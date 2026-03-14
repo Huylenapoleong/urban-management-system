@@ -1,0 +1,10 @@
+node_modules
+.pnpm-store
+dist
+build
+coverage
+.expo
+.env
+.env.*
+!.env.example
+.DS_Store
