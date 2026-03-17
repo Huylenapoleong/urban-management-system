@@ -1,12 +1,20 @@
 import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Public } from './common/decorators/public.decorator';
+import { ApiOkEnvelopeResponse } from './common/openapi/swagger-envelope';
+import { HealthStatusDto } from './common/openapi/swagger.models';
 
+@ApiTags('System')
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
-
+  @Public()
   @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  @ApiOperation({ summary: 'Health check' })
+  @ApiOkEnvelopeResponse(HealthStatusDto)
+  getHealth(): { service: string; status: string } {
+    return {
+      service: 'urban-management-api',
+      status: 'ok',
+    };
   }
 }

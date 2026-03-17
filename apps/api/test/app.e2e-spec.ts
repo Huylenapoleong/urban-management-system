@@ -1,5 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
@@ -20,6 +20,29 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Hello World!');
+      .expect({
+        success: true,
+        data: {
+          service: 'urban-management-api',
+          status: 'ok',
+        },
+      });
+  });
+
+  it('/health/live (GET)', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200);
+    const body = response.body as {
+      service?: unknown;
+      status?: unknown;
+      timestamp?: unknown;
+    };
+
+    expect(body).toMatchObject({
+      service: 'urban-management-api',
+      status: 'ok',
+    });
+    expect(typeof body.timestamp).toBe('string');
   });
 });
