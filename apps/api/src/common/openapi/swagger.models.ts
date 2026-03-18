@@ -1,0 +1,948 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  GROUP_MEMBER_ROLES,
+  GROUP_TYPES,
+  MESSAGE_TYPES,
+  REPORT_CATEGORIES,
+  REPORT_PRIORITIES,
+  REPORT_STATUSES,
+  UPLOAD_TARGETS,
+  USER_ROLES,
+  USER_STATUSES,
+} from '@urban/shared-constants';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+
+const GROUP_MEMBER_ACTIONS = ['add', 'update', 'remove'] as const;
+const BOOLEAN_QUERY_VALUES = ['true', 'false'] as const;
+const INTEGER_QUERY_PATTERN = /^\d+$/;
+
+export class HealthStatusDto {
+  @ApiProperty({ example: 'urban-management-api' })
+  service!: string;
+
+  @ApiProperty({ example: 'ok' })
+  status!: string;
+}
+
+export class LiveHealthStatusDto extends HealthStatusDto {
+  @ApiProperty({ example: '2026-03-17T10:00:00.000Z' })
+  timestamp!: string;
+}
+
+export class HealthCheckItemDto {
+  @ApiProperty({ example: 'dynamodb' })
+  component!: string;
+
+  @ApiProperty({
+    enum: ['ok', 'error', 'skipped', 'shutting_down'],
+    example: 'ok',
+  })
+  status!: 'ok' | 'error' | 'skipped' | 'shutting_down';
+
+  @ApiProperty({ example: 'Users:ACTIVE' })
+  detail!: string;
+}
+
+export class ReadinessStatusDto {
+  @ApiProperty({ example: 'urban-management-api' })
+  service!: string;
+
+  @ApiProperty({ enum: ['ok', 'degraded'], example: 'ok' })
+  status!: 'ok' | 'degraded';
+
+  @ApiProperty({ type: [HealthCheckItemDto] })
+  checks!: HealthCheckItemDto[];
+
+  @ApiProperty({ example: '2026-03-17T10:00:00.000Z' })
+  timestamp!: string;
+}
+
+export class ErrorPayloadDto {
+  @ApiProperty({ example: 400 })
+  statusCode!: number;
+
+  @ApiProperty({
+    oneOf: [
+      { type: 'string', example: 'Invalid credentials.' },
+      {
+        type: 'array',
+        items: { type: 'string' },
+        example: ['phone is invalid.'],
+      },
+    ],
+  })
+  message!: string | string[];
+
+  @ApiProperty({ example: 'Bad Request' })
+  error!: string;
+}
+
+export class ErrorResponseDto {
+  @ApiProperty({ example: false })
+  success!: false;
+
+  @ApiProperty({ type: () => ErrorPayloadDto })
+  error!: ErrorPayloadDto;
+
+  @ApiProperty({ example: '/api/auth/login' })
+  path!: string;
+
+  @ApiProperty({ example: '2026-03-17T10:00:00.000Z' })
+  timestamp!: string;
+}
+
+export class ResponseMetaDto {
+  @ApiProperty({ example: 2 })
+  count!: number;
+}
+
+export class AuthTokenPairDto {
+  @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
+  accessToken!: string;
+
+  @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
+  refreshToken!: string;
+
+  @ApiProperty({ example: 3600 })
+  expiresIn!: number;
+
+  @ApiProperty({ example: 604800 })
+  refreshExpiresIn!: number;
+
+  @ApiProperty({ enum: ['Bearer'], example: 'Bearer' })
+  tokenType!: 'Bearer';
+}
+
+export class UserProfileDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  id!: string;
+
+  @ApiPropertyOptional({ example: '+84901234567' })
+  phone?: string;
+
+  @ApiPropertyOptional({ example: 'citizen.a@smartcity.local' })
+  email?: string;
+
+  @ApiProperty({ example: 'Le Thi Citizen A' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
+  unit?: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-a.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T06:15:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-03-17T06:15:00.000Z' })
+  updatedAt!: string;
+}
+
+export class AuthSessionDto {
+  @ApiProperty({ type: () => AuthTokenPairDto })
+  tokens!: AuthTokenPairDto;
+
+  @ApiProperty({ type: () => UserProfileDto })
+  user!: UserProfileDto;
+}
+
+export class GroupMetadataDto {
+  @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
+  id!: string;
+
+  @ApiProperty({ example: 'Phuong 1 Q1 - Ha tang' })
+  groupName!: string;
+
+  @ApiProperty({ enum: GROUP_TYPES, example: 'AREA' })
+  groupType!: (typeof GROUP_TYPES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  createdBy!: string;
+
+  @ApiPropertyOptional({ example: 'Nhom trao doi ve ha tang phuong 1.' })
+  description?: string;
+
+  @ApiProperty({ example: 24 })
+  memberCount!: number;
+
+  @ApiProperty({ example: false })
+  isOfficial!: boolean;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class GroupMembershipDto {
+  @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
+  groupId!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  userId!: string;
+
+  @ApiProperty({ enum: GROUP_MEMBER_ROLES, example: 'MEMBER' })
+  roleInGroup!: (typeof GROUP_MEMBER_ROLES)[number];
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  joinedAt!: string;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class MessageItemDto {
+  @ApiProperty({ example: 'group:01JPCY1000AREAGROUP0000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '01JPCY3000GROUPMSG00000001' })
+  id!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  senderId!: string;
+
+  @ApiProperty({ example: 'Le Thi Citizen A' })
+  senderName!: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-a.jpg' })
+  senderAvatarUrl?: string;
+
+  @ApiProperty({ enum: MESSAGE_TYPES, example: 'TEXT' })
+  type!: (typeof MESSAGE_TYPES)[number];
+
+  @ApiProperty({ example: '{"text":"O ga truoc so 123 Le Loi","mention":[]}' })
+  content!: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/file.jpg' })
+  attachmentUrl?: string;
+
+  @ApiPropertyOptional({ example: '01JPCY3000GROUPMSG00000001' })
+  replyTo?: string;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T08:00:00.000Z' })
+  sentAt!: string;
+
+  @ApiProperty({ example: '2026-03-17T08:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class ConversationSummaryDto {
+  @ApiProperty({
+    example: 'dm:01JPCY0000WARDOFFICER00000',
+  })
+  conversationId!: string;
+
+  @ApiProperty({ example: 'Tran Van Ward' })
+  groupName!: string;
+
+  @ApiProperty({ example: 'Da xem, dang cho doi thi cong den xu ly.' })
+  lastMessagePreview!: string;
+
+  @ApiProperty({ example: 'Tran Van Ward' })
+  lastSenderName!: string;
+
+  @ApiProperty({ example: 1 })
+  unreadCount!: number;
+
+  @ApiProperty({ example: false })
+  isGroup!: boolean;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T08:25:00.000Z' })
+  updatedAt!: string;
+}
+
+export class ReportItemDto {
+  @ApiProperty({ example: '01JPCY2000REPORTNEW00000000' })
+  id!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  userId!: string;
+
+  @ApiPropertyOptional({ example: '01JPCY1000AREAGROUP0000000' })
+  groupId?: string;
+
+  @ApiProperty({ example: 'Den duong hong o Le Loi' })
+  title!: string;
+
+  @ApiPropertyOptional({ example: 'Khu vuc toi om, nguy hiem vao ban dem.' })
+  description?: string;
+
+  @ApiProperty({ enum: REPORT_CATEGORIES, example: 'INFRASTRUCTURE' })
+  category!: (typeof REPORT_CATEGORIES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiProperty({ enum: REPORT_STATUSES, example: 'NEW' })
+  status!: (typeof REPORT_STATUSES)[number];
+
+  @ApiProperty({ enum: REPORT_PRIORITIES, example: 'HIGH' })
+  priority!: (typeof REPORT_PRIORITIES)[number];
+
+  @ApiProperty({
+    type: [String],
+    example: ['https://cdn.example.com/report-1.jpg'],
+  })
+  mediaUrls!: string[];
+
+  @ApiPropertyOptional({ example: '01JPCY0000WARDOFFICER00000' })
+  assignedOfficerId?: string;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T08:15:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-03-17T08:40:00.000Z' })
+  updatedAt!: string;
+}
+
+export class RegisterRequestDto {
+  @ApiPropertyOptional({ example: '+84901234567' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phone?: string;
+
+  @ApiPropertyOptional({ example: 'citizen.c@smartcity.local' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  email?: string;
+
+  @ApiProperty({ example: 'Password123!' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  password!: string;
+
+  @ApiProperty({ example: 'Nguyen Van Citizen C' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  fullName!: string;
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @IsString()
+  @MaxLength(30)
+  locationCode!: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-c.jpg' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  avatarUrl?: string;
+}
+
+export class LoginRequestDto {
+  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  login!: string;
+
+  @ApiProperty({ example: 'Password123!' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  password!: string;
+}
+
+export class RefreshRequestDto {
+  @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(5000)
+  refreshToken!: string;
+}
+
+export class LogoutRequestDto {
+  @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(5000)
+  refreshToken!: string;
+}
+
+export class LogoutResultDto {
+  @ApiProperty({ example: true })
+  loggedOut!: true;
+}
+
+export class UpdateProfileRequestDto {
+  @ApiPropertyOptional({ example: '+84908887766' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phone?: string;
+
+  @ApiPropertyOptional({ example: 'citizen.a+new@smartcity.local' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  email?: string;
+
+  @ApiPropertyOptional({ example: 'Le Thi Citizen A Updated' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  fullName?: string;
+
+  @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  unit?: string;
+
+  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  locationCode?: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-a-new.jpg' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  avatarUrl?: string;
+}
+
+export class CreateUserRequestDto {
+  @ApiPropertyOptional({ example: '+84901239999' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phone?: string;
+
+  @ApiPropertyOptional({ example: 'ward.officer.2@smartcity.local' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  email?: string;
+
+  @ApiProperty({ example: 'Password123!' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  password!: string;
+
+  @ApiProperty({ example: 'Tran Van Ward 2' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'WARD_OFFICER' })
+  @IsIn(USER_ROLES)
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @IsString()
+  @MaxLength(30)
+  locationCode!: string;
+
+  @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  unit?: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/officer.jpg' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  avatarUrl?: string;
+}
+
+export class UpdateUserStatusRequestDto {
+  @ApiProperty({ enum: USER_STATUSES, example: 'LOCKED' })
+  @IsIn(USER_STATUSES)
+  status!: (typeof USER_STATUSES)[number];
+}
+
+export class CreateGroupRequestDto {
+  @ApiProperty({ example: 'Phuong 1 Q1 - Ha tang' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  groupName!: string;
+
+  @ApiProperty({ enum: GROUP_TYPES, example: 'AREA' })
+  @IsIn(GROUP_TYPES)
+  groupType!: (typeof GROUP_TYPES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @IsString()
+  @MaxLength(30)
+  locationCode!: string;
+
+  @ApiPropertyOptional({
+    example: 'Nhom chinh thuc trao doi ve ha tang dia ban.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @ApiPropertyOptional({ example: false, default: false })
+  @IsOptional()
+  @IsBoolean()
+  isOfficial?: boolean;
+}
+
+export class UpdateGroupRequestDto {
+  @ApiPropertyOptional({ example: 'Phuong 1 Q1 - Moi truong' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  groupName?: string;
+
+  @ApiPropertyOptional({ enum: GROUP_TYPES, example: 'TOPIC' })
+  @IsOptional()
+  @IsIn(GROUP_TYPES)
+  groupType?: (typeof GROUP_TYPES)[number];
+
+  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  locationCode?: string;
+
+  @ApiPropertyOptional({ example: 'Nhom trao doi ve moi truong phuong 1.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  isOfficial?: boolean;
+}
+
+export class ManageGroupMemberRequestDto {
+  @ApiProperty({ enum: GROUP_MEMBER_ACTIONS, example: 'update' })
+  @IsIn(GROUP_MEMBER_ACTIONS)
+  action!: (typeof GROUP_MEMBER_ACTIONS)[number];
+
+  @ApiPropertyOptional({ enum: GROUP_MEMBER_ROLES, example: 'OFFICER' })
+  @IsOptional()
+  @IsIn(GROUP_MEMBER_ROLES)
+  roleInGroup?: (typeof GROUP_MEMBER_ROLES)[number];
+}
+
+export class SendDirectMessageRequestDto {
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(50)
+  targetUserId!: string;
+
+  @ApiPropertyOptional({
+    example: 'mobile-1742205600-0001',
+    description:
+      'Client-generated id used for retry-safe message sending and deduplication.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  clientMessageId?: string;
+
+  @ApiPropertyOptional({ enum: MESSAGE_TYPES, example: 'TEXT' })
+  @IsOptional()
+  @IsIn(MESSAGE_TYPES)
+  type?: (typeof MESSAGE_TYPES)[number];
+
+  @ApiPropertyOptional({
+    example: '{"text":"Anh oi, bao cao 1 da duoc xem chua?","mention":[]}',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  content?: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/file.jpg' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentUrl?: string;
+
+  @ApiPropertyOptional({
+    example: '01JPCY3000DIRECTMSG0000001',
+    description:
+      'Message id returned by the API for the message being replied to.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  replyTo?: string;
+}
+
+export class SendMessageRequestDto {
+  @ApiPropertyOptional({
+    example: 'mobile-1742205600-0002',
+    description:
+      'Client-generated id used for retry-safe message sending and deduplication.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  clientMessageId?: string;
+
+  @ApiPropertyOptional({ enum: MESSAGE_TYPES, example: 'TEXT' })
+  @IsOptional()
+  @IsIn(MESSAGE_TYPES)
+  type?: (typeof MESSAGE_TYPES)[number];
+
+  @ApiPropertyOptional({
+    example: '{"text":"Da tiep nhan, se cu can bo kiem tra.","mention":[]}',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  content?: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/file.jpg' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentUrl?: string;
+
+  @ApiPropertyOptional({
+    example: '01JPCY3000GROUPMSG00000001',
+    description:
+      'Message id returned by the API for the message being replied to.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  replyTo?: string;
+}
+
+export class UpdateMessageRequestDto {
+  @ApiPropertyOptional({
+    example:
+      '{"text":"Da tiep nhan, da chuyen can bo phuong xu ly.","mention":[]}',
+    description:
+      'Canonical structured content string. Send an empty string only when keeping an attachment.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  content?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/file-updated.jpg',
+    description:
+      'Updated attachment URL. Send an empty string to clear the current attachment.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentUrl?: string;
+}
+
+export class CreateReportRequestDto {
+  @ApiProperty({ example: 'Den duong hong o Le Loi' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  title!: string;
+
+  @ApiPropertyOptional({ example: 'Khu vuc toi om, nguy hiem vao ban dem.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @ApiProperty({ enum: REPORT_CATEGORIES, example: 'INFRASTRUCTURE' })
+  @IsIn(REPORT_CATEGORIES)
+  category!: (typeof REPORT_CATEGORIES)[number];
+
+  @ApiProperty({ enum: REPORT_PRIORITIES, example: 'HIGH' })
+  @IsIn(REPORT_PRIORITIES)
+  priority!: (typeof REPORT_PRIORITIES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @IsString()
+  @MaxLength(30)
+  locationCode!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['https://cdn.example.com/report-1.jpg'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(500, { each: true })
+  mediaUrls?: string[];
+
+  @ApiPropertyOptional({ example: '01JPCY1000AREAGROUP0000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  groupId?: string;
+}
+
+export class UpdateReportRequestDto {
+  @ApiPropertyOptional({ example: 'Den duong chua duoc sua o Le Loi' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  title?: string;
+
+  @ApiPropertyOptional({ example: 'Tinh trang van con ton tai sau 2 ngay.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @ApiPropertyOptional({ enum: REPORT_CATEGORIES, example: 'ENVIRONMENT' })
+  @IsOptional()
+  @IsIn(REPORT_CATEGORIES)
+  category?: (typeof REPORT_CATEGORIES)[number];
+
+  @ApiPropertyOptional({ enum: REPORT_PRIORITIES, example: 'URGENT' })
+  @IsOptional()
+  @IsIn(REPORT_PRIORITIES)
+  priority?: (typeof REPORT_PRIORITIES)[number];
+
+  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  locationCode?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['https://cdn.example.com/report-1-update.jpg'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(500, { each: true })
+  mediaUrls?: string[];
+}
+
+export class AssignReportRequestDto {
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(50)
+  officerId!: string;
+}
+
+export class UpdateReportStatusRequestDto {
+  @ApiProperty({ enum: REPORT_STATUSES, example: 'IN_PROGRESS' })
+  @IsIn(REPORT_STATUSES)
+  status!: (typeof REPORT_STATUSES)[number];
+}
+
+export class ListUsersQueryDto {
+  @ApiPropertyOptional({ enum: USER_ROLES })
+  @IsOptional()
+  @IsIn(USER_ROLES)
+  role?: string;
+
+  @ApiPropertyOptional({ enum: USER_STATUSES })
+  @IsOptional()
+  @IsIn(USER_STATUSES)
+  status?: string;
+
+  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  locationCode?: string;
+
+  @ApiPropertyOptional({ example: 'citizen ward 1' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class ListGroupsQueryDto {
+  @ApiPropertyOptional({ type: Boolean, example: true })
+  @IsOptional()
+  @IsIn(BOOLEAN_QUERY_VALUES)
+  mine?: string;
+
+  @ApiPropertyOptional({ enum: GROUP_TYPES })
+  @IsOptional()
+  @IsIn(GROUP_TYPES)
+  groupType?: string;
+
+  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  locationCode?: string;
+
+  @ApiPropertyOptional({ example: 'ha tang' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class ListConversationsQueryDto {
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class ListMessagesQueryDto {
+  @ApiPropertyOptional({ type: Number, example: 50 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class ListReportsQueryDto {
+  @ApiPropertyOptional({ type: Boolean, example: true })
+  @IsOptional()
+  @IsIn(BOOLEAN_QUERY_VALUES)
+  mine?: string;
+
+  @ApiPropertyOptional({ type: Boolean, example: false })
+  @IsOptional()
+  @IsIn(BOOLEAN_QUERY_VALUES)
+  assignedToMe?: string;
+
+  @ApiPropertyOptional({ enum: REPORT_STATUSES })
+  @IsOptional()
+  @IsIn(REPORT_STATUSES)
+  status?: string;
+
+  @ApiPropertyOptional({ enum: REPORT_CATEGORIES })
+  @IsOptional()
+  @IsIn(REPORT_CATEGORIES)
+  category?: string;
+
+  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  locationCode?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class UploadedAssetDto {
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({
+    example:
+      'https://smartcity-assets.s3.ap-southeast-1.amazonaws.com/uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  url!: string;
+
+  @ApiProperty({ example: 'smartcity-assets' })
+  bucket!: string;
+
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  entityId?: string;
+
+  @ApiProperty({ example: 'street-light.jpg' })
+  originalFileName!: string;
+
+  @ApiProperty({ example: 'street-light.jpg' })
+  fileName!: string;
+
+  @ApiProperty({ example: 'image/jpeg' })
+  contentType!: string;
+
+  @ApiProperty({ example: 345678 })
+  size!: number;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  uploadedBy!: string;
+
+  @ApiProperty({ example: '2026-03-17T10:30:00.000Z' })
+  uploadedAt!: string;
+}
+
+export class UploadMediaRequestDto {
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiProperty({ type: 'string', format: 'binary' })
+  file!: string;
+}
