@@ -1,0 +1,508 @@
+import { makeConversationPk, makeDmConversationId } from '@urban/shared-utils';
+import type {
+  StoredConversation,
+  StoredMessage,
+  StoredUser,
+} from '../../common/storage-records';
+import { ConversationStateService } from '../../common/services/conversation-state.service';
+import { ConversationsService } from './conversations.service';
+import { ConversationSummaryService } from './conversation-summary.service';
+
+describe('ConversationsService', () => {
+  const repository = {
+    delete: jest.fn(),
+    get: jest.fn(),
+    put: jest.fn(),
+    queryByPk: jest.fn(),
+    scanAll: jest.fn(),
+    transactPut: jest.fn(),
+  };
+  const authorizationService = {
+    canAccessDirectConversation: jest.fn(),
+    isAdmin: jest.fn(),
+  };
+  const usersService = {
+    getByIdOrThrow: jest.fn(),
+  };
+  const groupsService = {
+    getGroup: jest.fn(),
+    getMembership: jest.fn(),
+    listMembers: jest.fn(),
+  };
+  const chatRateLimitService = {
+    consumeMessageSend: jest.fn(),
+  };
+  const chatRealtimeService = {
+    emitToConversation: jest.fn(),
+    emitToUser: jest.fn(),
+    leaveConversationForUser: jest.fn(),
+  };
+  const conversationDispatchService = {
+    emitConversationRead: jest.fn(),
+    emitConversationRemoved: jest.fn(),
+    emitMessageCreated: jest.fn(),
+    emitMessageDeleted: jest.fn(),
+    emitMessageUpdated: jest.fn(),
+  };
+  const chatOutboxService = {
+    buildChatOutboxEvent: jest.fn(),
+    deleteChatOutboxEvent: jest.fn(),
+  };
+  const auditTrailService = {
+    buildConversationEvent: jest.fn(),
+    listConversationEvents: jest.fn(),
+  };
+  const pushNotificationService = {
+    buildPushOutboxEvent: jest.fn(),
+  };
+  const config = {
+    chatOutboxBatchSize: 10,
+    chatOutboxPollIntervalMs: 1000,
+    chatOutboxShardCount: 2,
+    dynamodbConversationsTableName: 'Conversations',
+    dynamodbMessagesTableName: 'Messages',
+    dynamodbMembershipsTableName: 'Memberships',
+    redisKeyPrefix: 'urban',
+  };
+
+  const actor = {
+    id: 'user-1',
+    role: 'CITIZEN' as const,
+    locationCode: 'VN-79-760-26734',
+    fullName: 'Citizen One',
+    status: 'ACTIVE' as const,
+    createdAt: '2026-03-18T10:00:00.000Z',
+    updatedAt: '2026-03-18T10:00:00.000Z',
+  };
+  const otherUser: StoredUser = {
+    PK: 'USER#user-2',
+    SK: 'PROFILE',
+    entityType: 'USER_PROFILE',
+    userId: 'user-2',
+    email: 'officer@example.com',
+    phone: undefined,
+    passwordHash: 'secret',
+    fullName: 'Officer Two',
+    role: 'WARD_OFFICER',
+    locationCode: 'VN-79-760-26734',
+    unit: 'Ward Office',
+    avatarUrl: undefined,
+    status: 'ACTIVE',
+    deletedAt: null,
+    createdAt: '2026-03-18T10:00:00.000Z',
+    updatedAt: '2026-03-18T10:00:00.000Z',
+    GSI1SK: 'USER',
+  };
+  const actorUser: StoredUser = {
+    ...otherUser,
+    PK: 'USER#user-1',
+    userId: 'user-1',
+    email: 'citizen@example.com',
+    fullName: actor.fullName,
+    role: actor.role,
+    unit: undefined,
+  };
+  const conversationKey = makeDmConversationId(actor.id, otherUser.userId);
+  const actorSummary: StoredConversation = {
+    PK: 'USER#user-1',
+    SK: `CONV#${conversationKey}#LAST#2026-03-18T10:05:00.000Z`,
+    entityType: 'CONVERSATION',
+    GSI1PK: 'USER#user-1#TYPE#DM',
+    userId: actor.id,
+    conversationId: conversationKey,
+    groupName: otherUser.fullName,
+    lastMessagePreview: 'Xin chao',
+    lastSenderName: otherUser.fullName,
+    unreadCount: 2,
+    isGroup: false,
+    deletedAt: null,
+    updatedAt: '2026-03-18T10:05:00.000Z',
+    lastReadAt: null,
+  };
+  const otherSummary: StoredConversation = {
+    ...actorSummary,
+    PK: 'USER#user-2',
+    GSI1PK: 'USER#user-2#TYPE#DM',
+    userId: otherUser.userId,
+    unreadCount: 0,
+    lastReadAt: '2026-03-18T10:05:00.000Z',
+  };
+  const latestMessage: StoredMessage = {
+    PK: makeConversationPk(conversationKey),
+    SK: 'MSG#2026-03-18T10:05:00.000Z#01MESSAGE0000000000000001',
+    entityType: 'MESSAGE',
+    messageId: '01MESSAGE0000000000000001',
+    conversationId: conversationKey,
+    senderId: otherUser.userId,
+    senderName: otherUser.fullName,
+    senderAvatarUrl: undefined,
+    type: 'TEXT',
+    content: '{"text":"Xin chao","mention":[]}',
+    attachmentUrl: undefined,
+    replyTo: undefined,
+    deletedAt: null,
+    sentAt: '2026-03-18T10:05:00.000Z',
+    updatedAt: '2026-03-18T10:05:00.000Z',
+  };
+
+  const conversationStateService = new ConversationStateService();
+  const conversationSummaryService = new ConversationSummaryService(
+    repository as never,
+    conversationStateService as never,
+    usersService as never,
+    groupsService as never,
+    config as never,
+  );
+
+  let service: ConversationsService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new ConversationsService(
+      repository as never,
+      authorizationService as never,
+      conversationStateService as never,
+      conversationSummaryService as never,
+      usersService as never,
+      groupsService as never,
+      chatRateLimitService as never,
+      conversationDispatchService as never,
+      chatOutboxService as never,
+      chatRealtimeService as never,
+      auditTrailService as never,
+      pushNotificationService as never,
+      config as never,
+    );
+    authorizationService.canAccessDirectConversation.mockReturnValue(true);
+    authorizationService.isAdmin.mockReturnValue(false);
+    usersService.getByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      throw new Error(`Unexpected user lookup: ${userId}`);
+    });
+    repository.delete.mockResolvedValue(undefined);
+    repository.put.mockResolvedValue(undefined);
+    repository.transactPut.mockResolvedValue(undefined);
+    chatOutboxService.buildChatOutboxEvent.mockImplementation(
+      ({
+        actorUserId,
+        clientMessageId,
+        conversationId,
+        eventName,
+        messageId,
+        occurredAt,
+      }) => ({
+        PK: 'OUTBOX#CHAT#0',
+        SK: 'EVENT#2026-03-18T10:05:00.000Z#01OUTBOX',
+        entityType: 'CHAT_OUTBOX_EVENT',
+        eventId: '01OUTBOX',
+        eventName,
+        conversationId,
+        actorUserId,
+        clientMessageId,
+        messageId,
+        createdAt: occurredAt ?? '2026-03-18T10:05:00.000Z',
+      }),
+    );
+    chatOutboxService.deleteChatOutboxEvent.mockResolvedValue(undefined);
+    conversationDispatchService.emitConversationRead.mockResolvedValue(
+      undefined,
+    );
+    auditTrailService.buildConversationEvent.mockReturnValue({
+      PK: `CONV#${conversationKey}`,
+      SK: 'AUDIT#2026-03-18T10:05:00.000Z#01AUDIT',
+      entityType: 'CONVERSATION_AUDIT_EVENT',
+      eventId: '01AUDIT',
+      conversationId: conversationKey,
+      action: 'MESSAGE_CREATED',
+      actorUserId: actor.id,
+      occurredAt: '2026-03-18T10:05:00.000Z',
+      summary: 'audit',
+    });
+    auditTrailService.listConversationEvents.mockResolvedValue({
+      success: true,
+      data: [],
+      meta: { count: 0 },
+    });
+    pushNotificationService.buildPushOutboxEvent.mockReturnValue(undefined);
+  });
+
+  it('deletes only the actor inbox summary and leaves shared messages untouched', async () => {
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.deleteConversation(
+      actor,
+      `dm:${otherUser.userId}`,
+    );
+
+    expect(repository.delete).toHaveBeenCalledWith(
+      'Conversations',
+      actorSummary.PK,
+      actorSummary.SK,
+    );
+    expect(repository.delete).not.toHaveBeenCalledWith(
+      'Messages',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(chatRealtimeService.leaveConversationForUser).toHaveBeenCalledWith(
+      actor.id,
+      conversationKey,
+    );
+    expect(
+      conversationDispatchService.emitConversationRemoved,
+    ).toHaveBeenCalledWith(
+      expect.any(String),
+      actor.id,
+      conversationKey,
+      expect.any(String),
+      'conversation.deleted',
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        removedAt: expect.any(String),
+      }),
+    );
+  });
+
+  it('recreates a missing inbox summary when marking a deleted conversation as read', async () => {
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === otherSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [otherSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [latestMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.markAsRead(actor, `dm:${otherUser.userId}`);
+
+    expect(repository.transactPut).toHaveBeenCalledWith([
+      expect.objectContaining({
+        tableName: 'Conversations',
+        item: expect.objectContaining({
+          PK: actorSummary.PK,
+          conversationId: conversationKey,
+          unreadCount: 0,
+          lastReadAt: latestMessage.sentAt,
+          groupName: otherUser.fullName,
+        }),
+      }),
+      expect.objectContaining({
+        tableName: 'Conversations',
+        item: expect.objectContaining({
+          entityType: 'CHAT_OUTBOX_EVENT',
+          conversationId: conversationKey,
+          eventName: 'conversation.read',
+        }),
+      }),
+    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        unreadCount: 0,
+        groupName: otherUser.fullName,
+      }),
+    );
+  });
+  it('deletes a stale group inbox summary without requiring current group access', async () => {
+    const groupConversationKey = 'GRP#group-1';
+    const groupSummary: StoredConversation = {
+      ...actorSummary,
+      SK: `CONV#${groupConversationKey}#LAST#2026-03-18T10:07:00.000Z`,
+      GSI1PK: 'USER#user-1#TYPE#GRP',
+      conversationId: groupConversationKey,
+      groupName: 'Area Group 1',
+      isGroup: true,
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === groupSummary.PK &&
+          options?.beginsWith === `CONV#${groupConversationKey}#LAST#`
+        ) {
+          return [groupSummary];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.deleteConversation(actor, 'group:group-1');
+
+    expect(groupsService.getGroup).not.toHaveBeenCalled();
+    expect(repository.delete).toHaveBeenCalledWith(
+      'Conversations',
+      groupSummary.PK,
+      groupSummary.SK,
+    );
+    expect(chatRealtimeService.leaveConversationForUser).toHaveBeenCalledWith(
+      actor.id,
+      groupConversationKey,
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        removedAt: expect.any(String),
+      }),
+    );
+  });
+
+  it('filters and paginates inbox conversations by keyword and unread state', async () => {
+    const matchingGroupSummary: StoredConversation = {
+      ...actorSummary,
+      SK: 'CONV#GRP#group-1#LAST#2026-03-18T10:07:00.000Z',
+      GSI1PK: 'USER#user-1#TYPE#GRP',
+      conversationId: 'GRP#group-1',
+      groupName: 'Ward Group 1',
+      lastMessagePreview: 'Can bo da tiep nhan.',
+      lastSenderName: 'Ward Officer',
+      unreadCount: 3,
+      isGroup: true,
+      updatedAt: '2026-03-18T10:07:00.000Z',
+    };
+    const olderMatchingGroupSummary: StoredConversation = {
+      ...matchingGroupSummary,
+      SK: 'CONV#GRP#group-2#LAST#2026-03-18T09:07:00.000Z',
+      conversationId: 'GRP#group-2',
+      groupName: 'Ward Group 2',
+      updatedAt: '2026-03-18T09:07:00.000Z',
+    };
+
+    repository.queryByPk.mockResolvedValue([
+      matchingGroupSummary,
+      olderMatchingGroupSummary,
+      actorSummary,
+    ]);
+
+    const result = await service.listConversations(actor, {
+      q: 'ward',
+      isGroup: 'true',
+      unreadOnly: 'true',
+      limit: '1',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: [
+        expect.objectContaining({
+          conversationId: 'group:group-1',
+          groupName: 'Ward Group 1',
+        }),
+      ],
+      meta: {
+        count: 1,
+        nextCursor: expect.any(String),
+      },
+    });
+  });
+
+  it('filters and paginates messages within a conversation', async () => {
+    const matchingMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:04:00.000Z#01MESSAGE0000000000000002',
+      messageId: '01MESSAGE0000000000000002',
+      content: '{"text":"Den duong hong tren Le Loi","mention":[]}',
+      sentAt: '2026-03-18T10:04:00.000Z',
+      updatedAt: '2026-03-18T10:04:00.000Z',
+    };
+    const olderMatchingMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:03:00.000Z#01MESSAGE0000000000000003',
+      messageId: '01MESSAGE0000000000000003',
+      content: '{"text":"Le Loi van dang toi","mention":[]}',
+      sentAt: '2026-03-18T10:03:00.000Z',
+      updatedAt: '2026-03-18T10:03:00.000Z',
+    };
+    const ignoredImageMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:02:00.000Z#01MESSAGE0000000000000004',
+      messageId: '01MESSAGE0000000000000004',
+      senderId: actor.id,
+      senderName: actor.fullName,
+      type: 'IMAGE',
+      content: '',
+      attachmentUrl: 'https://cdn.example.com/file.jpg',
+      sentAt: '2026-03-18T10:02:00.000Z',
+      updatedAt: '2026-03-18T10:02:00.000Z',
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [matchingMessage, olderMatchingMessage, ignoredImageMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      q: 'le loi',
+      type: 'TEXT',
+      fromUserId: otherUser.userId,
+      before: '2026-03-18T10:05:00.000Z',
+      limit: '1',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: [
+        expect.objectContaining({
+          id: '01MESSAGE0000000000000002',
+          conversationId: `dm:${otherUser.userId}`,
+        }),
+      ],
+      meta: {
+        count: 1,
+        nextCursor: expect.any(String),
+      },
+    });
+  });
+});
