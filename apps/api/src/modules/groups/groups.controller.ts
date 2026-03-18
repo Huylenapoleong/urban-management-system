@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -63,6 +64,7 @@ export class GroupsController {
   @ApiQuery({ name: 'groupType', required: false, enum: GROUP_TYPES })
   @ApiQuery({ name: 'locationCode', required: false, type: String })
   @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiOkEnvelopeResponse(GroupMetadataDto, { isArray: true })
   @ApiBadRequestResponse({ type: ErrorResponseDto })
@@ -103,6 +105,17 @@ export class GroupsController {
     return this.groupsService.updateGroup(user, groupId, body);
   }
 
+  @Delete(':groupId')
+  @ApiOperation({ summary: 'Delete group' })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiOkEnvelopeResponse(GroupMetadataDto)
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  deleteGroup(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+  ) {
+    return this.groupsService.deleteGroup(user, groupId);
+  }
   @Post(':groupId/join')
   @ApiOperation({ summary: 'Join group' })
   @ApiParam({ name: 'groupId', type: String })

@@ -1,6 +1,6 @@
-﻿import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { makeUserPk, makeUserProfileSk } from '@urban/shared-utils';
-import type { AuthenticatedUser } from '@urban/shared-types';
+import type { AuthenticatedUser, JwtClaims } from '@urban/shared-types';
 import type { Socket } from 'socket.io';
 import { toAuthenticatedUser } from '../../common/mappers';
 import type { StoredUser } from '../../common/storage-records';
@@ -8,6 +8,13 @@ import { AppConfigService } from '../../infrastructure/config/app-config.service
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { JwtTokenService } from '../../infrastructure/security/jwt-token.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
+
+export interface SocketAuthenticationContext {
+  claims: JwtClaims;
+  sessionId?: string;
+  token: string;
+  user: AuthenticatedUser;
+}
 
 @Injectable()
 export class ChatSocketAuthService {
@@ -18,7 +25,7 @@ export class ChatSocketAuthService {
     private readonly refreshSessionService: RefreshSessionService,
   ) {}
 
-  async authenticate(client: Socket): Promise<AuthenticatedUser> {
+  async authenticate(client: Socket): Promise<SocketAuthenticationContext> {
     const token = this.extractToken(client);
     const claims = this.jwtTokenService.verifyAccessToken(token);
     await this.refreshSessionService.assertActiveSessionForAccessToken(claims);
@@ -32,7 +39,12 @@ export class ChatSocketAuthService {
       throw new UnauthorizedException('User account is unavailable.');
     }
 
-    return toAuthenticatedUser(user);
+    return {
+      claims,
+      sessionId: claims.sid?.trim() || undefined,
+      token,
+      user: toAuthenticatedUser(user),
+    };
   }
 
   private extractToken(client: Socket): string {

@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { USER_ROLES, USER_STATUSES } from '@urban/shared-constants';
-import type { AuthenticatedUser, UserProfile } from '@urban/shared-types';
+import type {
+  ApiResponseMeta,
+  ApiSuccessResponse,
+  AuthenticatedUser,
+  PushDevice,
+  UserProfile,
+} from '@urban/shared-types';
 import {
   createUlid,
   makeUserPk,
@@ -13,6 +19,10 @@ import {
   nowIso,
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
+import {
+  buildPaginatedResponse,
+  paginateSortedItems,
+} from '../../common/pagination';
 import { toUserProfile } from '../../common/mappers';
 import type { StoredUser } from '../../common/storage-records';
 import {
@@ -27,7 +37,12 @@ import {
 } from '../../common/validation';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
+import { ChatRealtimeService } from '../../modules/conversations/chat-realtime.service';
 import { PasswordService } from '../../infrastructure/security/password.service';
+import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
+import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
+import { ObservabilityService } from '../../infrastructure/observability/observability.service';
 
 @Injectable()
 export class UsersService {
@@ -35,6 +50,11 @@ export class UsersService {
     private readonly repository: UrbanTableRepository,
     private readonly passwordService: PasswordService,
     private readonly authorizationService: AuthorizationService,
+    private readonly chatPresenceService: ChatPresenceService,
+    private readonly chatRealtimeService: ChatRealtimeService,
+    private readonly refreshSessionService: RefreshSessionService,
+    private readonly pushNotificationService: PushNotificationService,
+    private readonly observabilityService: ObservabilityService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -190,7 +210,7 @@ export class UsersService {
   async listUsers(
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
-  ): Promise<UserProfile[]> {
+  ): Promise<ApiSuccessResponse<UserProfile[], ApiResponseMeta>> {
     const users = (
       await this.repository.scanAll<StoredUser>(
         this.config.dynamodbUsersTableName,
@@ -231,11 +251,18 @@ export class UsersService {
 
       return haystacks.includes(keyword);
     });
+    const page = paginateSortedItems(
+      filtered,
+      limit,
+      query.cursor,
+      (user) => user.createdAt,
+      (user) => user.userId,
+    );
 
-    return filtered
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .slice(0, limit)
-      .map(toUserProfile);
+    return buildPaginatedResponse(
+      page.items.map(toUserProfile),
+      page.nextCursor,
+    );
   }
 
   async getUser(
@@ -326,9 +353,51 @@ export class UsersService {
     };
 
     await this.repository.put(this.config.dynamodbUsersTableName, nextUser);
+
+    if (status !== 'ACTIVE') {
+      const revokedSessionCount =
+        await this.refreshSessionService.revokeAllSessionsForUser(
+          target.userId,
+        );
+      this.chatRealtimeService.disconnectUserSockets(target.userId);
+      this.observabilityService.recordSessionRevocations(
+        'user_status',
+        revokedSessionCount,
+      );
+    }
+
     return toUserProfile(nextUser);
   }
 
+  async listPushDevices(
+    actor: AuthenticatedUser,
+  ): Promise<ApiSuccessResponse<PushDevice[], ApiResponseMeta>> {
+    return this.pushNotificationService.listDevices(actor.id);
+  }
+
+  async registerPushDevice(
+    actor: AuthenticatedUser,
+    payload: unknown,
+  ): Promise<PushDevice> {
+    return this.pushNotificationService.registerDevice(actor.id, payload);
+  }
+
+  async deletePushDevice(
+    actor: AuthenticatedUser,
+    deviceId: string,
+  ): Promise<{ deviceId: string; removedAt: string }> {
+    return this.pushNotificationService.deleteDevice(actor.id, deviceId);
+  }
+
+  async getPresence(actor: AuthenticatedUser, userId: string) {
+    const target = await this.getByIdOrThrow(userId);
+
+    if (!this.authorizationService.canReadUser(actor, target)) {
+      throw new ForbiddenException('You cannot access this profile.');
+    }
+
+    return this.chatPresenceService.getPresence(userId);
+  }
   private async hydrateFirst(
     items: Array<{ PK: string; SK: string }>,
   ): Promise<StoredUser | undefined> {

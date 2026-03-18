@@ -1,20 +1,37 @@
-﻿import type {
+import type {
+  AuditEventItem,
+  AuthSessionInfo,
   AuthenticatedUser,
   ConversationSummary,
   GroupMembership,
   GroupMetadata,
   MessageItem,
+  PushDevice,
+  ReportConversationLinkItem,
   ReportItem,
   UserProfile,
 } from '@urban/shared-types';
 import type {
   StoredConversation,
+  StoredConversationAuditEvent,
+  StoredRefreshSession,
   StoredGroup,
   StoredMembership,
   StoredMessage,
+  StoredPushDevice,
   StoredReport,
+  StoredReportAuditEvent,
+  StoredReportConversationLink,
   StoredUser,
 } from './storage-records';
+
+function maskPushToken(pushToken: string): string {
+  if (pushToken.length <= 10) {
+    return pushToken;
+  }
+
+  return `${pushToken.slice(0, 6)}...${pushToken.slice(-4)}`;
+}
 
 export function toUserProfile(user: StoredUser): UserProfile {
   return {
@@ -46,6 +63,39 @@ export function toAuthenticatedUser(user: StoredUser): AuthenticatedUser {
     status: user.status,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
+  };
+}
+
+export function toAuthSessionInfo(
+  session: StoredRefreshSession,
+  currentSessionId?: string,
+): AuthSessionInfo {
+  return {
+    sessionId: session.sessionId,
+    isCurrent: session.sessionId === currentSessionId,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    lastUsedAt: session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
+    expiresAt: session.expiresAt,
+    revokedAt: session.revokedAt,
+    userAgent: session.userAgent,
+    ipAddress: session.ipAddress,
+    deviceId: session.deviceId,
+    appVariant: session.appVariant,
+  };
+}
+
+export function toPushDevice(device: StoredPushDevice): PushDevice {
+  return {
+    deviceId: device.deviceId,
+    provider: device.provider,
+    platform: device.platform,
+    appVariant: device.appVariant,
+    tokenPreview: maskPushToken(device.pushToken),
+    disabledAt: device.disabledAt,
+    lastSeenAt: device.lastSeenAt,
+    createdAt: device.createdAt,
+    updatedAt: device.updatedAt,
   };
 }
 
@@ -103,6 +153,9 @@ export function toConversationSummary(
     lastSenderName: conversation.lastSenderName,
     unreadCount: conversation.unreadCount,
     isGroup: conversation.isGroup,
+    isPinned: conversation.isPinned ?? false,
+    archivedAt: conversation.archivedAt ?? null,
+    mutedUntil: conversation.mutedUntil ?? null,
     deletedAt: conversation.deletedAt,
     updatedAt: conversation.updatedAt,
   };
@@ -124,5 +177,33 @@ export function toReport(report: StoredReport): ReportItem {
     deletedAt: report.deletedAt,
     createdAt: report.createdAt,
     updatedAt: report.updatedAt,
+  };
+}
+
+export function toAuditEvent(
+  event: StoredConversationAuditEvent | StoredReportAuditEvent,
+  scope: AuditEventItem['scope'],
+): AuditEventItem {
+  return {
+    id: event.eventId,
+    scope,
+    action: event.action,
+    actorUserId: event.actorUserId,
+    occurredAt: event.occurredAt,
+    summary: event.summary,
+    metadata: event.metadata,
+  };
+}
+
+export function toReportConversationLink(
+  link: StoredReportConversationLink,
+): ReportConversationLinkItem {
+  return {
+    reportId: link.reportId,
+    groupId: link.groupId,
+    conversationId: link.conversationId,
+    linkedByUserId: link.linkedByUserId,
+    createdAt: link.createdAt,
+    updatedAt: link.updatedAt,
   };
 }

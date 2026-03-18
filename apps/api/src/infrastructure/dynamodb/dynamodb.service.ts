@@ -1,14 +1,18 @@
 import { DescribeTableCommand, DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
+import { CircuitBreakerService } from '../resilience/circuit-breaker.service';
 
 @Injectable()
 export class DynamoDbService implements OnApplicationShutdown {
   readonly client: DynamoDBClient;
   readonly documentClient: DynamoDBDocumentClient;
 
-  constructor(private readonly config: AppConfigService) {
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly circuitBreakerService: CircuitBreakerService,
+  ) {
     this.client = new DynamoDBClient({
       region: this.config.awsRegion,
       endpoint: this.config.dynamodbEndpoint,
@@ -24,10 +28,15 @@ export class DynamoDbService implements OnApplicationShutdown {
   }
 
   async checkConnection(): Promise<{ tableName: string; tableStatus: string }> {
-    const response = await this.client.send(
-      new DescribeTableCommand({
-        TableName: this.config.dynamodbUsersTableName,
-      }),
+    const response = await this.circuitBreakerService.execute(
+      'dynamodb',
+      'DynamoDB',
+      () =>
+        this.client.send(
+          new DescribeTableCommand({
+            TableName: this.config.dynamodbUsersTableName,
+          }),
+        ),
     );
 
     return {

@@ -13,6 +13,7 @@ import type {
 import { AppConfigService } from '../config/app-config.service';
 import { UrbanTableRepository } from '../dynamodb/urban-table.repository';
 import { JwtTokenService } from './jwt-token.service';
+import type { SessionClientMetadata } from '../../common/request-session-metadata';
 
 interface SessionRefreshResolution {
   claims: JwtClaims;
@@ -40,6 +41,7 @@ export class RefreshSessionService {
   async persistIssuedRefreshToken(
     userId: string,
     refreshToken: string,
+    metadata?: SessionClientMetadata,
   ): Promise<StoredRefreshSession> {
     const claims = this.jwtTokenService.verifyRefreshToken(refreshToken);
 
@@ -47,7 +49,9 @@ export class RefreshSessionService {
       throw new UnauthorizedException('Refresh token subject is invalid.');
     }
 
-    const session = this.buildSessionRecord(userId, claims, refreshToken);
+    const session = this.buildSessionRecord(userId, claims, refreshToken, {
+      metadata,
+    });
     await this.repository.put(this.config.dynamodbUsersTableName, session);
     return session;
   }
@@ -88,6 +92,7 @@ export class RefreshSessionService {
   async rotateRefreshSession(
     currentSession: StoredRefreshSession,
     nextRefreshToken: string,
+    metadata?: SessionClientMetadata,
   ): Promise<StoredRefreshSession> {
     const claims = this.jwtTokenService.verifyRefreshToken(nextRefreshToken);
 
@@ -99,10 +104,15 @@ export class RefreshSessionService {
       currentSession.userId,
       claims,
       nextRefreshToken,
+      {
+        metadata,
+        previousSession: currentSession,
+      },
     );
     const now = nowIso();
     const revokedSession: StoredRefreshSession = {
       ...currentSession,
+      lastUsedAt: currentSession.lastUsedAt ?? currentSession.updatedAt,
       revokedAt: now,
       replacedBySessionId: nextSession.sessionId,
       updatedAt: now,
@@ -129,6 +139,7 @@ export class RefreshSessionService {
     userId: string,
     legacyRefreshToken: string,
     nextRefreshToken: string,
+    metadata?: SessionClientMetadata,
   ): Promise<StoredRefreshSession> {
     const legacyClaims =
       this.jwtTokenService.verifyRefreshToken(legacyRefreshToken);
@@ -154,6 +165,9 @@ export class RefreshSessionService {
       userId,
       nextClaims,
       nextRefreshToken,
+      {
+        metadata,
+      },
     );
 
     await this.repository.transactPut([
@@ -172,6 +186,86 @@ export class RefreshSessionService {
     ]);
 
     return nextSession;
+  }
+
+  async listSessionsForUser(userId: string): Promise<StoredRefreshSession[]> {
+    const sessions = await this.repository.queryByPk<StoredRefreshSession>(
+      this.config.dynamodbUsersTableName,
+      makeUserPk(userId),
+      {
+        beginsWith: 'SESSION#',
+      },
+    );
+    const now = nowIso();
+
+    return sessions
+      .filter((session) => session.entityType === 'USER_REFRESH_SESSION')
+      .filter((session) => session.expiresAt > now)
+      .map((session) => ({
+        ...session,
+        lastUsedAt:
+          session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
+      }));
+  }
+
+  async revokeSessionById(
+    userId: string,
+    sessionId: string,
+  ): Promise<StoredRefreshSession | undefined> {
+    const session = await this.repository.get<StoredRefreshSession>(
+      this.config.dynamodbUsersTableName,
+      makeUserPk(userId),
+      makeUserRefreshSessionSk(sessionId),
+    );
+
+    if (!session || session.entityType !== 'USER_REFRESH_SESSION') {
+      return undefined;
+    }
+
+    if (session.revokedAt) {
+      return {
+        ...session,
+        lastUsedAt:
+          session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
+      };
+    }
+
+    const now = nowIso();
+    const nextSession: StoredRefreshSession = {
+      ...session,
+      lastUsedAt: session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
+      revokedAt: now,
+      updatedAt: now,
+    };
+
+    await this.repository.put(this.config.dynamodbUsersTableName, nextSession);
+    return nextSession;
+  }
+
+  async revokeAllSessionsForUser(userId: string): Promise<number> {
+    const sessions = await this.listSessionsForUser(userId);
+    const revokedAt = nowIso();
+    let revokedCount = 0;
+
+    for (const session of sessions) {
+      if (session.entityType !== 'USER_REFRESH_SESSION' || session.revokedAt) {
+        continue;
+      }
+
+      const nextSession: StoredRefreshSession = {
+        ...session,
+        revokedAt,
+        updatedAt: revokedAt,
+      };
+
+      await this.repository.put(
+        this.config.dynamodbUsersTableName,
+        nextSession,
+      );
+      revokedCount += 1;
+    }
+
+    return revokedCount;
   }
 
   async revokeRefreshToken(refreshToken: string): Promise<void> {
@@ -210,6 +304,7 @@ export class RefreshSessionService {
     const now = nowIso();
     const nextSession: StoredRefreshSession = {
       ...session,
+      lastUsedAt: session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
       revokedAt: now,
       updatedAt: now,
     };
@@ -238,16 +333,27 @@ export class RefreshSessionService {
       throw new UnauthorizedException('Refresh token session has expired.');
     }
 
-    return session;
+    return {
+      ...session,
+      lastUsedAt: session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
+    };
   }
 
   private buildSessionRecord(
     userId: string,
     claims: JwtClaims,
     refreshToken: string,
+    options: {
+      metadata?: SessionClientMetadata;
+      previousSession?: StoredRefreshSession;
+    } = {},
   ): StoredRefreshSession {
     const sessionId = this.requireSessionId(claims);
     const now = nowIso();
+    const metadata = this.resolveSessionMetadata(
+      options.metadata,
+      options.previousSession,
+    );
 
     return {
       PK: makeUserPk(userId),
@@ -258,6 +364,11 @@ export class RefreshSessionService {
       tokenHash: this.hashToken(refreshToken),
       expiresAt: new Date(claims.exp * 1000).toISOString(),
       revokedAt: null,
+      userAgent: metadata.userAgent,
+      ipAddress: metadata.ipAddress,
+      deviceId: metadata.deviceId,
+      appVariant: metadata.appVariant,
+      lastUsedAt: now,
       createdAt: now,
       updatedAt: now,
     };
@@ -369,5 +480,17 @@ export class RefreshSessionService {
 
   private makeLegacyRefreshRevocationSk(tokenHash: string): string {
     return `REVOKED_REFRESH#${tokenHash}`;
+  }
+
+  private resolveSessionMetadata(
+    metadata?: SessionClientMetadata,
+    previousSession?: StoredRefreshSession,
+  ): SessionClientMetadata {
+    return {
+      userAgent: metadata?.userAgent ?? previousSession?.userAgent,
+      ipAddress: metadata?.ipAddress ?? previousSession?.ipAddress,
+      deviceId: metadata?.deviceId ?? previousSession?.deviceId,
+      appVariant: metadata?.appVariant ?? previousSession?.appVariant,
+    };
   }
 }

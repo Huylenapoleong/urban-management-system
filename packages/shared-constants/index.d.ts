@@ -1,4 +1,4 @@
-﻿export const USER_ROLES: readonly [
+export const USER_ROLES: readonly [
   "CITIZEN",
   "WARD_OFFICER",
   "PROVINCE_OFFICER",
@@ -30,6 +30,12 @@ export const MESSAGE_TYPES: readonly [
   "SYSTEM",
 ];
 export type MessageType = (typeof MESSAGE_TYPES)[number];
+
+export const MESSAGE_DELIVERY_STATES: readonly ["SENT", "DELIVERED", "READ"];
+export type MessageDeliveryState = (typeof MESSAGE_DELIVERY_STATES)[number];
+
+export const PUSH_DEVICE_PROVIDERS: readonly ["FCM", "APNS", "WEB", "WEBHOOK"];
+export type PushDeviceProvider = (typeof PUSH_DEVICE_PROVIDERS)[number];
 
 export const REPORT_CATEGORIES: readonly [
   "INFRASTRUCTURE",
@@ -68,6 +74,7 @@ export const CHAT_SOCKET_EVENTS: {
   readonly ERROR: "chat.error";
   readonly CONVERSATION_JOIN: "conversation.join";
   readonly CONVERSATION_LEAVE: "conversation.leave";
+  readonly CONVERSATION_DELETE: "conversation.delete";
   readonly MESSAGE_SEND: "message.send";
   readonly MESSAGE_UPDATE: "message.update";
   readonly MESSAGE_DELETE: "message.delete";
@@ -80,6 +87,8 @@ export const CHAT_SOCKET_EVENTS: {
   readonly TYPING_START: "typing.start";
   readonly TYPING_STOP: "typing.stop";
   readonly TYPING_STATE: "typing.state";
+  readonly PRESENCE_SNAPSHOT: "presence.snapshot";
+  readonly PRESENCE_UPDATED: "presence.updated";
 };
 export type ChatSocketEvent =
   (typeof CHAT_SOCKET_EVENTS)[keyof typeof CHAT_SOCKET_EVENTS];
@@ -89,3 +98,4 @@ export const EMAIL_PATTERN: RegExp;
 export const LOCATION_CODE_PATTERN: RegExp;
 export const DEFAULT_PAGE_SIZE: number;
 export const MAX_PAGE_SIZE: number;
+

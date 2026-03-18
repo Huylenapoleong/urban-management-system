@@ -4,8 +4,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { GROUP_MEMBER_ROLES, GROUP_TYPES } from '@urban/shared-constants';
+import {
+  GROUP_MEMBER_ROLES,
+  GROUP_TYPES,
+  type GroupMemberRole,
+  type GroupType,
+} from '@urban/shared-constants';
 import type {
+  ApiResponseMeta,
+  ApiSuccessResponse,
   AuthenticatedUser,
   GroupMembership,
   GroupMetadata,
@@ -21,10 +28,16 @@ import {
   nowIso,
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
+import {
+  buildPaginatedResponse,
+  paginateSortedItems,
+} from '../../common/pagination';
 import { toGroupMetadata, toMembership } from '../../common/mappers';
 import type {
+  StoredConversation,
   StoredGroup,
   StoredMembership,
+  StoredReport,
 } from '../../common/storage-records';
 import {
   ensureLocationCode,
@@ -123,7 +136,7 @@ export class GroupsService {
   async listGroups(
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
-  ): Promise<GroupMetadata[]> {
+  ): Promise<ApiSuccessResponse<GroupMetadata[], ApiResponseMeta>> {
     const mine = parseBooleanQuery(query.mine, 'mine') ?? false;
     const groupType = optionalQueryString(query.groupType, 'groupType');
     const locationCode = optionalQueryString(
@@ -153,7 +166,6 @@ export class GroupsService {
           groupType as (typeof GROUP_TYPES)[number],
           locationCode,
         ),
-        { limit },
       );
       groups = await this.repository.batchGet<StoredGroup>(
         this.config.dynamodbGroupsTableName,
@@ -165,7 +177,7 @@ export class GroupsService {
       );
     }
 
-    return groups
+    const filtered = groups
       .filter((group) => !group.deletedAt)
       .filter((group) =>
         this.authorizationService.canReadGroup(
@@ -191,10 +203,19 @@ export class GroupsService {
           .join(' ')
           .toLowerCase()
           .includes(keyword);
-      })
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .slice(0, limit)
-      .map(toGroupMetadata);
+      });
+    const page = paginateSortedItems(
+      filtered,
+      limit,
+      query.cursor,
+      (group) => group.createdAt,
+      (group) => group.groupId,
+    );
+
+    return buildPaginatedResponse(
+      page.items.map(toGroupMetadata),
+      page.nextCursor,
+    );
   }
 
   async getGroup(
@@ -230,7 +251,7 @@ export class GroupsService {
       !this.authorizationService.canManageGroup(
         actor,
         group,
-        membership?.roleInGroup,
+        this.getMembershipRole(membership),
       )
     ) {
       throw new ForbiddenException('You cannot update this group.');
@@ -247,7 +268,7 @@ export class GroupsService {
     const nextLocationCode = locationCodeInput
       ? ensureLocationCode(locationCodeInput)
       : group.locationCode;
-    const nextGroupType = groupType ?? group.groupType;
+    const nextGroupType: GroupType = groupType ?? group.groupType;
     const nextIsOfficial = isOfficial ?? group.isOfficial;
 
     if (
@@ -276,6 +297,38 @@ export class GroupsService {
     return toGroupMetadata(nextGroup);
   }
 
+  async deleteGroup(
+    actor: AuthenticatedUser,
+    groupId: string,
+  ): Promise<GroupMetadata> {
+    const group = await this.getGroupOrThrow(groupId);
+    const membership = await this.getMembership(groupId, actor.id);
+
+    if (
+      !this.authorizationService.canDeleteGroup(
+        actor,
+        group,
+        this.getMembershipRole(membership),
+      )
+    ) {
+      throw new ForbiddenException('You cannot delete this group.');
+    }
+
+    const deletedAt = nowIso();
+    const nextGroup: StoredGroup = {
+      ...group,
+      deletedAt,
+      memberCount: 0,
+      updatedAt: deletedAt,
+    };
+
+    await this.repository.put(this.config.dynamodbGroupsTableName, nextGroup);
+    await this.softDeleteMembershipsForGroup(groupId, deletedAt);
+    await this.softDeleteConversationSummariesForGroup(groupId, deletedAt);
+    await this.detachReportsFromGroup(groupId, deletedAt);
+
+    return toGroupMetadata(nextGroup);
+  }
   async joinGroup(
     actor: AuthenticatedUser,
     groupId: string,
@@ -386,7 +439,7 @@ export class GroupsService {
       !this.authorizationService.canManageGroup(
         actor,
         group,
-        actorMembership?.roleInGroup,
+        this.getMembershipRole(actorMembership),
       )
     ) {
       throw new ForbiddenException('You cannot manage members of this group.');
@@ -466,6 +519,91 @@ export class GroupsService {
     throw new BadRequestException('Unsupported action.');
   }
 
+  private async softDeleteMembershipsForGroup(
+    groupId: string,
+    deletedAt: string,
+  ): Promise<void> {
+    const memberships = await this.queryGroupMemberships(groupId);
+
+    for (const membership of memberships) {
+      if (membership.deletedAt) {
+        continue;
+      }
+
+      const nextMembership: StoredMembership = {
+        ...membership,
+        deletedAt,
+        updatedAt: deletedAt,
+      };
+
+      await this.repository.put(
+        this.config.dynamodbMembershipsTableName,
+        nextMembership,
+      );
+    }
+  }
+
+  private async softDeleteConversationSummariesForGroup(
+    groupId: string,
+    deletedAt: string,
+  ): Promise<void> {
+    const conversationId = `GRP#${groupId}`;
+    const summaries = await this.repository.scanAll<StoredConversation>(
+      this.config.dynamodbConversationsTableName,
+    );
+
+    for (const summary of summaries) {
+      if (
+        summary.entityType !== 'CONVERSATION' ||
+        summary.conversationId !== conversationId ||
+        summary.deletedAt
+      ) {
+        continue;
+      }
+
+      const nextSummary: StoredConversation = {
+        ...summary,
+        deletedAt,
+        updatedAt: deletedAt,
+      };
+
+      await this.repository.put(
+        this.config.dynamodbConversationsTableName,
+        nextSummary,
+      );
+    }
+  }
+
+  private async detachReportsFromGroup(
+    groupId: string,
+    updatedAt: string,
+  ): Promise<void> {
+    const reports = await this.repository.scanAll<StoredReport>(
+      this.config.dynamodbReportsTableName,
+    );
+
+    for (const report of reports) {
+      if (
+        report.entityType !== 'REPORT' ||
+        report.groupId !== groupId ||
+        report.deletedAt
+      ) {
+        continue;
+      }
+
+      const nextReport: StoredReport = {
+        ...report,
+        groupId: undefined,
+        updatedAt,
+      };
+
+      await this.repository.put(
+        this.config.dynamodbReportsTableName,
+        nextReport,
+      );
+    }
+  }
+
   async getMembership(
     groupId: string,
     userId: string,
@@ -475,6 +613,24 @@ export class GroupsService {
       makeGroupPk(groupId),
       makeMembershipSk(userId),
     );
+  }
+
+  private getMembershipRole(
+    membership?: StoredMembership,
+  ): GroupMemberRole | undefined {
+    if (membership?.roleInGroup === 'OWNER') {
+      return 'OWNER';
+    }
+
+    if (membership?.roleInGroup === 'OFFICER') {
+      return 'OFFICER';
+    }
+
+    if (membership?.roleInGroup === 'MEMBER') {
+      return 'MEMBER';
+    }
+
+    return undefined;
   }
 
   private async getGroupOrThrow(groupId: string): Promise<StoredGroup> {

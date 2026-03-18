@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -31,6 +32,10 @@ import {
   CreateUserRequestDto,
   ErrorResponseDto,
   ListUsersQueryDto,
+  PresenceStateDto,
+  PushDeviceDto,
+  PushDeviceRemovalResultDto,
+  RegisterPushDeviceRequestDto,
   UpdateProfileRequestDto,
   UpdateUserStatusRequestDto,
   UserProfileDto,
@@ -52,6 +57,44 @@ export class UsersController {
     return this.usersService.getUser(user, user.id);
   }
 
+  @Get('me/presence')
+  @ApiOperation({ summary: 'Get my active presence state' })
+  @ApiOkEnvelopeResponse(PresenceStateDto)
+  getMyPresence(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.getPresence(user, user.id);
+  }
+
+  @Get('me/push-devices')
+  @ApiOperation({ summary: 'List my registered push devices' })
+  @ApiOkEnvelopeResponse(PushDeviceDto, { isArray: true })
+  listMyPushDevices(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.listPushDevices(user);
+  }
+
+  @Post('me/push-devices')
+  @ApiOperation({ summary: 'Register or update my push device token' })
+  @ApiBody({ type: RegisterPushDeviceRequestDto })
+  @ApiCreatedEnvelopeResponse(PushDeviceDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  registerMyPushDevice(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: RegisterPushDeviceRequestDto,
+  ) {
+    return this.usersService.registerPushDevice(user, body);
+  }
+
+  @Delete('me/push-devices/:deviceId')
+  @ApiOperation({ summary: 'Delete one of my registered push devices' })
+  @ApiParam({ name: 'deviceId', type: String })
+  @ApiOkEnvelopeResponse(PushDeviceRemovalResultDto)
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  deleteMyPushDevice(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('deviceId') deviceId: string,
+  ) {
+    return this.usersService.deletePushDevice(user, deviceId);
+  }
+
   @Patch('me')
   @ApiOperation({ summary: 'Update my profile' })
   @ApiBody({ type: UpdateProfileRequestDto })
@@ -71,6 +114,7 @@ export class UsersController {
   @ApiQuery({ name: 'status', required: false, enum: USER_STATUSES })
   @ApiQuery({ name: 'locationCode', required: false, type: String })
   @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiOkEnvelopeResponse(UserProfileDto, { isArray: true })
   @ApiBadRequestResponse({ type: ErrorResponseDto })
@@ -92,6 +136,18 @@ export class UsersController {
     @Body() body: CreateUserRequestDto,
   ) {
     return this.usersService.createUser(user, body);
+  }
+
+  @Get(':userId/presence')
+  @ApiOperation({ summary: 'Get active presence state for a user' })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(PresenceStateDto)
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  getUserPresence(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.getPresence(user, userId);
   }
 
   @Get(':userId')

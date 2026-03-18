@@ -1,4 +1,4 @@
-﻿const USER_ROLES = Object.freeze([
+const USER_ROLES = Object.freeze([
   "CITIZEN",
   "WARD_OFFICER",
   "PROVINCE_OFFICER",
@@ -25,6 +25,10 @@ const MESSAGE_TYPES = Object.freeze([
   "EMOJI",
   "SYSTEM",
 ]);
+
+const MESSAGE_DELIVERY_STATES = Object.freeze(["SENT", "DELIVERED", "READ"]);
+
+const PUSH_DEVICE_PROVIDERS = Object.freeze(["FCM", "APNS", "WEB", "WEBHOOK"]);
 
 const REPORT_CATEGORIES = Object.freeze([
   "INFRASTRUCTURE",
@@ -56,6 +60,7 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
   ERROR: "chat.error",
   CONVERSATION_JOIN: "conversation.join",
   CONVERSATION_LEAVE: "conversation.leave",
+  CONVERSATION_DELETE: "conversation.delete",
   MESSAGE_SEND: "message.send",
   MESSAGE_UPDATE: "message.update",
   MESSAGE_DELETE: "message.delete",
@@ -68,6 +73,8 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
   TYPING_START: "typing.start",
   TYPING_STOP: "typing.stop",
   TYPING_STATE: "typing.state",
+  PRESENCE_SNAPSHOT: "presence.snapshot",
+  PRESENCE_UPDATED: "presence.updated",
 });
 
 const PHONE_PATTERN = /^0\d{9,10}$/;
@@ -87,7 +94,9 @@ module.exports = {
   GROUP_TYPES,
   LOCATION_CODE_PATTERN,
   MAX_PAGE_SIZE,
+  MESSAGE_DELIVERY_STATES,
   MESSAGE_TYPES,
+  PUSH_DEVICE_PROVIDERS,
   PHONE_PATTERN,
   REPORT_CATEGORIES,
   REPORT_PRIORITIES,
@@ -96,3 +105,4 @@ module.exports = {
   USER_ROLES,
   USER_STATUSES,
 };
+

@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import { nowIso } from '@urban/shared-utils';
 import { DynamoDbService } from '../dynamodb/dynamodb.service';
+import { RealtimeRedisService } from '../realtime/realtime-redis.service';
+import {
+  CircuitBreakerService,
+  type CircuitBreakerSnapshot,
+} from '../resilience/circuit-breaker.service';
 import { S3StorageService } from '../storage/s3-storage.service';
 
 export interface SystemHealthCheck {
@@ -30,6 +35,8 @@ export class SystemHealthService
   constructor(
     private readonly dynamoDbService: DynamoDbService,
     private readonly s3StorageService: S3StorageService,
+    private readonly realtimeRedisService: RealtimeRedisService,
+    private readonly circuitBreakerService: CircuitBreakerService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -65,6 +72,12 @@ export class SystemHealthService
       },
     ];
 
+    this.pushCircuitBreakerCheck(
+      checks,
+      'dynamodb-circuit-breaker',
+      this.circuitBreakerService.getSnapshot('dynamodb'),
+    );
+
     try {
       const connection = await this.dynamoDbService.checkConnection();
       checks.push({
@@ -80,12 +93,26 @@ export class SystemHealthService
       });
     }
 
+    const redisHealth = this.realtimeRedisService.getHealth();
+    checks.push({
+      component: 'redis',
+      detail: redisHealth.detail,
+      status: redisHealth.status,
+    });
+
     const storageHealth = this.s3StorageService.getHealth();
     checks.push({
       component: 's3',
       detail: storageHealth.detail,
       status: storageHealth.configured ? 'ok' : 'skipped',
     });
+
+    this.pushCircuitBreakerCheck(
+      checks,
+      's3-circuit-breaker',
+      this.circuitBreakerService.getSnapshot('s3'),
+      !storageHealth.configured,
+    );
 
     const status = checks.every(
       (check) => check.status === 'ok' || check.status === 'skipped',
@@ -99,5 +126,43 @@ export class SystemHealthService
       status,
       timestamp: nowIso(),
     };
+  }
+
+  private pushCircuitBreakerCheck(
+    checks: SystemHealthCheck[],
+    component: string,
+    snapshot: CircuitBreakerSnapshot,
+    skipped = false,
+  ): void {
+    if (skipped) {
+      checks.push({
+        component,
+        detail: 'Skipped because the dependency is not configured.',
+        status: 'skipped',
+      });
+      return;
+    }
+
+    const details = [
+      `state=${snapshot.state}`,
+      `failures=${snapshot.consecutiveFailures}`,
+      snapshot.lastFailureAt
+        ? `lastFailureAt=${snapshot.lastFailureAt}`
+        : undefined,
+      snapshot.lastFailureMessage
+        ? `lastFailure=${snapshot.lastFailureMessage}`
+        : undefined,
+      snapshot.nextAttemptAt
+        ? `nextAttemptAt=${snapshot.nextAttemptAt}`
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    checks.push({
+      component,
+      detail: details,
+      status: snapshot.state === 'open' ? 'error' : 'ok',
+    });
   }
 }

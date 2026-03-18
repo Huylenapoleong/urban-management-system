@@ -170,6 +170,41 @@ export function optionalQueryString(
   return cleanString(value, field);
 }
 
+export function parseEnumQuery<T extends string>(
+  value: unknown,
+  field: string,
+  values: readonly T[],
+): T | undefined {
+  const raw = optionalQueryString(value, field);
+
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  if (!values.includes(raw as T)) {
+    throw new BadRequestException(`${field} is invalid.`);
+  }
+
+  return raw as T;
+}
+
+export function parseIsoDateQuery(
+  value: unknown,
+  field: string,
+): string | undefined {
+  const raw = optionalQueryString(value, field);
+
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  if (Number.isNaN(Date.parse(raw))) {
+    throw new BadRequestException(`${field} must be a valid ISO date.`);
+  }
+
+  return raw;
+}
+
 export function parseLimit(value: unknown): number {
   const raw = optionalQueryString(value, 'limit');
 
