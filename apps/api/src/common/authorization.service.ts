@@ -1,4 +1,4 @@
-﻿import { Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type {
   GroupMemberRole,
   GroupType,
@@ -158,6 +158,14 @@ export class AuthorizationService {
     return this.canAccessLocationScope(actor, group.locationCode);
   }
 
+  canDeleteGroup(
+    actor: AuthenticatedUser,
+    group: StoredGroup,
+    roleInGroup?: GroupMemberRole,
+  ): boolean {
+    return this.canManageGroup(actor, group, roleInGroup);
+  }
+
   canReadReport(actor: AuthenticatedUser, report: StoredReport): boolean {
     if (actor.role === 'ADMIN' || actor.id === report.userId) {
       return true;
@@ -216,6 +224,13 @@ export class AuthorizationService {
     }
 
     return this.canAccessLocationScope(actor, report.locationCode);
+  }
+
+  canDeleteReport(actor: AuthenticatedUser, report: StoredReport): boolean {
+    return (
+      this.canManageReport(actor, report) ||
+      this.canUpdateOwnReport(actor, report)
+    );
   }
 
   canAccessDirectConversation(

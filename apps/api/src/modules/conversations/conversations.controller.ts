@@ -28,11 +28,15 @@ import {
   ApiOkEnvelopeResponse,
 } from '../../common/openapi/swagger-envelope';
 import {
+  AuditEventItemDto,
+  ConversationDeletedResultDto,
   ConversationSummaryDto,
   ErrorResponseDto,
+  ListAuditQueryDto,
   ListConversationsQueryDto,
   ListMessagesQueryDto,
   MessageItemDto,
+  UpdateConversationPreferencesRequestDto,
   SendDirectMessageRequestDto,
   SendMessageRequestDto,
   UpdateMessageRequestDto,
@@ -49,6 +53,11 @@ export class ConversationsController {
 
   @Get()
   @ApiOperation({ summary: 'List inbox conversations' })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'isGroup', required: false, type: Boolean })
+  @ApiQuery({ name: 'unreadOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'includeArchived', required: false, type: Boolean })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiOkEnvelopeResponse(ConversationSummaryDto, { isArray: true })
   @ApiBadRequestResponse({ type: ErrorResponseDto })
@@ -84,6 +93,16 @@ export class ConversationsController {
     description:
       'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
   })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'DOC', 'EMOJI', 'SYSTEM'],
+  })
+  @ApiQuery({ name: 'fromUserId', required: false, type: String })
+  @ApiQuery({ name: 'before', required: false, type: String })
+  @ApiQuery({ name: 'after', required: false, type: String })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiOkEnvelopeResponse(MessageItemDto, { isArray: true })
   @ApiBadRequestResponse({ type: ErrorResponseDto })
@@ -97,6 +116,55 @@ export class ConversationsController {
       user,
       conversationId,
       query as Record<string, unknown>,
+    );
+  }
+
+  @Get(':conversationId/audit')
+  @ApiOperation({ summary: 'List audit events for a conversation' })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
+  })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkEnvelopeResponse(AuditEventItemDto, { isArray: true })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  listAuditEvents(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+    @Query() query: ListAuditQueryDto,
+  ) {
+    return this.conversationsService.listAuditEvents(
+      user,
+      conversationId,
+      query as Record<string, unknown>,
+    );
+  }
+
+  @Patch(':conversationId/preferences')
+  @ApiOperation({ summary: 'Update per-user conversation preferences' })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
+  })
+  @ApiBody({ type: UpdateConversationPreferencesRequestDto })
+  @ApiOkEnvelopeResponse(ConversationSummaryDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  updateConversationPreferences(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+    @Body() body: UpdateConversationPreferencesRequestDto,
+  ) {
+    return this.conversationsService.updateConversationPreferences(
+      user,
+      conversationId,
+      body,
     );
   }
 
@@ -170,6 +238,26 @@ export class ConversationsController {
       conversationId,
       messageId,
     );
+  }
+
+  @Delete(':conversationId')
+  @ApiOperation({
+    summary: 'Delete conversation from the current user inbox only',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
+  })
+  @ApiOkEnvelopeResponse(ConversationDeletedResultDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  deleteConversation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.deleteConversation(user, conversationId);
   }
 
   @Post(':conversationId/read')

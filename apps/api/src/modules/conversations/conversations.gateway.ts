@@ -1,8 +1,4 @@
-import {
-  HttpException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -20,6 +16,7 @@ import {
 import type {
   AuthenticatedUser,
   ChatConversationCommandPayload,
+  ChatConversationDeletedAccepted,
   ChatConversationSubscription,
   ChatConversationUnsubscription,
   ChatMessageAccepted,
@@ -28,6 +25,8 @@ import type {
   ChatMessageSendPayload,
   ChatMessageUpdatedAccepted,
   ChatMessageUpdatePayload,
+  ChatPresenceSnapshotEvent,
+  ChatPresenceUpdatedEvent,
   ChatReadAccepted,
   ChatSocketAck,
   ChatSocketError,
@@ -44,6 +43,7 @@ import {
   optionalString,
   requiredString,
 } from '../../common/validation';
+import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
 import { ChatRealtimeService } from './chat-realtime.service';
 import { ChatSocketAuthService } from './chat-socket-auth.service';
 import { ConversationsService } from './conversations.service';
@@ -54,6 +54,7 @@ type AuthenticatedSocket = Socket<
   Record<string, never>,
   {
     user?: AuthenticatedUser;
+    sessionId?: string;
   }
 >;
 
@@ -71,6 +72,7 @@ export class ConversationsGateway
   constructor(
     private readonly chatSocketAuthService: ChatSocketAuthService,
     private readonly chatRealtimeService: ChatRealtimeService,
+    private readonly chatPresenceService: ChatPresenceService,
     private readonly conversationsService: ConversationsService,
   ) {}
 
@@ -80,9 +82,16 @@ export class ConversationsGateway
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
     try {
-      const user = await this.chatSocketAuthService.authenticate(client);
+      const authContext = await this.chatSocketAuthService.authenticate(client);
+      const { user, sessionId } = authContext;
       client.data.user = user;
-      await this.chatRealtimeService.attachUserSocket(client, user.id);
+      client.data.sessionId = sessionId;
+      await this.chatRealtimeService.attachUserSocket(
+        client,
+        user.id,
+        sessionId,
+      );
+      await this.chatPresenceService.attachSocket(user.id, client.id);
 
       const payload: ChatSocketReadyPayload = {
         user,
@@ -101,7 +110,22 @@ export class ConversationsGateway
     }
   }
 
-  handleDisconnect(): void {}
+  async handleDisconnect(client: AuthenticatedSocket): Promise<void> {
+    const user = client.data.user;
+
+    if (!user) {
+      return;
+    }
+
+    const joinedConversationKeys =
+      this.chatRealtimeService.getJoinedConversationKeys(client);
+
+    await this.chatPresenceService.detachSocket(user.id, client.id);
+
+    for (const conversationKey of joinedConversationKeys) {
+      await this.broadcastPresenceUpdate(conversationKey, user.id);
+    }
+  }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN)
   async joinConversation(
@@ -109,7 +133,7 @@ export class ConversationsGateway
     @MessageBody() payload: ChatConversationCommandPayload,
   ): Promise<ChatSocketAck<ChatConversationSubscription>> {
     return this.withAck(async () => {
-      const user = this.getSocketUser(client);
+      const user = await this.getSocketUser(client);
       const conversationId = this.extractConversationId(payload);
       const access = await this.conversationsService.resolveConversationAccess(
         user,
@@ -119,6 +143,16 @@ export class ConversationsGateway
       await this.chatRealtimeService.joinConversation(
         client,
         access.conversationKey,
+      );
+      await this.emitPresenceSnapshot(
+        client,
+        access.conversationKey,
+        access.participants,
+      );
+      await this.broadcastPresenceUpdate(
+        access.conversationKey,
+        user.id,
+        client.id,
       );
 
       return {
@@ -137,7 +171,7 @@ export class ConversationsGateway
     @MessageBody() payload: ChatConversationCommandPayload,
   ): Promise<ChatSocketAck<ChatConversationUnsubscription>> {
     return this.withAck(async () => {
-      const user = this.getSocketUser(client);
+      const user = await this.getSocketUser(client);
       const conversationId = this.extractConversationId(payload);
       const access = await this.conversationsService.resolveConversationAccess(
         user,
@@ -157,13 +191,33 @@ export class ConversationsGateway
     }, 'CHAT_CONVERSATION_LEAVE_FAILED');
   }
 
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CONVERSATION_DELETE)
+  async deleteConversation(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: ChatConversationCommandPayload,
+  ): Promise<ChatSocketAck<ChatConversationDeletedAccepted>> {
+    return this.withAck(async () => {
+      const user = await this.getSocketUser(client);
+      const conversationId = this.extractConversationId(payload);
+      const result = await this.conversationsService.deleteConversation(
+        user,
+        conversationId,
+      );
+
+      return {
+        conversationId: result.conversationId,
+        removedAt: result.removedAt,
+      };
+    }, 'CHAT_CONVERSATION_DELETE_FAILED');
+  }
+
   @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_SEND)
   async sendMessage(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatMessageSendPayload,
   ): Promise<ChatSocketAck<ChatMessageAccepted>> {
     return this.withAck(async () => {
-      const user = this.getSocketUser(client);
+      const user = await this.getSocketUser(client);
       const body = ensureObject(payload as unknown);
       const conversationId = requiredString(body, 'conversationId', {
         minLength: 1,
@@ -205,7 +259,7 @@ export class ConversationsGateway
     @MessageBody() payload: ChatMessageUpdatePayload,
   ): Promise<ChatSocketAck<ChatMessageUpdatedAccepted>> {
     return this.withAck(async () => {
-      const user = this.getSocketUser(client);
+      const user = await this.getSocketUser(client);
       const body = ensureObject(payload as unknown);
       const conversationId = requiredString(body, 'conversationId', {
         minLength: 1,
@@ -248,7 +302,7 @@ export class ConversationsGateway
     @MessageBody() payload: ChatMessageDeletePayload,
   ): Promise<ChatSocketAck<ChatMessageDeletedAccepted>> {
     return this.withAck(async () => {
-      const user = this.getSocketUser(client);
+      const user = await this.getSocketUser(client);
       const body = ensureObject(payload as unknown);
       const conversationId = requiredString(body, 'conversationId', {
         minLength: 1,
@@ -290,7 +344,7 @@ export class ConversationsGateway
     @MessageBody() payload: ChatConversationCommandPayload,
   ): Promise<ChatSocketAck<ChatReadAccepted>> {
     return this.withAck(async () => {
-      const user = this.getSocketUser(client);
+      const user = await this.getSocketUser(client);
       const conversationId = this.extractConversationId(payload);
       const access = await this.conversationsService.resolveConversationAccess(
         user,
@@ -331,7 +385,7 @@ export class ConversationsGateway
     isTyping: boolean,
   ): Promise<ChatSocketAck<ChatTypingAccepted>> {
     return this.withAck(async () => {
-      const user = this.getSocketUser(client);
+      const user = await this.getSocketUser(client);
       const body = ensureObject(payload as unknown);
       const conversationId = requiredString(body, 'conversationId', {
         minLength: 1,
@@ -376,6 +430,39 @@ export class ConversationsGateway
     }, 'CHAT_TYPING_STATE_FAILED');
   }
 
+  private async emitPresenceSnapshot(
+    client: AuthenticatedSocket,
+    conversationKey: string,
+    participants: string[],
+  ): Promise<void> {
+    const payload: ChatPresenceSnapshotEvent = {
+      conversationKey,
+      participants: await this.chatPresenceService.listPresence(participants),
+      occurredAt: nowIso(),
+    };
+
+    this.emitClientEvent(client, CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, payload);
+  }
+
+  private async broadcastPresenceUpdate(
+    conversationKey: string,
+    userId: string,
+    exceptSocketId?: string,
+  ): Promise<void> {
+    const payload: ChatPresenceUpdatedEvent = {
+      conversationKey,
+      presence: await this.chatPresenceService.getPresence(userId),
+      occurredAt: nowIso(),
+    };
+
+    this.chatRealtimeService.emitToConversation(
+      conversationKey,
+      CHAT_SOCKET_EVENTS.PRESENCE_UPDATED,
+      payload,
+      exceptSocketId,
+    );
+  }
+
   private emitClientEvent<TPayload>(
     client: AuthenticatedSocket,
     event: string,
@@ -387,14 +474,18 @@ export class ConversationsGateway
     );
   }
 
-  private getSocketUser(client: AuthenticatedSocket): AuthenticatedUser {
-    const user = client.data.user;
-
-    if (!user) {
-      throw new UnauthorizedException('Socket is not authenticated.');
+  private async getSocketUser(
+    client: AuthenticatedSocket,
+  ): Promise<AuthenticatedUser> {
+    try {
+      const authContext = await this.chatSocketAuthService.authenticate(client);
+      client.data.user = authContext.user;
+      client.data.sessionId = authContext.sessionId;
+      return authContext.user;
+    } catch (error) {
+      client.disconnect(true);
+      throw error;
     }
-
-    return user;
   }
 
   private extractConversationId(payload: unknown): string {

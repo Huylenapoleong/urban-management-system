@@ -59,6 +59,10 @@ function makeUserRefreshSessionSk(sessionId) {
   return `SESSION#${sessionId}`;
 }
 
+function makeUserPushDeviceSk(deviceId) {
+  return `PUSH_DEVICE#${deviceId}`;
+}
+
 function makePhoneLookupKey(phone) {
   return `PHONE#${phone}`;
 }
@@ -95,6 +99,14 @@ function makeConversationPk(conversationId) {
   return `CONV#${conversationId}`;
 }
 
+function makeConversationAuditSk(createdAt, eventId) {
+  return `AUDIT#${createdAt}#${eventId}`;
+}
+
+function makeConversationReportLinkSk(reportId) {
+  return `LINK#REPORT#${reportId}`;
+}
+
 function makeMessageSk(sentAt, messageId) {
   return `MSG#${sentAt}#${messageId}`;
 }
@@ -119,12 +131,28 @@ function makeReportMetadataSk() {
   return "METADATA";
 }
 
+function makeReportAuditSk(createdAt, eventId) {
+  return `AUDIT#${createdAt}#${eventId}`;
+}
+
+function makeReportConversationLinkSk(groupId) {
+  return `LINK#GRP#${groupId}`;
+}
+
 function makeReportCategoryLocationKey(category, locationCode) {
   return `CAT#${category}#LOC#${locationCode}`;
 }
 
 function makeReportStatusLocationKey(status, locationCode) {
   return `STATUS#${status}#LOC#${locationCode}`;
+}
+
+function makePushOutboxPk(shard) {
+  return `OUTBOX#PUSH#${shard}`;
+}
+
+function makePushOutboxSk(createdAt, eventId) {
+  return `EVENT#${createdAt}#${eventId}`;
 }
 
 function makeDmConversationId(leftUserId, rightUserId) {
@@ -151,7 +179,9 @@ module.exports = {
   isGroupConversationId,
   isSameProvince,
   isSameWard,
+  makeConversationAuditSk,
   makeConversationPk,
+  makeConversationReportLinkSk,
   makeConversationSummarySk,
   makeDmConversationId,
   makeEmailLookupKey,
@@ -163,7 +193,11 @@ module.exports = {
   makeMembershipSk,
   makeMessageSk,
   makePhoneLookupKey,
+  makePushOutboxPk,
+  makePushOutboxSk,
+  makeReportAuditSk,
   makeReportCategoryLocationKey,
+  makeReportConversationLinkSk,
   makeReportMetadataSk,
   makeReportPk,
   makeReportStatusLocationKey,
@@ -171,6 +205,7 @@ module.exports = {
   makeUserGroupsSk,
   makeUserPk,
   makeUserProfileSk,
+  makeUserPushDeviceSk,
   makeUserRefreshSessionSk,
   normalizeEmail,
   normalizePhone,

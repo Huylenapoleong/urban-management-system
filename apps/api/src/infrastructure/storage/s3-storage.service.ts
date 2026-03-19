@@ -1,18 +1,22 @@
+import { S3Client } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import {
   Injectable,
   InternalServerErrorException,
   OnApplicationShutdown,
 } from '@nestjs/common';
-import { S3Client } from '@aws-sdk/client-s3';
-import { Upload } from '@aws-sdk/lib-storage';
-import { createInfrastructureOperationError } from '../errors/infrastructure-error.utils';
 import { AppConfigService } from '../config/app-config.service';
+import { createInfrastructureOperationError } from '../errors/infrastructure-error.utils';
+import { CircuitBreakerService } from '../resilience/circuit-breaker.service';
 
 @Injectable()
 export class S3StorageService implements OnApplicationShutdown {
   private readonly client: S3Client;
 
-  constructor(private readonly config: AppConfigService) {
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly circuitBreakerService: CircuitBreakerService,
+  ) {
     this.client = new S3Client({
       region: this.config.awsRegion,
       endpoint: this.config.s3Endpoint,
@@ -43,7 +47,7 @@ export class S3StorageService implements OnApplicationShutdown {
     });
 
     try {
-      await upload.done();
+      await this.circuitBreakerService.execute('s3', 'S3', () => upload.done());
     } catch (error) {
       throw createInfrastructureOperationError({
         context: {

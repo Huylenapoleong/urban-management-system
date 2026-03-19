@@ -1,7 +1,9 @@
-﻿import type {
+import type {
   GroupMemberRole,
   GroupType,
+  MessageDeliveryState,
   MessageType,
+  PushDeviceProvider,
   ReportCategory,
   ReportPriority,
   ReportStatus,
@@ -16,6 +18,20 @@ export interface AuthTokenPair {
   expiresIn: number;
   refreshExpiresIn: number;
   tokenType: "Bearer";
+}
+
+export interface AuthSessionInfo {
+  sessionId: string;
+  isCurrent: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  userAgent?: string;
+  ipAddress?: string;
+  deviceId?: string;
+  appVariant?: string;
 }
 
 export interface JwtClaims {
@@ -101,6 +117,11 @@ export interface MessageItem {
   deletedAt: string | null;
   sentAt: string;
   updatedAt: string;
+  deliveryState?: MessageDeliveryState;
+  recipientCount?: number;
+  deliveredCount?: number;
+  readByCount?: number;
+  lastReadAt?: string;
 }
 
 export interface ConversationSummary {
@@ -110,6 +131,9 @@ export interface ConversationSummary {
   lastSenderName: string;
   unreadCount: number;
   isGroup: boolean;
+  isPinned?: boolean;
+  archivedAt?: string | null;
+  mutedUntil?: string | null;
   deletedAt: string | null;
   updatedAt: string;
 }
@@ -133,6 +157,7 @@ export interface ReportItem {
 
 export interface ApiResponseMeta {
   count: number;
+  nextCursor?: string;
 }
 
 export interface ApiSuccessResponse<TData, TMeta = undefined> {
@@ -152,11 +177,43 @@ export interface ApiErrorResponse {
   error: ApiErrorPayload;
   path: string;
   timestamp: string;
+  requestId?: string;
 }
 
 export type ApiResponse<TData, TMeta = undefined> =
   | ApiSuccessResponse<TData, TMeta>
   | ApiErrorResponse;
+
+export interface PushDevice {
+  deviceId: string;
+  provider: PushDeviceProvider;
+  platform: string;
+  appVariant?: string;
+  tokenPreview: string;
+  disabledAt: string | null;
+  lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuditEventItem {
+  id: string;
+  scope: "REPORT" | "CONVERSATION";
+  action: string;
+  actorUserId: string;
+  occurredAt: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReportConversationLinkItem {
+  reportId: string;
+  groupId: string;
+  conversationId: string;
+  linkedByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface UploadedAsset {
   key: string;
@@ -237,6 +294,11 @@ export interface ChatConversationUnsubscription {
   leftAt: string;
 }
 
+export interface ChatConversationDeletedAccepted {
+  conversationId: string;
+  removedAt: string;
+}
+
 export interface ChatMessageAccepted {
   conversationId: string;
   conversationKey: string;
@@ -273,6 +335,7 @@ export interface ChatTypingAccepted {
 }
 
 export interface ChatMessageCreatedEvent {
+  eventId: string;
   conversationId: string;
   conversationKey: string;
   message: MessageItem;
@@ -283,6 +346,7 @@ export interface ChatMessageCreatedEvent {
 }
 
 export interface ChatMessageUpdatedEvent {
+  eventId: string;
   conversationId: string;
   conversationKey: string;
   message: MessageItem;
@@ -291,6 +355,7 @@ export interface ChatMessageUpdatedEvent {
 }
 
 export interface ChatMessageDeletedEvent {
+  eventId: string;
   conversationId: string;
   conversationKey: string;
   messageId: string;
@@ -299,6 +364,7 @@ export interface ChatMessageDeletedEvent {
 }
 
 export interface ChatConversationUpdatedEvent {
+  eventId: string;
   conversationId: string;
   conversationKey: string;
   summary: ConversationSummary;
@@ -306,18 +372,21 @@ export interface ChatConversationUpdatedEvent {
     | "message.created"
     | "message.updated"
     | "message.deleted"
-    | "conversation.read";
+    | "conversation.read"
+    | "conversation.preferences.updated";
   occurredAt: string;
 }
 
 export interface ChatConversationRemovedEvent {
+  eventId: string;
   conversationId: string;
   conversationKey: string;
-  reason: "message.deleted";
+  reason: "message.deleted" | "conversation.deleted";
   occurredAt: string;
 }
 
 export interface ChatConversationReadEvent {
+  eventId: string;
   conversationId: string;
   conversationKey: string;
   readByUserId: string;
@@ -333,3 +402,26 @@ export interface ChatTypingStateEvent {
   occurredAt: string;
   clientTimestamp?: string;
 }
+export interface ChatPresenceState {
+  userId: string;
+  isActive: boolean;
+  activeSocketCount: number;
+  lastSeenAt?: string;
+  occurredAt: string;
+}
+
+export interface ChatPresenceSnapshotEvent {
+  conversationKey: string;
+  participants: ChatPresenceState[];
+  occurredAt: string;
+}
+
+export interface ChatPresenceUpdatedEvent {
+  conversationKey: string;
+  presence: ChatPresenceState;
+  occurredAt: string;
+}
+
+
+
+

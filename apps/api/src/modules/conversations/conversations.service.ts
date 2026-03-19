@@ -3,17 +3,15 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CHAT_SOCKET_EVENTS, MESSAGE_TYPES } from '@urban/shared-constants';
+import { MESSAGE_TYPES } from '@urban/shared-constants';
 import type {
+  ApiResponseMeta,
+  ApiSuccessResponse,
+  AuditEventItem,
   AuthenticatedUser,
-  ChatConversationReadEvent,
-  ChatConversationRemovedEvent,
-  ChatConversationUpdatedEvent,
-  ChatMessageCreatedEvent,
-  ChatMessageDeletedEvent,
-  ChatMessageUpdatedEvent,
   ConversationSummary,
   MessageItem,
 } from '@urban/shared-types';
@@ -31,33 +29,47 @@ import {
   nowIso,
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
-import { toConversationSummary, toMessage } from '../../common/mappers';
+import {
+  buildPaginatedResponse,
+  paginateSortedItems,
+} from '../../common/pagination';
 import type {
+  StoredChatOutboxEvent,
   StoredConversation,
+  StoredConversationAuditEvent,
   StoredMessage,
   StoredMessageDedup,
   StoredMessageRef,
+  StoredPushOutboxEvent,
 } from '../../common/storage-records';
 import {
   ensureObject,
+  optionalBoolean,
   optionalEnum,
+  optionalQueryString,
   optionalString,
+  parseBooleanQuery,
+  parseEnumQuery,
+  parseIsoDateQuery,
   parseLimit,
   requiredString,
 } from '../../common/validation';
+import { AuditTrailService } from '../../infrastructure/audit/audit-trail.service';
+import {
+  ConversationStateService,
+  type MessageDeliveryContext,
+  type SupportedMessageType,
+} from '../../common/services/conversation-state.service';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
+import { ConversationDispatchService } from './conversation-dispatch.service';
+import { ChatOutboxService } from './chat-outbox.service';
+import { ConversationSummaryService } from './conversation-summary.service';
 import { ChatRealtimeService } from './chat-realtime.service';
 import { GroupsService } from '../groups/groups.service';
 import { UsersService } from '../users/users.service';
-
-interface StructuredMessageContent extends Record<string, unknown> {
-  text: string;
-  mention: unknown[];
-}
-
-type SupportedMessageType = (typeof MESSAGE_TYPES)[number];
 
 export interface ResolvedConversationAccess {
   conversationId: string;
@@ -66,42 +78,178 @@ export interface ResolvedConversationAccess {
   isGroup: boolean;
 }
 
-interface ConversationSyncResult {
-  latestMessage?: StoredMessage;
-  participantIds: string[];
-  removedUserIds: string[];
-  summariesByUser: Map<string, StoredConversation>;
+export interface DeletedConversationResult {
+  conversationId: string;
+  removedAt: string;
 }
 
 @Injectable()
 export class ConversationsService {
+  private readonly logger = new Logger(ConversationsService.name);
+
   constructor(
     private readonly repository: UrbanTableRepository,
     private readonly authorizationService: AuthorizationService,
+    private readonly conversationStateService: ConversationStateService,
+    private readonly conversationSummaryService: ConversationSummaryService,
     private readonly usersService: UsersService,
     private readonly groupsService: GroupsService,
     private readonly chatRateLimitService: ChatRateLimitService,
+    private readonly conversationDispatchService: ConversationDispatchService,
+    private readonly chatOutboxService: ChatOutboxService,
     private readonly chatRealtimeService: ChatRealtimeService,
+    private readonly auditTrailService: AuditTrailService,
+    private readonly pushNotificationService: PushNotificationService,
     private readonly config: AppConfigService,
   ) {}
 
   async listConversations(
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
-  ): Promise<ConversationSummary[]> {
+  ): Promise<ApiSuccessResponse<ConversationSummary[], ApiResponseMeta>> {
+    const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
+    const isGroup = parseBooleanQuery(query.isGroup, 'isGroup');
+    const unreadOnly =
+      parseBooleanQuery(query.unreadOnly, 'unreadOnly') ?? false;
+    const includeArchived =
+      parseBooleanQuery(query.includeArchived, 'includeArchived') ?? false;
     const limit = parseLimit(query.limit);
     const items = await this.repository.queryByPk<StoredConversation>(
       this.config.dynamodbConversationsTableName,
       makeInboxPk(actor.id),
       {
         beginsWith: 'CONV#',
-        limit,
       },
     );
+    const filtered = items.filter((item) => {
+      if (item.deletedAt) {
+        return false;
+      }
 
-    return items
-      .filter((item) => !item.deletedAt)
-      .map((item) => this.serializeConversationSummary(actor.id, item));
+      if (isGroup !== undefined && item.isGroup !== isGroup) {
+        return false;
+      }
+
+      if (unreadOnly && item.unreadCount <= 0) {
+        return false;
+      }
+
+      if (!includeArchived && item.archivedAt) {
+        return false;
+      }
+
+      if (!keyword) {
+        return true;
+      }
+
+      return [item.groupName, item.lastMessagePreview, item.lastSenderName]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword);
+    });
+    const page = paginateSortedItems(
+      filtered,
+      limit,
+      query.cursor,
+      (item) => `${item.isPinned ? '1' : '0'}|${item.updatedAt}`,
+      (item) => item.conversationId,
+    );
+
+    return buildPaginatedResponse(
+      page.items.map((item) =>
+        this.serializeConversationSummary(actor.id, item),
+      ),
+      page.nextCursor,
+    );
+  }
+
+  async listAuditEvents(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    query: Record<string, unknown>,
+  ): Promise<ApiSuccessResponse<AuditEventItem[], ApiResponseMeta>> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    return this.auditTrailService.listConversationEvents(
+      access.conversationKey,
+      query,
+    );
+  }
+
+  async updateConversationPreferences(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    payload: unknown,
+  ): Promise<ConversationSummary> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const current =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        access.conversationKey,
+      );
+
+    if (!current || current.deletedAt) {
+      throw new NotFoundException('Conversation not found in inbox.');
+    }
+
+    const body = ensureObject(payload);
+    const archived = optionalBoolean(body, 'archived');
+    const isPinned = optionalBoolean(body, 'isPinned');
+    let mutedUntil = current.mutedUntil ?? null;
+
+    if (Object.prototype.hasOwnProperty.call(body, 'mutedUntil')) {
+      const rawMutedUntil = body.mutedUntil;
+
+      if (rawMutedUntil === null || rawMutedUntil === '') {
+        mutedUntil = null;
+      } else if (
+        typeof rawMutedUntil === 'string' &&
+        !Number.isNaN(Date.parse(rawMutedUntil))
+      ) {
+        mutedUntil = rawMutedUntil.trim();
+      } else {
+        throw new BadRequestException(
+          'mutedUntil must be null or a valid ISO date.',
+        );
+      }
+    }
+
+    if (
+      archived === undefined &&
+      isPinned === undefined &&
+      !Object.prototype.hasOwnProperty.call(body, 'mutedUntil')
+    ) {
+      throw new BadRequestException(
+        'archived, isPinned or mutedUntil must be provided.',
+      );
+    }
+
+    const nextConversation: StoredConversation = {
+      ...current,
+      isPinned: isPinned ?? current.isPinned ?? false,
+      archivedAt:
+        archived === undefined
+          ? (current.archivedAt ?? null)
+          : archived
+            ? nowIso()
+            : null,
+      mutedUntil,
+      updatedAt: nowIso(),
+    };
+
+    await this.repository.put(
+      this.config.dynamodbConversationsTableName,
+      nextConversation,
+    );
+    this.conversationDispatchService.emitConversationSummaryUpdated(
+      createUlid(),
+      actor.id,
+      access.conversationKey,
+      nextConversation,
+      'conversation.preferences.updated',
+      nextConversation.updatedAt,
+    );
+
+    return this.serializeConversationSummary(actor.id, nextConversation);
   }
 
   async resolveConversationAccess(
@@ -131,21 +279,73 @@ export class ConversationsService {
     actor: AuthenticatedUser,
     conversationId: string,
     query: Record<string, unknown>,
-  ): Promise<MessageItem[]> {
+  ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
     const access = await this.resolveConversationAccess(actor, conversationId);
+    const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
+    const type = parseEnumQuery(query.type, 'type', MESSAGE_TYPES);
+    const fromUserId = optionalQueryString(query.fromUserId, 'fromUserId');
+    const before = parseIsoDateQuery(query.before, 'before');
+    const after = parseIsoDateQuery(query.after, 'after');
     const limit = parseLimit(query.limit);
     const items = await this.repository.queryByPk<StoredMessage>(
       this.config.dynamodbMessagesTableName,
       makeConversationPk(access.conversationKey),
       {
         beginsWith: 'MSG#',
-        limit,
       },
     );
+    const filtered = items.filter((item) => {
+      if (item.deletedAt) {
+        return false;
+      }
 
-    return items
-      .filter((item) => !item.deletedAt)
-      .map((item) => this.serializeMessage(actor.id, item));
+      if (type && item.type !== type) {
+        return false;
+      }
+
+      if (fromUserId && item.senderId !== fromUserId) {
+        return false;
+      }
+
+      if (before && item.sentAt >= before) {
+        return false;
+      }
+
+      if (after && item.sentAt <= after) {
+        return false;
+      }
+
+      if (!keyword) {
+        return true;
+      }
+
+      return [
+        item.senderName,
+        this.buildPreview(item),
+        item.attachmentUrl ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword);
+    });
+    const page = paginateSortedItems(
+      filtered,
+      limit,
+      query.cursor,
+      (item) => item.sentAt,
+      (item) => item.messageId,
+    );
+    const deliveryContext = await this.buildMessageDeliveryContext(
+      access.participants,
+      access.conversationKey,
+    );
+
+    return buildPaginatedResponse(
+      page.items.map((item) =>
+        this.serializeMessage(actor.id, item, deliveryContext),
+      ),
+      page.nextCursor,
+    );
   }
 
   async sendMessage(
@@ -196,33 +396,147 @@ export class ConversationsService {
     conversationId: string,
   ): Promise<ConversationSummary> {
     const access = await this.resolveConversationAccess(actor, conversationId);
-    const current = await this.getConversationSummary(
-      actor.id,
-      access.conversationKey,
-    );
+    const existingConversation =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        access.conversationKey,
+      );
+    const updatedAt = nowIso();
+    let nextConversation = existingConversation;
 
-    if (!current) {
-      throw new NotFoundException('Conversation not found.');
+    if (!nextConversation) {
+      const activeMessages =
+        await this.conversationSummaryService.listActiveMessages(
+          access.conversationKey,
+        );
+      const latestMessage = activeMessages[0];
+
+      if (!latestMessage) {
+        throw new NotFoundException('Conversation not found.');
+      }
+
+      const labelMap =
+        await this.conversationSummaryService.getConversationLabelMap(
+          access.conversationKey,
+          access.participants,
+        );
+      const kind = getConversationKind(access.conversationKey);
+
+      nextConversation = {
+        PK: makeInboxPk(actor.id),
+        SK: makeConversationSummarySk(
+          access.conversationKey,
+          latestMessage.sentAt,
+        ),
+        entityType: 'CONVERSATION',
+        GSI1PK: makeInboxStatsKey(actor.id, kind),
+        userId: actor.id,
+        conversationId: access.conversationKey,
+        groupName: labelMap.get(actor.id) ?? actor.fullName,
+        lastMessagePreview: this.buildPreview(latestMessage),
+        lastSenderName: latestMessage.senderName,
+        unreadCount: 0,
+        isGroup: access.isGroup,
+        isPinned: false,
+        archivedAt: null,
+        mutedUntil: null,
+        deletedAt: null,
+        updatedAt,
+        lastReadAt: latestMessage.sentAt,
+      } satisfies StoredConversation;
+    } else {
+      nextConversation = {
+        ...nextConversation,
+        unreadCount: 0,
+        lastReadAt:
+          this.getConversationLastMessageSentAt(nextConversation) ??
+          nextConversation.lastReadAt ??
+          updatedAt,
+        updatedAt,
+      };
     }
 
-    const nextConversation: StoredConversation = {
-      ...current,
-      unreadCount: 0,
-      lastReadAt:
-        this.getConversationLastMessageSentAt(current) ??
-        current.lastReadAt ??
-        nowIso(),
-      updatedAt: nowIso(),
-    };
+    const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      eventName: 'conversation.read',
+      occurredAt: nextConversation.updatedAt,
+    });
 
-    await this.repository.put(
-      this.config.dynamodbConversationsTableName,
+    await this.repository.transactPut([
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: nextConversation,
+      },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: outboxRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+    ]);
+    await this.conversationDispatchService.emitConversationRead(
+      outboxRecord.eventId,
+      actor.id,
+      access.conversationKey,
+      access.participants,
       nextConversation,
     );
-    this.emitConversationRead(actor, access, nextConversation);
+    await this.chatOutboxService
+      .deleteChatOutboxEvent(outboxRecord)
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown error.';
+        this.logger.warn(
+          'Failed to delete chat outbox event ' +
+            outboxRecord.eventId +
+            ': ' +
+            message,
+        );
+      });
     return this.serializeConversationSummary(actor.id, nextConversation);
   }
 
+  async deleteConversation(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<DeletedConversationResult> {
+    const conversationKey = await this.normalizeConversationIdForInboxOperation(
+      actor,
+      conversationId,
+    );
+    const current =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        conversationKey,
+      );
+    const removedAt = nowIso();
+
+    if (current && !current.deletedAt) {
+      await this.repository.delete(
+        this.config.dynamodbConversationsTableName,
+        current.PK,
+        current.SK,
+      );
+    }
+
+    this.chatRealtimeService.leaveConversationForUser(
+      actor.id,
+      conversationKey,
+    );
+    this.conversationDispatchService.emitConversationRemoved(
+      createUlid(),
+      actor.id,
+      conversationKey,
+      removedAt,
+      'conversation.deleted',
+    );
+
+    return {
+      conversationId: this.toPublicConversationId(actor.id, conversationKey),
+      removedAt,
+    };
+  }
   async updateMessage(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -299,15 +613,66 @@ export class ConversationsService {
       attachmentUrl: nextAttachmentUrl,
       updatedAt: nowIso(),
     };
+    const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      eventName: 'message.updated',
+      messageId,
+      occurredAt: nextMessage.updatedAt,
+    });
+    const auditRecord = this.auditTrailService.buildConversationEvent({
+      action: 'MESSAGE_UPDATED',
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      messageId,
+      occurredAt: nextMessage.updatedAt,
+      summary: `${actor.fullName} updated a message.`,
+      metadata: { type: nextMessage.type },
+    });
 
-    await this.repository.put(
-      this.config.dynamodbMessagesTableName,
-      nextMessage,
-    );
+    await this.repository.transactPut([
+      {
+        tableName: this.config.dynamodbMessagesTableName,
+        item: nextMessage,
+        conditionExpression: 'attribute_exists(PK) AND attribute_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: outboxRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: auditRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+    ]);
     const syncResult =
-      await this.syncConversationSummariesAfterMessageMutation(access);
-    this.emitMessageUpdated(actor, nextMessage, access, syncResult);
-    return this.serializeMessage(actor.id, nextMessage);
+      await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
+        access,
+      );
+    this.conversationDispatchService.emitMessageUpdated(
+      outboxRecord.eventId,
+      actor.id,
+      nextMessage,
+      access.conversationKey,
+      syncResult,
+    );
+    await this.chatOutboxService
+      .deleteChatOutboxEvent(outboxRecord)
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown error.';
+        this.logger.warn(
+          `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
+        );
+      });
+    return this.serializeMessage(actor.id, nextMessage, {
+      participantIds: syncResult.participantIds,
+      summariesByUser: syncResult.summariesByUser,
+    });
   }
 
   async deleteMessage(
@@ -332,15 +697,66 @@ export class ConversationsService {
       deletedAt,
       updatedAt: deletedAt,
     };
+    const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      eventName: 'message.deleted',
+      messageId,
+      occurredAt: deletedAt,
+    });
+    const auditRecord = this.auditTrailService.buildConversationEvent({
+      action: 'MESSAGE_DELETED',
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      messageId,
+      occurredAt: deletedAt,
+      summary: `${actor.fullName} deleted a message.`,
+      metadata: { type: nextMessage.type },
+    });
 
-    await this.repository.put(
-      this.config.dynamodbMessagesTableName,
-      nextMessage,
-    );
+    await this.repository.transactPut([
+      {
+        tableName: this.config.dynamodbMessagesTableName,
+        item: nextMessage,
+        conditionExpression: 'attribute_exists(PK) AND attribute_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: outboxRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: auditRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+    ]);
     const syncResult =
-      await this.syncConversationSummariesAfterMessageMutation(access);
-    this.emitMessageDeleted(actor, nextMessage, access, syncResult);
-    return this.serializeMessage(actor.id, nextMessage);
+      await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
+        access,
+      );
+    this.conversationDispatchService.emitMessageDeleted(
+      outboxRecord.eventId,
+      actor.id,
+      nextMessage,
+      access.conversationKey,
+      syncResult,
+    );
+    await this.chatOutboxService
+      .deleteChatOutboxEvent(outboxRecord)
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown error.';
+        this.logger.warn(
+          `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
+        );
+      });
+    return this.serializeMessage(actor.id, nextMessage, {
+      participantIds: syncResult.participantIds,
+      summariesByUser: syncResult.summariesByUser,
+    });
   }
 
   private async createMessage(
@@ -414,9 +830,38 @@ export class ConversationsService {
           message,
         )
       : undefined;
+    const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
+      actorUserId: actor.id,
+      clientMessageId,
+      conversationId,
+      eventName: 'message.created',
+      messageId,
+      occurredAt: sentAt,
+    });
+    const auditRecord = this.auditTrailService.buildConversationEvent({
+      action: 'MESSAGE_CREATED',
+      actorUserId: actor.id,
+      conversationId,
+      messageId,
+      occurredAt: sentAt,
+      summary: `${actor.fullName} sent a ${type.toLowerCase()} message.`,
+      metadata: { replyTo: replyTo ?? '', type },
+    });
+    const pushRecord = this.buildChatPushOutboxEvent(
+      actor,
+      conversationId,
+      participants,
+      message,
+    );
     const transactionItems: Array<{
       tableName: string;
-      item: StoredMessage | StoredMessageRef | StoredMessageDedup;
+      item:
+        | StoredChatOutboxEvent
+        | StoredConversationAuditEvent
+        | StoredMessage
+        | StoredMessageRef
+        | StoredMessageDedup
+        | StoredPushOutboxEvent;
       conditionExpression: string;
     }> = [
       {
@@ -431,12 +876,33 @@ export class ConversationsService {
         conditionExpression:
           'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: outboxRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: auditRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
     ];
 
     if (dedupRecord) {
       transactionItems.push({
         tableName: this.config.dynamodbMessagesTableName,
         item: dedupRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      });
+    }
+
+    if (pushRecord) {
+      transactionItems.push({
+        tableName: this.config.dynamodbUsersTableName,
+        item: pushRecord,
         conditionExpression:
           'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       });
@@ -464,248 +930,34 @@ export class ConversationsService {
       throw error;
     }
 
-    const summariesByUser = await this.upsertConversationSummaries(
-      actor,
-      conversationId,
-      participants,
-      message,
-    );
-    this.emitMessageCreated(
-      actor,
+    const summariesByUser =
+      await this.conversationSummaryService.upsertConversationSummaries(
+        conversationId,
+        participants,
+        message,
+      );
+    this.conversationDispatchService.emitMessageCreated(
+      outboxRecord.eventId,
+      actor.id,
       message,
       participants,
       summariesByUser,
       clientMessageId,
     );
-
-    return this.serializeMessage(actor.id, message);
-  }
-
-  private async upsertConversationSummaries(
-    actor: AuthenticatedUser,
-    conversationId: string,
-    participants: string[],
-    message: StoredMessage,
-  ): Promise<Map<string, StoredConversation>> {
-    const kind = getConversationKind(conversationId);
-    const labelMap = await this.buildConversationLabelMap(
-      conversationId,
-      participants,
-    );
-    const summariesByUser = new Map<string, StoredConversation>();
-
-    for (const participantId of participants) {
-      const existingConversation = await this.getConversationSummary(
-        participantId,
-        conversationId,
-      );
-      const previousUnreadCount = existingConversation?.unreadCount ?? 0;
-      const lastReadAt =
-        participantId === actor.id
-          ? message.sentAt
-          : this.resolveStoredLastReadAt(existingConversation, message.sentAt);
-      const nextConversation: StoredConversation = {
-        PK: makeInboxPk(participantId),
-        SK: makeConversationSummarySk(conversationId, message.sentAt),
-        entityType: 'CONVERSATION',
-        GSI1PK: makeInboxStatsKey(participantId, kind),
-        userId: participantId,
-        conversationId,
-        groupName:
-          labelMap.get(participantId) ??
-          existingConversation?.groupName ??
-          participantId,
-        lastMessagePreview: this.buildPreview(message),
-        lastSenderName: actor.fullName,
-        unreadCount: participantId === actor.id ? 0 : previousUnreadCount + 1,
-        isGroup: kind === 'GRP',
-        deletedAt: null,
-        updatedAt: message.sentAt,
-        lastReadAt,
-      };
-
-      if (
-        existingConversation &&
-        existingConversation.SK != nextConversation.SK
-      ) {
-        await this.repository.delete(
-          this.config.dynamodbConversationsTableName,
-          existingConversation.PK,
-          existingConversation.SK,
+    await this.chatOutboxService
+      .deleteChatOutboxEvent(outboxRecord)
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown error.';
+        this.logger.warn(
+          `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
         );
-      }
+      });
 
-      await this.repository.put(
-        this.config.dynamodbConversationsTableName,
-        nextConversation,
-      );
-      summariesByUser.set(participantId, nextConversation);
-    }
-
-    return summariesByUser;
-  }
-
-  private emitMessageCreated(
-    actor: AuthenticatedUser,
-    message: StoredMessage,
-    participants: string[],
-    summariesByUser: Map<string, StoredConversation>,
-    clientMessageId?: string,
-  ): void {
-    for (const participantId of participants) {
-      const summary = summariesByUser.get(participantId);
-
-      if (!summary) {
-        continue;
-      }
-
-      const payload: ChatMessageCreatedEvent = {
-        conversationId: this.toPublicConversationId(
-          participantId,
-          message.conversationId,
-        ),
-        conversationKey: message.conversationId,
-        message: this.serializeMessage(participantId, message),
-        summary: this.serializeConversationSummary(participantId, summary),
-        sentByUserId: actor.id,
-        clientMessageId:
-          participantId === actor.id ? clientMessageId : undefined,
-        occurredAt: message.sentAt,
-      };
-
-      this.chatRealtimeService.emitToUser(
-        participantId,
-        CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
-        payload,
-      );
-      this.emitConversationSummaryUpdated(
-        participantId,
-        message.conversationId,
-        summary,
-        'message.created',
-        payload.occurredAt,
-      );
-    }
-  }
-
-  private emitMessageUpdated(
-    actor: AuthenticatedUser,
-    message: StoredMessage,
-    access: ResolvedConversationAccess,
-    syncResult: ConversationSyncResult,
-  ): void {
-    for (const participantId of syncResult.participantIds) {
-      const payload: ChatMessageUpdatedEvent = {
-        conversationId: this.toPublicConversationId(
-          participantId,
-          access.conversationKey,
-        ),
-        conversationKey: access.conversationKey,
-        message: this.serializeMessage(participantId, message),
-        updatedByUserId: actor.id,
-        occurredAt: message.updatedAt,
-      };
-
-      this.chatRealtimeService.emitToUser(
-        participantId,
-        CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
-        payload,
-      );
-    }
-
-    for (const [
-      participantId,
-      summary,
-    ] of syncResult.summariesByUser.entries()) {
-      this.emitConversationSummaryUpdated(
-        participantId,
-        access.conversationKey,
-        summary,
-        'message.updated',
-        message.updatedAt,
-      );
-    }
-  }
-
-  private emitMessageDeleted(
-    actor: AuthenticatedUser,
-    message: StoredMessage,
-    access: ResolvedConversationAccess,
-    syncResult: ConversationSyncResult,
-  ): void {
-    const occurredAt = message.deletedAt ?? message.updatedAt;
-
-    for (const participantId of syncResult.participantIds) {
-      const payload: ChatMessageDeletedEvent = {
-        conversationId: this.toPublicConversationId(
-          participantId,
-          access.conversationKey,
-        ),
-        conversationKey: access.conversationKey,
-        messageId: message.messageId,
-        deletedByUserId: actor.id,
-        occurredAt,
-      };
-
-      this.chatRealtimeService.emitToUser(
-        participantId,
-        CHAT_SOCKET_EVENTS.MESSAGE_DELETED,
-        payload,
-      );
-    }
-
-    for (const [
-      participantId,
-      summary,
-    ] of syncResult.summariesByUser.entries()) {
-      this.emitConversationSummaryUpdated(
-        participantId,
-        access.conversationKey,
-        summary,
-        'message.deleted',
-        occurredAt,
-      );
-    }
-
-    for (const participantId of syncResult.removedUserIds) {
-      this.emitConversationRemoved(
-        participantId,
-        access.conversationKey,
-        occurredAt,
-      );
-    }
-  }
-
-  private emitConversationRead(
-    actor: AuthenticatedUser,
-    access: ResolvedConversationAccess,
-    actorConversation: StoredConversation,
-  ): void {
-    this.emitConversationSummaryUpdated(
-      actor.id,
-      access.conversationKey,
-      actorConversation,
-      'conversation.read',
-      actorConversation.updatedAt,
-    );
-
-    for (const participantId of access.participants) {
-      const payload: ChatConversationReadEvent = {
-        conversationId: this.toPublicConversationId(
-          participantId,
-          access.conversationKey,
-        ),
-        conversationKey: access.conversationKey,
-        readByUserId: actor.id,
-        readAt: actorConversation.updatedAt,
-      };
-
-      this.chatRealtimeService.emitToUser(
-        participantId,
-        CHAT_SOCKET_EVENTS.CONVERSATION_READ,
-        payload,
-      );
-    }
+    return this.serializeMessage(actor.id, message, {
+      participantIds: participants,
+      summariesByUser,
+    });
   }
 
   private async ensureReplyTargetAvailable(
@@ -868,244 +1120,43 @@ export class ConversationsService {
     throw new ForbiddenException(`You cannot ${action} this message.`);
   }
 
-  private async syncConversationSummariesAfterMessageMutation(
-    access: ResolvedConversationAccess,
-  ): Promise<ConversationSyncResult> {
-    const participantIds =
-      await this.resolveConversationSummaryParticipants(access);
-    const activeMessages = await this.listActiveMessages(
-      access.conversationKey,
-    );
-
-    if (activeMessages.length === 0) {
-      const removedUserIds: string[] = [];
-
-      for (const participantId of participantIds) {
-        const existingConversation = await this.getConversationSummary(
-          participantId,
-          access.conversationKey,
-        );
-
-        if (!existingConversation) {
-          continue;
-        }
-
-        await this.repository.delete(
-          this.config.dynamodbConversationsTableName,
-          existingConversation.PK,
-          existingConversation.SK,
-        );
-        removedUserIds.push(participantId);
-      }
-
-      return {
-        participantIds,
-        removedUserIds,
-        summariesByUser: new Map(),
-      };
-    }
-
-    const latestMessage = activeMessages[0];
-    const kind = getConversationKind(access.conversationKey);
-    const labelMap = await this.buildConversationLabelMap(
-      access.conversationKey,
-      access.participants,
-    );
-    const summariesByUser = new Map<string, StoredConversation>();
-
-    for (const participantId of participantIds) {
-      const existingConversation = await this.getConversationSummary(
-        participantId,
-        access.conversationKey,
-      );
-      const lastReadAt = this.resolveStoredLastReadAt(
-        existingConversation,
-        latestMessage.sentAt,
-      );
-      const nextConversation: StoredConversation = {
-        PK: makeInboxPk(participantId),
-        SK: makeConversationSummarySk(
-          access.conversationKey,
-          latestMessage.sentAt,
-        ),
-        entityType: 'CONVERSATION',
-        GSI1PK: makeInboxStatsKey(participantId, kind),
-        userId: participantId,
-        conversationId: access.conversationKey,
-        groupName:
-          existingConversation?.groupName ??
-          labelMap.get(participantId) ??
-          participantId,
-        lastMessagePreview: this.buildPreview(latestMessage),
-        lastSenderName: latestMessage.senderName,
-        unreadCount: this.computeUnreadCount(
-          participantId,
-          activeMessages,
-          lastReadAt,
-        ),
-        isGroup: kind === 'GRP',
-        deletedAt: null,
-        updatedAt: latestMessage.sentAt,
-        lastReadAt,
-      };
-
-      if (
-        !this.hasConversationSummaryChanged(
-          existingConversation,
-          nextConversation,
-        )
-      ) {
-        continue;
-      }
-
-      if (
-        existingConversation &&
-        existingConversation.SK !== nextConversation.SK
-      ) {
-        await this.repository.delete(
-          this.config.dynamodbConversationsTableName,
-          existingConversation.PK,
-          existingConversation.SK,
-        );
-      }
-
-      await this.repository.put(
-        this.config.dynamodbConversationsTableName,
-        nextConversation,
-      );
-      summariesByUser.set(participantId, nextConversation);
-    }
-
-    return {
-      latestMessage,
-      participantIds,
-      removedUserIds: [],
-      summariesByUser,
-    };
-  }
-
-  private async resolveConversationSummaryParticipants(
-    access: ResolvedConversationAccess,
-  ): Promise<string[]> {
-    const storedSummaries = await this.repository.scanAll<StoredConversation>(
-      this.config.dynamodbConversationsTableName,
-    );
-    const summaryUserIds = storedSummaries
-      .filter((summary) => summary.conversationId === access.conversationKey)
-      .map((summary) => summary.userId);
-
-    return Array.from(new Set([...access.participants, ...summaryUserIds]));
-  }
-
-  private async buildConversationLabelMap(
-    conversationId: string,
-    participants: string[],
-  ): Promise<Map<string, string>> {
-    const userMap = new Map<
-      string,
-      Awaited<ReturnType<UsersService['getByIdOrThrow']>>
-    >();
-    const labelMap = new Map<string, string>();
-
-    for (const userId of participants) {
-      userMap.set(userId, await this.usersService.getByIdOrThrow(userId));
-    }
-
-    for (const participantId of participants) {
-      labelMap.set(
-        participantId,
-        await this.getConversationLabel(
-          participantId,
-          conversationId,
-          participants,
-          userMap,
-        ),
-      );
-    }
-
-    return labelMap;
-  }
-
-  private async listActiveMessages(
-    conversationId: string,
-  ): Promise<StoredMessage[]> {
-    const items = await this.repository.queryByPk<StoredMessage>(
-      this.config.dynamodbMessagesTableName,
-      makeConversationPk(conversationId),
-      {
-        beginsWith: 'MSG#',
-      },
-    );
-
-    return items.filter((item) => !item.deletedAt);
-  }
-
   private computeUnreadCount(
     participantId: string,
     messages: StoredMessage[],
     lastReadAt: string | null,
   ): number {
-    return messages.filter(
-      (message) =>
-        message.senderId !== participantId &&
-        (!lastReadAt || message.sentAt > lastReadAt),
-    ).length;
+    return this.conversationStateService.computeUnreadCount(
+      participantId,
+      messages,
+      lastReadAt,
+    );
   }
 
   private resolveStoredLastReadAt(
     conversation: StoredConversation | undefined,
     fallbackSentAt?: string,
   ): string | null {
-    if (conversation?.lastReadAt !== undefined) {
-      return conversation.lastReadAt ?? null;
-    }
-
-    if (!conversation) {
-      return null;
-    }
-
-    if (conversation.unreadCount === 0) {
-      return (
-        this.getConversationLastMessageSentAt(conversation) ??
-        fallbackSentAt ??
-        null
-      );
-    }
-
-    return null;
+    return this.conversationStateService.resolveStoredLastReadAt(
+      conversation,
+      fallbackSentAt,
+    );
   }
 
   private getConversationLastMessageSentAt(
     conversation: StoredConversation,
   ): string | null {
-    const marker = '#LAST#';
-    const markerIndex = conversation.SK.indexOf(marker);
-
-    if (markerIndex === -1) {
-      return null;
-    }
-
-    const sentAt = conversation.SK.slice(markerIndex + marker.length);
-    return sentAt || null;
+    return this.conversationStateService.getConversationLastMessageSentAt(
+      conversation,
+    );
   }
 
   private hasConversationSummaryChanged(
     current: StoredConversation | undefined,
     next: StoredConversation,
   ): boolean {
-    if (!current) {
-      return true;
-    }
-
-    return (
-      current.SK !== next.SK ||
-      current.groupName !== next.groupName ||
-      current.lastMessagePreview !== next.lastMessagePreview ||
-      current.lastSenderName !== next.lastSenderName ||
-      current.unreadCount !== next.unreadCount ||
-      current.deletedAt !== next.deletedAt ||
-      current.updatedAt !== next.updatedAt ||
-      current.lastReadAt !== next.lastReadAt
+    return this.conversationStateService.hasConversationSummaryChanged(
+      current,
+      next,
     );
   }
 
@@ -1114,19 +1165,11 @@ export class ConversationsService {
     content: string,
     attachmentUrl?: string,
   ): boolean {
-    if (attachmentUrl) {
-      return true;
-    }
-
-    if (!content) {
-      return false;
-    }
-
-    if (this.usesStructuredContent(type)) {
-      return Boolean(this.extractPreviewText(content));
-    }
-
-    return content.trim().length > 0;
+    return this.conversationStateService.hasMeaningfulMessageBody(
+      type,
+      content,
+      attachmentUrl,
+    );
   }
 
   private asSupportedMessageType(type: unknown): SupportedMessageType {
@@ -1139,53 +1182,6 @@ export class ConversationsService {
     }
 
     return type as SupportedMessageType;
-  }
-
-  private emitConversationSummaryUpdated(
-    participantId: string,
-    conversationKey: string,
-    summary: StoredConversation,
-    reason: ChatConversationUpdatedEvent['reason'],
-    occurredAt: string,
-  ): void {
-    const payload: ChatConversationUpdatedEvent = {
-      conversationId: this.toPublicConversationId(
-        participantId,
-        conversationKey,
-      ),
-      conversationKey,
-      summary: this.serializeConversationSummary(participantId, summary),
-      reason,
-      occurredAt,
-    };
-
-    this.chatRealtimeService.emitToUser(
-      participantId,
-      CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
-      payload,
-    );
-  }
-
-  private emitConversationRemoved(
-    participantId: string,
-    conversationKey: string,
-    occurredAt: string,
-  ): void {
-    const payload: ChatConversationRemovedEvent = {
-      conversationId: this.toPublicConversationId(
-        participantId,
-        conversationKey,
-      ),
-      conversationKey,
-      reason: 'message.deleted',
-      occurredAt,
-    };
-
-    this.chatRealtimeService.emitToUser(
-      participantId,
-      CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
-      payload,
-    );
   }
 
   private isReplyTargetConversationReference(
@@ -1265,6 +1261,61 @@ export class ConversationsService {
     }
 
     return '';
+  }
+
+  private async normalizeConversationIdForInboxOperation(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<string> {
+    const rawConversationId = conversationId.trim();
+
+    if (!rawConversationId) {
+      throw new BadRequestException('Conversation id is required.');
+    }
+
+    if (/^grp#/i.test(rawConversationId)) {
+      return `GRP#${rawConversationId.slice('GRP#'.length)}`;
+    }
+
+    if (/^dm#/i.test(rawConversationId)) {
+      return `DM#${rawConversationId.slice('DM#'.length)}`;
+    }
+
+    if (rawConversationId === 'GRP' || rawConversationId === 'DM') {
+      throw new BadRequestException(
+        'Conversation id is incomplete. Use group:<groupId> or dm:<userId>, or URL-encode legacy ids.',
+      );
+    }
+
+    const groupMatch = rawConversationId.match(/^(?:group|grp)[:/](.+)$/i);
+    if (groupMatch) {
+      const groupId = groupMatch[1]?.trim();
+
+      if (!groupId) {
+        throw new BadRequestException('Group conversation id is missing.');
+      }
+
+      return `GRP#${groupId}`;
+    }
+
+    const dmMatch = rawConversationId.match(/^(?:dm|user)[:/](.+)$/i);
+    if (dmMatch) {
+      const targetUserId = dmMatch[1]?.trim();
+
+      if (!targetUserId) {
+        throw new BadRequestException(
+          'Direct conversation user id is missing.',
+        );
+      }
+
+      if (targetUserId === actor.id) {
+        throw new BadRequestException('Cannot create DM with yourself.');
+      }
+
+      return makeDmConversationId(actor.id, targetUserId);
+    }
+
+    return this.normalizeConversationId(actor, rawConversationId);
   }
 
   private async normalizeConversationId(
@@ -1353,145 +1404,143 @@ export class ConversationsService {
     return makeDmConversationId(actor.id, targetUser.userId);
   }
 
+  private async buildMessageDeliveryContext(
+    participantIds: string[],
+    conversationId: string,
+  ): Promise<MessageDeliveryContext> {
+    const summariesByUser = new Map<string, StoredConversation>();
+
+    for (const participantId of participantIds) {
+      const summary =
+        await this.conversationSummaryService.getConversationSummary(
+          participantId,
+          conversationId,
+        );
+
+      if (summary && !summary.deletedAt) {
+        summariesByUser.set(participantId, summary);
+      }
+    }
+
+    return {
+      participantIds,
+      summariesByUser,
+    };
+  }
+
+  private getMessageDeliveryState(
+    message: StoredMessage,
+    context?: MessageDeliveryContext,
+  ): Pick<
+    MessageItem,
+    | 'deliveryState'
+    | 'recipientCount'
+    | 'deliveredCount'
+    | 'readByCount'
+    | 'lastReadAt'
+  > {
+    return this.conversationStateService.getMessageDeliveryState(
+      message,
+      context,
+    );
+  }
+
   private serializeConversationSummary(
     actorId: string,
     conversation: StoredConversation,
   ): ConversationSummary {
-    const summary = toConversationSummary(conversation);
-
-    return {
-      ...summary,
-      conversationId: this.toPublicConversationId(
-        actorId,
-        summary.conversationId,
-      ),
-    };
+    return this.conversationStateService.serializeConversationSummary(
+      actorId,
+      conversation,
+    );
   }
 
   private serializeMessage(
     actorId: string,
     message: StoredMessage,
+    deliveryContext?: MessageDeliveryContext,
   ): MessageItem {
-    const item = toMessage(message);
-
-    return {
-      ...item,
-      conversationId: this.toPublicConversationId(actorId, item.conversationId),
-    };
+    return this.conversationStateService.serializeMessage(
+      actorId,
+      message,
+      deliveryContext,
+    );
   }
 
   private toPublicConversationId(
     actorId: string,
     conversationId: string,
   ): string {
-    if (isGroupConversationId(conversationId)) {
-      return `group:${conversationId.slice('GRP#'.length)}`;
-    }
-
-    if (!isDmConversationId(conversationId)) {
-      return conversationId;
-    }
-
-    const participantIds = conversationId.slice('DM#'.length).split('#');
-    const otherParticipantId = participantIds.find(
-      (participantId) => participantId !== actorId,
+    return this.conversationStateService.toPublicConversationId(
+      actorId,
+      conversationId,
     );
-
-    return otherParticipantId ? `dm:${otherParticipantId}` : conversationId;
   }
 
   private normalizeStoredContent(
     type: SupportedMessageType,
     rawContent: string,
   ): string {
-    if (!this.usesStructuredContent(type)) {
-      return rawContent;
-    }
-
-    const parsedContent = this.tryParseStructuredContent(rawContent);
-
-    if (parsedContent) {
-      return JSON.stringify(parsedContent);
-    }
-
-    return JSON.stringify({
-      text: rawContent,
-      mention: [],
-    } satisfies StructuredMessageContent);
+    return this.conversationStateService.normalizeStoredContent(
+      type,
+      rawContent,
+    );
   }
 
   private usesStructuredContent(type: SupportedMessageType): boolean {
-    return type === 'TEXT' || type === 'EMOJI' || type === 'SYSTEM';
+    return this.conversationStateService.usesStructuredContent(type);
   }
 
   private tryParseStructuredContent(
     rawContent: string,
-  ): StructuredMessageContent | undefined {
-    if (!rawContent) {
-      return {
-        text: '',
-        mention: [],
-      };
-    }
+  ):
+    | (Record<string, unknown> & { text: string; mention: unknown[] })
+    | undefined {
+    return this.conversationStateService.tryParseStructuredContent(rawContent);
+  }
 
-    try {
-      const parsed = JSON.parse(rawContent) as unknown;
+  private buildChatPushOutboxEvent(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    participants: string[],
+    message: StoredMessage,
+  ): StoredPushOutboxEvent | undefined {
+    const recipients = participants.filter(
+      (participantId) => participantId !== actor.id,
+    );
 
-      if (typeof parsed === 'string') {
-        return {
-          text: parsed,
-          mention: [],
-        };
-      }
-
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-        return undefined;
-      }
-
-      const record = parsed as Record<string, unknown>;
-      return {
-        ...record,
-        text: typeof record.text === 'string' ? record.text : '',
-        mention: Array.isArray(record.mention) ? record.mention : [],
-      };
-    } catch {
+    if (recipients.length === 0) {
       return undefined;
     }
+
+    const preview = this.buildPreview(message) || 'New message';
+
+    return this.pushNotificationService.buildPushOutboxEvent({
+      actorUserId: actor.id,
+      eventName: 'chat.message.created',
+      recipientUserIds: recipients,
+      title: isGroupConversationId(conversationId)
+        ? `New message from ${actor.fullName}`
+        : actor.fullName,
+      body: preview,
+      conversationId,
+      messageId: message.messageId,
+      data: {
+        conversationId,
+        conversationKind: getConversationKind(conversationId),
+        messageId: message.messageId,
+        senderId: actor.id,
+      },
+      occurredAt: message.sentAt,
+    });
   }
 
   private extractPreviewText(rawContent: string): string | undefined {
-    const normalized = rawContent.trim();
-
-    if (!normalized) {
-      return undefined;
-    }
-
-    const parsed = this.tryParseStructuredContent(normalized);
-    const text = parsed?.text?.trim();
-
-    if (text) {
-      return text;
-    }
-
-    return parsed ? undefined : normalized;
+    return this.conversationStateService.extractPreviewText(rawContent);
   }
 
   private buildPreview(message: StoredMessage): string {
-    if (
-      message.type !== 'TEXT' &&
-      message.type !== 'EMOJI' &&
-      message.type !== 'SYSTEM'
-    ) {
-      return `[${message.type}]`;
-    }
-
-    const previewText = this.extractPreviewText(message.content);
-
-    if (!previewText) {
-      return '[Attachment]';
-    }
-
-    return previewText.slice(0, 100);
+    return this.conversationStateService.buildPreview(message);
   }
 
   private async resolveConversationParticipants(
@@ -1541,64 +1590,5 @@ export class ConversationsService {
     }
 
     return participantIds;
-  }
-
-  private async getConversationLabel(
-    participantId: string,
-    conversationId: string,
-    participants: string[],
-    userMap: Map<string, Awaited<ReturnType<UsersService['getByIdOrThrow']>>>,
-  ): Promise<string> {
-    if (isGroupConversationId(conversationId)) {
-      const user = userMap.get(participantId);
-
-      if (!user) {
-        throw new NotFoundException('Conversation participant not found.');
-      }
-
-      const group = await this.groupsService.getGroup(
-        {
-          id: participantId,
-          phone: user.phone,
-          email: user.email,
-          fullName: user.fullName,
-          role: user.role,
-          locationCode: user.locationCode,
-          unit: user.unit,
-          avatarUrl: user.avatarUrl,
-          status: user.status,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-        },
-        conversationId.slice('GRP#'.length),
-      );
-      return group.groupName;
-    }
-
-    const otherParticipantId = participants.find(
-      (userId) => userId !== participantId,
-    );
-
-    if (!otherParticipantId) {
-      throw new NotFoundException('Conversation participant not found.');
-    }
-
-    return userMap.get(otherParticipantId)?.fullName ?? otherParticipantId;
-  }
-
-  private async getConversationSummary(
-    userId: string,
-    conversationId: string,
-  ): Promise<StoredConversation | undefined> {
-    const items = await this.repository.queryByPk<StoredConversation>(
-      this.config.dynamodbConversationsTableName,
-      makeInboxPk(userId),
-      {
-        beginsWith: `CONV#${conversationId}#LAST#`,
-        limit: 1,
-      },
-    );
-
-    return items[0];
   }
 }

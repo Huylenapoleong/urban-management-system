@@ -2,7 +2,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   GROUP_MEMBER_ROLES,
   GROUP_TYPES,
+  MESSAGE_DELIVERY_STATES,
   MESSAGE_TYPES,
+  PUSH_DEVICE_PROVIDERS,
   REPORT_CATEGORIES,
   REPORT_PRIORITIES,
   REPORT_STATUSES,
@@ -99,11 +101,20 @@ export class ErrorResponseDto {
 
   @ApiProperty({ example: '2026-03-17T10:00:00.000Z' })
   timestamp!: string;
+
+  @ApiPropertyOptional({ example: '01JREQUEST0000000000000001' })
+  requestId?: string;
 }
 
 export class ResponseMetaDto {
   @ApiProperty({ example: 2 })
   count!: number;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  nextCursor?: string;
 }
 
 export class AuthTokenPairDto {
@@ -161,6 +172,103 @@ export class UserProfileDto {
   updatedAt!: string;
 }
 
+export class PresenceStateDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: true })
+  isActive!: boolean;
+
+  @ApiProperty({ example: 2 })
+  activeSocketCount!: number;
+
+  @ApiPropertyOptional({ example: '2026-03-18T03:10:00.000Z' })
+  lastSeenAt?: string;
+
+  @ApiProperty({ example: '2026-03-18T03:11:15.000Z' })
+  occurredAt!: string;
+}
+
+export class PushDeviceDto {
+  @ApiProperty({ example: 'device-admin-web-01' })
+  deviceId!: string;
+
+  @ApiProperty({ enum: PUSH_DEVICE_PROVIDERS, example: 'WEB' })
+  provider!: (typeof PUSH_DEVICE_PROVIDERS)[number];
+
+  @ApiProperty({ example: 'chrome' })
+  platform!: string;
+
+  @ApiPropertyOptional({ example: 'admin-web' })
+  appVariant?: string;
+
+  @ApiProperty({ example: 'fcm_12...9xyz' })
+  tokenPreview!: string;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  disabledAt!: string | null;
+
+  @ApiPropertyOptional({ example: '2026-03-18T11:00:00.000Z' })
+  lastSeenAt?: string;
+
+  @ApiProperty({ example: '2026-03-18T11:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-03-18T11:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class PushDeviceRemovalResultDto {
+  @ApiProperty({ example: 'device-admin-web-01' })
+  deviceId!: string;
+
+  @ApiProperty({ example: '2026-03-18T11:30:00.000Z' })
+  removedAt!: string;
+}
+
+export class AuditEventItemDto {
+  @ApiProperty({ example: '01JPDAUDIT0000000000000000' })
+  id!: string;
+
+  @ApiProperty({ enum: ['REPORT', 'CONVERSATION'], example: 'REPORT' })
+  scope!: 'REPORT' | 'CONVERSATION';
+
+  @ApiProperty({ example: 'REPORT_STATUS_UPDATED' })
+  action!: string;
+
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  actorUserId!: string;
+
+  @ApiProperty({ example: '2026-03-18T11:40:00.000Z' })
+  occurredAt!: string;
+
+  @ApiProperty({ example: 'Changed report status to IN_PROGRESS.' })
+  summary!: string;
+
+  @ApiPropertyOptional({ example: { status: 'IN_PROGRESS' } })
+  metadata?: Record<string, unknown>;
+}
+
+export class ReportConversationLinkDto {
+  @ApiProperty({ example: '01JPCY2000REPORTNEW00000000' })
+  reportId!: string;
+
+  @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
+  groupId!: string;
+
+  @ApiProperty({ example: 'group:01JPCY1000AREAGROUP0000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  linkedByUserId!: string;
+
+  @ApiProperty({ example: '2026-03-18T11:45:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-03-18T11:45:00.000Z' })
+  updatedAt!: string;
+}
+
 export class AuthSessionDto {
   @ApiProperty({ type: () => AuthTokenPairDto })
   tokens!: AuthTokenPairDto;
@@ -169,6 +277,62 @@ export class AuthSessionDto {
   user!: UserProfileDto;
 }
 
+export class AuthSessionInfoDto {
+  @ApiProperty({ example: '01JSESSION0000000000000001' })
+  sessionId!: string;
+
+  @ApiProperty({ example: true })
+  isCurrent!: boolean;
+
+  @ApiProperty({ example: '2026-03-18T12:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-03-18T12:30:00.000Z' })
+  updatedAt!: string;
+
+  @ApiProperty({ example: '2026-03-18T12:30:00.000Z' })
+  lastUsedAt!: string;
+
+  @ApiProperty({ example: '2026-03-25T12:00:00.000Z' })
+  expiresAt!: string;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  revokedAt!: string | null;
+
+  @ApiPropertyOptional({ example: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
+  userAgent?: string;
+
+  @ApiPropertyOptional({ example: '203.113.1.20' })
+  ipAddress?: string;
+
+  @ApiPropertyOptional({ example: 'device-admin-web-01' })
+  deviceId?: string;
+
+  @ApiPropertyOptional({ example: 'admin-web' })
+  appVariant?: string;
+}
+
+export class RevokeSessionResultDto {
+  @ApiProperty({ example: '01JSESSION0000000000000001' })
+  sessionId!: string;
+
+  @ApiProperty({ example: '2026-03-18T12:45:00.000Z' })
+  revokedAt!: string;
+
+  @ApiProperty({ example: true })
+  currentSessionRevoked!: boolean;
+}
+
+export class LogoutAllResultDto {
+  @ApiProperty({ example: 3 })
+  revokedSessionCount!: number;
+
+  @ApiProperty({ example: '2026-03-18T12:50:00.000Z' })
+  revokedAt!: string;
+
+  @ApiProperty({ example: true })
+  currentSessionRevoked!: boolean;
+}
 export class GroupMetadataDto {
   @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
   id!: string;
@@ -260,6 +424,21 @@ export class MessageItemDto {
 
   @ApiProperty({ example: '2026-03-17T08:00:00.000Z' })
   updatedAt!: string;
+
+  @ApiPropertyOptional({ enum: MESSAGE_DELIVERY_STATES, example: 'DELIVERED' })
+  deliveryState?: (typeof MESSAGE_DELIVERY_STATES)[number];
+
+  @ApiPropertyOptional({ example: 3 })
+  recipientCount?: number;
+
+  @ApiPropertyOptional({ example: 2 })
+  deliveredCount?: number;
+
+  @ApiPropertyOptional({ example: 1 })
+  readByCount?: number;
+
+  @ApiPropertyOptional({ example: '2026-03-17T08:01:00.000Z' })
+  lastReadAt?: string;
 }
 
 export class ConversationSummaryDto {
@@ -283,11 +462,28 @@ export class ConversationSummaryDto {
   @ApiProperty({ example: false })
   isGroup!: boolean;
 
+  @ApiProperty({ example: false })
+  isPinned!: boolean;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  archivedAt!: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  mutedUntil!: string | null;
+
   @ApiPropertyOptional({ example: null, nullable: true })
   deletedAt!: string | null;
 
   @ApiProperty({ example: '2026-03-17T08:25:00.000Z' })
   updatedAt!: string;
+}
+
+export class ConversationDeletedResultDto {
+  @ApiProperty({ example: 'group:01JPCY1000AREAGROUP0000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '2026-03-18T09:15:00.000Z' })
+  removedAt!: string;
 }
 
 export class ReportItemDto {
@@ -407,6 +603,54 @@ export class LogoutRequestDto {
 export class LogoutResultDto {
   @ApiProperty({ example: true })
   loggedOut!: true;
+}
+
+export class RegisterPushDeviceRequestDto {
+  @ApiProperty({ example: 'device-admin-web-01' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(120)
+  deviceId!: string;
+
+  @ApiProperty({ enum: PUSH_DEVICE_PROVIDERS, example: 'WEB' })
+  @IsIn(PUSH_DEVICE_PROVIDERS)
+  provider!: (typeof PUSH_DEVICE_PROVIDERS)[number];
+
+  @ApiProperty({ example: 'chrome' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(50)
+  platform!: string;
+
+  @ApiProperty({ example: 'fcm-or-web-push-token' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(5000)
+  pushToken!: string;
+
+  @ApiPropertyOptional({ example: 'admin-web' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  appVariant?: string;
+}
+
+export class UpdateConversationPreferencesRequestDto {
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  archived?: boolean;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  isPinned?: boolean;
+
+  @ApiPropertyOptional({ example: '2026-03-20T00:00:00.000Z', nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  mutedUntil?: string | null;
 }
 
 export class UpdateProfileRequestDto {
@@ -772,6 +1016,14 @@ export class UpdateReportRequestDto {
   mediaUrls?: string[];
 }
 
+export class LinkReportConversationRequestDto {
+  @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(50)
+  groupId!: string;
+}
+
 export class AssignReportRequestDto {
   @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
   @IsString()
@@ -809,6 +1061,15 @@ export class ListUsersQueryDto {
   @MaxLength(100)
   q?: string;
 
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
   @ApiPropertyOptional({ type: Number, example: 20 })
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
@@ -838,6 +1099,15 @@ export class ListGroupsQueryDto {
   @MaxLength(100)
   q?: string;
 
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
   @ApiPropertyOptional({ type: Number, example: 20 })
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
@@ -845,6 +1115,36 @@ export class ListGroupsQueryDto {
 }
 
 export class ListConversationsQueryDto {
+  @ApiPropertyOptional({ example: 'ward' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({ type: Boolean, example: false })
+  @IsOptional()
+  @IsIn(BOOLEAN_QUERY_VALUES)
+  isGroup?: string;
+
+  @ApiPropertyOptional({ type: Boolean, example: true })
+  @IsOptional()
+  @IsIn(BOOLEAN_QUERY_VALUES)
+  unreadOnly?: string;
+
+  @ApiPropertyOptional({ type: Boolean, example: false })
+  @IsOptional()
+  @IsIn(BOOLEAN_QUERY_VALUES)
+  includeArchived?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6ImRtOnVzZXItMiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
   @ApiPropertyOptional({ type: Number, example: 20 })
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
@@ -852,11 +1152,67 @@ export class ListConversationsQueryDto {
 }
 
 export class ListMessagesQueryDto {
+  @ApiPropertyOptional({ example: 'Le Loi' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({ enum: MESSAGE_TYPES })
+  @IsOptional()
+  @IsIn(MESSAGE_TYPES)
+  type?: string;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENA00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  fromUserId?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-18T10:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  before?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-17T10:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  after?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
   @ApiPropertyOptional({ type: Number, example: 50 })
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
   limit?: string;
 }
+
+export class ListAuditQueryDto {
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class ListLinkedReportConversationsQueryDto extends ListAuditQueryDto {}
 
 export class ListReportsQueryDto {
   @ApiPropertyOptional({ type: Boolean, example: true })
@@ -879,11 +1235,49 @@ export class ListReportsQueryDto {
   @IsIn(REPORT_CATEGORIES)
   category?: string;
 
+  @ApiPropertyOptional({ enum: REPORT_PRIORITIES })
+  @IsOptional()
+  @IsIn(REPORT_PRIORITIES)
+  priority?: string;
+
+  @ApiPropertyOptional({ example: '01JPCY0000WARDOFFICER00000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  assignedOfficerId?: string;
+
   @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
   locationCode?: string;
+
+  @ApiPropertyOptional({ example: 'den duong' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-01T00:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  createdFrom?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-31T23:59:59.999Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  createdTo?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
 
   @ApiPropertyOptional({ type: Number, example: 20 })
   @IsOptional()

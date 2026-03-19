@@ -45,6 +45,10 @@ function extractMessage(error: unknown): string {
 }
 
 export function isRetryableInfrastructureError(error: unknown): boolean {
+  if (error instanceof ServiceUnavailableException) {
+    return true;
+  }
+
   const errorName = extractErrorName(error);
 
   if (errorName && RETRYABLE_AWS_ERROR_NAMES.has(errorName)) {
@@ -68,6 +72,10 @@ export function createInfrastructureOperationError(input: {
   publicMessage: string;
   serviceLabel: string;
 }): Error {
+  if (input.error instanceof ServiceUnavailableException) {
+    return input.error;
+  }
+
   const details = Object.entries(input.context)
     .filter((entry): entry is [string, string] => entry[1] !== undefined)
     .map(([key, value]) => `${key}=${value}`)

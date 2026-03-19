@@ -35,6 +35,7 @@ export class JwtAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{
       headers: Record<string, string | undefined>;
       user?: AuthenticatedUser;
+      authClaims?: import('@urban/shared-types').JwtClaims;
     }>();
     const authHeader = request.headers.authorization;
 
@@ -56,6 +57,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     request.user = toAuthenticatedUser(user);
+    request.authClaims = claims;
     return true;
   }
 }

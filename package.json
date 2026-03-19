@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.32.1",
   "scripts": {
+    "postinstall": "node scripts/patch-nestjs-swagger.mjs",
     "dev:admin": "pnpm --filter admin-web dev",
     "dev:api": "pnpm --filter api start:dev",
     "dev:mobile": "pnpm --filter mobile-app start",

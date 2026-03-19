@@ -27,7 +27,9 @@ export class RolesGuard implements CanActivate {
       return false;
     }
 
-    if (user.role === 'ADMIN' || roles.includes(user.role)) {
+    const currentRole = user.role as UserRole;
+
+    if (currentRole === 'ADMIN' || roles.includes(currentRole)) {
       return true;
     }
 

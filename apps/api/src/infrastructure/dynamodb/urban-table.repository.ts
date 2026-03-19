@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import {
   BatchGetCommand,
   DeleteCommand,
@@ -8,8 +7,10 @@ import {
   ScanCommand,
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { Injectable } from '@nestjs/common';
 import type { TableItemBase } from '../../common/storage-records';
 import { createInfrastructureOperationError } from '../errors/infrastructure-error.utils';
+import { CircuitBreakerService } from '../resilience/circuit-breaker.service';
 import { DynamoDbService } from './dynamodb.service';
 
 interface QueryOptions {
@@ -35,7 +36,10 @@ interface TransactionPutInput {
 
 @Injectable()
 export class UrbanTableRepository {
-  constructor(private readonly dynamoDbService: DynamoDbService) {}
+  constructor(
+    private readonly dynamoDbService: DynamoDbService,
+    private readonly circuitBreakerService: CircuitBreakerService,
+  ) {}
 
   async get<T>(
     tableName: string,
@@ -43,14 +47,16 @@ export class UrbanTableRepository {
     sk: string,
   ): Promise<T | undefined> {
     try {
-      const response = await this.dynamoDbService.documentClient.send(
-        new GetCommand({
-          TableName: tableName,
-          Key: {
-            PK: pk,
-            SK: sk,
-          },
-        }),
+      const response = await this.execute(() =>
+        this.dynamoDbService.documentClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: {
+              PK: pk,
+              SK: sk,
+            },
+          }),
+        ),
       );
 
       return response.Item as T | undefined;
@@ -65,11 +71,13 @@ export class UrbanTableRepository {
 
   async put(tableName: string, item: TableItemBase): Promise<void> {
     try {
-      await this.dynamoDbService.documentClient.send(
-        new PutCommand({
-          TableName: tableName,
-          Item: item,
-        }),
+      await this.execute(() =>
+        this.dynamoDbService.documentClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: item,
+          }),
+        ),
       );
     } catch (error) {
       throw this.createOperationError('Put', error, {
@@ -86,16 +94,18 @@ export class UrbanTableRepository {
     }
 
     try {
-      await this.dynamoDbService.documentClient.send(
-        new TransactWriteCommand({
-          TransactItems: items.map((item) => ({
-            Put: {
-              TableName: item.tableName,
-              Item: item.item,
-              ConditionExpression: item.conditionExpression,
-            },
-          })),
-        }),
+      await this.execute(() =>
+        this.dynamoDbService.documentClient.send(
+          new TransactWriteCommand({
+            TransactItems: items.map((item) => ({
+              Put: {
+                TableName: item.tableName,
+                Item: item.item,
+                ConditionExpression: item.conditionExpression,
+              },
+            })),
+          }),
+        ),
       );
     } catch (error) {
       throw this.createOperationError('TransactWrite', error, {
@@ -106,14 +116,16 @@ export class UrbanTableRepository {
 
   async delete(tableName: string, pk: string, sk: string): Promise<void> {
     try {
-      await this.dynamoDbService.documentClient.send(
-        new DeleteCommand({
-          TableName: tableName,
-          Key: {
-            PK: pk,
-            SK: sk,
-          },
-        }),
+      await this.execute(() =>
+        this.dynamoDbService.documentClient.send(
+          new DeleteCommand({
+            TableName: tableName,
+            Key: {
+              PK: pk,
+              SK: sk,
+            },
+          }),
+        ),
       );
     } catch (error) {
       throw this.createOperationError('Delete', error, {
@@ -155,14 +167,16 @@ export class UrbanTableRepository {
     }
 
     try {
-      const response = await this.dynamoDbService.documentClient.send(
-        new BatchGetCommand({
-          RequestItems: {
-            [tableName]: {
-              Keys: uniqueKeys,
+      const response = await this.execute(() =>
+        this.dynamoDbService.documentClient.send(
+          new BatchGetCommand({
+            RequestItems: {
+              [tableName]: {
+                Keys: uniqueKeys,
+              },
             },
-          },
-        }),
+          }),
+        ),
       );
 
       return (response.Responses?.[tableName] as T[] | undefined) ?? [];
@@ -244,11 +258,13 @@ export class UrbanTableRepository {
 
     try {
       do {
-        const response = await this.dynamoDbService.documentClient.send(
-          new ScanCommand({
-            TableName: tableName,
-            ExclusiveStartKey: exclusiveStartKey,
-          }),
+        const response = await this.execute(() =>
+          this.dynamoDbService.documentClient.send(
+            new ScanCommand({
+              TableName: tableName,
+              ExclusiveStartKey: exclusiveStartKey,
+            }),
+          ),
         );
 
         items.push(...((response.Items as T[] | undefined) ?? []));
@@ -281,16 +297,18 @@ export class UrbanTableRepository {
     }
 
     try {
-      const response = await this.dynamoDbService.documentClient.send(
-        new QueryCommand({
-          TableName: input.tableName,
-          IndexName: input.indexName,
-          KeyConditionExpression: keyConditionExpression,
-          ExpressionAttributeNames: expressionNames,
-          ExpressionAttributeValues: expressionValues,
-          Limit: input.options.limit,
-          ScanIndexForward: input.options.scanForward ?? false,
-        }),
+      const response = await this.execute(() =>
+        this.dynamoDbService.documentClient.send(
+          new QueryCommand({
+            TableName: input.tableName,
+            IndexName: input.indexName,
+            KeyConditionExpression: keyConditionExpression,
+            ExpressionAttributeNames: expressionNames,
+            ExpressionAttributeValues: expressionValues,
+            Limit: input.options.limit,
+            ScanIndexForward: input.options.scanForward ?? false,
+          }),
+        ),
       );
 
       return (response.Items as T[] | undefined) ?? [];
@@ -316,6 +334,10 @@ export class UrbanTableRepository {
       PK: key.PK,
       SK: key.SK,
     };
+  }
+
+  private async execute<T>(action: () => Promise<T>): Promise<T> {
+    return this.circuitBreakerService.execute('dynamodb', 'DynamoDB', action);
   }
 
   private createOperationError(

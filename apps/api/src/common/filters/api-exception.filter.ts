@@ -8,6 +8,10 @@ import {
 import type { ApiErrorPayload, ApiErrorResponse } from '@urban/shared-types';
 import type { Request, Response } from 'express';
 
+type HttpRequestWithObservability = Request & {
+  requestId?: string;
+};
+
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -23,11 +27,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     const context = host.switchToHttp();
     const response = context.getResponse<Response>();
-    const request = context.getRequest<Request>();
+    const request = context.getRequest<HttpRequestWithObservability>();
     const payload = this.normalizeException(exception);
 
     if (payload.statusCode >= 500) {
-      this.logServerException(exception);
+      this.logServerException(exception, request.requestId);
     }
 
     response.status(payload.statusCode).json({
@@ -35,20 +39,28 @@ export class ApiExceptionFilter implements ExceptionFilter {
       error: payload,
       path: request.originalUrl || request.url,
       timestamp: new Date().toISOString(),
+      requestId: request.requestId,
     } satisfies ApiErrorResponse);
   }
 
-  private logServerException(exception: unknown): void {
+  private logServerException(exception: unknown, requestId?: string): void {
     if (exception instanceof Error) {
       const detail = (exception as Error & { detail?: unknown }).detail;
+      const message =
+        typeof detail === 'string' && detail ? detail : exception.message;
 
       console.error(
-        typeof detail === 'string' && detail ? detail : exception.message,
+        requestId ? `[requestId=${requestId}] ${message}` : message,
       );
       return;
     }
 
-    console.error('Unhandled server exception', exception);
+    console.error(
+      requestId
+        ? `[requestId=${requestId}] Unhandled server exception`
+        : 'Unhandled server exception',
+      exception,
+    );
   }
 
   private normalizeException(exception: unknown): ApiErrorPayload {
