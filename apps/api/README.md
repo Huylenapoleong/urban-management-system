@@ -8,6 +8,7 @@ NestJS backend for SmartCity OTT using six DynamoDB tables on AWS.
 - Integration guide: `apps/api/docs/FE_INTEGRATION.md`
 - Postman collection: `apps/api/docs/postman/urban-management-api.postman_collection.json`
 - Postman environment: `apps/api/docs/postman/urban-management-api.postman_environment.json`
+- Release checklist: `apps/api/docs/RELEASE_CHECKLIST.md`
 
 ## Modules
 
@@ -24,6 +25,14 @@ NestJS backend for SmartCity OTT using six DynamoDB tables on AWS.
 - `@urban/shared-types`
 - `@urban/shared-utils`
 
+## Product Policy Decisions
+
+These are intentional product/backend policies, not accidental restrictions:
+
+- Direct messages are not globally open. Citizen-to-citizen DM is blocked; DM access is constrained by role and scope.
+- Group management is membership-based. `ADMIN` can manage any group, while non-admin staff must be an `OWNER` or `OFFICER` member to manage a group.
+- Report status transitions follow a backend state machine. FE should only show actions valid for the current status.
+
 ## Environment
 
 Default runtime is AWS DynamoDB with six separate tables.
@@ -33,6 +42,8 @@ Important variables:
 
 - `PORT=3001`
 - `API_PREFIX=api`
+- `NODE_ENV=development`
+- `SWAGGER_ENABLED=true`
 - `CORS_ORIGIN=http://localhost:3000,http://localhost:8081`
 - `AWS_REGION=ap-southeast-1`
 - `AWS_MAX_ATTEMPTS=3`
@@ -77,6 +88,9 @@ Important variables:
 - `CHAT_RECONCILIATION_MAINTENANCE_MODE=preview`
 - `CHAT_RECONCILIATION_MAINTENANCE_INTERVAL_MS=21600000`
 - `CHAT_RECONCILIATION_MAINTENANCE_LOCK_TTL_MS=1800000`
+- `GROUP_DELETE_CLEANUP_ENABLED=true`
+- `GROUP_DELETE_CLEANUP_INTERVAL_MS=300000`
+- `GROUP_DELETE_CLEANUP_LOCK_TTL_MS=600000`
 
 Index names:
 
@@ -96,6 +110,7 @@ AWS credentials:
 - Optional upload vars: `S3_PUBLIC_BASE_URL`, `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `UPLOAD_ALLOWED_MIME_TYPES`.
 - Redis is optional for local single-instance development; if `REDIS_URL` is unset the API falls back to in-memory presence and local outbox locking.
 - `CORS_ORIGIN` is a comma-separated exact allowlist for browser origins; requests without an `Origin` header, such as server-to-server calls or Postman, are still accepted.
+- In production, the API fails fast on unsafe config such as default JWT secrets, identical access/refresh secrets, wildcard `CORS_ORIGIN`, or `PUSH_PROVIDER=webhook` without `PUSH_WEBHOOK_URL`.
 
 ## AWS DynamoDB
 
@@ -105,7 +120,7 @@ Main flow:
 - Keep `DYNAMODB_ENDPOINT` unset for AWS.
 - Start Redis if you want multi-instance websocket fanout or shared presence.
 - Run `pnpm dev:api`.
-- Open Swagger UI at `http://localhost:3001/api/docs`.
+- Open Swagger UI at `http://localhost:3001/api/docs` when `SWAGGER_ENABLED=true`.
 - Open OpenAPI JSON at `http://localhost:3001/api/docs/json`.
 - Open OpenAPI YAML at `http://localhost:3001/api/docs/yaml`.
 - Liveness probe: `GET /api/health/live`.
@@ -228,6 +243,13 @@ Recommended client behavior:
 - The repair flow intentionally does not recreate missing summaries, because a missing inbox can be the valid result of `delete conversation for me`.
 - When `CHAT_RECONCILIATION_MAINTENANCE_ENABLED=true`, an automatic scheduler runs every `CHAT_RECONCILIATION_MAINTENANCE_INTERVAL_MS` in `preview` or `repair` mode according to `CHAT_RECONCILIATION_MAINTENANCE_MODE`.
 - If Redis is configured and connected, the scheduler uses `CHAT_RECONCILIATION_MAINTENANCE_LOCK_TTL_MS` to avoid duplicate runs across multiple API instances.
+
+## Group Cleanup Replay
+
+- `deleteGroup` now commits the deleted group metadata together with a durable cleanup task, then attempts immediate cleanup as a best-effort replay.
+- If the immediate cleanup flow fails part-way, the cleanup task remains in the `Groups` table and can be replayed safely without re-deleting the group metadata.
+- When `GROUP_DELETE_CLEANUP_ENABLED=true`, an automatic scheduler scans and retries pending cleanup tasks every `GROUP_DELETE_CLEANUP_INTERVAL_MS`.
+- If Redis is configured and connected, the scheduler uses `GROUP_DELETE_CLEANUP_LOCK_TTL_MS` to avoid duplicate runs across multiple API instances.
 
 ## Search and Pagination
 

@@ -90,6 +90,23 @@ Use only route-safe ids in FE:
 Do not use internal keys like `GRP#...` or `DM#...` in FE state.
 Backend may still accept legacy keys, but FE should not rely on them.
 
+## Product Policy Decisions
+
+The backend currently enforces these product rules and FE should align UI/UX with them:
+
+- Direct messages are not globally open:
+  - citizen cannot DM citizen
+  - citizen can DM in-scope staff/admin according to backend authorization
+  - staff-to-staff DM is allowed only when scope rules overlap
+- Group management is membership-based:
+  - `ADMIN` can manage any group
+  - `OWNER` and `OFFICER` members can manage their group
+  - staff outside the group cannot manage a non-private group just because it is in scope
+- Report status uses a state machine, not free-form transitions:
+  - FE must render actions from the current status, not from a global list
+  - citizen is only expected to close their own resolved report
+  - invalid transitions will be rejected by the API
+
 ## Chat Rules
 
 For sending messages:

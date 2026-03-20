@@ -22,6 +22,7 @@ describe('ConversationsService', () => {
     isAdmin: jest.fn(),
   };
   const usersService = {
+    getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
   };
   const groupsService = {
@@ -175,6 +176,17 @@ describe('ConversationsService', () => {
     );
     authorizationService.canAccessDirectConversation.mockReturnValue(true);
     authorizationService.isAdmin.mockReturnValue(false);
+    usersService.getActiveByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      throw new Error(`Unexpected active user lookup: ${userId}`);
+    });
     usersService.getByIdOrThrow.mockImplementation((userId: string) => {
       if (userId === actor.id) {
         return actorUser;
@@ -504,5 +516,32 @@ describe('ConversationsService', () => {
         nextCursor: expect.any(String),
       },
     });
+  });
+  it('rejects direct messages when policy denies access to the target user', async () => {
+    authorizationService.canAccessDirectConversation.mockReturnValueOnce(false);
+
+    await expect(
+      service.sendDirectMessage(actor, {
+        targetUserId: otherUser.userId,
+        content: '{"text":"Xin chao","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow('You cannot access this conversation.');
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('rejects direct messages to inactive targets before writing a message', async () => {
+    usersService.getActiveByIdOrThrow.mockRejectedValueOnce(
+      new Error('User account is not active.'),
+    );
+
+    await expect(
+      service.sendDirectMessage(actor, {
+        targetUserId: otherUser.userId,
+        content: '{"text":"Xin chao","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow('User account is not active.');
+    expect(repository.transactPut).not.toHaveBeenCalled();
   });
 });
