@@ -1,9 +1,8 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type {
-  StoredConversation,
   StoredGroup,
+  StoredGroupDeleteCleanupTask,
   StoredMembership,
-  StoredReport,
 } from '../../common/storage-records';
 import { GroupsService } from './groups.service';
 
@@ -16,6 +15,8 @@ describe('GroupsService', () => {
     queryByIndex: jest.fn(),
     queryByPk: jest.fn(),
     scanAll: jest.fn(),
+    transactPut: jest.fn(),
+    transactWrite: jest.fn(),
   };
   const authorizationService = {
     canCreateGroup: jest.fn(),
@@ -25,7 +26,12 @@ describe('GroupsService', () => {
     canReadGroup: jest.fn(),
   };
   const usersService = {
+    getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
+  };
+  const groupCleanupService = {
+    buildGroupDeleteCleanupTask: jest.fn(),
+    processTask: jest.fn(),
   };
   const config = {
     dynamodbGroupsTableName: 'Groups',
@@ -89,43 +95,15 @@ describe('GroupsService', () => {
     roleInGroup: 'MEMBER',
   };
 
-  const summary: StoredConversation = {
-    PK: 'USER#user-1',
-    SK: 'CONV#GRP#group-1#LAST#2026-03-18T10:05:00.000Z',
-    entityType: 'CONVERSATION',
-    GSI1PK: 'USER#user-1#TYPE#GRP',
-    userId: 'user-1',
-    conversationId: 'GRP#group-1',
-    groupName: 'Area 1',
-    lastMessagePreview: 'Hello',
-    lastSenderName: 'Ward Officer',
-    unreadCount: 0,
-    isGroup: true,
-    deletedAt: null,
-    updatedAt: '2026-03-18T10:05:00.000Z',
-    lastReadAt: '2026-03-18T10:05:00.000Z',
-  };
-
-  const linkedReport: StoredReport = {
-    PK: 'REPORT#report-1',
-    SK: 'METADATA',
-    entityType: 'REPORT',
-    GSI1PK: 'CAT#INFRA#LOC#VN-79-760-26734',
-    GSI2PK: 'STATUS#NEW#LOC#VN-79-760-26734',
-    reportId: 'report-1',
-    userId: 'user-3',
+  const cleanupTask: StoredGroupDeleteCleanupTask = {
+    PK: 'GROUP_DELETE_CLEANUP',
+    SK: 'TASK#2026-03-18T11:00:00.000Z#group-1',
+    entityType: 'GROUP_DELETE_CLEANUP_TASK',
     groupId: 'group-1',
-    title: 'Broken streetlight',
-    description: 'Lamp is out',
-    category: 'INFRASTRUCTURE',
-    locationCode: 'VN-79-760-26734',
-    status: 'NEW',
-    priority: 'MEDIUM',
-    mediaUrls: [],
-    assignedOfficerId: undefined,
-    deletedAt: null,
-    createdAt: '2026-03-18T10:00:00.000Z',
-    updatedAt: '2026-03-18T10:00:00.000Z',
+    deletedAt: '2026-03-18T11:00:00.000Z',
+    attempts: 0,
+    createdAt: '2026-03-18T11:00:00.000Z',
+    updatedAt: '2026-03-18T11:00:00.000Z',
   };
 
   beforeEach(() => {
@@ -134,74 +112,64 @@ describe('GroupsService', () => {
       repository as never,
       authorizationService as never,
       usersService as never,
+      groupCleanupService as never,
       config as never,
     );
-    repository.get.mockImplementation((tableName: string) => {
-      if (tableName === 'Groups') {
-        return group;
-      }
+    repository.batchGet.mockResolvedValue([]);
+    repository.queryByGsi1.mockResolvedValue([]);
+    repository.transactPut.mockResolvedValue(undefined);
+    repository.transactWrite.mockResolvedValue(undefined);
+    usersService.getActiveByIdOrThrow.mockResolvedValue(undefined);
+    usersService.getByIdOrThrow.mockResolvedValue(undefined);
+    groupCleanupService.buildGroupDeleteCleanupTask.mockReturnValue(
+      cleanupTask,
+    );
+    groupCleanupService.processTask.mockResolvedValue(undefined);
+    repository.get.mockImplementation(
+      (tableName: string, _pk: string, sk: string) => {
+        if (tableName === 'Groups') {
+          return group;
+        }
 
-      if (tableName === 'Memberships') {
-        return actorMembership;
-      }
+        if (tableName === 'Memberships') {
+          if (sk === actorMembership.SK) {
+            return actorMembership;
+          }
 
-      return undefined;
-    });
+          if (sk === memberTwo.SK) {
+            return memberTwo;
+          }
+        }
+
+        return undefined;
+      },
+    );
     repository.queryByPk.mockResolvedValue([actorMembership, memberTwo]);
-    repository.scanAll.mockImplementation((tableName: string) => {
-      if (tableName === 'Conversations') {
-        return [summary];
-      }
-
-      if (tableName === 'Reports') {
-        return [linkedReport];
-      }
-
-      return [];
-    });
+    repository.scanAll.mockResolvedValue([]);
   });
 
-  it('soft deletes a group and cascades related records', async () => {
+  it('marks a group deleted and schedules cleanup replay', async () => {
     authorizationService.canDeleteGroup.mockReturnValue(true);
 
     const result = await service.deleteGroup(actor, group.groupId);
 
-    expect(repository.put).toHaveBeenCalledWith(
-      'Groups',
+    expect(repository.transactWrite).toHaveBeenCalledWith([
       expect.objectContaining({
-        groupId: group.groupId,
-        deletedAt: expect.any(String),
-        memberCount: 0,
+        kind: 'put',
+        tableName: 'Groups',
+        item: expect.objectContaining({
+          groupId: group.groupId,
+          deletedAt: expect.any(String),
+          memberCount: 0,
+        }),
       }),
-    );
-    expect(repository.put).toHaveBeenCalledWith(
-      'Memberships',
       expect.objectContaining({
-        userId: actorMembership.userId,
-        deletedAt: expect.any(String),
+        kind: 'put',
+        tableName: 'Groups',
+        item: cleanupTask,
       }),
-    );
-    expect(repository.put).toHaveBeenCalledWith(
-      'Memberships',
-      expect.objectContaining({
-        userId: memberTwo.userId,
-        deletedAt: expect.any(String),
-      }),
-    );
-    expect(repository.put).toHaveBeenCalledWith(
-      'Conversations',
-      expect.objectContaining({
-        conversationId: 'GRP#group-1',
-        deletedAt: expect.any(String),
-      }),
-    );
-    expect(repository.put).toHaveBeenCalledWith(
-      'Reports',
-      expect.objectContaining({
-        reportId: linkedReport.reportId,
-        groupId: undefined,
-      }),
-    );
+    ]);
+    expect(groupCleanupService.processTask).toHaveBeenCalledWith(cleanupTask);
     expect(result).toEqual(
       expect.objectContaining({
         id: group.groupId,
@@ -211,12 +179,69 @@ describe('GroupsService', () => {
     );
   });
 
+  it('returns deleted group metadata even when cleanup replay is deferred', async () => {
+    authorizationService.canDeleteGroup.mockReturnValue(true);
+    groupCleanupService.processTask.mockRejectedValueOnce(
+      new Error('cleanup failed'),
+    );
+
+    await expect(service.deleteGroup(actor, group.groupId)).resolves.toEqual(
+      expect.objectContaining({
+        id: group.groupId,
+        deletedAt: expect.any(String),
+        memberCount: 0,
+      }),
+    );
+    expect(repository.transactWrite).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects group deletion when the actor is not allowed', async () => {
     authorizationService.canDeleteGroup.mockReturnValue(false);
 
     await expect(service.deleteGroup(actor, group.groupId)).rejects.toThrow(
       new ForbiddenException('You cannot delete this group.'),
     );
+    expect(repository.transactWrite).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning owner role via member management', async () => {
+    authorizationService.canManageGroup.mockReturnValue(true);
+
+    await expect(
+      service.manageMember(actor, group.groupId, 'user-2', {
+        action: 'update',
+        roleInGroup: 'OWNER',
+      }),
+    ).rejects.toThrow(
+      new ForbiddenException(
+        'Owner role cannot be assigned via member management.',
+      ),
+    );
     expect(repository.put).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding an already active membership', async () => {
+    authorizationService.canManageGroup.mockReturnValue(true);
+
+    await expect(
+      service.manageMember(actor, group.groupId, 'user-2', {
+        action: 'add',
+      }),
+    ).rejects.toThrow(new BadRequestException('Membership already exists.'));
+    expect(repository.transactWrite).not.toHaveBeenCalled();
+  });
+
+  it('ignores cleanup task records when listing groups via scan path', async () => {
+    authorizationService.canReadGroup.mockReturnValue(true);
+    repository.scanAll.mockResolvedValue([group, cleanupTask]);
+
+    const result = await service.listGroups(actor, {});
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        id: group.groupId,
+      }),
+    );
   });
 });
