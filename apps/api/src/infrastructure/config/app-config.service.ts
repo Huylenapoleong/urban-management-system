@@ -3,6 +3,10 @@ import { loadEnvFiles } from './load-env';
 
 loadEnvFiles();
 
+const DEFAULT_ACCESS_SECRET = 'dev-access-secret-change-me';
+const DEFAULT_REFRESH_SECRET = 'dev-refresh-secret-change-me';
+const ALLOWED_PUSH_PROVIDERS = new Set(['disabled', 'log', 'webhook']);
+
 function readNumber(name: string, fallback: number): number {
   const value = process.env[name];
 
@@ -12,6 +16,24 @@ function readNumber(name: string, fallback: number): number {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readBoolean(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+
+  if (!value) {
+    return fallback;
+  }
+
+  if (value === 'true') {
+    return true;
+  }
+
+  if (value === 'false') {
+    return false;
+  }
+
+  return fallback;
 }
 
 function normalizeCorsOrigin(origin: string): string {
@@ -32,8 +54,15 @@ function readCommaSeparatedList(
 
 @Injectable()
 export class AppConfigService {
+  readonly nodeEnv = (process.env.NODE_ENV ?? 'development')
+    .trim()
+    .toLowerCase();
   readonly port = readNumber('PORT', 3001);
   readonly apiPrefix = process.env.API_PREFIX ?? 'api';
+  readonly swaggerEnabled = readBoolean(
+    'SWAGGER_ENABLED',
+    this.nodeEnv !== 'production',
+  );
   readonly awsRegion = process.env.AWS_REGION ?? 'ap-southeast-1';
   readonly awsMaxAttempts = readNumber('AWS_MAX_ATTEMPTS', 3);
   readonly dynamodbEndpoint = process.env.DYNAMODB_ENDPOINT || undefined;
@@ -73,9 +102,9 @@ export class AppConfigService {
     process.env.DYNAMODB_REPORTS_STATUS_LOCATION_INDEX_NAME ?? 'GSI2-StatusLoc';
 
   readonly accessTokenSecret =
-    process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me';
+    process.env.JWT_ACCESS_SECRET ?? DEFAULT_ACCESS_SECRET;
   readonly refreshTokenSecret =
-    process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me';
+    process.env.JWT_REFRESH_SECRET ?? DEFAULT_REFRESH_SECRET;
   readonly jwtIssuer = process.env.JWT_ISSUER ?? 'urban-management-system';
   readonly accessTokenTtlSeconds = readNumber('JWT_ACCESS_TTL_SECONDS', 3600);
   readonly refreshTokenTtlSeconds = readNumber(
@@ -116,8 +145,7 @@ export class AppConfigService {
     .trim()
     .toLowerCase();
   readonly pushWebhookUrl = process.env.PUSH_WEBHOOK_URL || undefined;
-  readonly pushSkipActiveUsers =
-    (process.env.PUSH_SKIP_ACTIVE_USERS ?? 'true').toLowerCase() === 'true';
+  readonly pushSkipActiveUsers = readBoolean('PUSH_SKIP_ACTIVE_USERS', true);
   readonly pushOutboxPollIntervalMs = readNumber(
     'PUSH_OUTBOX_POLL_INTERVAL_MS',
     4000,
@@ -152,9 +180,10 @@ export class AppConfigService {
     'RETENTION_DELETED_CONVERSATION_SUMMARY_DAYS',
     30,
   );
-  readonly retentionMaintenanceEnabled =
-    (process.env.RETENTION_MAINTENANCE_ENABLED ?? 'false').toLowerCase() ===
-    'true';
+  readonly retentionMaintenanceEnabled = readBoolean(
+    'RETENTION_MAINTENANCE_ENABLED',
+    false,
+  );
   readonly retentionMaintenanceIntervalMs = readNumber(
     'RETENTION_MAINTENANCE_INTERVAL_MS',
     6 * 60 * 60 * 1000,
@@ -163,10 +192,10 @@ export class AppConfigService {
     'RETENTION_MAINTENANCE_LOCK_TTL_MS',
     30 * 60 * 1000,
   );
-  readonly chatReconciliationMaintenanceEnabled =
-    (
-      process.env.CHAT_RECONCILIATION_MAINTENANCE_ENABLED ?? 'false'
-    ).toLowerCase() === 'true';
+  readonly chatReconciliationMaintenanceEnabled = readBoolean(
+    'CHAT_RECONCILIATION_MAINTENANCE_ENABLED',
+    false,
+  );
   readonly chatReconciliationMaintenanceIntervalMs = readNumber(
     'CHAT_RECONCILIATION_MAINTENANCE_INTERVAL_MS',
     6 * 60 * 60 * 1000,
@@ -181,12 +210,23 @@ export class AppConfigService {
       .toLowerCase() === 'repair'
       ? 'repair'
       : 'preview';
+  readonly groupDeleteCleanupEnabled = readBoolean(
+    'GROUP_DELETE_CLEANUP_ENABLED',
+    true,
+  );
+  readonly groupDeleteCleanupIntervalMs = readNumber(
+    'GROUP_DELETE_CLEANUP_INTERVAL_MS',
+    5 * 60 * 1000,
+  );
+  readonly groupDeleteCleanupLockTtlMs = readNumber(
+    'GROUP_DELETE_CLEANUP_LOCK_TTL_MS',
+    10 * 60 * 1000,
+  );
 
   readonly s3BucketName = process.env.S3_BUCKET_NAME ?? '';
   readonly s3Endpoint = process.env.S3_ENDPOINT || undefined;
   readonly s3PublicBaseUrl = process.env.S3_PUBLIC_BASE_URL || undefined;
-  readonly s3ForcePathStyle =
-    (process.env.S3_FORCE_PATH_STYLE ?? 'false').toLowerCase() === 'true';
+  readonly s3ForcePathStyle = readBoolean('S3_FORCE_PATH_STYLE', false);
   readonly uploadKeyPrefix = process.env.UPLOAD_KEY_PREFIX ?? 'uploads';
   readonly uploadMaxFileSizeBytes = readNumber(
     'UPLOAD_MAX_FILE_SIZE_BYTES',
@@ -212,6 +252,14 @@ export class AppConfigService {
     .split(',')
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
+
+  constructor() {
+    this.validate();
+  }
+
+  get isProduction(): boolean {
+    return this.nodeEnv === 'production';
+  }
 
   get corsAllowsAnyOrigin(): boolean {
     return this.corsOrigins.includes('*');
@@ -249,5 +297,123 @@ export class AppConfigService {
     }
 
     return undefined;
+  }
+
+  private validate(): void {
+    this.ensurePositive('PORT', this.port);
+    this.ensurePositive('AWS_MAX_ATTEMPTS', this.awsMaxAttempts);
+    this.ensurePositive('JWT_ACCESS_TTL_SECONDS', this.accessTokenTtlSeconds);
+    this.ensurePositive('JWT_REFRESH_TTL_SECONDS', this.refreshTokenTtlSeconds);
+    this.ensurePositive('BCRYPT_ROUNDS', this.bcryptRounds);
+    this.ensurePositive(
+      'CHAT_MESSAGE_RATE_LIMIT_WINDOW_SECONDS',
+      this.chatMessageRateLimitWindowSeconds,
+    );
+    this.ensurePositive(
+      'CHAT_MESSAGE_RATE_LIMIT_MAX_PER_WINDOW',
+      this.chatMessageRateLimitMaxPerWindow,
+    );
+    this.ensurePositive(
+      'CHAT_PRESENCE_TTL_SECONDS',
+      this.chatPresenceTtlSeconds,
+    );
+    this.ensurePositive(
+      'CHAT_PRESENCE_HEARTBEAT_SECONDS',
+      this.chatPresenceHeartbeatSeconds,
+    );
+    this.ensurePositive(
+      'CHAT_PRESENCE_LAST_SEEN_TTL_SECONDS',
+      this.chatPresenceLastSeenTtlSeconds,
+    );
+    this.ensurePositive(
+      'CHAT_OUTBOX_POLL_INTERVAL_MS',
+      this.chatOutboxPollIntervalMs,
+    );
+    this.ensurePositive('CHAT_OUTBOX_BATCH_SIZE', this.chatOutboxBatchSize);
+    this.ensurePositive('CHAT_OUTBOX_SHARD_COUNT', this.chatOutboxShardCount);
+    this.ensurePositive(
+      'PUSH_OUTBOX_POLL_INTERVAL_MS',
+      this.pushOutboxPollIntervalMs,
+    );
+    this.ensurePositive('PUSH_OUTBOX_BATCH_SIZE', this.pushOutboxBatchSize);
+    this.ensurePositive('PUSH_OUTBOX_SHARD_COUNT', this.pushOutboxShardCount);
+    this.ensurePositive(
+      'CIRCUIT_BREAKER_FAILURE_THRESHOLD',
+      this.circuitBreakerFailureThreshold,
+    );
+    this.ensurePositive(
+      'CIRCUIT_BREAKER_OPEN_DURATION_MS',
+      this.circuitBreakerOpenDurationMs,
+    );
+    this.ensurePositive(
+      'UPLOAD_MAX_FILE_SIZE_BYTES',
+      this.uploadMaxFileSizeBytes,
+    );
+
+    if (this.chatPresenceHeartbeatSeconds >= this.chatPresenceTtlSeconds) {
+      throw new Error(
+        'CHAT_PRESENCE_HEARTBEAT_SECONDS must be lower than CHAT_PRESENCE_TTL_SECONDS.',
+      );
+    }
+
+    if (!this.corsAllowsAnyOrigin && this.corsOrigins.length === 0) {
+      throw new Error('CORS_ORIGIN must contain at least one allowed origin.');
+    }
+
+    if (!ALLOWED_PUSH_PROVIDERS.has(this.pushProvider)) {
+      throw new Error('PUSH_PROVIDER must be one of: disabled, log, webhook.');
+    }
+
+    if (this.pushProvider === 'webhook' && !this.pushWebhookUrl) {
+      throw new Error(
+        'PUSH_WEBHOOK_URL is required when PUSH_PROVIDER=webhook.',
+      );
+    }
+
+    if (!this.accessTokenSecret.trim()) {
+      throw new Error('JWT_ACCESS_SECRET must not be empty.');
+    }
+
+    if (!this.refreshTokenSecret.trim()) {
+      throw new Error('JWT_REFRESH_SECRET must not be empty.');
+    }
+
+    if (this.accessTokenSecret === this.refreshTokenSecret) {
+      throw new Error(
+        'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different.',
+      );
+    }
+
+    if (this.isProduction) {
+      if (this.accessTokenSecret === DEFAULT_ACCESS_SECRET) {
+        throw new Error('JWT_ACCESS_SECRET must be overridden in production.');
+      }
+
+      if (this.refreshTokenSecret === DEFAULT_REFRESH_SECRET) {
+        throw new Error('JWT_REFRESH_SECRET must be overridden in production.');
+      }
+
+      if (this.accessTokenSecret.length < 32) {
+        throw new Error(
+          'JWT_ACCESS_SECRET must be at least 32 characters in production.',
+        );
+      }
+
+      if (this.refreshTokenSecret.length < 32) {
+        throw new Error(
+          'JWT_REFRESH_SECRET must be at least 32 characters in production.',
+        );
+      }
+
+      if (this.corsAllowsAnyOrigin) {
+        throw new Error('CORS_ORIGIN cannot allow * in production.');
+      }
+    }
+  }
+
+  private ensurePositive(name: string, value: number): void {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`${name} must be a positive number.`);
+    }
   }
 }

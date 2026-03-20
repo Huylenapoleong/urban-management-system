@@ -6,6 +6,10 @@ export function setupSwagger(
   app: INestApplication,
   config: AppConfigService,
 ): void {
+  if (!config.swaggerEnabled) {
+    return;
+  }
+
   const document = SwaggerModule.createDocument(
     app,
     new DocumentBuilder()

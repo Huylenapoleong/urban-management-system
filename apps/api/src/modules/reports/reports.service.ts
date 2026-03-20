@@ -1,5 +1,5 @@
 import {
-  BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -516,18 +516,31 @@ export class ReportsService {
       },
     });
 
-    await this.repository.transactPut([
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: nextReport,
-      },
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: auditRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-    ]);
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: nextReport,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': report.updatedAt,
+          },
+        },
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Report changed. Please retry.');
+      }
+
+      throw error;
+    }
     return toReport(nextReport);
   }
 
@@ -559,18 +572,31 @@ export class ReportsService {
       summary: `Deleted report ${report.title}.`,
     });
 
-    await this.repository.transactPut([
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: nextReport,
-      },
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: auditRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-    ]);
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: nextReport,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': report.updatedAt,
+          },
+        },
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Report changed. Please retry.');
+      }
+
+      throw error;
+    }
     return toReport(nextReport);
   }
 
@@ -585,7 +611,7 @@ export class ReportsService {
       maxLength: 50,
     });
     const report = await this.getReportOrThrow(reportId);
-    const officer = await this.usersService.getByIdOrThrow(officerId);
+    const officer = await this.usersService.getActiveByIdOrThrow(officerId);
 
     if (!this.authorizationService.canAssignReport(actor, report, officer)) {
       throw new ForbiddenException('You cannot assign this report.');
@@ -627,35 +653,50 @@ export class ReportsService {
           })
         : undefined;
 
-    await this.repository.transactPut([
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: nextReport,
-      },
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: auditRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-      ...(pushRecord
-        ? ([
-            {
-              tableName: this.config.dynamodbUsersTableName,
-              item: pushRecord,
-              conditionExpression:
-                'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-            },
-          ] as Array<{
-            tableName: string;
-            item: StoredPushOutboxEvent | StoredReport | StoredReportAuditEvent;
-            conditionExpression?: string;
-          }>)
-        : []),
-    ]);
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: nextReport,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': report.updatedAt,
+          },
+        },
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+        ...(pushRecord
+          ? ([
+              {
+                tableName: this.config.dynamodbUsersTableName,
+                item: pushRecord,
+                conditionExpression:
+                  'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+              },
+            ] as Array<{
+              tableName: string;
+              item:
+                | StoredPushOutboxEvent
+                | StoredReport
+                | StoredReportAuditEvent;
+              conditionExpression?: string;
+            }>)
+          : []),
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Report changed. Please retry.');
+      }
+
+      throw error;
+    }
     return toReport(nextReport);
   }
-
   async updateStatus(
     actor: AuthenticatedUser,
     reportId: string,
@@ -665,14 +706,8 @@ export class ReportsService {
     const status = requiredEnum(body, 'status', REPORT_STATUSES);
     const report = await this.getReportOrThrow(reportId);
 
-    if (!this.authorizationService.canTransitionReport(actor, report)) {
+    if (!this.authorizationService.canTransitionReport(actor, report, status)) {
       throw new ForbiddenException('You cannot update report status.');
-    }
-
-    if (actor.role === 'CITIZEN' && status !== 'CLOSED') {
-      throw new BadRequestException(
-        'Citizen can only close a resolved report.',
-      );
     }
 
     const updatedAt = nowIso();
@@ -714,33 +749,86 @@ export class ReportsService {
           })
         : undefined;
 
-    await this.repository.transactPut([
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: nextReport,
-      },
-      {
-        tableName: this.config.dynamodbReportsTableName,
-        item: auditRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-      ...(pushRecord
-        ? ([
-            {
-              tableName: this.config.dynamodbUsersTableName,
-              item: pushRecord,
-              conditionExpression:
-                'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-            },
-          ] as Array<{
-            tableName: string;
-            item: StoredPushOutboxEvent | StoredReport | StoredReportAuditEvent;
-            conditionExpression?: string;
-          }>)
-        : []),
-    ]);
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: nextReport,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': report.updatedAt,
+          },
+        },
+        {
+          tableName: this.config.dynamodbReportsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+        ...(pushRecord
+          ? ([
+              {
+                tableName: this.config.dynamodbUsersTableName,
+                item: pushRecord,
+                conditionExpression:
+                  'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+              },
+            ] as Array<{
+              tableName: string;
+              item:
+                | StoredPushOutboxEvent
+                | StoredReport
+                | StoredReportAuditEvent;
+              conditionExpression?: string;
+            }>)
+          : []),
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Report changed. Please retry.');
+      }
+
+      throw error;
+    }
     return toReport(nextReport);
+  }
+
+  private isConditionalWriteConflict(error: unknown): boolean {
+    const sourceErrors = [error];
+
+    if (
+      error &&
+      typeof error === 'object' &&
+      'cause' in error &&
+      (error as { cause?: unknown }).cause !== undefined
+    ) {
+      sourceErrors.push((error as { cause?: unknown }).cause);
+    }
+
+    return sourceErrors.some((sourceError) => {
+      if (!sourceError) {
+        return false;
+      }
+
+      const name =
+        typeof sourceError === 'object' &&
+        sourceError !== null &&
+        'name' in sourceError &&
+        typeof (sourceError as { name?: unknown }).name === 'string'
+          ? (sourceError as { name: string }).name
+          : '';
+      const message =
+        sourceError instanceof Error
+          ? sourceError.message
+          : typeof sourceError === 'string'
+            ? sourceError
+            : '';
+
+      return /ConditionalCheckFailed|TransactionCanceled/i.test(
+        [name, message].join(' '),
+      );
+    });
   }
 
   private async getReportOrThrow(reportId: string): Promise<StoredReport> {

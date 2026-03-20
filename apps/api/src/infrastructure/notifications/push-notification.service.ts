@@ -117,6 +117,13 @@ export class PushNotificationService
       makeUserPk(userId),
       makeUserPushDeviceSk(deviceId),
     );
+
+    await this.removeConflictingDeviceRegistrations(
+      userId,
+      deviceId,
+      pushToken,
+    );
+
     const nextDevice: StoredPushDevice = {
       PK: makeUserPk(userId),
       SK: makeUserPushDeviceSk(deviceId),
@@ -212,6 +219,42 @@ export class PushNotificationService
     return items.filter((item) => item.entityType === 'USER_PUSH_DEVICE');
   }
 
+  private async removeConflictingDeviceRegistrations(
+    userId: string,
+    deviceId: string,
+    pushToken: string,
+  ): Promise<void> {
+    const devices = await this.findDevicesByPushToken(pushToken);
+
+    for (const device of devices) {
+      if (device.userId === userId && device.deviceId === deviceId) {
+        continue;
+      }
+
+      await this.repository.delete(
+        this.config.dynamodbUsersTableName,
+        device.PK,
+        device.SK,
+      );
+      this.logger.warn(
+        'Removed conflicting push token registration for ' +
+          `${device.userId}/${device.deviceId}.`,
+      );
+    }
+  }
+
+  private async findDevicesByPushToken(
+    pushToken: string,
+  ): Promise<StoredPushDevice[]> {
+    const items = await this.repository.scanAll<StoredPushDevice>(
+      this.config.dynamodbUsersTableName,
+    );
+
+    return items.filter(
+      (item) =>
+        item.entityType === 'USER_PUSH_DEVICE' && item.pushToken === pushToken,
+    );
+  }
   private getPushOutboxShard(seed: string): number {
     const size = Math.max(this.config.pushOutboxShardCount, 1);
     let hash = 0;

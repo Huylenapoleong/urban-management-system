@@ -66,14 +66,14 @@ export class RealtimeRedisService implements OnApplicationShutdown {
       return {
         enabled: true,
         status: 'ok',
-        detail: `connected:${this.config.redisUrl}`,
+        detail: 'connected',
       };
     }
 
     return {
       enabled: true,
       status: 'error',
-      detail: this.lastError ?? `disconnected:${this.config.redisUrl}`,
+      detail: this.lastError ?? 'disconnected',
     };
   }
 
@@ -118,7 +118,26 @@ export class RealtimeRedisService implements OnApplicationShutdown {
       key: `${this.config.redisKeyPrefix}:socket.io`,
     });
     this.lastError = undefined;
-    this.logger.log(`Redis realtime adapter connected (${url}).`);
+    this.logger.log(
+      `Redis realtime adapter connected (${this.getSanitizedRedisTarget()}).`,
+    );
+  }
+
+  private getSanitizedRedisTarget(): string {
+    const rawUrl = this.config.redisUrl;
+
+    if (!rawUrl) {
+      return 'redis';
+    }
+
+    try {
+      const parsed = new URL(rawUrl);
+      return parsed.port
+        ? `${parsed.hostname}:${parsed.port}`
+        : parsed.hostname;
+    } catch {
+      return 'redis';
+    }
   }
 
   private async closeClient(client: RedisClient | undefined): Promise<void> {

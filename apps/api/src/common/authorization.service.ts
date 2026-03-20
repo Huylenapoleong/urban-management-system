@@ -19,7 +19,7 @@ export class AuthorizationService {
   }
 
   canAccessLocationScope(
-    user: AuthenticatedUser,
+    user: Pick<AuthenticatedUser, 'role' | 'locationCode'>,
     locationCode: string,
   ): boolean {
     switch (user.role) {
@@ -35,10 +35,15 @@ export class AuthorizationService {
   }
 
   canReadUser(actor: AuthenticatedUser, target: StoredUser): boolean {
-    return (
-      actor.id === target.userId ||
-      this.canAccessLocationScope(actor, target.locationCode)
-    );
+    if (actor.id === target.userId) {
+      return true;
+    }
+
+    if (actor.role === 'CITIZEN') {
+      return false;
+    }
+
+    return this.canAccessLocationScope(actor, target.locationCode);
   }
 
   canManageUser(actor: AuthenticatedUser, target: StoredUser): boolean {
@@ -125,25 +130,14 @@ export class AuthorizationService {
 
   canManageGroup(
     actor: AuthenticatedUser,
-    group: StoredGroup,
+    _group: StoredGroup,
     roleInGroup?: GroupMemberRole,
   ): boolean {
     if (actor.role === 'ADMIN') {
       return true;
     }
 
-    if (roleInGroup === 'OWNER' || roleInGroup === 'OFFICER') {
-      return true;
-    }
-
-    if (actor.role === 'CITIZEN') {
-      return false;
-    }
-
-    return (
-      group.groupType !== 'PRIVATE' &&
-      this.canAccessLocationScope(actor, group.locationCode)
-    );
+    return roleInGroup === 'OWNER' || roleInGroup === 'OFFICER';
   }
 
   canJoinGroup(actor: AuthenticatedUser, group: StoredGroup): boolean {
@@ -160,10 +154,10 @@ export class AuthorizationService {
 
   canDeleteGroup(
     actor: AuthenticatedUser,
-    group: StoredGroup,
+    _group: StoredGroup,
     roleInGroup?: GroupMemberRole,
   ): boolean {
-    return this.canManageGroup(actor, group, roleInGroup);
+    return actor.role === 'ADMIN' || roleInGroup === 'OWNER';
   }
 
   canReadReport(actor: AuthenticatedUser, report: StoredReport): boolean {
@@ -207,23 +201,46 @@ export class AuthorizationService {
       return false;
     }
 
-    if (officer.role === 'CITIZEN') {
+    if (
+      officer.role === 'CITIZEN' ||
+      officer.deletedAt ||
+      officer.status !== 'ACTIVE'
+    ) {
       return false;
     }
 
-    return this.canAccessLocationScope(actor, officer.locationCode);
+    return (
+      this.canAccessLocationScope(actor, officer.locationCode) &&
+      this.canAccessLocationScope(officer, report.locationCode)
+    );
   }
 
-  canTransitionReport(actor: AuthenticatedUser, report: StoredReport): boolean {
+  canTransitionReport(
+    actor: AuthenticatedUser,
+    report: StoredReport,
+    nextStatus: StoredReport['status'],
+  ): boolean {
+    if (nextStatus === report.status) {
+      return false;
+    }
+
     if (actor.role === 'ADMIN') {
-      return true;
+      return this.isAllowedReportStatusTransition(report.status, nextStatus);
     }
 
     if (actor.role === 'CITIZEN') {
-      return actor.id === report.userId && report.status === 'RESOLVED';
+      return (
+        actor.id === report.userId &&
+        report.status === 'RESOLVED' &&
+        nextStatus === 'CLOSED'
+      );
     }
 
-    return this.canAccessLocationScope(actor, report.locationCode);
+    if (!this.canAccessLocationScope(actor, report.locationCode)) {
+      return false;
+    }
+
+    return this.isAllowedReportStatusTransition(report.status, nextStatus);
   }
 
   canDeleteReport(actor: AuthenticatedUser, report: StoredReport): boolean {
@@ -235,8 +252,57 @@ export class AuthorizationService {
 
   canAccessDirectConversation(
     actor: AuthenticatedUser,
-    participantIds: string[],
+    target: StoredUser,
   ): boolean {
-    return actor.role === 'ADMIN' || participantIds.includes(actor.id);
+    if (actor.id === target.userId || target.deletedAt) {
+      return false;
+    }
+
+    if (actor.role === 'ADMIN') {
+      return true;
+    }
+
+    if (target.role === 'ADMIN') {
+      return actor.role !== 'CITIZEN';
+    }
+
+    if (actor.role === 'CITIZEN') {
+      return (
+        target.role !== 'CITIZEN' &&
+        this.canAccessLocationScope(target, actor.locationCode)
+      );
+    }
+
+    if (target.role === 'CITIZEN') {
+      return this.canAccessLocationScope(actor, target.locationCode);
+    }
+
+    return (
+      this.canAccessLocationScope(actor, target.locationCode) ||
+      this.canAccessLocationScope(target, actor.locationCode)
+    );
+  }
+
+  private isAllowedReportStatusTransition(
+    currentStatus: StoredReport['status'],
+    nextStatus: StoredReport['status'],
+  ): boolean {
+    switch (currentStatus) {
+      case 'NEW':
+        return (
+          nextStatus === 'IN_PROGRESS' ||
+          nextStatus === 'RESOLVED' ||
+          nextStatus === 'REJECTED'
+        );
+      case 'IN_PROGRESS':
+        return nextStatus === 'RESOLVED' || nextStatus === 'REJECTED';
+      case 'RESOLVED':
+        return nextStatus === 'IN_PROGRESS' || nextStatus === 'CLOSED';
+      case 'REJECTED':
+        return nextStatus === 'IN_PROGRESS';
+      case 'CLOSED':
+      default:
+        return false;
+    }
   }
 }

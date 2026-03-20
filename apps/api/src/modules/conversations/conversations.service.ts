@@ -236,10 +236,28 @@ export class ConversationsService {
       updatedAt: nowIso(),
     };
 
-    await this.repository.put(
-      this.config.dynamodbConversationsTableName,
-      nextConversation,
-    );
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: nextConversation,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': current.updatedAt,
+          },
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException(
+          'Conversation preferences changed. Please retry.',
+        );
+      }
+
+      throw error;
+    }
+
     this.conversationDispatchService.emitConversationSummaryUpdated(
       createUlid(),
       actor.id,
@@ -251,7 +269,6 @@ export class ConversationsService {
 
     return this.serializeConversationSummary(actor.id, nextConversation);
   }
-
   async resolveConversationAccess(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -376,10 +393,17 @@ export class ConversationsService {
       minLength: 5,
       maxLength: 50,
     });
-    const targetUser = await this.usersService.getByIdOrThrow(targetUserId);
+    const targetUser =
+      await this.usersService.getActiveByIdOrThrow(targetUserId);
 
     if (targetUser.userId === actor.id) {
       throw new BadRequestException('Cannot create DM with yourself.');
+    }
+
+    if (
+      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
+    ) {
+      throw new ForbiddenException('You cannot access this conversation.');
     }
 
     const conversationId = makeDmConversationId(actor.id, targetUser.userId);
@@ -630,51 +654,76 @@ export class ConversationsService {
       metadata: { type: nextMessage.type },
     });
 
-    await this.repository.transactPut([
-      {
-        tableName: this.config.dynamodbMessagesTableName,
-        item: nextMessage,
-        conditionExpression: 'attribute_exists(PK) AND attribute_exists(SK)',
-      },
-      {
-        tableName: this.config.dynamodbConversationsTableName,
-        item: outboxRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-      {
-        tableName: this.config.dynamodbConversationsTableName,
-        item: auditRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-    ]);
-    const syncResult =
-      await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
-        access,
-      );
-    this.conversationDispatchService.emitMessageUpdated(
-      outboxRecord.eventId,
-      actor.id,
-      nextMessage,
-      access.conversationKey,
-      syncResult,
-    );
-    await this.chatOutboxService
-      .deleteChatOutboxEvent(outboxRecord)
-      .catch((error: unknown) => {
-        const message =
-          error instanceof Error ? error.message : 'Unknown error.';
-        this.logger.warn(
-          `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
-        );
-      });
-    return this.serializeMessage(actor.id, nextMessage, {
-      participantIds: syncResult.participantIds,
-      summariesByUser: syncResult.summariesByUser,
-    });
-  }
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbMessagesTableName,
+          item: nextMessage,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': message.updatedAt,
+            ':expectedDeletedAt': message.deletedAt,
+          },
+        },
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: outboxRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Message changed. Please retry.');
+      }
 
+      throw error;
+    }
+
+    try {
+      const syncResult =
+        await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
+          access,
+        );
+      this.conversationDispatchService.emitMessageUpdated(
+        outboxRecord.eventId,
+        actor.id,
+        nextMessage,
+        access.conversationKey,
+        syncResult,
+      );
+      await this.chatOutboxService
+        .deleteChatOutboxEvent(outboxRecord)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : 'Unknown error.';
+          this.logger.warn(
+            `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
+          );
+        });
+      return this.serializeMessage(actor.id, nextMessage, {
+        participantIds: syncResult.participantIds,
+        summariesByUser: syncResult.summariesByUser,
+      });
+    } catch (error) {
+      this.logDeferredChatOutboxEvent(
+        outboxRecord.eventId,
+        outboxRecord.eventName,
+        error,
+      );
+      return this.serializeMessage(actor.id, nextMessage, {
+        participantIds: access.participants,
+        summariesByUser: new Map<string, StoredConversation>(),
+      });
+    }
+  }
   async deleteMessage(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -714,51 +763,76 @@ export class ConversationsService {
       metadata: { type: nextMessage.type },
     });
 
-    await this.repository.transactPut([
-      {
-        tableName: this.config.dynamodbMessagesTableName,
-        item: nextMessage,
-        conditionExpression: 'attribute_exists(PK) AND attribute_exists(SK)',
-      },
-      {
-        tableName: this.config.dynamodbConversationsTableName,
-        item: outboxRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-      {
-        tableName: this.config.dynamodbConversationsTableName,
-        item: auditRecord,
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      },
-    ]);
-    const syncResult =
-      await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
-        access,
-      );
-    this.conversationDispatchService.emitMessageDeleted(
-      outboxRecord.eventId,
-      actor.id,
-      nextMessage,
-      access.conversationKey,
-      syncResult,
-    );
-    await this.chatOutboxService
-      .deleteChatOutboxEvent(outboxRecord)
-      .catch((error: unknown) => {
-        const message =
-          error instanceof Error ? error.message : 'Unknown error.';
-        this.logger.warn(
-          `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
-        );
-      });
-    return this.serializeMessage(actor.id, nextMessage, {
-      participantIds: syncResult.participantIds,
-      summariesByUser: syncResult.summariesByUser,
-    });
-  }
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbMessagesTableName,
+          item: nextMessage,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': message.updatedAt,
+            ':expectedDeletedAt': message.deletedAt,
+          },
+        },
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: outboxRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Message changed. Please retry.');
+      }
 
+      throw error;
+    }
+
+    try {
+      const syncResult =
+        await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
+          access,
+        );
+      this.conversationDispatchService.emitMessageDeleted(
+        outboxRecord.eventId,
+        actor.id,
+        nextMessage,
+        access.conversationKey,
+        syncResult,
+      );
+      await this.chatOutboxService
+        .deleteChatOutboxEvent(outboxRecord)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : 'Unknown error.';
+          this.logger.warn(
+            `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
+          );
+        });
+      return this.serializeMessage(actor.id, nextMessage, {
+        participantIds: syncResult.participantIds,
+        summariesByUser: syncResult.summariesByUser,
+      });
+    } catch (error) {
+      this.logDeferredChatOutboxEvent(
+        outboxRecord.eventId,
+        outboxRecord.eventName,
+        error,
+      );
+      return this.serializeMessage(actor.id, nextMessage, {
+        participantIds: access.participants,
+        summariesByUser: new Map<string, StoredConversation>(),
+      });
+    }
+  }
   private async createMessage(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -930,34 +1004,46 @@ export class ConversationsService {
       throw error;
     }
 
-    const summariesByUser =
-      await this.conversationSummaryService.upsertConversationSummaries(
-        conversationId,
-        participants,
-        message,
-      );
-    this.conversationDispatchService.emitMessageCreated(
-      outboxRecord.eventId,
-      actor.id,
-      message,
-      participants,
-      summariesByUser,
-      clientMessageId,
-    );
-    await this.chatOutboxService
-      .deleteChatOutboxEvent(outboxRecord)
-      .catch((error: unknown) => {
-        const message =
-          error instanceof Error ? error.message : 'Unknown error.';
-        this.logger.warn(
-          `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
+    try {
+      const summariesByUser =
+        await this.conversationSummaryService.upsertConversationSummaries(
+          conversationId,
+          participants,
+          message,
         );
-      });
+      this.conversationDispatchService.emitMessageCreated(
+        outboxRecord.eventId,
+        actor.id,
+        message,
+        participants,
+        summariesByUser,
+        clientMessageId,
+      );
+      await this.chatOutboxService
+        .deleteChatOutboxEvent(outboxRecord)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : 'Unknown error.';
+          this.logger.warn(
+            `Failed to delete chat outbox event ${outboxRecord.eventId}: ${message}`,
+          );
+        });
 
-    return this.serializeMessage(actor.id, message, {
-      participantIds: participants,
-      summariesByUser,
-    });
+      return this.serializeMessage(actor.id, message, {
+        participantIds: participants,
+        summariesByUser,
+      });
+    } catch (error) {
+      this.logDeferredChatOutboxEvent(
+        outboxRecord.eventId,
+        outboxRecord.eventName,
+        error,
+      );
+      return this.serializeMessage(actor.id, message, {
+        participantIds: participants,
+        summariesByUser: new Map<string, StoredConversation>(),
+      });
+    }
   }
 
   private async ensureReplyTargetAvailable(
@@ -1243,6 +1329,35 @@ export class ConversationsService {
     );
   }
 
+  private isConditionalWriteConflict(error: unknown): boolean {
+    const messages = [this.errorText(error)];
+    const cause = error instanceof Error ? error.cause : undefined;
+
+    messages.push(this.errorText(cause));
+
+    if (cause && typeof cause === 'object' && 'name' in cause) {
+      const causeName = (cause as { name?: unknown }).name;
+
+      if (typeof causeName === 'string') {
+        messages.push(causeName);
+      }
+    }
+
+    return messages.some((message) =>
+      /ConditionalCheckFailed|TransactionCanceled/i.test(message),
+    );
+  }
+
+  private logDeferredChatOutboxEvent(
+    eventId: string,
+    eventName: StoredChatOutboxEvent['eventName'],
+    error: unknown,
+  ): void {
+    const message = error instanceof Error ? error.message : 'Unknown error.';
+    this.logger.warn(
+      `Deferred ${eventName} replay to chat outbox for ${eventId}: ${message}`,
+    );
+  }
   private errorText(value: unknown): string {
     if (value instanceof Error) {
       return value.message;
@@ -1396,6 +1511,12 @@ export class ConversationsService {
     }
 
     const targetUser = await this.usersService.getByIdOrThrow(targetUserId);
+
+    if (
+      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
+    ) {
+      throw new ForbiddenException('You cannot access this conversation.');
+    }
 
     if (targetUser.userId === actor.id) {
       throw new BadRequestException('Cannot create DM with yourself.');
@@ -1580,11 +1701,15 @@ export class ConversationsService {
       throw new BadRequestException('Invalid DM conversation id.');
     }
 
+    const otherParticipantId =
+      participantIds.find((participantId) => participantId !== actor.id) ??
+      participantIds[0];
+    const targetUser = requireSendAccess
+      ? await this.usersService.getActiveByIdOrThrow(otherParticipantId)
+      : await this.usersService.getByIdOrThrow(otherParticipantId);
+
     if (
-      !this.authorizationService.canAccessDirectConversation(
-        actor,
-        participantIds,
-      )
+      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
     ) {
       throw new ForbiddenException('You cannot access this conversation.');
     }

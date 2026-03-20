@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -34,10 +36,8 @@ import {
 } from '../../common/pagination';
 import { toGroupMetadata, toMembership } from '../../common/mappers';
 import type {
-  StoredConversation,
   StoredGroup,
   StoredMembership,
-  StoredReport,
 } from '../../common/storage-records';
 import {
   ensureLocationCode,
@@ -53,14 +53,18 @@ import {
 } from '../../common/validation';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { GroupCleanupService } from './group-cleanup.service';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class GroupsService {
+  private readonly logger = new Logger(GroupsService.name);
+
   constructor(
     private readonly repository: UrbanTableRepository,
     private readonly authorizationService: AuthorizationService,
     private readonly usersService: UsersService,
+    private readonly groupCleanupService: GroupCleanupService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -124,11 +128,20 @@ export class GroupsService {
       updatedAt: now,
     };
 
-    await this.repository.put(this.config.dynamodbGroupsTableName, group);
-    await this.repository.put(
-      this.config.dynamodbMembershipsTableName,
-      ownerMembership,
-    );
+    await this.repository.transactPut([
+      {
+        tableName: this.config.dynamodbGroupsTableName,
+        item: group,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbMembershipsTableName,
+        item: ownerMembership,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+    ]);
 
     return toGroupMetadata(group);
   }
@@ -178,6 +191,7 @@ export class GroupsService {
     }
 
     const filtered = groups
+      .filter((group) => group.entityType === 'GROUP_METADATA')
       .filter((group) => !group.deletedAt)
       .filter((group) =>
         this.authorizationService.canReadGroup(
@@ -293,7 +307,25 @@ export class GroupsService {
       updatedAt: nowIso(),
     };
 
-    await this.repository.put(this.config.dynamodbGroupsTableName, nextGroup);
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbGroupsTableName,
+          item: nextGroup,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': group.updatedAt,
+          },
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Group changed. Please retry.');
+      }
+
+      throw error;
+    }
     return toGroupMetadata(nextGroup);
   }
 
@@ -321,14 +353,51 @@ export class GroupsService {
       memberCount: 0,
       updatedAt: deletedAt,
     };
+    const cleanupTask = this.groupCleanupService.buildGroupDeleteCleanupTask(
+      groupId,
+      deletedAt,
+    );
 
-    await this.repository.put(this.config.dynamodbGroupsTableName, nextGroup);
-    await this.softDeleteMembershipsForGroup(groupId, deletedAt);
-    await this.softDeleteConversationSummariesForGroup(groupId, deletedAt);
-    await this.detachReportsFromGroup(groupId, deletedAt);
+    try {
+      await this.repository.transactWrite([
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbGroupsTableName,
+          item: nextGroup,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': group.updatedAt,
+          },
+        },
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbGroupsTableName,
+          item: cleanupTask,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Group changed. Please retry.');
+      }
+
+      throw error;
+    }
+
+    try {
+      await this.groupCleanupService.processTask(cleanupTask);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error.';
+      this.logger.warn(
+        'Group cleanup deferred for ' + groupId + ': ' + message,
+      );
+    }
 
     return toGroupMetadata(nextGroup);
   }
+
   async joinGroup(
     actor: AuthenticatedUser,
     groupId: string,
@@ -359,11 +428,25 @@ export class GroupsService {
       updatedAt: now,
     };
 
-    await this.repository.put(
-      this.config.dynamodbMembershipsTableName,
+    const nextGroup: StoredGroup = {
+      ...group,
+      memberCount: group.memberCount + 1,
+      updatedAt: now,
+    };
+
+    await this.writeGroupMembershipTransaction({
+      group,
+      nextGroup,
       membership,
-    );
-    await this.syncMemberCount(group);
+      membershipConditionExpression: existingMembership
+        ? 'attribute_exists(PK) AND attribute_exists(SK) AND deletedAt = :expectedDeletedAt'
+        : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      membershipExpressionAttributeValues: existingMembership
+        ? {
+            ':expectedDeletedAt': existingMembership.deletedAt,
+          }
+        : undefined,
+    });
 
     return toMembership(membership);
   }
@@ -389,11 +472,23 @@ export class GroupsService {
       updatedAt: nowIso(),
     };
 
-    await this.repository.put(
-      this.config.dynamodbMembershipsTableName,
-      nextMembership,
-    );
-    await this.syncMemberCount(group);
+    const nextGroup: StoredGroup = {
+      ...group,
+      memberCount: Math.max(group.memberCount - 1, 0),
+      updatedAt: nextMembership.updatedAt,
+    };
+
+    await this.writeGroupMembershipTransaction({
+      group,
+      nextGroup,
+      membership: nextMembership,
+      membershipConditionExpression:
+        'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+      membershipExpressionAttributeValues: {
+        ':expectedUpdatedAt': membership.updatedAt,
+        ':expectedDeletedAt': null,
+      },
+    });
 
     return toMembership(nextMembership);
   }
@@ -445,9 +540,20 @@ export class GroupsService {
       throw new ForbiddenException('You cannot manage members of this group.');
     }
 
-    await this.usersService.getByIdOrThrow(userId);
+    const existingMembership = await this.getMembership(groupId, userId);
 
     if (action === 'add') {
+      await this.usersService.getActiveByIdOrThrow(userId);
+      if (existingMembership && !existingMembership.deletedAt) {
+        throw new BadRequestException('Membership already exists.');
+      }
+
+      if (roleInGroup === 'OWNER') {
+        throw new ForbiddenException(
+          'Owner role cannot be assigned via member management.',
+        );
+      }
+
       const now = nowIso();
       const membership: StoredMembership = {
         PK: makeGroupPk(groupId),
@@ -457,30 +563,55 @@ export class GroupsService {
         GSI1SK: makeUserGroupsSk(groupId, now),
         groupId,
         userId,
-        roleInGroup: roleInGroup ?? 'MEMBER',
-        joinedAt: now,
+        roleInGroup: roleInGroup ?? existingMembership?.roleInGroup ?? 'MEMBER',
+        joinedAt: existingMembership?.joinedAt ?? now,
         deletedAt: null,
         updatedAt: now,
       };
 
-      await this.repository.put(
-        this.config.dynamodbMembershipsTableName,
+      const nextGroup: StoredGroup = {
+        ...group,
+        memberCount: group.memberCount + 1,
+        updatedAt: now,
+      };
+
+      await this.writeGroupMembershipTransaction({
+        group,
+        nextGroup,
         membership,
-      );
-      await this.syncMemberCount(group);
+        membershipConditionExpression: existingMembership
+          ? 'attribute_exists(PK) AND attribute_exists(SK) AND deletedAt = :expectedDeletedAt'
+          : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        membershipExpressionAttributeValues: existingMembership
+          ? {
+              ':expectedDeletedAt': existingMembership.deletedAt,
+            }
+          : undefined,
+      });
       return toMembership(membership);
     }
-
-    const existingMembership = await this.getMembership(groupId, userId);
 
     if (!existingMembership || existingMembership.deletedAt) {
       throw new NotFoundException('Membership not found.');
     }
 
     if (action === 'update') {
+      await this.usersService.getActiveByIdOrThrow(userId);
       if (!roleInGroup) {
         throw new BadRequestException(
           'roleInGroup is required for update action.',
+        );
+      }
+
+      if (roleInGroup === 'OWNER') {
+        throw new ForbiddenException(
+          'Owner role cannot be assigned via member management.',
+        );
+      }
+
+      if (existingMembership.roleInGroup === 'OWNER') {
+        throw new BadRequestException(
+          'Owner role cannot be changed via member management.',
         );
       }
 
@@ -490,14 +621,21 @@ export class GroupsService {
         updatedAt: nowIso(),
       };
 
-      await this.repository.put(
-        this.config.dynamodbMembershipsTableName,
-        nextMembership,
-      );
+      await this.writeGroupMembershipTransaction({
+        group,
+        membership: nextMembership,
+        membershipConditionExpression:
+          'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+        membershipExpressionAttributeValues: {
+          ':expectedUpdatedAt': existingMembership.updatedAt,
+          ':expectedDeletedAt': null,
+        },
+      });
       return toMembership(nextMembership);
     }
 
     if (action === 'remove') {
+      await this.usersService.getByIdOrThrow(userId);
       if (existingMembership.roleInGroup === 'OWNER') {
         throw new BadRequestException('Owner cannot be removed directly.');
       }
@@ -508,100 +646,106 @@ export class GroupsService {
         updatedAt: nowIso(),
       };
 
-      await this.repository.put(
-        this.config.dynamodbMembershipsTableName,
-        nextMembership,
-      );
-      await this.syncMemberCount(group);
+      const nextGroup: StoredGroup = {
+        ...group,
+        memberCount: Math.max(group.memberCount - 1, 0),
+        updatedAt: nextMembership.updatedAt,
+      };
+
+      await this.writeGroupMembershipTransaction({
+        group,
+        nextGroup,
+        membership: nextMembership,
+        membershipConditionExpression:
+          'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+        membershipExpressionAttributeValues: {
+          ':expectedUpdatedAt': existingMembership.updatedAt,
+          ':expectedDeletedAt': null,
+        },
+      });
       return toMembership(nextMembership);
     }
 
     throw new BadRequestException('Unsupported action.');
   }
+  private async writeGroupMembershipTransaction(input: {
+    group: StoredGroup;
+    nextGroup?: StoredGroup;
+    membership: StoredMembership;
+    membershipConditionExpression: string;
+    membershipExpressionAttributeValues?: Record<string, unknown>;
+  }): Promise<void> {
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbMembershipsTableName,
+        item: input.membership,
+        conditionExpression: input.membershipConditionExpression,
+        expressionAttributeValues: input.membershipExpressionAttributeValues,
+      },
+    ];
 
-  private async softDeleteMembershipsForGroup(
-    groupId: string,
-    deletedAt: string,
-  ): Promise<void> {
-    const memberships = await this.queryGroupMemberships(groupId);
+    if (input.nextGroup) {
+      transactionItems.push({
+        kind: 'put',
+        tableName: this.config.dynamodbGroupsTableName,
+        item: input.nextGroup,
+        conditionExpression:
+          'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+        expressionAttributeValues: {
+          ':expectedUpdatedAt': input.group.updatedAt,
+        },
+      });
+    }
 
-    for (const membership of memberships) {
-      if (membership.deletedAt) {
-        continue;
+    try {
+      await this.repository.transactWrite(transactionItems);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Group membership changed. Please retry.');
       }
 
-      const nextMembership: StoredMembership = {
-        ...membership,
-        deletedAt,
-        updatedAt: deletedAt,
-      };
-
-      await this.repository.put(
-        this.config.dynamodbMembershipsTableName,
-        nextMembership,
-      );
+      throw error;
     }
   }
 
-  private async softDeleteConversationSummariesForGroup(
-    groupId: string,
-    deletedAt: string,
-  ): Promise<void> {
-    const conversationId = `GRP#${groupId}`;
-    const summaries = await this.repository.scanAll<StoredConversation>(
-      this.config.dynamodbConversationsTableName,
-    );
+  private isConditionalWriteConflict(error: unknown): boolean {
+    const sourceErrors = [error];
 
-    for (const summary of summaries) {
-      if (
-        summary.entityType !== 'CONVERSATION' ||
-        summary.conversationId !== conversationId ||
-        summary.deletedAt
-      ) {
-        continue;
+    if (
+      error &&
+      typeof error === 'object' &&
+      'cause' in error &&
+      (error as { cause?: unknown }).cause !== undefined
+    ) {
+      sourceErrors.push((error as { cause?: unknown }).cause);
+    }
+
+    return sourceErrors.some((sourceError) => {
+      if (!sourceError) {
+        return false;
       }
 
-      const nextSummary: StoredConversation = {
-        ...summary,
-        deletedAt,
-        updatedAt: deletedAt,
-      };
+      const name =
+        typeof sourceError === 'object' &&
+        sourceError !== null &&
+        'name' in sourceError &&
+        typeof (sourceError as { name?: unknown }).name === 'string'
+          ? (sourceError as { name: string }).name
+          : '';
+      const message =
+        sourceError instanceof Error
+          ? sourceError.message
+          : typeof sourceError === 'string'
+            ? sourceError
+            : '';
 
-      await this.repository.put(
-        this.config.dynamodbConversationsTableName,
-        nextSummary,
+      return /ConditionalCheckFailed|TransactionCanceled/i.test(
+        [name, message].join(' '),
       );
-    }
-  }
-
-  private async detachReportsFromGroup(
-    groupId: string,
-    updatedAt: string,
-  ): Promise<void> {
-    const reports = await this.repository.scanAll<StoredReport>(
-      this.config.dynamodbReportsTableName,
-    );
-
-    for (const report of reports) {
-      if (
-        report.entityType !== 'REPORT' ||
-        report.groupId !== groupId ||
-        report.deletedAt
-      ) {
-        continue;
-      }
-
-      const nextReport: StoredReport = {
-        ...report,
-        groupId: undefined,
-        updatedAt,
-      };
-
-      await this.repository.put(
-        this.config.dynamodbReportsTableName,
-        nextReport,
-      );
-    }
+    });
   }
 
   async getMembership(
@@ -685,18 +829,5 @@ export class GroupsService {
         beginsWith: 'MEMBER#',
       },
     );
-  }
-
-  private async syncMemberCount(group: StoredGroup): Promise<void> {
-    const activeMembers = (
-      await this.queryGroupMemberships(group.groupId)
-    ).filter((membership) => !membership.deletedAt);
-    const nextGroup: StoredGroup = {
-      ...group,
-      memberCount: activeMembers.length,
-      updatedAt: nowIso(),
-    };
-
-    await this.repository.put(this.config.dynamodbGroupsTableName, nextGroup);
   }
 }
