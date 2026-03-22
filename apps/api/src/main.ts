@@ -50,8 +50,12 @@ async function bootstrap() {
     new AppSocketIoAdapter(app, config, realtimeRedisService),
   );
   app.setGlobalPrefix(config.apiPrefix);
+  // app.enableCors({
+  //   origin: config.corsOriginSetting,
+  //   credentials: true,
+  // });
   app.enableCors({
-    origin: config.corsOriginSetting,
+    origin: true,
     credentials: true,
   });
   app.useGlobalPipes(

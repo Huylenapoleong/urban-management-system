@@ -45,6 +45,7 @@ import {
   optionalQueryString,
   optionalString,
   optionalStringArray,
+  parseLocationCodeQuery,
   parseBooleanQuery,
   parseEnumQuery,
   parseIsoDateQuery,
@@ -176,7 +177,7 @@ export class ReportsService {
       query.assignedOfficerId,
       'assignedOfficerId',
     );
-    const locationCode = optionalQueryString(
+    const locationCode = parseLocationCodeQuery(
       query.locationCode,
       'locationCode',
     );
@@ -229,6 +230,7 @@ export class ReportsService {
     }
 
     const filtered = reports
+      .filter((report) => report.entityType === 'REPORT')
       .filter((report) => !report.deletedAt)
       .filter((report) =>
         this.authorizationService.canReadReport(actor, report),

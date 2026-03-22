@@ -188,6 +188,19 @@ export function parseEnumQuery<T extends string>(
   return raw as T;
 }
 
+export function parseLocationCodeQuery(
+  value: unknown,
+  field: string,
+): string | undefined {
+  const raw = optionalQueryString(value, field);
+
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  return ensureLocationCode(raw, field);
+}
+
 export function parseIsoDateQuery(
   value: unknown,
   field: string,
@@ -274,9 +287,11 @@ export function ensureLocationCode(
   locationCode: string,
   field = 'locationCode',
 ): string {
-  if (!LOCATION_CODE_PATTERN.test(locationCode)) {
+  const normalized = locationCode.trim().toUpperCase();
+
+  if (!LOCATION_CODE_PATTERN.test(normalized)) {
     throw new BadRequestException(`${field} is invalid.`);
   }
 
-  return locationCode;
+  return normalized;
 }
