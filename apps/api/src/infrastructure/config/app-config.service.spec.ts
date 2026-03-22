@@ -15,6 +15,7 @@ describe('AppConfigService', () => {
     process.env.CORS_ORIGIN = 'http://localhost:5173, http://localhost:8081/';
     process.env.JWT_ACCESS_SECRET = 'a'.repeat(32);
     process.env.JWT_REFRESH_SECRET = 'b'.repeat(32);
+    delete process.env.SWAGGER_ENABLED;
 
     const config = new AppConfigService();
 
@@ -32,6 +33,7 @@ describe('AppConfigService', () => {
     process.env.NODE_ENV = 'production';
     process.env.JWT_ACCESS_SECRET = 'a'.repeat(32);
     process.env.JWT_REFRESH_SECRET = 'b'.repeat(32);
+    delete process.env.SWAGGER_ENABLED;
 
     const config = new AppConfigService();
 
