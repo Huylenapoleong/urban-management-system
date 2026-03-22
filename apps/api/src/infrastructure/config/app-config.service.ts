@@ -223,6 +223,14 @@ export class AppConfigService {
     10 * 60 * 1000,
   );
 
+  // === AI Chatbot (Groq + KnowledgeBase) ===
+  readonly groqApiKey = process.env.GROQ_API_KEY ?? '';
+  readonly groqModel = process.env.GROQ_MODEL ?? 'llama-3.1-8b-instant';
+  readonly groqTimeoutMs = readNumber('GROQ_TIMEOUT_MS', 15000);
+  readonly dynamodbKnowledgeTableName =
+    process.env.DYNAMODB_KNOWLEDGE_TABLE_NAME ?? 'KnowledgeBase';
+  readonly chatbotMaxContextDocs = readNumber('CHATBOT_MAX_CONTEXT_DOCS', 5);
+
   readonly s3BucketName = process.env.S3_BUCKET_NAME ?? '';
   readonly s3Endpoint = process.env.S3_ENDPOINT || undefined;
   readonly s3PublicBaseUrl = process.env.S3_PUBLIC_BASE_URL || undefined;
@@ -362,6 +370,10 @@ export class AppConfigService {
 
     if (!ALLOWED_PUSH_PROVIDERS.has(this.pushProvider)) {
       throw new Error('PUSH_PROVIDER must be one of: disabled, log, webhook.');
+    }
+
+    if (this.isProduction && !this.groqApiKey.trim()) {
+      throw new Error('GROQ_API_KEY is required in production.');
     }
 
     if (this.pushProvider === 'webhook' && !this.pushWebhookUrl) {
