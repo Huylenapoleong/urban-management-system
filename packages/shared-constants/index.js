@@ -79,7 +79,7 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
 
 const PHONE_PATTERN = /^0\d{9,10}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
-const LOCATION_CODE_PATTERN = /^VN-[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+$/;
+const LOCATION_CODE_PATTERN = /^VN(?:-[A-Z0-9]+){1,3}$/;
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
