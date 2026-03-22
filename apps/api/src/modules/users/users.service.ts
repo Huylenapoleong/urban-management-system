@@ -33,6 +33,7 @@ import {
   ensureLocationCode,
   ensureObject,
   optionalQueryString,
+  parseLocationCodeQuery,
   optionalString,
   parseLimit,
   requirePhoneOrEmail,
@@ -237,7 +238,7 @@ export class UsersService {
       .filter((user) => this.authorizationService.canReadUser(actor, user));
     const role = optionalQueryString(query.role, 'role');
     const status = optionalQueryString(query.status, 'status');
-    const locationCode = optionalQueryString(
+    const locationCode = parseLocationCodeQuery(
       query.locationCode,
       'locationCode',
     );

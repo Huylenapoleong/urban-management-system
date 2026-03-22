@@ -45,6 +45,7 @@ import {
   optionalBoolean,
   optionalEnum,
   optionalQueryString,
+  parseLocationCodeQuery,
   optionalString,
   parseBooleanQuery,
   parseLimit,
@@ -152,7 +153,7 @@ export class GroupsService {
   ): Promise<ApiSuccessResponse<GroupMetadata[], ApiResponseMeta>> {
     const mine = parseBooleanQuery(query.mine, 'mine') ?? false;
     const groupType = optionalQueryString(query.groupType, 'groupType');
-    const locationCode = optionalQueryString(
+    const locationCode = parseLocationCodeQuery(
       query.locationCode,
       'locationCode',
     );
