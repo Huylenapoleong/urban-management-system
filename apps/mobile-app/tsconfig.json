@@ -8,7 +8,10 @@
       ],
       "@/assets/*": [
         "./assets/*"
-      ]
+      ],
+      "@urban/shared-constants": ["../../packages/shared-constants"],
+      "@urban/shared-types": ["../../packages/shared-types"],
+      "@urban/shared-utils": ["../../packages/shared-utils"]
     }
   },
   "include": [
