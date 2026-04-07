@@ -9,27 +9,32 @@ interface ReportCardProps {
   onPress?: (id: string) => void;
 }
 
-const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  NEW: { color: '#f44336', label: 'Chờ xử lý' },
-  IN_PROGRESS: { color: '#ff9800', label: 'Đang xử lý' },
-  RESOLVED: { color: '#4caf50', label: 'Đã giải quyết' },
-  REJECTED: { color: '#9e9e9e', label: 'Từ chối' },
+const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
+  NEW: { bg: '#ffcdd2', text: '#d32f2f', label: 'MỚI' },
+  IN_PROGRESS: { bg: '#ffe0b2', text: '#f57c00', label: 'XỬ LÝ' },
+  RESOLVED: { bg: '#c8e6c9', text: '#388e3c', label: 'XONG' },
+  REJECTED: { bg: '#e0e0e0', text: '#616161', label: 'TỪ CHỐI' },
 };
 
 export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
   const theme = useTheme();
-  const statusConfig = STATUS_CONFIG[report.status] || { color: theme.colors.surfaceVariant, label: report.status };
+  const statusConfig = STATUS_CONFIG[report.status] || { bg: '#f5f5f5', text: '#666', label: report.status };
 
   return (
-    <Card style={styles.card} onPress={() => onPress?.(report.id)} mode="elevated">
-      <Card.Content>
+    <Card 
+      style={styles.card} 
+      onPress={() => onPress?.(report.id)} 
+      mode="elevated" 
+      elevation={1}
+    >
+      <Card.Content style={{ padding: 16 }}>
         <View style={styles.header}>
-          <Text variant="titleMedium" style={styles.title} numberOfLines={2}>
+          <Text variant="titleMedium" style={styles.title} numberOfLines={1}>
             {report.title}
           </Text>
           <Chip
-            textStyle={{ color: '#fff', fontSize: 12 }}
-            style={{ backgroundColor: statusConfig.color }}
+            textStyle={{ color: statusConfig.text, fontSize: 11, fontWeight: '900' }}
+            style={{ backgroundColor: statusConfig.bg, height: 26, borderRadius: 12, borderWidth: 0 }}
             compact
           >
             {statusConfig.label}
@@ -37,9 +42,9 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
         </View>
 
         <View style={styles.row}>
-          <MaterialCommunityIcons name="map-marker" size={16} color={theme.colors.onSurfaceVariant} />
+          <MaterialCommunityIcons name="map-marker-radius" size={16} color="#607d8b" />
           <Text variant="bodySmall" style={styles.address} numberOfLines={1}>
-            {report.locationCode || 'Chưa định vị'}
+            {report.locationCode || 'Khu vực chung'}
           </Text>
         </View>
 
@@ -48,9 +53,13 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
         </Text>
 
         <View style={styles.footer}>
-          <Text variant="labelSmall" style={styles.date}>
-            {new Date(report.createdAt).toLocaleString('vi-VN')}
-          </Text>
+          <View style={styles.footerLeft}>
+            <MaterialCommunityIcons name="clock-outline" size={14} color="#90a4ae" />
+            <Text variant="labelSmall" style={styles.date}>
+              {new Date(report.createdAt).toLocaleDateString('vi-VN')}
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color="#b0bec5" />
         </View>
       </Card.Content>
     </Card>
@@ -59,19 +68,24 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
 
 const styles = StyleSheet.create({
   card: {
-    marginVertical: 8,
+    marginVertical: 6,
     marginHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
+    alignItems: 'center',
+    marginBottom: 10,
   },
   title: {
     flex: 1,
-    marginRight: 8,
-    fontWeight: 'bold',
+    marginRight: 12,
+    fontWeight: '800',
+    color: '#2c3e50',
+    fontSize: 16,
   },
   row: {
     flexDirection: 'row',
@@ -80,15 +94,31 @@ const styles = StyleSheet.create({
   },
   address: {
     marginLeft: 4,
-    color: '#666',
+    color: '#607d8b',
+    fontWeight: '600',
+    fontSize: 13,
   },
   description: {
-    marginBottom: 12,
+    marginBottom: 16,
+    color: '#546e7a',
+    lineHeight: 18,
+    fontSize: 14,
   },
   footer: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 0.5,
+    borderTopColor: '#eceff1',
+  },
+  footerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   date: {
-    color: '#999',
+    color: '#9e9e9e',
+    fontWeight: '500',
   },
 });

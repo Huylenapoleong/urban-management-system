@@ -65,7 +65,7 @@ async function bootstrap() {
     }),
   );
   setupSwagger(app, config);
-  await app.listen(config.port);
+  await app.listen(config.port, '0.0.0.0');
 }
 
 function readRequestId(

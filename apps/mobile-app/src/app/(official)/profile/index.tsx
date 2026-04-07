@@ -70,61 +70,81 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        <Card style={styles.profileCard} elevation={1}>
-          <Card.Content style={styles.avatarSection}>
-            <View style={styles.avatarWrapper}>
-              {profile?.avatarUrl ? (
-                <Avatar.Image size={90} source={{ uri: profile.avatarUrl }} />
-              ) : (
-                <Avatar.Icon size={90} icon="account" style={{ backgroundColor: theme.colors.primaryContainer }} />
-              )}
-              {isUploading && (
-                <View style={[StyleSheet.absoluteFill, styles.avatarOverlay]}>
-                  <ActivityIndicator color="#fff" />
-                </View>
-              )}
-              <IconButton
-                icon="camera-plus"
-                size={20}
-                mode="contained"
-                onPress={handlePickAvatar}
-                disabled={isUploading}
-                style={styles.editAvatarBtn}
-              />
-            </View>
-            <Text variant="headlineSmall" style={styles.userName}>{profile?.fullName || 'Cán bộ'}</Text>
-            <Text variant="labelMedium" style={{ color: '#666' }}>Vai trò: {profile?.role || 'Chưa xác định'}</Text>
-          </Card.Content>
-        </Card>
+    <View style={[styles.container, { backgroundColor: '#f5f7fa' }]}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
+        {/* Header Profile Section */}
+        <View style={styles.avatarSection}>
+          <View style={styles.avatarWrapper}>
+            {profile?.avatarUrl ? (
+              <Avatar.Image size={100} source={{ uri: profile.avatarUrl }} style={styles.avatarBorder} />
+            ) : (
+              <Avatar.Icon size={100} icon="account" style={styles.avatarPlaceholder} />
+            )}
+            {isUploading && (
+              <View style={[StyleSheet.absoluteFill, styles.avatarOverlay]}>
+                <ActivityIndicator color="#fff" />
+              </View>
+            )}
+            <IconButton
+              icon="camera"
+              size={18}
+              mode="contained"
+              onPress={handlePickAvatar}
+              disabled={isUploading}
+              style={styles.editAvatarBtn}
+              containerColor="#1976D2"
+              iconColor="#fff"
+            />
+          </View>
+          <Text variant="headlineSmall" style={styles.userName}>{profile?.fullName || 'Cán bộ'}</Text>
+          <View style={styles.roleBadge}>
+            <Text variant="labelSmall" style={{ color: '#1976D2', fontWeight: 'bold' }}>
+              {profile?.role === 'PROVINCE_OFFICER' ? 'Cán bộ Tỉnh' : profile?.role === 'WARD_OFFICER' ? 'Cán bộ Phường' : 'Quản trị viên'}
+            </Text>
+          </View>
+        </View>
 
-        <Card style={styles.infoCard} elevation={1}>
-          <Card.Content style={{ paddingVertical: 8 }}>
+        {/* Detailed Info Card */}
+        <Card style={styles.infoCard} elevation={2}>
+          <Card.Content style={{ paddingVertical: 12 }}>
             <View style={styles.infoHeader}>
-              <Text variant="titleMedium" style={{ fontWeight: 'bold' }}>Thông tin chi tiết</Text>
-              <Button mode="text" icon="pencil" onPress={handleOpenEdit} compact>Sửa</Button>
+              <Text variant="titleMedium" style={{ fontWeight: '800', color: '#1a1a1a' }}>Thông tin chi tiết</Text>
+              <Button mode="text" icon="pencil" onPress={handleOpenEdit} compact labelStyle={{ fontWeight: '700' }}>Sửa</Button>
             </View>
             <List.Item
               title="Số điện thoại"
               description={profile?.phone || 'Chưa cập nhật'}
-              left={props => <List.Icon {...props} icon="phone" />}
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDesc}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="phone" color="#1976D2" /></View>}
             />
             <List.Item
               title="Email"
               description={profile?.email || 'Chưa cập nhật'}
-              left={props => <List.Icon {...props} icon="email" />}
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDesc}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="email" color="#1976D2" /></View>}
             />
             <List.Item
               title="Khu vực phụ trách"
               description={profile?.locationCode || 'Chưa cập nhật'}
-              left={props => <List.Icon {...props} icon="map-marker" />}
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDesc}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="map-marker" color="#1976D2" /></View>}
             />
           </Card.Content>
         </Card>
 
-        <Button mode="contained" onPress={logout} buttonColor="#f44336" style={styles.logoutBtn} icon="logout">
-          Đăng xuất tài khoản
+        <Button 
+          mode="contained" 
+          onPress={logout} 
+          buttonColor="#D32F2F" 
+          style={styles.logoutBtn} 
+          contentStyle={{ height: 48 }}
+          labelStyle={{ fontWeight: 'bold', letterSpacing: 1 }}
+          icon="logout"
+        >
+          ĐĂNG XUẤT TÀI KHOẢN
         </Button>
       </ScrollView>
 
@@ -175,17 +195,37 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
+  container: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  profileCard: { marginBottom: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 16, backgroundColor: '#fff' },
-  avatarSection: { alignItems: 'center', paddingVertical: 24 },
-  avatarWrapper: { position: 'relative' },
-  avatarOverlay: { backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 45, justifyContent: 'center', alignItems: 'center' },
-  editAvatarBtn: { position: 'absolute', bottom: -10, right: -10, backgroundColor: '#2196F3' },
-  userName: { fontWeight: 'bold', marginTop: 12, marginBottom: 4 },
-  infoCard: { backgroundColor: '#fff', borderRadius: 16, marginBottom: 24 },
-  infoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  logoutBtn: { borderRadius: 12, paddingVertical: 4, marginTop: 8 },
+  avatarSection: { 
+    alignItems: 'center', 
+    paddingVertical: 36, 
+    backgroundColor: '#ffffff', 
+    borderBottomLeftRadius: 32, 
+    borderBottomRightRadius: 32, 
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    marginBottom: 20,
+  },
+  avatarWrapper: { position: 'relative', marginBottom: 12 },
+  avatarBorder: { borderWidth: 3, borderColor: '#1976D2', backgroundColor: '#fff' },
+  avatarPlaceholder: { backgroundColor: '#E3F2FD' },
+  avatarOverlay: { backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 50, justifyContent: 'center', alignItems: 'center' },
+  editAvatarBtn: { position: 'absolute', bottom: -4, right: -4, elevation: 3 },
+  userName: { fontWeight: '900', color: '#1a1a1a', marginBottom: 6 },
+  roleBadge: { backgroundColor: '#E3F2FD', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  
+  infoCard: { backgroundColor: '#ffffff', marginHorizontal: 16, borderRadius: 20, marginBottom: 24, paddingVertical: 4 },
+  infoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 12 },
+  
+  iconCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f0f4f8', justifyContent: 'center', alignItems: 'center', alignSelf: 'center' },
+  listTitle: { fontWeight: '700', color: '#424242', fontSize: 14 },
+  listDesc: { color: '#757575', marginTop: 2, fontSize: 13 },
+  
+  logoutBtn: { marginHorizontal: 16, borderRadius: 16, marginTop: 8 },
   input: { marginBottom: 12, backgroundColor: '#fff' }
 });
 

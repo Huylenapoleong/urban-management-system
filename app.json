@@ -1,0 +1,10 @@
+{
+  "android": {
+    "package": "com.anonymous.urbanmanagementsystem"
+  },
+  "extra": {
+    "eas": {
+      "projectId": "580ff1b6-5100-440e-868a-80c4a2d8b30a"
+    }
+  }
+}

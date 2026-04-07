@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, FlatList, StyleSheet } from 'react-native';
-import { Text, List, Avatar, Badge, Searchbar, useTheme, ActivityIndicator, Divider, SegmentedButtons } from 'react-native-paper';
+import { Text, List, Avatar, Badge, Searchbar, useTheme, ActivityIndicator, Divider, SegmentedButtons, IconButton, Card } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useConversations } from '../../../hooks/shared/useConversations';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function ChatListScreen() {
   const router = useRouter();
@@ -11,6 +13,13 @@ export default function ChatListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState('ALL');
   const { data: conversations, isLoading, refetch } = useConversations({ q: searchQuery || undefined });
+  
+  // Refresh list whenever screen is focused (user comes back from chat)
+  useFocusEffect(
+    useCallback(() => {
+      refetch();
+    }, [refetch])
+  );
 
   const sortedConversations = React.useMemo(() => {
     console.log('[ChatList] conversations raw:', conversations);
@@ -21,6 +30,17 @@ export default function ChatListScreen() {
       return [];
     }
     let filtered = [...conversations];
+    
+    // Deduplicate by conversationId to prevent FlatList key warnings
+    const uniqueMap = new Map();
+    for (const conv of filtered) {
+      const existing = uniqueMap.get(conv.conversationId);
+      if (!existing || new Date(conv.updatedAt || 0) > new Date(existing.updatedAt || 0)) {
+        uniqueMap.set(conv.conversationId, conv);
+      }
+    }
+    filtered = Array.from(uniqueMap.values());
+
     if (filterMode === 'GROUP') {
       filtered = filtered.filter(c => c.isGroup);
     } else if (filterMode === 'PRIVATE') {
@@ -49,7 +69,10 @@ export default function ChatListScreen() {
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       {/* Header / Search */}
       <View style={styles.header}>
-        <Text variant="headlineSmall" style={styles.headerTitle}>Hộp thư</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <Text variant="headlineSmall" style={styles.headerTitle}>Hộp thư</Text>
+          <IconButton icon="account-search-outline" size={28} onPress={() => router.push('/(official)/chat/search' as any)} />
+        </View>
         <Searchbar
           placeholder="Tìm kiếm cuộc hội thoại..."
           onChangeText={setSearchQuery}
@@ -84,36 +107,36 @@ export default function ChatListScreen() {
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <Divider style={{ marginHorizontal: 16 }} />}
           renderItem={({ item }) => (
-            <List.Item
-              title={item.groupName || 'Hội thoại'}
-              titleStyle={item.unreadCount > 0 ? { fontWeight: 'bold', color: theme.colors.primary } : { color: '#333' }}
-              description={item.lastMessagePreview || 'Bắt đầu trò chuyện...'}
-              descriptionStyle={item.unreadCount > 0 ? { fontWeight: '600', color: '#000' } : { color: '#666' }}
-              descriptionNumberOfLines={1}
-              onPress={() => handlePress(item.conversationId)}
-              left={props => (
+            <Card style={styles.chatCard} onPress={() => handlePress(item.conversationId)} mode="elevated" elevation={1}>
+              <Card.Content style={styles.cardContent}>
                 <View style={styles.avatarContainer}>
                   <Avatar.Icon 
-                    {...props} 
                     icon={item.isGroup ? "account-group" : "account"} 
                     size={48} 
                     style={{ backgroundColor: item.isGroup ? theme.colors.secondaryContainer : theme.colors.primaryContainer }} 
                   />
                   {item.unreadCount > 0 && <Badge style={styles.badge}>{item.unreadCount}</Badge>}
                 </View>
-              )}
-              right={props => (
-                <View style={{ justifyContent: 'center' }}>
-                  <Text variant="labelSmall" style={{ color: '#aaa' }}>
-                    {item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''}
+                <View style={styles.textContainer}>
+                  <View style={styles.row}>
+                    <Text variant="titleMedium" style={[styles.groupName, item.unreadCount > 0 && { fontWeight: 'bold' }]} numberOfLines={1}>
+                      {item.groupName || 'Hội thoại'}
+                    </Text>
+                    <Text variant="labelSmall" style={styles.timeText}>
+                      {item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''}
+                    </Text>
+                  </View>
+                  <Text variant="bodySmall" style={[styles.description, item.unreadCount > 0 && { fontWeight: '600', color: '#000' }]} numberOfLines={1}>
+                    {item.lastMessagePreview || 'Bắt đầu trò chuyện...'}
                   </Text>
                 </View>
-              )}
-            />
+              </Card.Content>
+            </Card>
           )}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text variant="bodyLarge" style={{ color: theme.colors.onSurfaceDisabled }}>
+              <MaterialCommunityIcons name="message-text-outline" size={60} color="#e0e0e0" />
+              <Text variant="bodyLarge" style={{ color: '#9e9e9e', fontWeight: 'bold', marginTop: 8 }}>
                 Không có cuộc hội thoại nào.
               </Text>
             </View>
@@ -125,14 +148,60 @@ export default function ChatListScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { padding: 16, backgroundColor: '#fff', borderBottomLeftRadius: 16, borderBottomRightRadius: 16, elevation: 1 },
-  headerTitle: { fontWeight: 'bold', marginBottom: 16 },
-  searchBar: { borderRadius: 12, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: '#f5f7fa' },
+  header: { 
+    padding: 16, 
+    backgroundColor: '#fff', 
+    borderBottomLeftRadius: 24, 
+    borderBottomRightRadius: 24, 
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    zIndex: 10,
+  },
+  headerTitle: { fontWeight: '900', color: '#1a1a1a' },
+  searchBar: { borderRadius: 12, backgroundColor: '#f2f3f5', elevation: 0 },
   filterRow: { marginTop: 12 },
-  listContent: { paddingVertical: 8, backgroundColor: '#fff', marginTop: 12, marginHorizontal: 16, borderRadius: 16, elevation: 1 },
-  avatarContainer: { position: 'relative', justifyContent: 'center', marginLeft: 8 },
-  badge: { position: 'absolute', top: -4, right: -4 },
+  
+  listContent: { paddingVertical: 12 },
+  chatCard: {
+    marginHorizontal: 16,
+    marginVertical: 4,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+  },
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+  avatarContainer: { position: 'relative' },
+  badge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#E53935' },
+  
+  textContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  groupName: {
+    flex: 1,
+    color: '#212121',
+  },
+  timeText: {
+    color: '#9e9e9e',
+    fontWeight: '500',
+  },
+  description: {
+    color: '#757575',
+  },
+  
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  empty: { padding: 32, alignItems: 'center' },
+  empty: { padding: 48, alignItems: 'center' },
 });

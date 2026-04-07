@@ -277,6 +277,10 @@ export class AuthorizationService {
       return this.canAccessLocationScope(actor, target.locationCode);
     }
 
+    if (this.isStaff(actor) && target.role !== 'CITIZEN') {
+      return isSameProvince(actor.locationCode, target.locationCode);
+    }
+
     return (
       this.canAccessLocationScope(actor, target.locationCode) ||
       this.canAccessLocationScope(target, actor.locationCode)

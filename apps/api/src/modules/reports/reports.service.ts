@@ -229,7 +229,7 @@ export class ReportsService {
     }
 
     const filtered = reports
-      .filter((report) => !report.deletedAt)
+      .filter((report) => report.entityType === 'REPORT' && !report.deletedAt)
       .filter((report) =>
         this.authorizationService.canReadReport(actor, report),
       )

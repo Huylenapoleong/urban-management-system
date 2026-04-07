@@ -5,7 +5,11 @@ import { Platform } from 'react-native';
 // Dùng mock nếu không tìm thấy, nhưng recommend setup dev env đúng.
 import { CHAT_SOCKET_EVENTS, CHAT_SOCKET_NAMESPACE } from '@urban/shared-constants';
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+let SOCKET_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+
+if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+  SOCKET_URL = 'http://localhost:3001';
+}
 
 class SocketClient {
   public socket: Socket | null = null;

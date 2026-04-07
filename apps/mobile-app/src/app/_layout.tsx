@@ -3,6 +3,8 @@ import { PaperProvider } from "react-native-paper";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "../providers/AuthProvider";
 
+import { WebRTCProvider } from '../providers/WebRTCProvider';
+
 const queryClient = new QueryClient();
 
 export default function RootLayout() {
@@ -10,7 +12,9 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <PaperProvider>
         <AuthProvider>
-          <Stack screenOptions={{ headerShown: false }} />
+          <WebRTCProvider>
+            <Stack screenOptions={{ headerShown: false }} />
+          </WebRTCProvider>
         </AuthProvider>
       </PaperProvider>
     </QueryClientProvider>
