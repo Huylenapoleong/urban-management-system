@@ -13,10 +13,13 @@ export default function OfficialDashboardScreen() {
   const { user } = useAuth();
   const { data: profile } = useProfile();
 
-  const { data: reports, isLoading } = useReports();
+  // Fetch recent reports to simulate statistics and showcase lists
+  const { data: reports, isLoading } = useReports({
+    locationCode: user?.locationCode,
+  });
 
   const totalReports = reports?.length || 0;
-  const pendingCount = reports?.filter(r => r.status === 'PENDING' || r.status === 'NEW').length || 0;
+  const pendingCount = reports?.filter(r => r.status === 'NEW').length || 0;
   const inProgressCount = reports?.filter(r => r.status === 'IN_PROGRESS').length || 0;
 
   return (
@@ -93,13 +96,13 @@ export default function OfficialDashboardScreen() {
                   <View style={styles.actionColumn}>
                     <Chip 
                       compact 
-                      textStyle={{ fontSize: 11, fontWeight: 'bold', color: item.status === 'PENDING' || item.status === 'NEW' ? '#d32f2f' : '#f57c00' }} 
+                      textStyle={{ fontSize: 11, fontWeight: 'bold', color: item.status === 'NEW' ? '#d32f2f' : '#f57c00' }} 
                       style={[
                         styles.statusChip, 
-                        { backgroundColor: item.status === 'PENDING' || item.status === 'NEW' ? '#ffcdd2' : '#ffe0b2' }
+                        { backgroundColor: item.status === 'NEW' ? '#ffcdd2' : '#ffe0b2' }
                       ]}
                     >
-                      {item.status === 'PENDING' || item.status === 'NEW' ? 'MỚI' : 'XỬ LÝ'}
+                      {item.status === 'NEW' ? 'MỚI' : 'XỬ LÝ'}
                     </Chip>
                   </View>
                 </View>

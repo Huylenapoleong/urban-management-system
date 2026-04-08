@@ -1,17 +1,15 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { readWebToken } from './web-token-storage';
+import { ENV_CONFIG } from '@/constants/env';
 
-let API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001') + '/api';
-
-if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-  API_BASE_URL = 'http://localhost:3001/api';
-}
+const API_BASE_URL = ENV_CONFIG.API_BASE_URL;
 
 export class ApiClient {
   static async getToken(): Promise<string | null> {
     try {
       if (Platform.OS === 'web') {
-        return localStorage.getItem('auth_token');
+        return readWebToken();
       }
       return await SecureStore.getItemAsync('auth_token');
     } catch (e) {
@@ -22,6 +20,7 @@ export class ApiClient {
   static async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = await this.getToken();
     const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
       ...((options.headers as Record<string, string>) || {}),
     };
 
@@ -36,17 +35,7 @@ export class ApiClient {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error('[ApiClient] Request failed:', {
-        endpoint,
-        status: response.status,
-        errorData
-      });
-      
-      const errorMessage = Array.isArray(errorData.message) 
-        ? errorData.message.join(', ') 
-        : (errorData.message || 'API request failed');
-        
-      throw new Error(errorMessage);
+      throw new Error(errorData.message || 'API request failed');
     }
 
     const data = await response.json();
@@ -64,24 +53,13 @@ export class ApiClient {
   static post<T = any>(endpoint: string, body?: any) {
     return this.request<T>(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
-    });
-  }
-
-  static upload<T = any>(endpoint: string, formData: FormData) {
-    // Note: When uploading FormData, Fetch will automatically set the correct 
-    // Content-Type with boundary if we DON'T set it manually.
-    return this.request<T>(endpoint, {
-      method: 'POST',
-      body: formData,
     });
   }
 
   static patch<T = any>(endpoint: string, body?: any) {
     return this.request<T>(endpoint, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
     });
   }

@@ -131,7 +131,9 @@ export default function ReportDetailsScreen() {
                 router.push(`/(official)/chat/dm:${report.userId}`);
               } else {
                 const linked = linkedConversations?.[0];
-                const targetId = linked?.conversationId || (report as any)?.groupId;
+                const targetId =
+                  linked?.conversationId ||
+                  ((report as any)?.groupId ? `group:${(report as any).groupId}` : undefined);
                 if (targetId) {
                   router.push(`/(official)/chat/${targetId}`);
                 } else {

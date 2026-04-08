@@ -5,15 +5,18 @@ import { useRouter } from 'expo-router';
 import { useReports } from '../../../hooks/shared/useReports';
 import { ReportCard } from '../../../components/shared/ReportCard';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAuth } from '../../../providers/AuthProvider';
 
 export default function OfficialReportsScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<string>('');
   
   const { data: reports, isLoading, error, refetch } = useReports({
     status: statusFilter || undefined,
     assignedToMe: true, // UC014
+    locationCode: user?.locationCode,
   });
 
   const handlePress = (id: string) => {

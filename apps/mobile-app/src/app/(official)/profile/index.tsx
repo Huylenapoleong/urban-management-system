@@ -228,4 +228,3 @@ const styles = StyleSheet.create({
   logoutBtn: { marginHorizontal: 16, borderRadius: 16, marginTop: 8 },
   input: { marginBottom: 12, backgroundColor: '#fff' }
 });
-

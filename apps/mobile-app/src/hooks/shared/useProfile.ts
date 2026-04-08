@@ -30,13 +30,14 @@ export const useUpdateProfile = () => {
 
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { readWebToken } from '@/lib/web-token-storage';
 
 export const useUploadAvatar = () => {
   return useMutation({
     mutationFn: async (uri: string) => {
       let token = '';
       if (Platform.OS === 'web') {
-        token = localStorage.getItem('auth_token') || '';
+        token = readWebToken() || '';
       } else {
         token = await SecureStore.getItemAsync('auth_token') || '';
       }

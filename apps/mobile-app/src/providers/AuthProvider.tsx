@@ -1,10 +1,14 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { ApiClient } from '../lib/api-client';
 import { jwtDecode } from 'jwt-decode';
 import { JwtClaims } from '@urban/shared-types';
 import { useRouter, useSegments } from 'expo-router';
+import { socketClient } from '../lib/socket-client';
+import { ACCESS_TOKEN_KEY, AUTH_TOKEN_KEY, clearWebToken, readWebToken, writeWebToken } from '../lib/web-token-storage';
+import { disconnectChatSocket } from '../services/chat-socket';
 
 interface AuthContextType {
   user: JwtClaims | null;
@@ -15,30 +19,54 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+async function readStoredToken(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    return readWebToken();
+  }
+
+  const secureToken = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+  if (secureToken) {
+    return secureToken;
+  }
+
+  return await AsyncStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+async function persistToken(token: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    writeWebToken(token);
+    return;
+  }
+
+  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+  await AsyncStorage.setItem(ACCESS_TOKEN_KEY, token);
+}
+
+async function clearStoredToken(): Promise<void> {
+  if (Platform.OS === 'web') {
+    clearWebToken();
+    return;
+  }
+
+  await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+  await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<JwtClaims | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const segments = useSegments();
   const router = useRouter();
+  const previousUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const loadToken = async () => {
       try {
-        let token;
-        if (Platform.OS === 'web') {
-          token = localStorage.getItem('auth_token');
-        } else {
-          token = await SecureStore.getItemAsync('auth_token');
-        }
+        const token = await readStoredToken();
         if (token) {
           const decoded = jwtDecode<JwtClaims>(token);
           if (decoded.exp * 1000 < Date.now()) {
-            // Token expired
-            if (Platform.OS === 'web') {
-              localStorage.removeItem('auth_token');
-            } else {
-              await SecureStore.deleteItemAsync('auth_token');
-            }
+            await clearStoredToken();
             setUser(null);
           } else {
             setUser(decoded);
@@ -60,18 +88,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isRoot = !segments[0];
 
     if (!user && !inAuthGroup) {
-      // Redirect to login if not authenticated
       router.replace('/login');
     } else if (user) {
       if (inAuthGroup || isRoot) {
         if (['ADMIN', 'PROVINCE_OFFICER', 'WARD_OFFICER'].includes(user.role)) {
-          router.replace('/(official)');
+          router.replace('/(official)' as any);
         } else {
           router.replace('/(citizen)' as any);
         }
       }
     }
   }, [user, isLoading, segments]);
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    const nextUserId = user?.sub ?? null;
+
+    if (
+      previousUserIdRef.current !== null &&
+      previousUserIdRef.current !== nextUserId
+    ) {
+      socketClient.disconnect();
+      disconnectChatSocket();
+    }
+
+    previousUserIdRef.current = nextUserId;
+  }, [user?.sub, isLoading]);
 
   const login = async (phone: string, password: string) => {
     try {
@@ -80,11 +125,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (response && response.tokens && response.tokens.accessToken) {
         const token = response.tokens.accessToken;
 
-        if (Platform.OS === 'web') {
-          localStorage.setItem('auth_token', token);
-        } else {
-          await SecureStore.setItemAsync('auth_token', token);
-        }
+        socketClient.disconnect();
+        disconnectChatSocket();
+        await persistToken(token);
 
         const decoded = jwtDecode<JwtClaims>(token);
         setUser(decoded);
@@ -97,11 +140,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    if (Platform.OS === 'web') {
-      localStorage.removeItem('auth_token');
-    } else {
-      await SecureStore.deleteItemAsync('auth_token');
-    }
+    socketClient.disconnect();
+    disconnectChatSocket();
+    await clearStoredToken();
     setUser(null);
   };
 

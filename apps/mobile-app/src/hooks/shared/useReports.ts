@@ -7,19 +7,53 @@ export const useReports = ({
   status,
   category,
   assignedToMe,
+  locationCode,
 }: {
   status?: string; // REPORT_STATUSES
   category?: string; // REPORT_CATEGORIES
   assignedToMe?: boolean;
+  locationCode?: string;
 } = {}) => {
   return useQuery<ReportItem[]>({
-    queryKey: ['reports', { status, category, assignedToMe }],
-    queryFn: () => {
-      const params: any = {};
-      if (status) params.status = status;
-      if (category) params.category = category;
-      if (assignedToMe) params.assignedToMe = assignedToMe;
-      return ApiClient.get<ReportItem[]>('/reports', params);
+    queryKey: ['reports', { status, category, assignedToMe, locationCode }],
+    queryFn: async () => {
+      const baseParams: any = {};
+      if (assignedToMe) baseParams.assignedToMe = assignedToMe;
+      if (locationCode) baseParams.locationCode = locationCode;
+
+      if (status) {
+        return ApiClient.get<ReportItem[]>('/reports', {
+          ...baseParams,
+          status,
+        });
+      }
+
+      if (category) {
+        return ApiClient.get<ReportItem[]>('/reports', {
+          ...baseParams,
+          category,
+        });
+      }
+
+      if (!locationCode) {
+        return ApiClient.get<ReportItem[]>('/reports', baseParams);
+      }
+
+      const resultSets = await Promise.all(
+        REPORT_STATUSES.map((reportStatus) =>
+          ApiClient.get<ReportItem[]>('/reports', {
+            ...baseParams,
+            status: reportStatus,
+          }),
+        ),
+      );
+
+      return resultSets
+        .flat()
+        .sort(
+          (left, right) =>
+            new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+        );
     },
   });
 };

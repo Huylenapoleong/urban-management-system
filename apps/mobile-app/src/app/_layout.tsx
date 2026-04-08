@@ -1,7 +1,7 @@
 import { Stack } from "expo-router";
 import { PaperProvider } from "react-native-paper";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AuthProvider } from "../providers/AuthProvider";
+import { AuthProvider } from "@/providers/AuthProvider";
 
 import { WebRTCProvider } from '../providers/WebRTCProvider';
 

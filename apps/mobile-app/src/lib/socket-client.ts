@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { readWebToken } from './web-token-storage';
 // Tái sử dụng constants nếu `mobile-app` có link `@urban/shared-constants`.
 // Dùng mock nếu không tìm thấy, nhưng recommend setup dev env đúng.
 import { CHAT_SOCKET_EVENTS, CHAT_SOCKET_NAMESPACE } from '@urban/shared-constants';
@@ -15,9 +16,9 @@ class SocketClient {
   public socket: Socket | null = null;
   private connectPromise: Promise<void> | null = null;
   private isConnecting = false;
+  private authToken: string | null = null;
 
   connect(): Promise<void> {
-    if (this.socket?.connected) return Promise.resolve();
     if (this.connectPromise) return this.connectPromise;
 
     this.connectPromise = new Promise(async (resolve, reject) => {
@@ -26,9 +27,22 @@ class SocketClient {
       try {
         let token;
         if (Platform.OS === 'web') {
-          token = localStorage.getItem('auth_token');
+          token = readWebToken();
         } else {
           token = await SecureStore.getItemAsync('auth_token');
+        }
+
+        if (this.socket?.connected && this.authToken === token) {
+          this.isConnecting = false;
+          this.connectPromise = null;
+          resolve();
+          return;
+        }
+
+        if (this.socket && this.authToken !== token) {
+          this.socket.removeAllListeners();
+          this.socket.disconnect();
+          this.socket = null;
         }
 
         this.socket = io(`${SOCKET_URL}${CHAT_SOCKET_NAMESPACE}`, {
@@ -36,10 +50,12 @@ class SocketClient {
           auth: { token },
           reconnectionAttempts: 5,
         });
+        this.authToken = token ?? null;
 
         this.socket.on('connect', () => {
           console.log('Socket connected:', this.socket?.id);
           this.isConnecting = false;
+          this.connectPromise = null;
           resolve();
         });
 
@@ -72,9 +88,12 @@ class SocketClient {
 
   disconnect() {
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
     }
+    this.authToken = null;
+    this.connectPromise = null;
   }
 
   emitWithAck<T = any>(event: string, payload: any): Promise<T> {
