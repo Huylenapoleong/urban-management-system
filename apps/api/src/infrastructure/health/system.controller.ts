@@ -1,15 +1,20 @@
 import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
 import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiProduces,
   ApiServiceUnavailableResponse,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-response-envelope.decorator';
 import {
+  ErrorResponseDto,
   LiveHealthStatusDto,
   ReadinessStatusDto,
 } from '../../common/openapi/swagger.models';
@@ -52,13 +57,16 @@ export class SystemController {
     return readiness;
   }
 
-  @Public()
+  @Roles('ADMIN')
   @SkipResponseEnvelope()
   @Get('metrics')
   @ApiOperation({
     summary:
       'Operational metrics for HTTP status codes, session revocations, outbox backlog, and circuit breakers',
   })
+  @ApiBearerAuth('bearer')
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
   @ApiOkResponse({
     schema: {
       type: 'object',
@@ -87,7 +95,7 @@ export class SystemController {
     return this.observabilityService.getSnapshot();
   }
 
-  @Public()
+  @Roles('ADMIN')
   @SkipResponseEnvelope()
   @Get('metrics/prometheus')
   @ApiOperation({
@@ -95,6 +103,9 @@ export class SystemController {
       'Prometheus exposition format for request, session, retention, outbox, and circuit-breaker metrics',
   })
   @ApiProduces('text/plain')
+  @ApiBearerAuth('bearer')
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
   @ApiOkResponse({
     schema: {
       type: 'string',

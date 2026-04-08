@@ -12,12 +12,14 @@ import type {
 
 export type StorageEntityType =
   | 'USER_PROFILE'
+  | 'USER_IDENTITY_CLAIM'
   | 'USER_REFRESH_SESSION'
   | 'USER_REFRESH_TOKEN_REVOCATION'
   | 'USER_PUSH_DEVICE'
   | 'PUSH_OUTBOX_EVENT'
   | 'GROUP_METADATA'
   | 'GROUP_MEMBERSHIP'
+  | 'GROUP_DELETE_CLEANUP_TASK'
   | 'MESSAGE'
   | 'MESSAGE_REF'
   | 'MESSAGE_DEDUP'
@@ -42,6 +44,15 @@ export interface StoredUser extends TableItemBase, Omit<UserProfile, 'id'> {
   entityType: 'USER_PROFILE';
   userId: string;
   passwordHash: string;
+}
+
+export interface StoredUserIdentityClaim extends TableItemBase {
+  entityType: 'USER_IDENTITY_CLAIM';
+  userId: string;
+  identityType: 'PHONE' | 'EMAIL';
+  identityValue: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StoredRefreshSession extends TableItemBase {
@@ -108,6 +119,16 @@ export interface StoredMembership
   entityType: 'GROUP_MEMBERSHIP';
   groupId: string;
   userId: string;
+}
+
+export interface StoredGroupDeleteCleanupTask extends TableItemBase {
+  entityType: 'GROUP_DELETE_CLEANUP_TASK';
+  groupId: string;
+  deletedAt: string;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+  lastError?: string;
 }
 
 export interface StoredMessage

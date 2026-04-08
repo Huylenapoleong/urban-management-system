@@ -9,3 +9,7 @@ export async function updateProfile(payload: Partial<UserProfile>): Promise<User
   return await client.patch("/users/me", payload);
 }
 
+export async function getUserById(userId: string): Promise<UserProfile> {
+  return await client.get(`/users/${encodeURIComponent(userId)}`);
+}
+

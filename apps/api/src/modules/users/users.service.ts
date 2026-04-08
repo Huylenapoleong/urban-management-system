@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -24,7 +25,10 @@ import {
   paginateSortedItems,
 } from '../../common/pagination';
 import { toUserProfile } from '../../common/mappers';
-import type { StoredUser } from '../../common/storage-records';
+import type {
+  StoredUser,
+  StoredUserIdentityClaim,
+} from '../../common/storage-records';
 import {
   ensureLocationCode,
   ensureObject,
@@ -71,6 +75,16 @@ export class UsersService {
 
     if (!user || user.deletedAt || user.status === 'DELETED') {
       throw new NotFoundException('User not found.');
+    }
+
+    return user;
+  }
+
+  async getActiveByIdOrThrow(userId: string): Promise<StoredUser> {
+    const user = await this.getByIdOrThrow(userId);
+
+    if (user.status !== 'ACTIVE') {
+      throw new BadRequestException('User account is not active.');
     }
 
     return user;
@@ -124,8 +138,6 @@ export class UsersService {
     );
     const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
 
-    await this.assertUniqueIdentity(identity.phone, identity.email);
-
     const now = nowIso();
     const userId = createUlid();
     const user: StoredUser = {
@@ -148,7 +160,10 @@ export class UsersService {
       updatedAt: now,
     };
 
-    await this.repository.put(this.config.dynamodbUsersTableName, user);
+    await this.assertUniqueIdentity(user.phone, user.email);
+    await this.persistUserWithIdentityClaims({
+      nextUser: user,
+    });
     return toUserProfile(user);
   }
 
@@ -176,10 +191,8 @@ export class UsersService {
     if (
       !this.authorizationService.canCreateUserRole(actor, role, locationCode)
     ) {
-      throw new ForbiddenException('You cannot create this role.');
+      throw new ForbiddenException('You cannot create this user role.');
     }
-
-    await this.assertUniqueIdentity(identity.phone, identity.email);
 
     const now = nowIso();
     const userId = createUlid();
@@ -203,7 +216,10 @@ export class UsersService {
       updatedAt: now,
     };
 
-    await this.repository.put(this.config.dynamodbUsersTableName, user);
+    await this.assertUniqueIdentity(user.phone, user.email);
+    await this.persistUserWithIdentityClaims({
+      nextUser: user,
+    });
     return toUserProfile(user);
   }
 
@@ -296,23 +312,21 @@ export class UsersService {
       email: body.email ?? current.email,
     });
 
+    const nextLocationCode = locationCodeInput
+      ? ensureLocationCode(locationCodeInput)
+      : current.locationCode;
+
+    if (locationCodeInput && actor.role === 'CITIZEN') {
+      throw new ForbiddenException('Citizens cannot change locationCode.');
+    }
+
     if (
       locationCodeInput &&
       actor.role !== 'ADMIN' &&
-      actor.role !== 'CITIZEN' &&
-      !this.authorizationService.canAccessLocationScope(
-        actor,
-        locationCodeInput,
-      )
+      !this.authorizationService.canAccessLocationScope(actor, nextLocationCode)
     ) {
       throw new ForbiddenException('locationCode is outside of your scope.');
     }
-
-    await this.assertUniqueIdentity(
-      identity.phone,
-      identity.email,
-      current.userId,
-    );
 
     const nextUser: StoredUser = {
       ...current,
@@ -322,13 +336,20 @@ export class UsersService {
       fullName: fullName ?? current.fullName,
       unit: unit ?? current.unit,
       avatarUrl: avatarUrl ?? current.avatarUrl,
-      locationCode: locationCodeInput
-        ? ensureLocationCode(locationCodeInput)
-        : current.locationCode,
+      locationCode: nextLocationCode,
       updatedAt: nowIso(),
     };
 
-    await this.repository.put(this.config.dynamodbUsersTableName, nextUser);
+    await this.assertUniqueIdentity(
+      nextUser.phone,
+      nextUser.email,
+      current.userId,
+    );
+    await this.persistUserWithIdentityClaims({
+      nextUser,
+      previousUser: current,
+      expectedUpdatedAt: current.updatedAt,
+    });
     return toUserProfile(nextUser);
   }
 
@@ -352,7 +373,25 @@ export class UsersService {
       updatedAt: nowIso(),
     };
 
-    await this.repository.put(this.config.dynamodbUsersTableName, nextUser);
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbUsersTableName,
+          item: nextUser,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': target.updatedAt,
+          },
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('User changed. Please retry.');
+      }
+
+      throw error;
+    }
 
     if (status !== 'ACTIVE') {
       const revokedSessionCount =
@@ -416,6 +455,199 @@ export class UsersService {
     );
 
     return user;
+  }
+
+  private async persistUserWithIdentityClaims(input: {
+    nextUser: StoredUser;
+    previousUser?: StoredUser;
+    expectedUpdatedAt?: string;
+  }): Promise<void> {
+    try {
+      await this.writeUserWithIdentityClaims(input);
+    } catch (error) {
+      await this.rethrowUserWriteConflict(
+        error,
+        input.nextUser.phone,
+        input.nextUser.email,
+        input.previousUser?.userId,
+      );
+    }
+  }
+
+  private async writeUserWithIdentityClaims(input: {
+    nextUser: StoredUser;
+    previousUser?: StoredUser;
+    expectedUpdatedAt?: string;
+  }): Promise<void> {
+    const { nextUser, previousUser } = input;
+    const claimTimestamp = nextUser.updatedAt;
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [];
+
+    transactionItems.push({
+      kind: 'put',
+      tableName: this.config.dynamodbUsersTableName,
+      item: nextUser,
+      conditionExpression: previousUser
+        ? 'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt'
+        : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      expressionAttributeValues: previousUser
+        ? {
+            ':expectedUpdatedAt':
+              input.expectedUpdatedAt ?? previousUser.updatedAt,
+          }
+        : undefined,
+    });
+
+    const nextPhone = nextUser.phone?.trim();
+    const previousPhone = previousUser?.phone?.trim();
+    const nextEmail = nextUser.email?.trim();
+    const previousEmail = previousUser?.email?.trim();
+
+    if (nextPhone && nextPhone !== previousPhone) {
+      transactionItems.push({
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: this.buildIdentityClaim(
+          nextUser.userId,
+          'PHONE',
+          nextPhone,
+          claimTimestamp,
+        ),
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      });
+    }
+
+    if (nextEmail && nextEmail !== previousEmail) {
+      transactionItems.push({
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: this.buildIdentityClaim(
+          nextUser.userId,
+          'EMAIL',
+          nextEmail,
+          claimTimestamp,
+        ),
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      });
+    }
+
+    if (previousUser && previousPhone && previousPhone !== nextPhone) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: this.makeIdentityClaimPk('PHONE', previousPhone),
+          SK: this.makeIdentityClaimSk(),
+        },
+        conditionExpression: 'attribute_not_exists(userId) OR userId = :userId',
+        expressionAttributeValues: {
+          ':userId': previousUser.userId,
+        },
+      });
+    }
+
+    if (previousUser && previousEmail && previousEmail !== nextEmail) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: this.makeIdentityClaimPk('EMAIL', previousEmail),
+          SK: this.makeIdentityClaimSk(),
+        },
+        conditionExpression: 'attribute_not_exists(userId) OR userId = :userId',
+        expressionAttributeValues: {
+          ':userId': previousUser.userId,
+        },
+      });
+    }
+
+    await this.repository.transactWrite(transactionItems);
+  }
+
+  private buildIdentityClaim(
+    userId: string,
+    identityType: 'PHONE' | 'EMAIL',
+    identityValue: string,
+    timestamp: string,
+  ): StoredUserIdentityClaim {
+    return {
+      PK: this.makeIdentityClaimPk(identityType, identityValue),
+      SK: this.makeIdentityClaimSk(),
+      entityType: 'USER_IDENTITY_CLAIM',
+      userId,
+      identityType,
+      identityValue,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  }
+
+  private makeIdentityClaimPk(
+    identityType: 'PHONE' | 'EMAIL',
+    identityValue: string,
+  ): string {
+    return ['IDENTITY', identityType, identityValue].join('#');
+  }
+
+  private makeIdentityClaimSk(): string {
+    return 'CLAIM';
+  }
+
+  private async rethrowUserWriteConflict(
+    error: unknown,
+    phone: string | undefined,
+    email: string | undefined,
+    currentUserId?: string,
+  ): Promise<never> {
+    if (!this.isConditionalWriteConflict(error)) {
+      throw error;
+    }
+
+    await this.assertUniqueIdentity(phone, email, currentUserId);
+    throw new ConflictException(
+      'User profile was changed by another request. Please retry.',
+    );
+  }
+
+  private isConditionalWriteConflict(error: unknown): boolean {
+    const sourceErrors = [error];
+
+    if (
+      error &&
+      typeof error === 'object' &&
+      'cause' in error &&
+      (error as { cause?: unknown }).cause !== undefined
+    ) {
+      sourceErrors.push((error as { cause?: unknown }).cause);
+    }
+
+    return sourceErrors.some((sourceError) => {
+      if (!sourceError) {
+        return false;
+      }
+
+      const name =
+        typeof sourceError === 'object' &&
+        sourceError !== null &&
+        'name' in sourceError &&
+        typeof (sourceError as { name?: unknown }).name === 'string'
+          ? (sourceError as { name: string }).name
+          : '';
+      const message =
+        sourceError instanceof Error
+          ? sourceError.message
+          : typeof sourceError === 'string'
+            ? sourceError
+            : '';
+
+      return /ConditionalCheckFailed|TransactionCanceled/i.test(
+        [name, message].join(' '),
+      );
+    });
   }
 
   private async assertUniqueIdentity(

@@ -13,7 +13,7 @@ type AuthState = {
   user: UserProfile | null;
   loading: boolean;
   error: string | null;
-  login: (payload: { login: string; password: string }) => Promise<void>; // 🔥 FIX
+  login: (payload: { login: string; password: string }) => Promise<void>;
   logout: () => Promise<void>;
   register: (payload: {
     fullName: string;
@@ -42,12 +42,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  /// 🔥 chuẩn hóa error
   const getErrorMessage = (err: any) => {
     return err?.message || "Có lỗi xảy ra";
   };
 
-const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async () => {
     try {
       setLoading(true);
       const profile = await getMe();
@@ -56,7 +55,6 @@ const refreshUser = useCallback(async () => {
     } catch (err: any) {
       setUser(null);
 
-      // 🔥 nếu 401 → không cần show lỗi
       if (err?.status !== 401) {
         setError(getErrorMessage(err));
       }

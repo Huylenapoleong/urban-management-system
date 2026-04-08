@@ -1,8 +1,14 @@
 import client from "./client";
 import type { GroupMetadata, GroupMembership } from "@urban/shared-types";
 
-export async function listGroups(): Promise<GroupMetadata[]> {
-  return await client.get("/groups");
+export async function listGroups(params?: {
+  mine?: boolean;
+  q?: string;
+  groupType?: string;
+  locationCode?: string;
+  limit?: number;
+}): Promise<GroupMetadata[]> {
+  return await client.get("/groups", { params });
 }
 
 export async function createGroup(data: {
@@ -16,6 +22,19 @@ export async function createGroup(data: {
 
 export async function getGroup(groupId: string): Promise<GroupMetadata> {
   return await client.get(`/groups/${encodeURIComponent(groupId)}`);
+}
+
+export async function updateGroup(
+  groupId: string,
+  data: {
+    groupName?: string;
+    description?: string;
+    groupType?: string;
+    locationCode?: string;
+    isOfficial?: boolean;
+  },
+): Promise<GroupMetadata> {
+  return await client.patch(`/groups/${encodeURIComponent(groupId)}`, data);
 }
 
 export async function joinGroup(groupId: string): Promise<GroupMembership> {

@@ -1,10 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import client, { ACCESS_TOKEN_KEY, request } from "./client";
+import { Platform } from "react-native";
+import client, { request } from "./client";
 import type { UserProfile } from "@urban/shared-types";
+import { ACCESS_TOKEN_KEY, clearWebToken, writeWebToken } from "@/lib/web-token-storage";
 
-/// ⚠️ NHỚ CHECK DTO BACKEND (phone hoặc email)
 type LoginRequest = {
-  login: string; // 🔥 sửa theo backend (email hoặc phone)
+  login: string;
   password: string;
 };
 
@@ -18,10 +19,20 @@ type RegisterRequest = {
 };
 
 const persistToken = async (token: string) => {
+  if (Platform.OS === "web") {
+    writeWebToken(token);
+    return;
+  }
+
   await AsyncStorage.setItem(ACCESS_TOKEN_KEY, token);
 };
 
 const clearToken = async () => {
+  if (Platform.OS === "web") {
+    clearWebToken();
+    return;
+  }
+
   await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
 };
 

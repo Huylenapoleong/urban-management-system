@@ -32,7 +32,24 @@ interface TransactionPutInput {
   tableName: string;
   item: TableItemBase;
   conditionExpression?: string;
+  expressionAttributeNames?: Record<string, string>;
+  expressionAttributeValues?: Record<string, unknown>;
 }
+
+interface TransactionDeleteInput {
+  tableName: string;
+  key: {
+    PK: string;
+    SK: string;
+  };
+  conditionExpression?: string;
+  expressionAttributeNames?: Record<string, string>;
+  expressionAttributeValues?: Record<string, unknown>;
+}
+
+type TransactionWriteInput =
+  | ({ kind: 'put' } & TransactionPutInput)
+  | ({ kind: 'delete' } & TransactionDeleteInput);
 
 @Injectable()
 export class UrbanTableRepository {
@@ -89,6 +106,15 @@ export class UrbanTableRepository {
   }
 
   async transactPut(items: TransactionPutInput[]): Promise<void> {
+    await this.transactWrite(
+      items.map((item) => ({
+        kind: 'put' as const,
+        ...item,
+      })),
+    );
+  }
+
+  async transactWrite(items: TransactionWriteInput[]): Promise<void> {
     if (items.length === 0) {
       return;
     }
@@ -97,13 +123,27 @@ export class UrbanTableRepository {
       await this.execute(() =>
         this.dynamoDbService.documentClient.send(
           new TransactWriteCommand({
-            TransactItems: items.map((item) => ({
-              Put: {
-                TableName: item.tableName,
-                Item: item.item,
-                ConditionExpression: item.conditionExpression,
-              },
-            })),
+            TransactItems: items.map((item) =>
+              item.kind === 'put'
+                ? {
+                    Put: {
+                      TableName: item.tableName,
+                      Item: item.item,
+                      ConditionExpression: item.conditionExpression,
+                      ExpressionAttributeNames: item.expressionAttributeNames,
+                      ExpressionAttributeValues: item.expressionAttributeValues,
+                    },
+                  }
+                : {
+                    Delete: {
+                      TableName: item.tableName,
+                      Key: item.key,
+                      ConditionExpression: item.conditionExpression,
+                      ExpressionAttributeNames: item.expressionAttributeNames,
+                      ExpressionAttributeValues: item.expressionAttributeValues,
+                    },
+                  },
+            ),
           }),
         ),
       );

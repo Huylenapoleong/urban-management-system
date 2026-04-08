@@ -6,7 +6,7 @@ import Button from "@/components/Button";
 import { getMe } from "@/services/api/auth.api";
 import type { UserProfile } from "@urban/shared-types";
 import colors from "@/constants/colors";
-import { useAuth } from "@/services/auth-context";
+import { useAuth } from "@/providers/AuthProvider";
 
 export default function ProfilePage() {
   const { logout } = useAuth();

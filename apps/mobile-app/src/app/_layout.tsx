@@ -1,10 +1,18 @@
 import { Stack } from "expo-router";
-import { AuthProvider } from "@/services/auth-context";
+import { PaperProvider } from "react-native-paper";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AuthProvider } from "@/providers/AuthProvider";
+
+const queryClient = new QueryClient();
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <Stack />
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <PaperProvider>
+        <AuthProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </AuthProvider>
+      </PaperProvider>
+    </QueryClientProvider>
   );
 }

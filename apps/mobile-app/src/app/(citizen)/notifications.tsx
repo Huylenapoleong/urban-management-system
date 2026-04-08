@@ -28,7 +28,7 @@ export default function NotificationsPage() {
       setLoading(true);
       try {
         const [reportData, conversationData] = await Promise.all([
-          listReports(),
+          listReports({ mine: true, limit: 100 }),
           listConversations(),
         ]);
 

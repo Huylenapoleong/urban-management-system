@@ -1,9 +1,9 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
+import { ACCESS_TOKEN_KEY, AUTH_TOKEN_KEY, readWebToken } from "@/lib/web-token-storage";
 
-export const ACCESS_TOKEN_KEY = "access_token";
-
-/// 📦 Envelope type cho API response
 export interface Envelope<T = any> {
   success: boolean;
   data: T;
@@ -18,9 +18,21 @@ const client = axios.create({
   timeout: 10000,
 });
 
-/// 🔐 Request interceptor: tự động gắn token
+export async function readAccessToken(): Promise<string | null> {
+  if (Platform.OS === "web") {
+    return readWebToken();
+  }
+
+  const secureToken = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+  if (secureToken) {
+    return secureToken;
+  }
+
+  return await AsyncStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
 client.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  const token = await readAccessToken();
 
   if (token) {
     config.headers = config.headers || {};
@@ -30,13 +42,12 @@ client.interceptors.request.use(async (config) => {
   return config;
 });
 
-/// 📦 Response interceptor: unwrap envelope
 client.interceptors.response.use(
   (response) => {
     const res = response.data;
 
     if (res.success) {
-      return res.data; // ✅ trả data luôn
+      return res.data;
     }
 
     throw {
@@ -52,7 +63,6 @@ client.interceptors.response.use(
   }
 );
 
-/// 🔥 Helper để fix typing (QUAN TRỌNG)
 export async function request<T>(promise: Promise<any>): Promise<T> {
   return promise;
 }

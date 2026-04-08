@@ -1,21 +1,16 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { io, type Socket } from "socket.io-client";
 import { CHAT_SOCKET_EVENTS, CHAT_SOCKET_NAMESPACE } from "@urban/shared-constants";
 import type {
   ChatConversationCommandPayload,
   ChatConversationSubscription,
   ChatSocketAck,
-  ChatSocketReadyPayload,
 } from "@urban/shared-types";
-import { ACCESS_TOKEN_KEY } from "./api/client";
+import { readAccessToken as readStoredAccessToken } from "./api/client";
 
-type ChatEventMap = {
-  [CHAT_SOCKET_EVENTS.READY]: ChatSocketReadyPayload;
-};
-
-type ChatSocketInstance = Socket<ChatEventMap>;
+type ChatSocketInstance = Socket;
 
 let chatSocket: ChatSocketInstance | undefined;
+let chatSocketToken: string | undefined;
 
 function getApiBaseUrl(): string {
   return process.env.API_BASE_URL || "http://localhost:3001/api";
@@ -26,8 +21,8 @@ function getSocketOrigin(): string {
   return apiBaseUrl.replace(/\/api\/?$/i, "");
 }
 
-async function readAccessToken(): Promise<string> {
-  const token = await AsyncStorage.getItem(ACCESS_TOKEN_KEY);
+async function requireAccessToken(): Promise<string> {
+  const token = await readStoredAccessToken();
 
   if (!token) {
     throw new Error("Missing access token.");
@@ -37,19 +32,28 @@ async function readAccessToken(): Promise<string> {
 }
 
 export async function connectChatSocket(): Promise<ChatSocketInstance> {
-  const token = await readAccessToken();
+  const token = await requireAccessToken();
+  const bearerToken = `Bearer ${token}`;
 
   if (!chatSocket) {
     chatSocket = io(`${getSocketOrigin()}${CHAT_SOCKET_NAMESPACE}`, {
       autoConnect: false,
       auth: {
-        token: `Bearer ${token}`,
+        token: bearerToken,
       },
       transports: ["websocket"],
     });
+    chatSocketToken = bearerToken;
+  } else if (chatSocketToken !== bearerToken) {
+    chatSocket.removeAllListeners();
+    chatSocket.disconnect();
+    chatSocket.auth = {
+      token: bearerToken,
+    };
+    chatSocketToken = bearerToken;
   } else {
     chatSocket.auth = {
-      token: `Bearer ${token}`,
+      token: bearerToken,
     };
   }
 
@@ -72,6 +76,7 @@ export function disconnectChatSocket(): void {
   chatSocket.removeAllListeners();
   chatSocket.disconnect();
   chatSocket = undefined;
+  chatSocketToken = undefined;
 }
 
 export async function emitChatAck<TData>(
@@ -103,16 +108,23 @@ export async function joinConversation(
   const payload: ChatConversationCommandPayload = { conversationId };
   return await emitChatAck<ChatConversationSubscription>(
     CHAT_SOCKET_EVENTS.CONVERSATION_JOIN,
-    payload,
+    payload as unknown as Record<string, unknown>,
   );
 }
 
 export async function leaveConversation(
   conversationId: string,
 ): Promise<ChatSocketAck<{ conversationId: string }>> {
+  if (!chatSocket || !chatSocket.connected) {
+    return {
+      success: true,
+      data: { conversationId },
+    };
+  }
+
   const payload: ChatConversationCommandPayload = { conversationId };
   return await emitChatAck<{ conversationId: string }>(
     CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE,
-    payload,
+    payload as unknown as Record<string, unknown>,
   );
 }

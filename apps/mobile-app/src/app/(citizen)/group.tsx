@@ -16,13 +16,14 @@ import type { GroupMetadata } from "@urban/shared-types";
 import { useRouter } from "expo-router";
 import Header from "@/components/Header";
 import colors from "@/constants/colors";
-import { useAuth } from "@/services/auth-context";
-import client from "@/services/api/client";
+import { useAuth } from "@/providers/AuthProvider";
 import { createGroup, joinGroup, leaveGroup, listGroups } from "@/services/api/group.api";
 
 type GroupWithStatus = GroupMetadata & {
   joined: boolean;
 };
+
+const PRIVATE_GROUP_TYPE = GROUP_TYPES.find((type) => type === "PRIVATE") ?? "PRIVATE";
 
 function normalizeText(value: string) {
   return value
@@ -81,9 +82,10 @@ export default function GroupsScreen() {
   const loadGroups = useCallback(async () => {
     setLoading(true);
     try {
+      const keyword = searchText.trim() || undefined;
       const [all, mine] = await Promise.all([
-        listGroups(),
-        client.get("/groups", { params: { mine: true } }) as Promise<GroupMetadata[]>,
+        listGroups({ q: keyword, limit: 100 }),
+        listGroups({ mine: true, limit: 100 }),
       ]);
 
       setAllGroups(all);
@@ -93,7 +95,7 @@ export default function GroupsScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [searchText]);
 
   useEffect(() => {
     void loadGroups();
@@ -131,6 +133,11 @@ export default function GroupsScreen() {
   }, [allGroups, joinedIds, normalizedSearch]);
 
   const handleJoinToggle = async (group: GroupWithStatus) => {
+    if (group.createdBy === user?.sub) {
+      Alert.alert("Khong the roi nhom", "Ban la chu nhom, hien tai khong the roi nhom do chinh minh tao.");
+      return;
+    }
+
     try {
       if (group.joined) {
         await leaveGroup(group.id);
@@ -152,7 +159,7 @@ export default function GroupsScreen() {
     try {
       const createdGroup = await createGroup({
         groupName: groupName.trim(),
-        groupType: GROUP_TYPES[3],
+        groupType: PRIVATE_GROUP_TYPE,
         locationCode: user.locationCode,
         description: description.trim() || undefined,
       });
@@ -160,7 +167,10 @@ export default function GroupsScreen() {
       setGroupName("");
       setDescription("");
       await loadGroups();
-      Alert.alert("Thanh cong", "Da tao nhom rieng cua ban");
+      Alert.alert(
+        "Thanh cong",
+        "Da tao nhom PRIVATE cua ban. Chi thanh vien moi co the thay va vao phong chat nay.",
+      );
       router.push({
         pathname: "/(citizen)/chat/[id]",
         params: { id: `group:${createdGroup.id}` },
@@ -193,7 +203,7 @@ export default function GroupsScreen() {
           <View style={styles.heroText}>
             <Text style={styles.heroTitle}>Group citizen hub</Text>
             <Text style={styles.heroSubtitle}>
-              Tim nhom phu hop theo khu vuc, tham gia nhanh va tao nhom rieng cua ban ngay trong mot man hinh.
+              Tim nhom ban da co quyen truy cap, tham gia nhanh va tao nhom PRIVATE trong khu vuc cua ban.
             </Text>
           </View>
           <Pressable style={styles.heroButton} onPress={() => setShowCreateModal(true)}>
@@ -223,6 +233,13 @@ export default function GroupsScreen() {
             <Text style={styles.legendText}>Chua tham gia</Text>
           </View>
           <Text style={styles.legendSummary}>{`${joinedGroups.length} nhom cua ban`}</Text>
+        </View>
+
+        <View style={styles.noticeCard}>
+          <Ionicons name="information-circle-outline" size={18} color="#1d4ed8" />
+          <Text style={styles.noticeText}>
+            Nhom do citizen tao se la PRIVATE. Can bo cung dia ban se khong tu thay nhom nay neu chua duoc them vao.
+          </Text>
         </View>
 
         {loading ? (
@@ -271,11 +288,21 @@ export default function GroupsScreen() {
                     </Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.joinButton, group.joined ? styles.leaveButton : null]}
+                    style={[
+                      styles.joinButton,
+                      group.joined ? styles.leaveButton : null,
+                      group.createdBy === user?.sub ? styles.ownerButton : null,
+                    ]}
                     onPress={() => void handleJoinToggle(group)}
                   >
-                    <Text style={[styles.joinButtonText, group.joined ? styles.leaveButtonText : null]}>
-                      {group.joined ? "Leave" : "Join"}
+                    <Text
+                      style={[
+                        styles.joinButtonText,
+                        group.joined ? styles.leaveButtonText : null,
+                        group.createdBy === user?.sub ? styles.ownerButtonText : null,
+                      ]}
+                    >
+                      {group.createdBy === user?.sub ? "Owner" : group.joined ? "Leave" : "Join"}
                     </Text>
                   </Pressable>
                 </View>
@@ -293,7 +320,7 @@ export default function GroupsScreen() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Create private group</Text>
             <Text style={styles.modalText}>
-              Citizen chi duoc tao nhom PRIVATE trong dung dia ban cua minh.
+              Citizen chi duoc tao nhom PRIVATE trong dung dia ban cua minh. Nhom nay chi thanh vien moi co the thay va tham gia.
             </Text>
             <TextInput
               style={styles.modalInput}
@@ -383,6 +410,25 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: "row", alignItems: "center" },
   legendText: { marginLeft: 6, color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
   legendSummary: { color: "#0f172a", fontWeight: "700", fontSize: 12 },
+  noticeCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#eff6ff",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    marginBottom: 14,
+  },
+  noticeText: {
+    flex: 1,
+    color: "#1e3a8a",
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "600",
+  },
   statusDot: { width: 10, height: 10, borderRadius: 999 },
   statusDotJoined: { backgroundColor: "#16a34a" },
   statusDotIdle: { backgroundColor: "#cbd5e1" },
@@ -451,8 +497,10 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
   },
   leaveButton: { backgroundColor: "#eef2ff" },
+  ownerButton: { backgroundColor: "#e2e8f0" },
   joinButtonText: { color: "#1d4ed8", fontWeight: "800", fontSize: 13 },
   leaveButtonText: { color: "#4338ca" },
+  ownerButtonText: { color: "#475569" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(15,23,42,0.3)",

@@ -1,23 +1,27 @@
 import { useEffect } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
-import { useAuth } from "@/services/auth-context";
+import { useAuth } from "@/providers/AuthProvider";
 
 export default function Index() {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    if (!loading) {
+    if (!isLoading) {
       if (user) {
-        router.replace("/home");
+        if (["ADMIN", "PROVINCE_OFFICER", "WARD_OFFICER"].includes(user.role)) {
+          router.replace("/(official)" as any);
+        } else {
+          router.replace("/home");
+        }
       } else {
         router.replace("/login");
       }
     }
-  }, [user, loading, router]);
+  }, [user, isLoading, router]);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#1677ff" />

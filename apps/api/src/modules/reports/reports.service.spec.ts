@@ -1,4 +1,8 @@
-import { ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import type { StoredReport } from '../../common/storage-records';
 import { ReportsService } from './reports.service';
 
@@ -20,6 +24,7 @@ describe('ReportsService', () => {
     canUpdateOwnReport: jest.fn(),
   };
   const usersService = {
+    getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
   };
   const groupsService = {
@@ -85,6 +90,14 @@ describe('ReportsService', () => {
     );
     repository.get.mockResolvedValue(report);
     repository.transactPut.mockResolvedValue(undefined);
+    usersService.getActiveByIdOrThrow.mockResolvedValue({
+      userId: 'officer-1',
+      fullName: 'Officer One',
+      role: 'WARD_OFFICER',
+      locationCode: report.locationCode,
+      status: 'ACTIVE',
+      deletedAt: null,
+    });
     auditTrailService.buildReportEvent.mockReturnValue({
       PK: report.PK,
       SK: 'AUDIT#2026-03-18T10:00:00.000Z#01AUDIT',
@@ -194,5 +207,66 @@ describe('ReportsService', () => {
         nextCursor: expect.any(String),
       },
     });
+  });
+  it('rejects assigning a report to an inactive officer', async () => {
+    usersService.getActiveByIdOrThrow.mockRejectedValue(
+      new BadRequestException('User account is not active.'),
+    );
+
+    await expect(
+      service.assignReport(
+        {
+          ...actor,
+          role: 'WARD_OFFICER',
+        },
+        report.reportId,
+        {
+          officerId: 'officer-locked',
+        },
+      ),
+    ).rejects.toThrow(new BadRequestException('User account is not active.'));
+  });
+
+  it('rejects invalid report status transitions before writing', async () => {
+    authorizationService.canTransitionReport.mockReturnValue(false);
+
+    await expect(
+      service.updateStatus(
+        {
+          ...actor,
+          role: 'WARD_OFFICER',
+        },
+        report.reportId,
+        {
+          status: 'CLOSED',
+        },
+      ),
+    ).rejects.toThrow(
+      new ForbiddenException('You cannot update report status.'),
+    );
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('maps report write conflicts to a retryable conflict error', async () => {
+    authorizationService.canManageReport.mockReturnValue(true);
+    authorizationService.canCreateReport.mockReturnValue(true);
+    const transactionError = new Error('Transaction canceled');
+    transactionError.cause = {
+      name: 'TransactionCanceledException',
+    };
+    repository.transactPut.mockRejectedValue(transactionError);
+
+    await expect(
+      service.updateReport(
+        {
+          ...actor,
+          role: 'WARD_OFFICER',
+        },
+        report.reportId,
+        {
+          title: 'Updated title',
+        },
+      ),
+    ).rejects.toThrow(new ConflictException('Report changed. Please retry.'));
   });
 });

@@ -4,20 +4,29 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import colors from "@/constants/colors";
-import { useAuth } from "@/services/auth-context";
+import { useAuth } from "@/providers/AuthProvider";
 
 export default function CitizenLayout() {
-  const { user, loading } = useAuth();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
+    if (isLoading) {
+      return;
     }
-  }, [loading, user, router]);
 
-  if (loading) {
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    if (["ADMIN", "PROVINCE_OFFICER", "WARD_OFFICER"].includes(user.role)) {
+      router.replace("/(official)" as any);
+    }
+  }, [isLoading, user, router]);
+
+  if (isLoading) {
     return (
       <View style={styles.loader}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -65,6 +74,7 @@ export default function CitizenLayout() {
         },
       }}
     >
+      <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen
         name="home"
         options={{
@@ -107,6 +117,7 @@ export default function CitizenLayout() {
       <Tabs.Screen name="notifications" options={{ href: null }} />
       <Tabs.Screen name="create-group" options={{ href: null }} />
       <Tabs.Screen name="join-group" options={{ href: null }} />
+      <Tabs.Screen name="report-history" options={{ href: null }} />
     </Tabs>
   );
 }
