@@ -38,6 +38,14 @@ type UseCitizenConversationParams = {
   currentUserId?: string;
 };
 
+type SendMessageOptions = {
+  type?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
+  attachmentUrl?: string;
+  replyTo?: string;
+  content?: string;
+  clientMessageId?: string;
+};
+
 export function useCitizenConversation({
   conversationId,
   currentUserId,
@@ -61,7 +69,7 @@ export function useCitizenConversation({
     const token = await readAccessToken();
 
     if (!token) {
-      setError("Phien dang nhap khong hop le. Vui long dang nhap lai.");
+      setError("Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.");
       disconnectChatSocket();
       return false;
     }
@@ -70,12 +78,12 @@ export function useCitizenConversation({
       const claims = jwtDecode<JwtClaims>(token);
 
       if (claims.sub !== currentUserId) {
-        setError("Phien dang nhap chua dong bo. Vui long dang xuat va dang nhap lai.");
+        setError("Phiên đăng nhập chưa đồng bộ. Vui lòng đăng xuất và đăng nhập lại.");
         disconnectChatSocket();
         return false;
       }
     } catch {
-      setError("Khong the xac thuc phien dang nhap hien tai.");
+      setError("Không thể xác thực phiên đăng nhập hiện tại.");
       disconnectChatSocket();
       return false;
     }
@@ -165,7 +173,15 @@ export function useCitizenConversation({
             return;
           }
 
-          setMessages((prev) => upsertSortedMessage(prev, event.message));
+          setMessages((prev) => {
+            const filtered = prev.filter(
+              (item: any) =>
+                item.id !== event.clientMessageId &&
+                item.clientMessageId !== event.clientMessageId,
+            );
+
+            return upsertSortedMessage(filtered, event.message);
+          });
           setError(null);
         };
 
@@ -276,10 +292,41 @@ export function useCitizenConversation({
     };
   }, [conversationId, currentUserId, ensureSessionMatchesCurrentUser]);
 
-  const sendMessage = useCallback(async (text: string) => {
-    if (!conversationId || !text.trim() || sending) {
+  const sendMessage = useCallback(async (text: string, options?: SendMessageOptions) => {
+    const messageType = options?.type ?? "TEXT";
+    const payloadContent =
+      options?.content ??
+      (messageType === "TEXT" || messageType === "EMOJI"
+        ? buildTextMessagePayload(text)
+        : text);
+
+    if (!conversationId || (!payloadContent?.trim() && !options?.attachmentUrl) || sending) {
       return false;
     }
+
+    const nextClientMessageId =
+      options?.clientMessageId ||
+      `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    // Optimistic insert for smoother UX while waiting socket ack.
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextClientMessageId,
+        conversationId,
+        senderId: currentUserId || 'me',
+        senderName: 'Bạn',
+        type: messageType,
+        content: payloadContent,
+        attachmentUrl: options?.attachmentUrl,
+        replyTo: options?.replyTo,
+        sentAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        deletedAt: null,
+        clientMessageId: nextClientMessageId,
+        isOptimistic: true,
+      } as any,
+    ]);
 
     setSending(true);
 
@@ -294,23 +341,28 @@ export function useCitizenConversation({
         CHAT_SOCKET_EVENTS.MESSAGE_SEND,
         {
           conversationId,
-          content: buildTextMessagePayload(text),
-          type: "TEXT",
-          clientMessageId: `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          content: payloadContent,
+          type: messageType,
+          attachmentUrl: options?.attachmentUrl,
+          replyTo: options?.replyTo,
+          clientMessageId: nextClientMessageId,
         },
       );
 
       if (!response.success) {
+        setMessages((prev) => prev.filter((item: any) => item.id !== nextClientMessageId));
         setError(response.error.message);
         return false;
       }
 
       setError(null);
       return true;
+      setMessages((prev) => prev.filter((item: any) => item.id !== nextClientMessageId));
+      throw error;
     } finally {
       setSending(false);
     }
-  }, [conversationId, ensureSessionMatchesCurrentUser, sending]);
+  }, [conversationId, currentUserId, ensureSessionMatchesCurrentUser, sending]);
 
   const setTyping = useCallback((isTyping: boolean) => {
     if (!conversationId) {
@@ -324,6 +376,51 @@ export function useCitizenConversation({
         clientTimestamp: new Date().toISOString(),
       },
     );
+  }, [conversationId]);
+
+  const updateMessage = useCallback(async (messageId: string, content: string) => {
+    if (!conversationId || !messageId) {
+      return false;
+    }
+
+    const response = await emitChatAck(
+      CHAT_SOCKET_EVENTS.MESSAGE_UPDATE,
+      {
+        conversationId,
+        messageId,
+        content,
+      },
+    );
+
+    if (!response.success) {
+      setError(response.error.message);
+      return false;
+    }
+
+    setError(null);
+    return true;
+  }, [conversationId]);
+
+  const deleteMessage = useCallback(async (messageId: string) => {
+    if (!conversationId || !messageId) {
+      return false;
+    }
+
+    const response = await emitChatAck(
+      CHAT_SOCKET_EVENTS.MESSAGE_DELETE,
+      {
+        conversationId,
+        messageId,
+      },
+    );
+
+    if (!response.success) {
+      setError(response.error.message);
+      return false;
+    }
+
+    setError(null);
+    return true;
   }, [conversationId]);
 
   const typingUsers = useMemo(
@@ -340,12 +437,12 @@ export function useCitizenConversation({
   );
 
   const subtitle = typingUsers.length
-    ? `${typingUsers.join(", ")} dang go tin nhan`
+    ? `${typingUsers.join(", ")} đang gõ tin nhắn`
     : activeParticipants > 0
-      ? `${activeParticipants} nguoi dang online`
+      ? `${activeParticipants} người đang online`
       : joinedConversationKey
-        ? "Dang dong bo realtime"
-        : "Dang ket noi phong chat";
+        ? "Đang đồng bộ realtime"
+        : "Đang kết nối phòng chat";
 
   return {
     messages,
@@ -355,5 +452,7 @@ export function useCitizenConversation({
     subtitle,
     sendMessage,
     setTyping,
+    updateMessage,
+    deleteMessage,
   };
 }

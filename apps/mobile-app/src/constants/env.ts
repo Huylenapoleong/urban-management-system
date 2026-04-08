@@ -1,7 +1,7 @@
 // Environment configuration for external services
 export const ENV_CONFIG = {
   // API URLs
-  API_BASE_URL: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api',
+  API_BASE_URL: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001',
 
   // S3 Configuration
   S3: {

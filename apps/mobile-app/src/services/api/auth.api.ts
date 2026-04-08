@@ -1,8 +1,8 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import client, { request } from "./client";
 import type { UserProfile } from "@urban/shared-types";
-import { ACCESS_TOKEN_KEY, clearWebToken, writeWebToken } from "@/lib/web-token-storage";
+import { AUTH_TOKEN_KEY, clearWebToken, writeWebToken } from "@/lib/web-token-storage";
 
 type LoginRequest = {
   login: string;
@@ -24,7 +24,7 @@ const persistToken = async (token: string) => {
     return;
   }
 
-  await AsyncStorage.setItem(ACCESS_TOKEN_KEY, token);
+  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
 };
 
 const clearToken = async () => {
@@ -33,7 +33,7 @@ const clearToken = async () => {
     return;
   }
 
-  await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
+  await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
 };
 
 export async function login(params: LoginRequest) {

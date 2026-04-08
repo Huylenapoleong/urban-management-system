@@ -5,6 +5,23 @@ import { ENV_CONFIG } from '@/constants/env';
 
 const API_BASE_URL = ENV_CONFIG.API_BASE_URL;
 
+function extractErrorMessage(payload: any): string {
+  if (!payload) {
+    return 'API request failed';
+  }
+
+  const directMessage =
+    typeof payload.message === 'string' ? payload.message : undefined;
+  const nestedMessage =
+    typeof payload.error?.message === 'string'
+      ? payload.error.message
+      : Array.isArray(payload.error?.message)
+        ? payload.error.message.join(', ')
+        : undefined;
+
+  return nestedMessage || directMessage || 'API request failed';
+}
+
 export class ApiClient {
   static async getToken(): Promise<string | null> {
     try {
@@ -19,10 +36,17 @@ export class ApiClient {
 
   static async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = await this.getToken();
+    const incomingHeaders =
+      (options.headers as Record<string, string> | undefined) || {};
+    const isFormDataBody =
+      typeof FormData !== 'undefined' && options.body instanceof FormData;
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...((options.headers as Record<string, string>) || {}),
+      ...incomingHeaders,
     };
+
+    if (!isFormDataBody && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
@@ -34,8 +58,8 @@ export class ApiClient {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || 'API request failed');
+      const errorData = await response.json().catch(() => null);
+      throw new Error(extractErrorMessage(errorData));
     }
 
     const data = await response.json();
@@ -54,6 +78,13 @@ export class ApiClient {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  static upload<T = any>(endpoint: string, formData: FormData) {
+    return this.request<T>(endpoint, {
+      method: 'POST',
+      body: formData,
     });
   }
 

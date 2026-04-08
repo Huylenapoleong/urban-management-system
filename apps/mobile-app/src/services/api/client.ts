@@ -1,8 +1,7 @@
 import axios from "axios";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { ACCESS_TOKEN_KEY, AUTH_TOKEN_KEY, readWebToken } from "@/lib/web-token-storage";
+import { AUTH_TOKEN_KEY, readWebToken } from "@/lib/web-token-storage";
 
 export interface Envelope<T = any> {
   success: boolean;
@@ -14,7 +13,10 @@ export interface Envelope<T = any> {
 }
 
 const client = axios.create({
-  baseURL: process.env.API_BASE_URL || "http://localhost:3001/api",
+  baseURL:
+    process.env.EXPO_PUBLIC_API_URL ||
+    process.env.API_BASE_URL ||
+    "http://localhost:3001",
   timeout: 10000,
 });
 
@@ -28,7 +30,7 @@ export async function readAccessToken(): Promise<string | null> {
     return secureToken;
   }
 
-  return await AsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  return null;
 }
 
 client.interceptors.request.use(async (config) => {

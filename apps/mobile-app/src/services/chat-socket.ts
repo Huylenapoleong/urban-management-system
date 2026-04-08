@@ -13,7 +13,11 @@ let chatSocket: ChatSocketInstance | undefined;
 let chatSocketToken: string | undefined;
 
 function getApiBaseUrl(): string {
-  return process.env.API_BASE_URL || "http://localhost:3001/api";
+  return (
+    process.env.EXPO_PUBLIC_API_URL ||
+    process.env.API_BASE_URL ||
+    "http://localhost:3001"
+  );
 }
 
 function getSocketOrigin(): string {

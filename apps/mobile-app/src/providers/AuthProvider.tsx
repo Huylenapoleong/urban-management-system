@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { ApiClient } from '../lib/api-client';
 import { jwtDecode } from 'jwt-decode';
@@ -29,7 +28,7 @@ async function readStoredToken(): Promise<string | null> {
     return secureToken;
   }
 
-  return await AsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  return null;
 }
 
 async function persistToken(token: string): Promise<void> {
@@ -39,7 +38,6 @@ async function persistToken(token: string): Promise<void> {
   }
 
   await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
-  await AsyncStorage.setItem(ACCESS_TOKEN_KEY, token);
 }
 
 async function clearStoredToken(): Promise<void> {
@@ -49,7 +47,6 @@ async function clearStoredToken(): Promise<void> {
   }
 
   await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
-  await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

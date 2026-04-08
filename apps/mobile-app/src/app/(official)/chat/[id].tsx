@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, Image, ScrollView, Alert, useWindowDimensions, Share } from 'react-native';
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, Image, ScrollView, Alert, useWindowDimensions, Share, Modal as NativeModal } from 'react-native';
 import { Text, TextInput, IconButton, useTheme, Appbar, ActivityIndicator, Avatar, Divider, Menu, Portal, Modal, Button } from 'react-native-paper';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { Audio } from 'expo-av';
+import { Audio, ResizeMode, Video } from 'expo-av';
 import { useChatConversation } from '../../../hooks/shared/useChatConversation';
 import { useAuth } from '../../../providers/AuthProvider';
 import { useWebRTCContext } from '../../../providers/WebRTCContext';
@@ -38,6 +38,8 @@ export default function OfficialChatScreen() {
   const [text, setText] = useState('');
   const [showMediaMenu, setShowMediaMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [replyToMessage, setReplyToMessage] = useState<any>(null);
+  const [fullscreenMedia, setFullscreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   
   const flatListRef = useRef<FlatList>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -101,8 +103,9 @@ export default function OfficialChatScreen() {
 
   const handleSend = () => {
     if (!text.trim()) return;
-    sendMessage(text.trim(), Date.now().toString());
+    sendMessage(text.trim(), Date.now().toString(), 'TEXT', undefined, replyToMessage?.id);
     setText('');
+    setReplyToMessage(null);
     sendTyping(false);
   };
 
@@ -117,16 +120,22 @@ export default function OfficialChatScreen() {
   // ── Media Handlers ────────────────────────────────────────────────────────
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: false,
       quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      const type = asset.type === 'video' ? 'VIDEO' : 'IMAGE';
       try {
-        await sendMedia(asset.uri, asset.fileName || 'upload', asset.mimeType || 'image/jpeg', type);
+        await sendMedia(
+          asset.uri,
+          asset.fileName || 'upload',
+          asset.mimeType || 'image/jpeg',
+          'IMAGE',
+          replyToMessage?.id,
+        );
+        setReplyToMessage(null);
       } catch (e) {
         Alert.alert('Lỗi', 'Không thể gửi tệp. Vui lòng thử lại.');
       }
@@ -140,8 +149,65 @@ export default function OfficialChatScreen() {
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      await sendMedia(asset.uri, 'camera-photo.jpg', 'image/jpeg', 'IMAGE');
+      await sendMedia(
+        asset.uri,
+        'camera-photo.jpg',
+        'image/jpeg',
+        'IMAGE',
+        replyToMessage?.id,
+      );
+      setReplyToMessage(null);
     }
+  };
+
+  const pickVideo = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      allowsEditing: false,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      try {
+        await sendMedia(
+          asset.uri,
+          asset.fileName || 'video.mp4',
+          asset.mimeType || 'video/mp4',
+          'VIDEO',
+          replyToMessage?.id,
+        );
+        setReplyToMessage(null);
+      } catch (e) {
+        Alert.alert('Lỗi', 'Không thể gửi video. Vui lòng thử lại.');
+      }
+    }
+    setShowMediaMenu(false);
+  };
+
+  const takeVideo = async () => {
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      quality: 0.8,
+      videoMaxDuration: 60,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      try {
+        await sendMedia(
+          asset.uri,
+          asset.fileName || 'camera-video.mp4',
+          asset.mimeType || 'video/mp4',
+          'VIDEO',
+          replyToMessage?.id,
+        );
+        setReplyToMessage(null);
+      } catch (e) {
+        Alert.alert('Lỗi', 'Không thể quay/gửi video. Vui lòng thử lại.');
+      }
+    }
+    setShowMediaMenu(false);
   };
 
   const pickDocument = async () => {
@@ -151,13 +217,74 @@ export default function OfficialChatScreen() {
       });
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        await sendMedia(asset.uri, asset.name, asset.mimeType || 'application/octet-stream', 'DOC');
+        await sendMedia(
+          asset.uri,
+          asset.name,
+          asset.mimeType || 'application/octet-stream',
+          'DOC',
+          replyToMessage?.id,
+        );
+        setReplyToMessage(null);
       }
     } catch (e) {
       console.warn('DocumentPicker not supported or failed', e);
       Alert.alert('Thông báo', 'Tính năng chọn tệp không khả dụng trên môi trường này.');
     }
     setShowMediaMenu(false);
+  };
+
+  const sendLocation = () => {
+    (async () => {
+      try {
+        let latitude: number | undefined;
+        let longitude: number | undefined;
+
+        try {
+          const Location = await import('expo-location');
+          const permission = await Location.requestForegroundPermissionsAsync();
+          if (permission.status === 'granted') {
+            const location = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            latitude = location.coords.latitude;
+            longitude = location.coords.longitude;
+          }
+        } catch {
+          // Fallback below.
+        }
+
+        if (latitude === undefined || longitude === undefined) {
+          const geolocation = (globalThis as any)?.navigator?.geolocation;
+          if (!geolocation) {
+            throw new Error('Thiết bị hiện tại chưa hỗ trợ vị trí.');
+          }
+
+          const fallback = await new Promise<any>((resolve, reject) => {
+            geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 12000,
+              maximumAge: 5000,
+            });
+          });
+
+          latitude = fallback.coords.latitude;
+          longitude = fallback.coords.longitude;
+        }
+
+        const mapUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
+        sendMessage(
+          `Vị trí hiện tại: ${mapUrl}`,
+          Date.now().toString(),
+          'TEXT',
+          undefined,
+          replyToMessage?.id,
+        );
+        setReplyToMessage(null);
+        setShowMediaMenu(false);
+      } catch (error: any) {
+        Alert.alert('Lỗi vị trí', error?.message || 'Không thể lấy vị trí hiện tại.');
+      }
+    })();
   };
 
   const startRecording = async () => {
@@ -179,7 +306,8 @@ export default function OfficialChatScreen() {
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
       if (uri) {
-        await sendMedia(uri, 'voice-message.m4a', 'audio/m4a', 'AUDIO');
+        await sendMedia(uri, 'voice-message.m4a', 'audio/mp4', 'AUDIO', replyToMessage?.id);
+        setReplyToMessage(null);
       }
     } catch (err) {
       console.error('Failed to stop recording', err);
@@ -202,7 +330,7 @@ export default function OfficialChatScreen() {
 
     if (item.type === 'IMAGE') {
       return (
-        <TouchableOpacity activeOpacity={0.9}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => item.attachmentUrl && setFullscreenMedia({ uri: item.attachmentUrl, type: 'image' })}>
           <Image source={{ uri: item.attachmentUrl }} style={styles.mediaImage} resizeMode="cover" />
         </TouchableOpacity>
       );
@@ -210,10 +338,10 @@ export default function OfficialChatScreen() {
 
     if (item.type === 'VIDEO') {
       return (
-        <View style={styles.mediaPlaceholder}>
+        <TouchableOpacity style={styles.mediaPlaceholder} activeOpacity={0.85} onPress={() => item.attachmentUrl && setFullscreenMedia({ uri: item.attachmentUrl, type: 'video' })}>
           <IconButton icon="play-circle" iconColor={isMe ? '#fff' : theme.colors.primary} size={40} />
-          <Text style={{ color: isMe ? '#fff' : theme.colors.onSurfaceVariant }}>Tin nhắn video</Text>
-        </View>
+          <Text style={{ color: isMe ? '#fff' : theme.colors.onSurfaceVariant }}>Video - nhấn để xem</Text>
+        </TouchableOpacity>
       );
     }
 
@@ -325,6 +453,15 @@ export default function OfficialChatScreen() {
     setSelectedMessage(item);
     setShowMoreMenu(false);
     setMenuVisible(true);
+  };
+
+  const handleReply = () => {
+    if (!selectedMessage) {
+      return;
+    }
+
+    setReplyToMessage(selectedMessage);
+    setMenuVisible(false);
   };
 
   const handleCopy = async () => {
@@ -502,6 +639,20 @@ export default function OfficialChatScreen() {
           </View>
         )}
 
+        {replyToMessage && (
+          <View style={styles.replyPreviewBox}>
+            <View style={{ flex: 1 }}>
+              <Text variant="labelSmall" style={{ color: theme.colors.primary, fontWeight: '700' }}>
+                Đang trả lời {replyToMessage.senderName || 'tin nhắn'}
+              </Text>
+              <Text variant="bodySmall" numberOfLines={1} style={{ color: '#666' }}>
+                {parseMessageContent(replyToMessage.content) || 'Tin nhắn đính kèm'}
+              </Text>
+            </View>
+            <IconButton icon="close" size={18} onPress={() => setReplyToMessage(null)} />
+          </View>
+        )}
+
         <View style={styles.inputArea}>
           <IconButton
             icon="plus-circle"
@@ -574,16 +725,16 @@ export default function OfficialChatScreen() {
                 <Text variant="labelSmall">Tài liệu</Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="map-marker" mode="contained" containerColor="#ff9500" iconColor="#fff" onPress={() => {}} />
+                <IconButton icon="map-marker" mode="contained" containerColor="#ff9500" iconColor="#fff" onPress={sendLocation} />
                 <Text variant="labelSmall">Vị trí</Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="account" mode="contained" containerColor="#ff2d55" iconColor="#fff" onPress={() => {}} />
-                <Text variant="labelSmall">Liên hệ</Text>
+                <IconButton icon="video-outline" mode="contained" containerColor="#ff2d55" iconColor="#fff" onPress={takeVideo} />
+                <Text variant="labelSmall">Quay video</Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="chart-bar" mode="contained" containerColor="#4cd964" iconColor="#fff" onPress={() => {}} />
-                <Text variant="labelSmall">Bình chọn</Text>
+                <IconButton icon="filmstrip" mode="contained" containerColor="#4cd964" iconColor="#fff" onPress={pickVideo} />
+                <Text variant="labelSmall">Video thư viện</Text>
               </View>
             </ScrollView>
           </View>
@@ -607,7 +758,7 @@ export default function OfficialChatScreen() {
             </View>
             
             <View style={styles.actionGrid}>
-              <TouchableOpacity style={styles.actionGridItem} onPress={() => { setMenuVisible(false); /* handle reply later */ }}>
+              <TouchableOpacity style={styles.actionGridItem} onPress={handleReply}>
                 <View style={styles.actionGridIcon}><IconButton icon="reply" size={24} iconColor={theme.colors.onSurface} /></View>
                 <Text variant="labelSmall">Trả lời</Text>
               </TouchableOpacity>
@@ -663,6 +814,48 @@ export default function OfficialChatScreen() {
           </View>
         </Modal>
       </Portal>
+
+      <NativeModal
+        visible={Boolean(fullscreenMedia)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullscreenMedia(null)}
+      >
+        <View style={styles.fullscreenOverlay}>
+          <TouchableOpacity style={styles.fullscreenCloseButton} onPress={() => setFullscreenMedia(null)}>
+            <IconButton icon="close" iconColor="#fff" size={26} />
+          </TouchableOpacity>
+
+          {fullscreenMedia?.type === 'image' ? (
+            <Image source={{ uri: fullscreenMedia.uri }} style={styles.fullscreenMedia} resizeMode="contain" />
+          ) : null}
+
+          {fullscreenMedia?.type === 'video' ? (
+            <Video
+              source={{ uri: fullscreenMedia.uri }}
+              style={styles.fullscreenMedia}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isLooping={false}
+            />
+          ) : null}
+
+          {fullscreenMedia?.uri ? (
+            <TouchableOpacity
+              style={styles.fullscreenShareButton}
+              onPress={() => {
+                void Share.share({
+                  url: fullscreenMedia.uri,
+                  message: 'Nội dung media từ chat',
+                });
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>Chia sẻ</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </NativeModal>
     </SafeAreaView>
   );
 }
@@ -704,6 +897,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 1,
+  },
+  replyPreviewBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eef4ff',
+    borderTopWidth: 1,
+    borderColor: '#dbeafe',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   inputArea: {
     flexDirection: 'row',
@@ -825,5 +1027,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 8,
+  },
+  fullscreenOverlay: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenMedia: {
+    width: '100%',
+    height: '75%',
+  },
+  fullscreenCloseButton: {
+    position: 'absolute',
+    top: 40,
+    right: 12,
+    zIndex: 2,
+  },
+  fullscreenShareButton: {
+    position: 'absolute',
+    bottom: 36,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(30, 136, 229, 0.9)',
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
   },
 });

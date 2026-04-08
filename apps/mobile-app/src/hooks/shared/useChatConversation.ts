@@ -125,7 +125,13 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
   }, [conversationId]);
 
   // ── 3. Send message ───────────────────────────────────────────────────────
-  const sendMessage = useCallback(async (content: string, clientMessageId: string, type: string = 'TEXT', attachmentUrl?: string) => {
+  const sendMessage = useCallback(async (
+    content: string,
+    clientMessageId: string,
+    type: string = 'TEXT',
+    attachmentUrl?: string,
+    replyTo?: string,
+  ) => {
     if (!isReady || !conversationId) return;
 
     // Optimistic UI Update: Hiển thị ngay lên màn hình
@@ -138,6 +144,7 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
         type: type,
         content,
         attachmentUrl,
+        replyTo,
         sentAt: new Date().toISOString(),
         deletedAt: null,
         clientMessageId,
@@ -154,7 +161,8 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
           content, 
           clientMessageId,
           type,
-          attachmentUrl
+          attachmentUrl,
+          replyTo,
         }
       );
     } catch (e) {
@@ -165,7 +173,13 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
   }, [conversationId, isReady, currentUser]);
 
   // ── 3.1 Upload and Send Media ─────────────────────────────────────────────
-  const sendMedia = useCallback(async (fileUri: string, fileName: string, mimeType: string, type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOC') => {
+  const sendMedia = useCallback(async (
+    fileUri: string,
+    fileName: string,
+    mimeType: string,
+    type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOC',
+    replyTo?: string,
+  ) => {
     if (!isReady || !conversationId) return;
     
     try {
@@ -196,7 +210,7 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
       }
 
       // 3. Send message with attachment
-      await sendMessage(fileName, Date.now().toString(), type, uploadResponse.url);
+      await sendMessage(fileName, Date.now().toString(), type, uploadResponse.url, replyTo);
       
     } catch (e) {
       console.error('[useChatConversation] Media send failed:', e);

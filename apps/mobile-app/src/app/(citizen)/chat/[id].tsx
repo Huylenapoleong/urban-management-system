@@ -17,7 +17,9 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { ResizeMode, Video } from "expo-av";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,6 +30,7 @@ import Avatar from "@/components/Avatar";
 import colors from "@/constants/colors";
 import { convertToS3Url } from "@/constants/s3";
 import { useAuth } from "@/providers/AuthProvider";
+import { useWebRTCContext } from "@/providers/WebRTCContext";
 import {
   fuzzyScore,
   getRenderMessage,
@@ -35,7 +38,6 @@ import {
   parseConversationId,
 } from "@/features/chat/citizen/chat-utils";
 import { useCitizenConversation } from "@/features/chat/citizen/useCitizenConversation";
-import { emitChatAck } from "@/services/chat-socket";
 import { getGroup, listMembers, updateGroup } from "@/services/api/group.api";
 import { getUserById } from "@/services/api/user.api";
 import { uploadMedia } from "@/services/api/upload.api";
@@ -44,12 +46,57 @@ type GroupParticipant = GroupMembership & {
   profile?: UserProfile;
 };
 
-function getAudienceMeta(role?: UserRole) {
-  if (role === "CITIZEN") {
-    return { label: "Nguoi dan", color: "#15803d" };
+type ParsedMessagePayload = {
+  text: string;
+  isPinned: boolean;
+  reactions: Record<string, string[]>;
+};
+
+function parseMessagePayload(content: string): ParsedMessagePayload {
+  const fallback: ParsedMessagePayload = {
+    text: content,
+    isPinned: false,
+    reactions: {},
+  };
+
+  if (!content?.trim()) {
+    return fallback;
   }
 
-  return { label: "Can bo", color: "#dc2626" };
+  try {
+    const parsed = JSON.parse(content);
+    return {
+      text:
+        typeof parsed?.text === "string"
+          ? parsed.text
+          : typeof parsed?.content === "string"
+            ? parsed.content
+            : fallback.text,
+      isPinned: parsed?.isPinned === true,
+      reactions:
+        parsed?.reactions && typeof parsed.reactions === "object"
+          ? (parsed.reactions as Record<string, string[]>)
+          : {},
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function buildMessageContent(payload: ParsedMessagePayload): string {
+  return JSON.stringify({
+    text: payload.text,
+    isPinned: payload.isPinned,
+    reactions: payload.reactions,
+  });
+}
+
+function getAudienceMeta(role?: UserRole) {
+  if (role === "CITIZEN") {
+    return { label: "Người dân", color: "#15803d" };
+  }
+
+  return { label: "Cán bộ", color: "#dc2626" };
 }
 
 function formatChatTimestamp(value: string) {
@@ -64,6 +111,7 @@ function formatChatTimestamp(value: string) {
 
 export default function ChatDetailPage() {
   const { user } = useAuth();
+  const { startCall } = useWebRTCContext();
   const router = useRouter();
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
@@ -89,10 +137,15 @@ export default function ChatDetailPage() {
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [pickingImage, setPickingImage] = useState(false);
   const [sendingImage, setSendingImage] = useState(false);
-  const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
+  const [mediaMenuVisible, setMediaMenuVisible] = useState(false);
+  const [fullscreenMedia, setFullscreenMedia] = useState<{ uri: string; type: "image" | "video" } | null>(null);
   const [downloadingImage, setDownloadingImage] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<MessageItem | null>(null);
+  const [messageActionVisible, setMessageActionVisible] = useState(false);
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const [replyToMessage, setReplyToMessage] = useState<MessageItem | null>(null);
 
-  const { messages, loading, sending, error, subtitle, sendMessage, setTyping } =
+  const { messages, loading, sending, error, subtitle, sendMessage, setTyping, updateMessage, deleteMessage } =
     useCitizenConversation({
       conversationId,
       currentUserId: user?.sub,
@@ -135,7 +188,7 @@ export default function ChatDetailPage() {
       setParticipants(nextParticipants);
       setGroupError(null);
     } catch (err: unknown) {
-      setGroupError((err as Error)?.message ?? "Khong the tai chi tiet nhom");
+      setGroupError((err as Error)?.message ?? "Không thể tải chi tiết nhóm");
     } finally {
       setGroupLoading(false);
     }
@@ -206,8 +259,38 @@ export default function ChatDetailPage() {
       });
   }, [messages, searchQuery]);
 
-  const topBarTitle = group?.groupName || (isGroupConversation ? "Phong chat nhom" : "Phong chat");
-  const topBarSubtitle = group ? `${group.memberCount} thanh vien | ${subtitle}` : subtitle;
+  const pinnedMessages = useMemo(
+    () =>
+      messages
+        .filter((item) => !item.deletedAt && parseMessagePayload(item.content).isPinned)
+        .slice(0, 5),
+    [messages],
+  );
+
+  const topBarTitle = group?.groupName || (isGroupConversation ? "Phòng chat nhóm" : "Phòng chat");
+  const topBarSubtitle = group ? `${group.memberCount} thành viên | ${subtitle}` : subtitle;
+
+  const handleStartAudioCall = () => {
+    if (!conversationId) {
+      return;
+    }
+
+    const targetId = conversationId.startsWith("dm:")
+      ? conversationId.replace(/^dm:/, "")
+      : conversationId;
+    void startCall(false, conversationId, targetId);
+  };
+
+  const handleStartVideoCall = () => {
+    if (!conversationId) {
+      return;
+    }
+
+    const targetId = conversationId.startsWith("dm:")
+      ? conversationId.replace(/^dm:/, "")
+      : conversationId;
+    void startCall(true, conversationId, targetId);
+  };
 
   const handleSend = async () => {
     const trimmed = text.trim();
@@ -216,14 +299,61 @@ export default function ChatDetailPage() {
       return;
     }
 
-    const sent = await sendMessage(trimmed);
+    const sent = await sendMessage(trimmed, {
+      replyTo: replyToMessage?.id,
+    });
 
     if (sent) {
       setText("");
+      setReplyToMessage(null);
       setTyping(false);
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
+    }
+  };
+
+  const sendUploadedMedia = async (params: {
+    uri: string;
+    fileName?: string;
+    mimeType?: string;
+    type: "IMAGE" | "VIDEO" | "DOC";
+  }) => {
+    if (!conversationId) {
+      return;
+    }
+
+    setSendingImage(true);
+
+    try {
+      const uploadedAsset = await uploadMedia({
+        uri: params.uri,
+        fileName: params.fileName,
+        mimeType: params.mimeType,
+        target: "MESSAGE",
+        entityId: conversationId,
+      });
+
+      const sent = await sendMessage(params.fileName || "", {
+        type: params.type,
+        attachmentUrl: uploadedAsset.url,
+        replyTo: replyToMessage?.id,
+      });
+
+      if (!sent) {
+        Alert.alert("Gửi tệp thất bại", "Không thể gửi tệp. Vui lòng thử lại.");
+        return;
+      }
+
+      setReplyToMessage(null);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (err: unknown) {
+      Alert.alert("Lỗi gửi tệp", (err as Error)?.message || "Không thể gửi tệp. Vui lòng thử lại.");
+    } finally {
+      setSendingImage(false);
+      setMediaMenuVisible(false);
     }
   };
 
@@ -253,49 +383,199 @@ export default function ChatDetailPage() {
       }
 
       setPickingImage(false);
-      setSendingImage(true);
-
-      console.log("[Chat] Starting image upload, conversationId:", conversationId);
-
-      // Upload the image to S3
-      const uploadedAsset = await uploadMedia({
+      await sendUploadedMedia({
         uri: asset.uri,
         fileName: asset.fileName || `image-${Date.now()}.jpg`,
-        mimeType: asset.type || "image/jpeg",
-        target: "MESSAGE",
-        entityId: conversationId,
+        mimeType: asset.mimeType || "image/jpeg",
+        type: "IMAGE",
+      });
+    } catch (err: unknown) {
+      Alert.alert("Lỗi gửi ảnh", (err as Error)?.message || "Không thể gửi ảnh. Vui lòng thử lại.");
+      setPickingImage(false);
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    if (!conversationId || pickingImage || sendingImage) {
+      return;
+    }
+
+    setPickingImage(true);
+
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.85,
       });
 
-      console.log("[Chat] Image uploaded successfully:", uploadedAsset);
-
-      // Send the image message with proper payload format
-      const response = await emitChatAck(
-        CHAT_SOCKET_EVENTS.MESSAGE_SEND,
-        {
-          conversationId,
-          content: JSON.stringify({ text: "", mention: [] }),
-          type: "IMAGE",
-          attachmentUrl: uploadedAsset.url,
-          clientMessageId: `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-        },
-      );
-
-      console.log("[Chat] Image message send response:", response);
-
-      if (!response.success) {
-        console.error("[Chat] Failed to send image message:", response.error);
-        Alert.alert("Gui anh that bai", response.error?.message || "Vui long thu lai sau.");
-        setSendingImage(false);
+      if (result.canceled || !result.assets[0]) {
+        setPickingImage(false);
         return;
       }
 
-      console.log("[Chat] Image message sent successfully");
-      setSendingImage(false);
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      const asset = result.assets[0];
+      setPickingImage(false);
+      await sendUploadedMedia({
+        uri: asset.uri,
+        fileName: asset.fileName || `camera-${Date.now()}.jpg`,
+        mimeType: asset.mimeType || "image/jpeg",
+        type: "IMAGE",
+      });
     } catch (err: unknown) {
-      Alert.alert("Loi gui anh", (err as Error)?.message || "Khong the gui anh. Vui long thu lai.");
+      setPickingImage(false);
+      Alert.alert("Lỗi chụp ảnh", (err as Error)?.message || "Không thể chụp ảnh lúc này.");
+    }
+  };
+
+  const handlePickVideo = async () => {
+    if (!conversationId || pickingImage || sendingImage) {
+      return;
+    }
+
+    setPickingImage(true);
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets[0]) {
+        setPickingImage(false);
+        return;
+      }
+
+      const asset = result.assets[0];
+      setPickingImage(false);
+      await sendUploadedMedia({
+        uri: asset.uri,
+        fileName: asset.fileName || `video-${Date.now()}.mp4`,
+        mimeType: asset.mimeType || "video/mp4",
+        type: "VIDEO",
+      });
+    } catch (err: unknown) {
+      setPickingImage(false);
+      Alert.alert("Lỗi chọn video", (err as Error)?.message || "Không thể chọn video.");
+    }
+  };
+
+  const handleRecordVideo = async () => {
+    if (!conversationId || pickingImage || sendingImage) {
+      return;
+    }
+
+    setPickingImage(true);
+
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        quality: 0.8,
+        videoMaxDuration: 60,
+      });
+
+      if (result.canceled || !result.assets[0]) {
+        setPickingImage(false);
+        return;
+      }
+
+      const asset = result.assets[0];
+      setPickingImage(false);
+      await sendUploadedMedia({
+        uri: asset.uri,
+        fileName: asset.fileName || `record-${Date.now()}.mp4`,
+        mimeType: asset.mimeType || "video/mp4",
+        type: "VIDEO",
+      });
+    } catch (err: unknown) {
+      setPickingImage(false);
+      Alert.alert("Lỗi quay video", (err as Error)?.message || "Không thể quay video lúc này.");
+    }
+  };
+
+  const handlePickDocument = async () => {
+    if (!conversationId || pickingImage || sendingImage) {
+      return;
+    }
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+      });
+
+      if (result.canceled || !result.assets[0]) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      await sendUploadedMedia({
+        uri: asset.uri,
+        fileName: asset.name,
+        mimeType: asset.mimeType || "application/octet-stream",
+        type: "DOC",
+      });
+    } catch (err: unknown) {
+      Alert.alert("Lỗi gửi tệp", (err as Error)?.message || "Không thể gửi tệp.");
+    }
+  };
+
+  const handleSendLocation = async () => {
+    if (!conversationId || sendingImage) {
+      return;
+    }
+
+    setSendingImage(true);
+    try {
+      let latitude: number | undefined;
+      let longitude: number | undefined;
+
+      try {
+        const Location = await import("expo-location");
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (permission.status === "granted") {
+          const location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          latitude = location.coords.latitude;
+          longitude = location.coords.longitude;
+        }
+      } catch {
+        // Fallback below
+      }
+
+      if (latitude === undefined || longitude === undefined) {
+        const geolocation = (globalThis as any)?.navigator?.geolocation;
+        if (!geolocation) {
+          throw new Error("Thiết bị hiện tại chưa hỗ trợ lấy vị trí.");
+        }
+
+        const fallback = await new Promise<any>((resolve, reject) => {
+          geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 12000,
+            maximumAge: 5000,
+          });
+        });
+
+        latitude = fallback.coords.latitude;
+        longitude = fallback.coords.longitude;
+      }
+
+      const mapUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
+      const sent = await sendMessage(`Vị trí hiện tại: ${mapUrl}`, {
+        type: "TEXT",
+        content: JSON.stringify({ text: `Vị trí hiện tại: ${mapUrl}`, mention: [] }),
+        replyTo: replyToMessage?.id,
+      });
+
+      if (!sent) {
+        Alert.alert("Gửi vị trí thất bại", "Không thể gửi vị trí lúc này.");
+      } else {
+        setReplyToMessage(null);
+        setMediaMenuVisible(false);
+      }
+    } catch (error: any) {
+      Alert.alert("Lỗi vị trí", error?.message || "Không thể lấy vị trí hiện tại.");
+    } finally {
       setSendingImage(false);
     }
   };
@@ -323,18 +603,18 @@ export default function ChatDetailPage() {
   );
 
   const handleDownloadImage = async () => {
-    if (!fullscreenImageUrl) return;
+    if (!fullscreenMedia?.uri) return;
 
     setDownloadingImage(true);
 
     try {
       await Share.share({
-        url: fullscreenImageUrl,
-        message: "Anh tu chat",
+        url: fullscreenMedia.uri,
+        message: "Media từ chat",
         title: `image-${Date.now()}.jpg`,
       });
     } catch (err: unknown) {
-      Alert.alert("Loi", (err as Error)?.message || "Khong the luu anh");
+      Alert.alert("Lỗi", (err as Error)?.message || "Không thể lưu ảnh");
     } finally {
       setDownloadingImage(false);
     }
@@ -355,17 +635,147 @@ export default function ChatDetailPage() {
       setMenuVisible(false);
       setGroupError(null);
     } catch (err: unknown) {
-      Alert.alert("Khong the doi ten nhom", (err as Error)?.message ?? "Vui long thu lai sau.");
+      Alert.alert("Không thể đổi tên nhóm", (err as Error)?.message ?? "Vui lòng thử lại sau.");
     } finally {
       setRenaming(false);
     }
+  };
+
+  const handleLongPressMessage = (item: MessageItem) => {
+    if (item.deletedAt) {
+      return;
+    }
+
+    setSelectedMessage(item);
+    setShowMoreActions(false);
+    setMessageActionVisible(true);
+  };
+
+  const handleCopyMessage = async () => {
+    if (!selectedMessage) {
+      return;
+    }
+
+    const payload = parseMessagePayload(selectedMessage.content);
+
+    try {
+      const textToCopy = payload.text || "";
+
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const module = await import("expo-clipboard");
+        await module.setStringAsync(textToCopy);
+      }
+
+      setMessageActionVisible(false);
+      Alert.alert("Đã sao chép", "Nội dung tin nhắn đã được sao chép.");
+    } catch {
+      setMessageActionVisible(false);
+      Alert.alert(
+        "Không thể sao chép",
+        "Thiết bị hiện tại chưa hỗ trợ clipboard trong build này. Bạn có thể dùng Chia sẻ để gửi nội dung.",
+      );
+    }
+  };
+
+  const handleShareMessage = async () => {
+    if (!selectedMessage) {
+      return;
+    }
+
+    const payload = parseMessagePayload(selectedMessage.content);
+    await Share.share({
+      message: payload.text || "",
+      url: selectedMessage.attachmentUrl,
+    });
+    setMessageActionVisible(false);
+  };
+
+  const handlePinMessage = async () => {
+    if (!selectedMessage) {
+      return;
+    }
+
+    const pinnedCount = messages.filter((item) => parseMessagePayload(item.content).isPinned).length;
+    if (pinnedCount >= 5 && !parseMessagePayload(selectedMessage.content).isPinned) {
+      Alert.alert("Thông báo", "Bạn chỉ có thể ghim tối đa 5 tin nhắn.");
+      return;
+    }
+
+    const payload = parseMessagePayload(selectedMessage.content);
+    const ok = await updateMessage(
+      selectedMessage.id,
+      buildMessageContent({
+        ...payload,
+        isPinned: !payload.isPinned,
+      }),
+    );
+
+    if (ok) {
+      setMessageActionVisible(false);
+    }
+  };
+
+  const handleReaction = async (emoji: string) => {
+    if (!selectedMessage || !user?.sub) {
+      return;
+    }
+
+    const payload = parseMessagePayload(selectedMessage.content);
+    const reactions = { ...payload.reactions };
+    const currentUsers = reactions[emoji] ?? [];
+
+    if (currentUsers.includes(user.sub)) {
+      reactions[emoji] = currentUsers.filter((id) => id !== user.sub);
+    } else {
+      reactions[emoji] = [...currentUsers, user.sub];
+    }
+
+    Object.keys(reactions).forEach((key) => {
+      if (!reactions[key]?.length) {
+        delete reactions[key];
+      }
+    });
+
+    const ok = await updateMessage(
+      selectedMessage.id,
+      buildMessageContent({
+        ...payload,
+        reactions,
+      }),
+    );
+
+    if (ok) {
+      setMessageActionVisible(false);
+    }
+  };
+
+  const handleRecallMessage = async () => {
+    if (!selectedMessage) {
+      return;
+    }
+
+    const ok = await deleteMessage(selectedMessage.id);
+    if (ok) {
+      setMessageActionVisible(false);
+    }
+  };
+
+  const handleReplyMessage = () => {
+    if (!selectedMessage || selectedMessage.deletedAt) {
+      return;
+    }
+
+    setReplyToMessage(selectedMessage);
+    setMessageActionVisible(false);
   };
 
   const handleOpenMenu = () => {
     if (!isGroupConversation) {
       Alert.alert(
         "Chat ca nhan",
-        "Menu 3 cham hien tai uu tien cho chat nhom. Chi tiet nhom va doi ten khong ap dung cho doan chat nay.",
+        "Menu 3 chấm hiện tại ưu tiên cho chat nhóm. Chi tiết nhóm và đổi tên không áp dụng cho đoạn chat này.",
       );
       return;
     }
@@ -376,8 +786,8 @@ export default function ChatDetailPage() {
   const handleAddMemberByCode = () => {
     setMenuVisible(false);
     Alert.alert(
-      "Chua the them thanh vien qua ma",
-      "Backend hien chi co API them thanh vien theo userId va chua co endpoint hoac flow invite code/member code. Khong the hoan thien muc nay neu khong sua file ngoai Citizen app.",
+      "Chưa thể thêm thành viên qua mã",
+      "Backend hiện chỉ có API thêm thành viên theo userId và chưa có endpoint hoặc flow invite code/member code. Không thể hoàn thiện mục này nếu không sửa file ngoài Citizen app.",
     );
   };
 
@@ -403,10 +813,32 @@ export default function ChatDetailPage() {
         <Pressable style={styles.topActionButton} onPress={() => setSearchVisible(true)}>
           <Ionicons name="search" size={18} color={colors.text} />
         </Pressable>
+        <Pressable style={styles.topActionButton} onPress={handleStartAudioCall}>
+          <Ionicons name="call-outline" size={18} color={colors.text} />
+        </Pressable>
+        <Pressable style={styles.topActionButton} onPress={handleStartVideoCall}>
+          <Ionicons name="videocam-outline" size={18} color={colors.text} />
+        </Pressable>
         <Pressable style={styles.topActionButton} onPress={handleOpenMenu}>
           <Ionicons name="ellipsis-vertical" size={18} color={colors.text} />
         </Pressable>
       </View>
+
+      {pinnedMessages.length > 0 ? (
+        <View style={styles.pinnedBanner}>
+          <Ionicons name="pin" size={14} color={colors.primary} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+            {pinnedMessages.map((item, index) => (
+              <View key={item.id} style={styles.pinnedItem}>
+                <Text numberOfLines={1} style={styles.pinnedText}>
+                  {parseMessagePayload(item.content).text || "Tin nhắn đã ghim"}
+                </Text>
+                {index < pinnedMessages.length - 1 ? <Text style={styles.pinnedDivider}>|</Text> : null}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
@@ -430,6 +862,9 @@ export default function ChatDetailPage() {
             const isHighlighted = item.id === highlightedMessageId;
             const correctedAttachmentUrl = item.attachmentUrl ? convertToS3Url(item.attachmentUrl) : null;
             const isImageMessage = item.type === "IMAGE";
+            const isVideoMessage = item.type === "VIDEO";
+            const payload = parseMessagePayload(item.content);
+            const reactionEntries = Object.entries(payload.reactions).filter(([, users]) => users.length > 0);
 
             return (
               <View style={[styles.messageRow, isOwn ? styles.messageRowOwn : styles.messageRowOther]}>
@@ -438,18 +873,31 @@ export default function ChatDetailPage() {
                 ) : null}
                 <View style={[styles.messageStack, isOwn ? styles.messageStackOwn : styles.messageStackOther, isImageMessage && { maxWidth: "95%" }]}>
                   <Text style={[styles.senderName, isOwn ? styles.senderNameOwn : null]}>
-                    {isOwn ? "Ban" : item.senderName}
+                    {isOwn ? "Bạn" : item.senderName}
                   </Text>
                   {isImageMessage && correctedAttachmentUrl ? (
-                    <Pressable onPress={() => setFullscreenImageUrl(correctedAttachmentUrl)}>
+                    <Pressable
+                      onPress={() => setFullscreenMedia({ uri: correctedAttachmentUrl, type: "image" })}
+                      onLongPress={() => handleLongPressMessage(item)}
+                    >
                       <RNImage
                         source={{ uri: correctedAttachmentUrl }}
                         style={styles.chatImageDirect}
                         resizeMode="contain"
                       />
                     </Pressable>
+                  ) : isVideoMessage && correctedAttachmentUrl ? (
+                    <Pressable
+                      style={styles.chatVideoCard}
+                      onPress={() => setFullscreenMedia({ uri: correctedAttachmentUrl, type: "video" })}
+                      onLongPress={() => handleLongPressMessage(item)}
+                    >
+                      <Ionicons name="play-circle" size={38} color={isOwn ? "#fff" : colors.primary} />
+                      <Text style={[styles.chatVideoText, isOwn ? { color: "#fff" } : null]}>Video - nhấn để xem</Text>
+                    </Pressable>
                   ) : (
-                    <View
+                    <Pressable
+                      onLongPress={() => handleLongPressMessage(item)}
                       style={[
                         styles.bubble,
                         isOwn ? styles.bubbleOwn : styles.bubbleOther,
@@ -472,7 +920,7 @@ export default function ChatDetailPage() {
                         <Pressable style={styles.chatAttachmentLink}>
                           <Ionicons name="document-attach" size={14} color={isOwn ? "white" : colors.text} />
                           <Text style={[styles.chatAttachmentText, isOwn && styles.chatAttachmentTextOwn]}>
-                            {rendered.secondaryText || "Tep dinh kem"}
+                            {rendered.secondaryText || "Tệp đính kèm"}
                           </Text>
                         </Pressable>
                       )}
@@ -482,7 +930,7 @@ export default function ChatDetailPage() {
                           minute: "2-digit",
                         })}
                       </Text>
-                    </View>
+                    </Pressable>
                   )}
                   {!isImageMessage && (
                     <Text style={[styles.messageTime, isOwn ? styles.messageTimeOwn : null]}>
@@ -492,6 +940,15 @@ export default function ChatDetailPage() {
                       })}
                     </Text>
                   )}
+                  {reactionEntries.length > 0 ? (
+                    <View style={[styles.reactionRow, isOwn ? styles.reactionRowOwn : styles.reactionRowOther]}>
+                      {reactionEntries.map(([emoji, users]) => (
+                        <View key={`${item.id}-${emoji}`} style={styles.reactionPill}>
+                          <Text style={styles.reactionText}>{emoji} {users.length}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
               </View>
             );
@@ -499,9 +956,9 @@ export default function ChatDetailPage() {
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Ionicons name="chatbubble-ellipses-outline" size={42} color={colors.textSecondary} />
-              <Text style={styles.emptyTitle}>Chua co tin nhan nao</Text>
+              <Text style={styles.emptyTitle}>Chưa có tin nhắn nào</Text>
               <Text style={styles.emptyText}>
-                Hay gui tin nhan dau tien de bat dau cuoc tro chuyen trong nhom nay.
+                Hãy gửi tin nhắn đầu tiên để bắt đầu cuộc trò chuyện trong nhóm này.
               </Text>
             </View>
           }
@@ -521,53 +978,100 @@ export default function ChatDetailPage() {
       )}
 
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.imagePickerButton,
-            (pickingImage || sendingImage) && styles.imagePickerButtonDisabled,
-            pressed && !pickingImage && !sendingImage ? styles.imagePickerButtonPressed : null,
-          ]}
-          onPress={handlePickImage}
-          disabled={pickingImage || sendingImage}
-        >
-          {pickingImage || sendingImage ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <Ionicons name="image-outline" size={20} color={colors.primary} />
-          )}
-        </Pressable>
-        <TextInput
-          style={styles.input}
-          placeholder="Nhap noi dung van ban..."
-          placeholderTextColor={colors.textSecondary}
-          value={text}
-          onChangeText={(value) => {
-            setText(value);
-            setTyping(Boolean(value.trim()));
-          }}
-          onBlur={() => setTyping(false)}
-          multiline
-          editable={!sending && !sendingImage}
-        />
-        <Pressable
-          style={({ pressed }) => [
-            styles.sendButton,
-            (!text.trim() || !conversationId || sending) && styles.sendButtonDisabled,
-            pressed && text.trim() && !sending ? styles.sendButtonPressed : null,
-          ]}
-          onPress={handleSend}
-          disabled={!text.trim() || !conversationId || sending}
-        >
-          <Ionicons name="send" size={18} color="white" />
-        </Pressable>
+        {replyToMessage ? (
+          <View style={styles.replyPreview}>
+            <View style={styles.replyPreviewTextWrap}>
+              <Text style={styles.replyPreviewTitle}>Đang trả lời {replyToMessage.senderName || "tin nhắn"}</Text>
+              <Text numberOfLines={1} style={styles.replyPreviewText}>
+                {parseMessagePayload(replyToMessage.content).text || "Tin nhắn đính kèm"}
+              </Text>
+            </View>
+            <Pressable style={styles.replyCloseButton} onPress={() => setReplyToMessage(null)}>
+              <Ionicons name="close" size={16} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        <View style={styles.inputRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.imagePickerButton,
+              (pickingImage || sendingImage) && styles.imagePickerButtonDisabled,
+              pressed && !pickingImage && !sendingImage ? styles.imagePickerButtonPressed : null,
+            ]}
+            onPress={() => setMediaMenuVisible((prev) => !prev)}
+            disabled={pickingImage || sendingImage}
+          >
+            {pickingImage || sendingImage ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+            )}
+          </Pressable>
+          <TextInput
+            style={styles.input}
+            placeholder="Nhập nội dung văn bản..."
+            placeholderTextColor={colors.textSecondary}
+            value={text}
+            onChangeText={(value) => {
+              setText(value);
+              setTyping(Boolean(value.trim()));
+            }}
+            onBlur={() => setTyping(false)}
+            multiline
+            editable={!sending && !sendingImage}
+          />
+          <Pressable
+            style={({ pressed }) => [
+              styles.sendButton,
+              (!text.trim() || !conversationId || sending) && styles.sendButtonDisabled,
+              pressed && text.trim() && !sending ? styles.sendButtonPressed : null,
+            ]}
+            onPress={handleSend}
+            disabled={!text.trim() || !conversationId || sending}
+          >
+            <Ionicons name="send" size={18} color="white" />
+          </Pressable>
+        </View>
       </View>
+
+      {mediaMenuVisible ? (
+        <View style={styles.mediaMenuPanel}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaMenuContent}>
+            <Pressable style={styles.mediaMenuItem} onPress={() => void handleTakePhoto()}>
+              <Ionicons name="camera-outline" size={20} color="white" />
+              <Text style={styles.mediaMenuItemText}>Chụp ảnh</Text>
+            </Pressable>
+            <Pressable style={styles.mediaMenuItem} onPress={() => void handlePickImage()}>
+              <Ionicons name="images-outline" size={20} color="white" />
+              <Text style={styles.mediaMenuItemText}>Ảnh thư viện</Text>
+            </Pressable>
+            <Pressable style={styles.mediaMenuItem} onPress={() => void handleRecordVideo()}>
+              <Ionicons name="videocam-outline" size={20} color="white" />
+              <Text style={styles.mediaMenuItemText}>Quay video</Text>
+            </Pressable>
+            <Pressable style={styles.mediaMenuItem} onPress={() => void handlePickVideo()}>
+              <Ionicons name="film-outline" size={20} color="white" />
+              <Text style={styles.mediaMenuItemText}>Video thư viện</Text>
+            </Pressable>
+            <Pressable style={styles.mediaMenuItem} onPress={() => void handlePickDocument()}>
+              <Ionicons name="document-outline" size={20} color="white" />
+              <Text style={styles.mediaMenuItemText}>Tệp</Text>
+            </Pressable>
+            <Pressable style={styles.mediaMenuItem} onPress={() => void handleSendLocation()}>
+              <Ionicons name="location-outline" size={20} color="white" />
+              <Text style={styles.mediaMenuItemText}>Vị trí</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      ) : null}
       </KeyboardAvoidingView>
 
       <Modal animationType="fade" transparent visible={searchVisible} onRequestClose={() => setSearchVisible(false)}>
         <View style={styles.overlay}>
           <View style={styles.searchModal}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Tim kiem tin nhan</Text>
+              <Text style={styles.modalTitle}>Tìm kiếm tin nhắn</Text>
               <Pressable onPress={() => setSearchVisible(false)} style={styles.closeButton}>
                 <Ionicons name="close" size={18} color={colors.text} />
               </Pressable>
@@ -579,7 +1083,7 @@ export default function ChatDetailPage() {
                 style={styles.searchInput}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                placeholder="Tim gan dung theo noi dung, nguoi gui..."
+                placeholder="Tìm gần đúng theo nội dung, người gửi..."
                 placeholderTextColor={colors.textSecondary}
                 autoFocus
               />
@@ -587,9 +1091,9 @@ export default function ChatDetailPage() {
 
             <ScrollView style={styles.searchResults}>
               {!searchQuery.trim() ? (
-                <Text style={styles.searchHint}>Nhap tu khoa de tim trong noi dung cuoc hoi thoai.</Text>
+                <Text style={styles.searchHint}>Nhập từ khóa để tìm trong nội dung cuộc hội thoại.</Text>
               ) : searchResults.length === 0 ? (
-                <Text style={styles.searchHint}>Khong tim thay ket qua phu hop.</Text>
+                <Text style={styles.searchHint}>Không tìm thấy kết quả phù hợp.</Text>
               ) : (
                 searchResults.map(({ item, rendered }) => (
                   <Pressable
@@ -621,13 +1125,13 @@ export default function ChatDetailPage() {
               }}
             >
               <Ionicons name="people-outline" size={18} color={colors.text} />
-              <Text style={styles.menuText}>Xem chi tiet nhom</Text>
+              <Text style={styles.menuText}>Xem chi tiết nhóm</Text>
             </Pressable>
             <Pressable
               style={[styles.menuItem, !canManageGroup && styles.menuItemDisabled]}
               onPress={() => {
                 if (!canManageGroup) {
-                  Alert.alert("Khong du quyen", "Chi owner hoac officer moi co the doi ten nhom.");
+                  Alert.alert("Không đủ quyền", "Chỉ owner hoặc officer mới có thể đổi tên nhóm.");
                   return;
                 }
 
@@ -636,11 +1140,11 @@ export default function ChatDetailPage() {
               }}
             >
               <Ionicons name="create-outline" size={18} color={colors.text} />
-              <Text style={styles.menuText}>Doi ten nhom</Text>
+              <Text style={styles.menuText}>Đổi tên nhóm</Text>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={handleAddMemberByCode}>
               <Ionicons name="person-add-outline" size={18} color={colors.text} />
-              <Text style={styles.menuText}>Them nguoi vao nhom qua ma</Text>
+              <Text style={styles.menuText}>Thêm người vào nhóm qua mã</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -650,7 +1154,7 @@ export default function ChatDetailPage() {
         <View style={styles.overlay}>
           <View style={styles.detailsCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Chi tiet nhom</Text>
+              <Text style={styles.modalTitle}>Chi tiết nhóm</Text>
               <Pressable onPress={() => setDetailsVisible(false)} style={styles.closeButton}>
                 <Ionicons name="close" size={18} color={colors.text} />
               </Pressable>
@@ -665,18 +1169,18 @@ export default function ChatDetailPage() {
                   <>
                     <View style={styles.groupInfoCard}>
                       <Text style={styles.groupInfoTitle}>{group.groupName}</Text>
-                      <Text style={styles.groupInfoSubtitle}>{`${group.memberCount} thanh vien`}</Text>
-                      <Text style={styles.groupInfoMeta}>{group.description || "Nhom chua co mo ta."}</Text>
+                      <Text style={styles.groupInfoSubtitle}>{`${group.memberCount} thành viên`}</Text>
+                      <Text style={styles.groupInfoMeta}>{group.description || "Nhóm chưa có mô tả."}</Text>
                     </View>
 
                     <View style={styles.legendRow}>
                       <View style={styles.legendItem}>
                         <View style={[styles.legendDot, { backgroundColor: "#dc2626" }]} />
-                        <Text style={styles.legendText}>Can bo</Text>
+                        <Text style={styles.legendText}>Cán bộ</Text>
                       </View>
                       <View style={styles.legendItem}>
                         <View style={[styles.legendDot, { backgroundColor: "#15803d" }]} />
-                        <Text style={styles.legendText}>Nguoi dan</Text>
+                        <Text style={styles.legendText}>Người dân</Text>
                       </View>
                     </View>
 
@@ -715,7 +1219,7 @@ export default function ChatDetailPage() {
         <View style={styles.overlay}>
           <View style={styles.renameCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Doi ten nhom</Text>
+              <Text style={styles.modalTitle}>Đổi tên nhóm</Text>
               <Pressable onPress={() => setRenameVisible(false)} style={styles.closeButton}>
                 <Ionicons name="close" size={18} color={colors.text} />
               </Pressable>
@@ -725,37 +1229,116 @@ export default function ChatDetailPage() {
               style={styles.renameInput}
               value={renameValue}
               onChangeText={setRenameValue}
-              placeholder="Nhap ten nhom moi"
+              placeholder="Nhập tên nhóm mới"
               placeholderTextColor={colors.textSecondary}
             />
 
             <View style={styles.renameActions}>
               <Pressable style={styles.secondaryButton} onPress={() => setRenameVisible(false)}>
-                <Text style={styles.secondaryButtonText}>Huy</Text>
+                <Text style={styles.secondaryButtonText}>Hủy</Text>
               </Pressable>
               <Pressable
                 style={[styles.primaryButton, (!renameValue.trim() || renaming) && styles.primaryButtonDisabled]}
                 disabled={!renameValue.trim() || renaming}
                 onPress={() => void handleRenameGroup()}
               >
-                <Text style={styles.primaryButtonText}>{renaming ? "Dang luu..." : "Luu ten moi"}</Text>
+                <Text style={styles.primaryButtonText}>{renaming ? "Đang lưu..." : "Lưu tên mới"}</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Modal animationType="fade" transparent visible={Boolean(fullscreenImageUrl)} onRequestClose={() => setFullscreenImageUrl(null)}>
+      <Modal
+        animationType="slide"
+        transparent
+        visible={messageActionVisible}
+        onRequestClose={() => setMessageActionVisible(false)}
+      >
+        <Pressable style={styles.overlay} onPress={() => setMessageActionVisible(false)}>
+          <Pressable style={styles.messageActionSheet} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.emojiRow}>
+              {["👍", "❤️", "😂", "😮", "😢", "😡"].map((emoji) => (
+                <Pressable key={emoji} style={styles.emojiButton} onPress={() => void handleReaction(emoji)}>
+                  <Text style={styles.emojiText}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={styles.messageActionGrid}>
+              <Pressable style={styles.messageActionItem} onPress={handleReplyMessage}>
+                <Ionicons name="return-up-back-outline" size={20} color={colors.text} />
+                <Text style={styles.messageActionText}>Trả lời</Text>
+              </Pressable>
+
+              <Pressable style={styles.messageActionItem} onPress={() => void handleCopyMessage()}>
+                <Ionicons name="copy-outline" size={20} color={colors.text} />
+                <Text style={styles.messageActionText}>Sao chép</Text>
+              </Pressable>
+
+              <Pressable style={styles.messageActionItem} onPress={() => void handlePinMessage()}>
+                <Ionicons name="pin-outline" size={20} color={colors.text} />
+                <Text style={styles.messageActionText}>Ghim</Text>
+              </Pressable>
+
+              <Pressable style={styles.messageActionItem} onPress={() => void handleShareMessage()}>
+                <Ionicons name="share-social-outline" size={20} color={colors.text} />
+                <Text style={styles.messageActionText}>Chia sẻ</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.messageActionItem}
+                onPress={() => {
+                  setShowMoreActions((prev) => !prev);
+                }}
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color={colors.text} />
+                <Text style={styles.messageActionText}>Khác</Text>
+              </Pressable>
+            </View>
+
+            {showMoreActions ? (
+              <Pressable
+                style={styles.recallButton}
+                onPress={() => {
+                  if (selectedMessage?.senderId !== user?.sub) {
+                    Alert.alert("Thông báo", "Bạn chỉ có thể thu hồi tin nhắn của mình.");
+                    return;
+                  }
+
+                  void handleRecallMessage();
+                }}
+              >
+                <Ionicons name="trash-outline" size={18} color="#dc2626" />
+                <Text style={styles.recallText}>Thu hồi tin nhắn</Text>
+              </Pressable>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal animationType="fade" transparent visible={Boolean(fullscreenMedia)} onRequestClose={() => setFullscreenMedia(null)}>
         <View style={styles.fullscreenOverlay}>
-          <Pressable style={styles.fullscreenCloseButton} onPress={() => setFullscreenImageUrl(null)}>
+          <Pressable style={styles.fullscreenCloseButton} onPress={() => setFullscreenMedia(null)}>
             <Ionicons name="close" size={28} color="white" />
           </Pressable>
 
-          {fullscreenImageUrl && (
+          {fullscreenMedia?.type === "image" && fullscreenMedia.uri && (
             <RNImage
-              source={{ uri: fullscreenImageUrl }}
+              source={{ uri: fullscreenMedia.uri }}
               style={styles.fullscreenImage}
               resizeMode="contain"
+            />
+          )}
+
+          {fullscreenMedia?.type === "video" && fullscreenMedia.uri && (
+            <Video
+              source={{ uri: fullscreenMedia.uri }}
+              style={styles.fullscreenImage}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isLooping={false}
             />
           )}
 
@@ -770,7 +1353,7 @@ export default function ChatDetailPage() {
               ) : (
                 <>
                   <Ionicons name="download" size={20} color="white" />
-                  <Text style={styles.fullscreenActionText}>Luu</Text>
+                  <Text style={styles.fullscreenActionText}>Lưu</Text>
                 </>
               )}
             </Pressable>
@@ -888,14 +1471,38 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
   },
   messageTimeOwn: { color: "rgba(255,255,255,0.76)" },
-  inputBar: {
+  reactionRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    flexWrap: "wrap",
+    marginTop: 6,
+    gap: 4,
+  },
+  reactionRowOwn: { alignSelf: "flex-end" },
+  reactionRowOther: { alignSelf: "flex-start" },
+  reactionPill: {
+    backgroundColor: "#ffffff",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  reactionText: {
+    fontSize: 11,
+    color: colors.text,
+    fontWeight: "700",
+  },
+  inputBar: {
+    flexDirection: "column",
     backgroundColor: "rgba(255,255,255,0.97)",
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingHorizontal: 12,
     paddingTop: 12,
+  },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
   },
   input: {
     flex: 1,
@@ -945,6 +1552,65 @@ const styles = StyleSheet.create({
   imagePickerButtonPressed: {
     transform: [{ scale: 0.95 }],
   },
+  replyPreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#eef4ff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#dbeafe",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  replyPreviewTextWrap: {
+    flex: 1,
+    marginRight: 8,
+  },
+  replyPreviewTitle: {
+    color: colors.primary,
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  replyPreviewText: {
+    marginTop: 2,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  replyCloseButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e2e8f0",
+  },
+  mediaMenuPanel: {
+    backgroundColor: "#ffffff",
+    borderTopWidth: 1,
+    borderTopColor: "#e2e8f0",
+    paddingVertical: 8,
+  },
+  mediaMenuContent: {
+    paddingHorizontal: 10,
+    gap: 10,
+    alignItems: "center",
+  },
+  mediaMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  mediaMenuItemText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   emptyState: {
     flex: 1,
     alignItems: "center",
@@ -963,6 +1629,30 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: "center",
     lineHeight: 20,
+  },
+  pinnedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#edf2f7",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  pinnedItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  pinnedText: {
+    color: colors.text,
+    maxWidth: 180,
+    fontSize: 12,
+  },
+  pinnedDivider: {
+    color: "#94a3b8",
+    marginHorizontal: 8,
   },
   overlay: {
     flex: 1,
@@ -1062,6 +1752,60 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     fontWeight: "700",
+  },
+  messageActionSheet: {
+    width: "100%",
+    backgroundColor: "#f8fafc",
+    borderRadius: 22,
+    padding: 14,
+    marginTop: "auto",
+  },
+  emojiRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  emojiButton: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  emojiText: {
+    fontSize: 28,
+  },
+  messageActionGrid: {
+    marginTop: 12,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 12,
+  },
+  messageActionItem: {
+    alignItems: "center",
+    gap: 6,
+    minWidth: 64,
+  },
+  messageActionText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  recallButton: {
+    marginTop: 12,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+  },
+  recallText: {
+    color: "#dc2626",
+    fontWeight: "800",
   },
   detailsCard: {
     width: "100%",
@@ -1208,6 +1952,20 @@ const styles = StyleSheet.create({
     height: 280,
     borderRadius: 16,
     backgroundColor: "#e2e8f0",
+  },
+  chatVideoCard: {
+    width: 280,
+    height: 180,
+    borderRadius: 16,
+    backgroundColor: "rgba(37,99,235,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  chatVideoText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "700",
   },
   chatAttachmentLink: {
     flexDirection: "row",
