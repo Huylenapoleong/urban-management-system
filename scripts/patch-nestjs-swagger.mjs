@@ -5,17 +5,18 @@ import {
   readdirSync,
   statSync,
   writeFileSync,
-} from 'node:fs';
-import { join, resolve } from 'node:path';
+} from "node:fs";
+import { join, resolve } from "node:path";
 
-const pnpmDir = resolve(process.cwd(), 'node_modules/.pnpm');
-const stub = '"use strict";\nObject.defineProperty(exports, "__esModule", { value: true });\n';
+const pnpmDir = resolve(process.cwd(), "node_modules/.pnpm");
+const stub =
+  '"use strict";\nObject.defineProperty(exports, "__esModule", { value: true });\n';
 let patchedCount = 0;
 let repairedWsFileCount = 0;
 
 function patchDirectory(dirPath) {
   for (const entry of readdirSync(dirPath)) {
-    if (entry === 'node_modules') {
+    if (entry === "node_modules") {
       continue;
     }
 
@@ -27,17 +28,17 @@ function patchDirectory(dirPath) {
       continue;
     }
 
-    if (!entry.endsWith('.d.ts') || entry === 'index.d.ts') {
+    if (!entry.endsWith(".d.ts") || entry === "index.d.ts") {
       continue;
     }
 
-    const jsPath = entryPath.replace(/\.d\.ts$/, '.js');
+    const jsPath = entryPath.replace(/\.d\.ts$/, ".js");
 
     if (existsSync(jsPath)) {
       continue;
     }
 
-    writeFileSync(jsPath, stub, 'utf8');
+    writeFileSync(jsPath, stub, "utf8");
     patchedCount += 1;
   }
 }
@@ -48,7 +49,7 @@ function patchNestPackages() {
   }
 
   for (const packageDir of readdirSync(pnpmDir)) {
-    const nestScopeDir = join(pnpmDir, packageDir, 'node_modules', '@nestjs');
+    const nestScopeDir = join(pnpmDir, packageDir, "node_modules", "@nestjs");
 
     if (!existsSync(nestScopeDir)) {
       continue;
@@ -74,24 +75,24 @@ function getWsDirs() {
   }
 
   for (const packageDir of readdirSync(pnpmDir)) {
-    const directWsDir = join(pnpmDir, packageDir, 'node_modules', 'ws');
+    const directWsDir = join(pnpmDir, packageDir, "node_modules", "ws");
 
     if (existsSync(directWsDir)) {
       results.push(directWsDir);
     }
 
-    const nestScopeDir = join(pnpmDir, packageDir, 'node_modules');
+    const nestScopeDir = join(pnpmDir, packageDir, "node_modules");
     if (!existsSync(nestScopeDir)) {
       continue;
     }
 
-    const nestedWsDir = join(nestScopeDir, 'ws');
+    const nestedWsDir = join(nestScopeDir, "ws");
     if (existsSync(nestedWsDir) && !results.includes(nestedWsDir)) {
       results.push(nestedWsDir);
     }
   }
 
-  const rootWsDir = resolve(process.cwd(), 'node_modules/ws');
+  const rootWsDir = resolve(process.cwd(), "node_modules/ws");
   if (existsSync(rootWsDir) && !results.includes(rootWsDir)) {
     results.push(rootWsDir);
   }
@@ -100,22 +101,22 @@ function getWsDirs() {
 }
 
 const REQUIRED_WS_FILES = [
-  'browser.js',
-  'index.js',
-  'wrapper.mjs',
-  'lib/buffer-util.js',
-  'lib/constants.js',
-  'lib/event-target.js',
-  'lib/extension.js',
-  'lib/limiter.js',
-  'lib/permessage-deflate.js',
-  'lib/receiver.js',
-  'lib/sender.js',
-  'lib/stream.js',
-  'lib/subprotocol.js',
-  'lib/validation.js',
-  'lib/websocket-server.js',
-  'lib/websocket.js',
+  "browser.js",
+  "index.js",
+  "wrapper.mjs",
+  "lib/buffer-util.js",
+  "lib/constants.js",
+  "lib/event-target.js",
+  "lib/extension.js",
+  "lib/limiter.js",
+  "lib/permessage-deflate.js",
+  "lib/receiver.js",
+  "lib/sender.js",
+  "lib/stream.js",
+  "lib/subprotocol.js",
+  "lib/validation.js",
+  "lib/websocket-server.js",
+  "lib/websocket.js",
 ];
 
 function isCompleteWsDir(dirPath) {
@@ -148,7 +149,7 @@ function repairWsPackages() {
         continue;
       }
 
-      mkdirSync(resolve(targetPath, '..'), { recursive: true });
+      mkdirSync(resolve(targetPath, ".."), { recursive: true });
       copyFileSync(sourcePath, targetPath);
       repairedWsFileCount += 1;
     }
@@ -159,9 +160,13 @@ patchNestPackages();
 repairWsPackages();
 
 if (patchedCount > 0) {
-  console.log(`[patch-runtime-deps] created ${patchedCount} Nest runtime stub files.`);
+  console.log(
+    `[patch-runtime-deps] created ${patchedCount} Nest runtime stub files.`,
+  );
 }
 
 if (repairedWsFileCount > 0) {
-  console.log(`[patch-runtime-deps] repaired ${repairedWsFileCount} missing ws runtime files.`);
+  console.log(
+    `[patch-runtime-deps] repaired ${repairedWsFileCount} missing ws runtime files.`,
+  );
 }

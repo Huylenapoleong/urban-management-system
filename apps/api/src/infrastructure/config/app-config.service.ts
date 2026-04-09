@@ -228,7 +228,10 @@ export class AppConfigService {
     900,
   );
   readonly authLoginMaxAttempts = readNumber('AUTH_LOGIN_MAX_ATTEMPTS', 5);
-  readonly authLoginWindowSeconds = readNumber('AUTH_LOGIN_WINDOW_SECONDS', 900);
+  readonly authLoginWindowSeconds = readNumber(
+    'AUTH_LOGIN_WINDOW_SECONDS',
+    900,
+  );
   readonly authLoginLockSeconds = readNumber('AUTH_LOGIN_LOCK_SECONDS', 900);
   readonly authRegisterMaxAttempts = readNumber(
     'AUTH_REGISTER_MAX_ATTEMPTS',
