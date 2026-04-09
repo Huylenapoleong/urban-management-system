@@ -92,6 +92,10 @@
       "value": "GENERAL"
     },
     {
+      "key": "uploadKey",
+      "value": ""
+    },
+    {
       "key": "appVariant",
       "value": "postman"
     },
@@ -2901,6 +2905,95 @@
       "name": "Uploads",
       "item": [
         {
+          "name": "Get Upload Limits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/limits"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Presign Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/presign/upload",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{uploadTarget}}\",\n  \"entityId\": \"{{reportId}}\",\n  \"fileName\": \"sample.jpg\",\n  \"contentType\": \"image/jpeg\",\n  \"size\": 123456\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.key) { pm.environment.set('uploadKey', json.data.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Presign Download",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/presign/download",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{uploadTarget}}\",\n  \"entityId\": \"{{reportId}}\",\n  \"key\": \"{{uploadKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Upload Media",
           "request": {
             "method": "POST",
@@ -2925,6 +3018,42 @@
                   "src": ""
                 }
               ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.key) { pm.environment.set('uploadKey', json.data.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Upload",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/media",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{uploadTarget}}\",\n  \"entityId\": \"{{reportId}}\",\n  \"key\": \"{{uploadKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [

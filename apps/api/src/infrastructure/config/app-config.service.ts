@@ -227,6 +227,25 @@ export class AppConfigService {
     'AUTH_REGISTER_DRAFT_TTL_SECONDS',
     900,
   );
+  readonly authLoginMaxAttempts = readNumber('AUTH_LOGIN_MAX_ATTEMPTS', 5);
+  readonly authLoginWindowSeconds = readNumber('AUTH_LOGIN_WINDOW_SECONDS', 900);
+  readonly authLoginLockSeconds = readNumber('AUTH_LOGIN_LOCK_SECONDS', 900);
+  readonly authRegisterMaxAttempts = readNumber(
+    'AUTH_REGISTER_MAX_ATTEMPTS',
+    5,
+  );
+  readonly authRegisterWindowSeconds = readNumber(
+    'AUTH_REGISTER_WINDOW_SECONDS',
+    900,
+  );
+  readonly authRegisterLockSeconds = readNumber(
+    'AUTH_REGISTER_LOCK_SECONDS',
+    900,
+  );
+  readonly uploadPresignTtlSeconds = readNumber(
+    'UPLOAD_PRESIGN_TTL_SECONDS',
+    300,
+  );
   readonly pushSkipActiveUsers = readBoolean('PUSH_SKIP_ACTIVE_USERS', true);
   readonly pushOutboxPollIntervalMs = readNumber(
     'PUSH_OUTBOX_POLL_INTERVAL_MS',
@@ -456,6 +475,28 @@ export class AppConfigService {
     this.ensurePositive(
       'AUTH_REGISTER_DRAFT_TTL_SECONDS',
       this.authRegisterDraftTtlSeconds,
+    );
+    this.ensurePositive('AUTH_LOGIN_MAX_ATTEMPTS', this.authLoginMaxAttempts);
+    this.ensurePositive(
+      'AUTH_LOGIN_WINDOW_SECONDS',
+      this.authLoginWindowSeconds,
+    );
+    this.ensurePositive('AUTH_LOGIN_LOCK_SECONDS', this.authLoginLockSeconds);
+    this.ensurePositive(
+      'AUTH_REGISTER_MAX_ATTEMPTS',
+      this.authRegisterMaxAttempts,
+    );
+    this.ensurePositive(
+      'AUTH_REGISTER_WINDOW_SECONDS',
+      this.authRegisterWindowSeconds,
+    );
+    this.ensurePositive(
+      'AUTH_REGISTER_LOCK_SECONDS',
+      this.authRegisterLockSeconds,
+    );
+    this.ensurePositive(
+      'UPLOAD_PRESIGN_TTL_SECONDS',
+      this.uploadPresignTtlSeconds,
     );
     this.ensurePositive(
       'CHAT_OUTBOX_POLL_INTERVAL_MS',

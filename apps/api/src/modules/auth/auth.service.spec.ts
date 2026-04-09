@@ -62,6 +62,20 @@ describe('AuthService', () => {
   const observabilityService = {
     recordSessionRevocations: jest.fn(),
   };
+  const repository = {
+    get: jest.fn(),
+    put: jest.fn(),
+    delete: jest.fn(),
+  };
+  const config = {
+    dynamodbUsersTableName: 'Users',
+    authLoginMaxAttempts: 5,
+    authLoginWindowSeconds: 900,
+    authLoginLockSeconds: 900,
+    authRegisterMaxAttempts: 5,
+    authRegisterWindowSeconds: 900,
+    authRegisterLockSeconds: 900,
+  };
 
   let service: AuthService;
 
@@ -130,11 +144,14 @@ describe('AuthService', () => {
       refreshSessionService as never,
       chatRealtimeService as never,
       observabilityService as never,
+      repository as never,
+      config as never,
     );
     passwordPolicyService.validateOrThrow.mockImplementation(() => undefined);
     usersService.getByIdOrThrow.mockResolvedValue(storedUser);
     usersService.getActiveByIdOrThrow.mockResolvedValue(storedUser);
     jwtTokenService.issueTokenPair.mockReturnValue(nextTokens);
+    repository.get.mockResolvedValue(undefined);
   });
 
   it('rotates an existing session-based refresh token', async () => {
@@ -241,6 +258,63 @@ describe('AuthService', () => {
       new BadRequestException('password is too common or predictable.'),
     );
     expect(usersService.findByEmail).not.toHaveBeenCalled();
+  });
+
+  it('blocks login when attempt window is locked', async () => {
+    repository.get.mockResolvedValueOnce({
+      PK: 'AUTH#ATTEMPT#LOGIN#EMAIL#citizen.a@smartcity.local',
+      SK: 'ATTEMPT',
+      entityType: 'AUTH_IDENTITY_ATTEMPT',
+      purpose: 'LOGIN',
+      identityType: 'EMAIL',
+      identityValue: 'citizen.a@smartcity.local',
+      attemptCount: 5,
+      firstAttemptAt: '2026-03-18T09:50:00.000Z',
+      lastAttemptAt: '2026-03-18T09:59:00.000Z',
+      lockedUntil: '2999-01-01T00:00:00.000Z',
+      expiresAt: '2999-01-01T00:10:00.000Z',
+      createdAt: '2026-03-18T09:50:00.000Z',
+      updatedAt: '2026-03-18T09:59:00.000Z',
+    });
+
+    await expect(
+      service.login(
+        {
+          login: storedUser.email,
+          password: 'Password123!',
+        },
+        sessionMetadata,
+      ),
+    ).rejects.toMatchObject({
+      status: 429,
+      message: 'Too many attempts. Please try again later.',
+    });
+    expect(usersService.findByEmail).not.toHaveBeenCalled();
+  });
+
+  it('records failed login attempts for invalid credentials', async () => {
+    usersService.findByEmail.mockResolvedValue(undefined);
+
+    await expect(
+      service.login(
+        {
+          login: storedUser.email,
+          password: 'Password123!',
+        },
+        sessionMetadata,
+      ),
+    ).rejects.toThrow(new UnauthorizedException('Invalid credentials.'));
+
+    expect(repository.put).toHaveBeenCalledWith(
+      'Users',
+      expect.objectContaining({
+        entityType: 'AUTH_IDENTITY_ATTEMPT',
+        purpose: 'LOGIN',
+        identityType: 'EMAIL',
+        identityValue: storedUser.email,
+        attemptCount: 1,
+      }),
+    );
   });
 
   it('requests OTP for forgot password without exposing account existence', async () => {

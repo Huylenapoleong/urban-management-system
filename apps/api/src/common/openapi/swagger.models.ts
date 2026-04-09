@@ -19,6 +19,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -1688,4 +1689,151 @@ export class UploadMediaRequestDto {
 
   @ApiProperty({ type: 'string', format: 'binary' })
   file!: string;
+}
+
+export class UploadLimitsDto {
+  @ApiProperty({ example: 10485760 })
+  maxFileSizeBytes!: number;
+
+  @ApiProperty({
+    type: [String],
+    example: ['image/jpeg', 'image/png', 'application/pdf'],
+  })
+  allowedMimeTypes!: string[];
+
+  @ApiProperty({
+    type: [String],
+    example: ['AVATAR'],
+  })
+  imageOnlyTargets!: (typeof UPLOAD_TARGETS)[number][];
+}
+
+export class DeleteUploadRequestDto {
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  key!: string;
+}
+
+export class DeleteUploadResultDto {
+  @ApiProperty({ example: true })
+  deleted!: true;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
+  removedAt!: string;
+}
+
+export class PresignUploadRequestDto {
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiProperty({ example: 'street-light.jpg' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  fileName!: string;
+
+  @ApiProperty({ example: 'image/jpeg' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(100)
+  contentType!: string;
+
+  @ApiProperty({ example: 345678 })
+  @IsNumber()
+  size!: number;
+}
+
+export class PresignUploadResultDto {
+  @ApiProperty({ example: 'PUT' })
+  method!: 'PUT';
+
+  @ApiProperty({ example: 'https://s3.ap-southeast-1.amazonaws.com/...' })
+  url!: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-street-light.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: 'smartcity-assets' })
+  bucket!: string;
+
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  entityId?: string;
+
+  @ApiProperty({ example: 'image/jpeg' })
+  contentType!: string;
+
+  @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
+  expiresAt!: string;
+}
+
+export class PresignDownloadRequestDto {
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-street-light.jpg',
+  })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  key!: string;
+}
+
+export class PresignDownloadResultDto {
+  @ApiProperty({ example: 'GET' })
+  method!: 'GET';
+
+  @ApiProperty({ example: 'https://s3.ap-southeast-1.amazonaws.com/...' })
+  url!: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-street-light.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
+  expiresAt!: string;
 }

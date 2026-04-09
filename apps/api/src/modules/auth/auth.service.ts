@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -42,6 +44,9 @@ import { RefreshSessionService } from '../../infrastructure/security/refresh-ses
 import { ChatRealtimeService } from '../conversations/chat-realtime.service';
 import type { SessionClientMetadata } from '../../common/request-session-metadata';
 import { AuthOtpService } from '../../infrastructure/security/auth-otp.service';
+import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
+import type { StoredAuthIdentityAttempt } from '../../common/storage-records';
 
 @Injectable()
 export class AuthService {
@@ -56,17 +61,40 @@ export class AuthService {
     private readonly refreshSessionService: RefreshSessionService,
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly observabilityService: ObservabilityService,
+    private readonly repository: UrbanTableRepository,
+    private readonly config: AppConfigService,
   ) {}
 
   async register(payload: unknown, metadata?: SessionClientMetadata) {
-    const user = await this.usersService.registerCitizen(payload);
-    const storedUser = await this.usersService.getByIdOrThrow(user.id);
-    const tokens = await this.issueTokenPairForUser(storedUser, metadata);
+    const body = ensureObject(payload);
+    const identity = requirePhoneOrEmail(body);
 
-    return {
-      tokens,
-      user,
-    };
+    await this.assertRegisterAttemptsAllowed(identity);
+
+    try {
+      const user = await this.usersService.registerCitizen(payload);
+      const storedUser = await this.usersService.getByIdOrThrow(user.id);
+      const tokens = await this.issueTokenPairForUser(storedUser, metadata);
+      await this.clearAuthAttempts('REGISTER', {
+        identityType: identity.email ? 'EMAIL' : 'PHONE',
+        identityValue: identity.email
+          ? normalizeEmail(identity.email)
+          : normalizePhone(identity.phone ?? ''),
+      });
+
+      return {
+        tokens,
+        user,
+      };
+    } catch (error) {
+      await this.recordAuthAttemptFailure('REGISTER', {
+        identityType: identity.email ? 'EMAIL' : 'PHONE',
+        identityValue: identity.email
+          ? normalizeEmail(identity.email)
+          : normalizePhone(identity.phone ?? ''),
+      });
+      throw error;
+    }
   }
 
   async requestRegisterOtp(payload: unknown) {
@@ -102,6 +130,7 @@ export class AuthService {
     );
 
     await this.assertIdentityAvailable(identity.phone, identity.email);
+    await this.assertRegisterAttemptsAllowed(identity);
     const passwordHash = await this.passwordService.hashPassword(password);
 
     await this.authOtpService.upsertRegisterDraft({
@@ -115,6 +144,10 @@ export class AuthService {
     const challenge = await this.authOtpService.requestOtp({
       purpose: 'REGISTER',
       email: identity.email,
+    });
+    await this.recordAuthAttemptFailure('REGISTER', {
+      identityType: 'EMAIL',
+      identityValue: normalizeEmail(identity.email),
     });
 
     return {
@@ -159,6 +192,10 @@ export class AuthService {
     });
     const storedUser = await this.usersService.getByIdOrThrow(user.id);
     await this.authOtpService.consumeRegisterDraft(email);
+    await this.clearAuthAttempts('REGISTER', {
+      identityType: 'EMAIL',
+      identityValue: email,
+    });
 
     return {
       tokens: await this.issueTokenPairForUser(storedUser, metadata),
@@ -177,11 +214,14 @@ export class AuthService {
       maxLength: 100,
     });
     this.passwordPolicyService.validateOrThrow(password, {}, 'standard');
+    const identity = this.resolveIdentityFromLogin(login);
+    await this.assertLoginAttemptsAllowed(identity);
     const user = login.includes('@')
       ? await this.usersService.findByEmail(normalizeEmail(login))
       : await this.usersService.findByPhone(normalizePhone(login));
 
     if (!user || user.deletedAt || user.status !== 'ACTIVE') {
+      await this.recordAuthAttemptFailure('LOGIN', identity);
       throw new UnauthorizedException('Invalid credentials.');
     }
 
@@ -191,9 +231,11 @@ export class AuthService {
     );
 
     if (!validPassword) {
+      await this.recordAuthAttemptFailure('LOGIN', identity);
       throw new UnauthorizedException('Invalid credentials.');
     }
 
+    await this.clearAuthAttempts('LOGIN', identity);
     return {
       tokens: await this.issueTokenPairForUser(user, metadata),
       user: toUserProfile(user),
@@ -211,9 +253,12 @@ export class AuthService {
       maxLength: 100,
     });
     this.passwordPolicyService.validateOrThrow(password, {}, 'standard');
+    const identity = this.resolveIdentityFromLogin(login);
+    await this.assertLoginAttemptsAllowed(identity);
     const user = await this.resolveUserByLogin(login);
 
     if (!user || user.deletedAt || user.status !== 'ACTIVE') {
+      await this.recordAuthAttemptFailure('LOGIN', identity);
       throw new UnauthorizedException('Invalid credentials.');
     }
 
@@ -223,6 +268,7 @@ export class AuthService {
     );
 
     if (!validPassword) {
+      await this.recordAuthAttemptFailure('LOGIN', identity);
       throw new UnauthorizedException('Invalid credentials.');
     }
 
@@ -238,6 +284,7 @@ export class AuthService {
       userId: user.userId,
     });
 
+    await this.clearAuthAttempts('LOGIN', identity);
     return {
       otpRequested: true,
       purpose: challenge.purpose,
@@ -1052,6 +1099,179 @@ export class AuthService {
     role: StoredUser['role'],
   ): PasswordPolicyProfile {
     return role === 'CITIZEN' ? 'standard' : 'privileged';
+  }
+
+  private resolveIdentityFromLogin(login: string): {
+    identityType: 'EMAIL' | 'PHONE';
+    identityValue: string;
+  } {
+    if (login.includes('@')) {
+      return {
+        identityType: 'EMAIL',
+        identityValue: normalizeEmail(login),
+      };
+    }
+
+    return {
+      identityType: 'PHONE',
+      identityValue: normalizePhone(login),
+    };
+  }
+
+  private async assertLoginAttemptsAllowed(identity: {
+    identityType: 'EMAIL' | 'PHONE';
+    identityValue: string;
+  }): Promise<void> {
+    await this.assertAuthAttemptsAllowed('LOGIN', identity);
+  }
+
+  private async assertRegisterAttemptsAllowed(identity: {
+    email?: string;
+    phone?: string;
+  }): Promise<void> {
+    const identityType = identity.email ? 'EMAIL' : 'PHONE';
+    const identityValue = identity.email
+      ? normalizeEmail(identity.email)
+      : identity.phone
+        ? normalizePhone(identity.phone)
+        : '';
+
+    if (!identityValue) {
+      return;
+    }
+
+    await this.assertAuthAttemptsAllowed('REGISTER', {
+      identityType,
+      identityValue,
+    });
+  }
+
+  private async assertAuthAttemptsAllowed(
+    purpose: 'LOGIN' | 'REGISTER',
+    identity: { identityType: 'EMAIL' | 'PHONE'; identityValue: string },
+  ): Promise<void> {
+    const attempt = await this.getAuthAttempt(purpose, identity);
+    const now = nowIso();
+
+    if (!attempt || this.isAttemptExpired(attempt, now)) {
+      return;
+    }
+
+    if (attempt.lockedUntil && attempt.lockedUntil > now) {
+      throw new HttpException(
+        'Too many attempts. Please try again later.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private async recordAuthAttemptFailure(
+    purpose: 'LOGIN' | 'REGISTER',
+    identity: { identityType: 'EMAIL' | 'PHONE'; identityValue: string },
+  ): Promise<void> {
+    if (!identity.identityValue) {
+      return;
+    }
+
+    const now = nowIso();
+    const attempt = await this.getAuthAttempt(purpose, identity);
+    const config = this.getAuthAttemptConfig(purpose);
+    const resetWindow =
+      !attempt || this.isAttemptExpired(attempt, now) || attempt.lockedUntil;
+    const nextCount = resetWindow ? 1 : attempt.attemptCount + 1;
+    const firstAttemptAt = resetWindow ? now : attempt.firstAttemptAt;
+    const lockedUntil =
+      nextCount >= config.maxAttempts
+        ? this.addSeconds(now, config.lockSeconds)
+        : null;
+
+    const record: StoredAuthIdentityAttempt = {
+      PK: this.makeAuthAttemptPk(purpose, identity),
+      SK: 'ATTEMPT',
+      entityType: 'AUTH_IDENTITY_ATTEMPT',
+      purpose,
+      identityType: identity.identityType,
+      identityValue: identity.identityValue,
+      attemptCount: nextCount,
+      firstAttemptAt,
+      lastAttemptAt: now,
+      lockedUntil,
+      expiresAt: this.addSeconds(now, config.windowSeconds),
+      createdAt: attempt?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    await this.repository.put(this.config.dynamodbUsersTableName, record);
+  }
+
+  private async clearAuthAttempts(
+    purpose: 'LOGIN' | 'REGISTER',
+    identity: { identityType: 'EMAIL' | 'PHONE'; identityValue: string },
+  ): Promise<void> {
+    if (!identity.identityValue) {
+      return;
+    }
+
+    await this.repository.delete(
+      this.config.dynamodbUsersTableName,
+      this.makeAuthAttemptPk(purpose, identity),
+      'ATTEMPT',
+    );
+  }
+
+  private async getAuthAttempt(
+    purpose: 'LOGIN' | 'REGISTER',
+    identity: { identityType: 'EMAIL' | 'PHONE'; identityValue: string },
+  ): Promise<StoredAuthIdentityAttempt | undefined> {
+    return this.repository.get<StoredAuthIdentityAttempt>(
+      this.config.dynamodbUsersTableName,
+      this.makeAuthAttemptPk(purpose, identity),
+      'ATTEMPT',
+    );
+  }
+
+  private getAuthAttemptConfig(purpose: 'LOGIN' | 'REGISTER'): {
+    maxAttempts: number;
+    windowSeconds: number;
+    lockSeconds: number;
+  } {
+    if (purpose === 'REGISTER') {
+      return {
+        maxAttempts: this.config.authRegisterMaxAttempts,
+        windowSeconds: this.config.authRegisterWindowSeconds,
+        lockSeconds: this.config.authRegisterLockSeconds,
+      };
+    }
+
+    return {
+      maxAttempts: this.config.authLoginMaxAttempts,
+      windowSeconds: this.config.authLoginWindowSeconds,
+      lockSeconds: this.config.authLoginLockSeconds,
+    };
+  }
+
+  private makeAuthAttemptPk(
+    purpose: 'LOGIN' | 'REGISTER',
+    identity: { identityType: 'EMAIL' | 'PHONE'; identityValue: string },
+  ): string {
+    return [
+      'AUTH',
+      'ATTEMPT',
+      purpose,
+      identity.identityType,
+      identity.identityValue,
+    ].join('#');
+  }
+
+  private isAttemptExpired(
+    attempt: StoredAuthIdentityAttempt,
+    now: string,
+  ): boolean {
+    return attempt.expiresAt <= now;
+  }
+
+  private addSeconds(timestamp: string, seconds: number): string {
+    return new Date(new Date(timestamp).getTime() + seconds * 1000).toISOString();
   }
 
   private async consumeOtpBestEffort(input: {

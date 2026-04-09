@@ -17,7 +17,12 @@ import type { StoredReport } from '../../common/storage-records';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { S3StorageService } from '../../infrastructure/storage/s3-storage.service';
-import type { UploadMediaRequestDto } from '../../common/openapi/swagger.models';
+import type {
+  DeleteUploadRequestDto,
+  PresignDownloadRequestDto,
+  PresignUploadRequestDto,
+  UploadMediaRequestDto,
+} from '../../common/openapi/swagger.models';
 import { ConversationsService } from '../conversations/conversations.service';
 
 interface UploadedBinaryFile {
@@ -49,7 +54,10 @@ export class UploadsService {
     if (!UPLOAD_TARGETS.includes(input.target)) {
       throw new BadRequestException('target is invalid.');
     }
-    await this.assertTargetAccess(actor, input);
+    await this.assertTargetAccess(actor, {
+      target: input.target,
+      entityId: input.entityId,
+    });
 
     if (!Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
       throw new BadRequestException('Uploaded file is empty.');
@@ -110,6 +118,168 @@ export class UploadsService {
     };
   }
 
+  getUploadLimits(): {
+    maxFileSizeBytes: number;
+    allowedMimeTypes: string[];
+    imageOnlyTargets: Array<(typeof UPLOAD_TARGETS)[number]>;
+  } {
+    return {
+      maxFileSizeBytes: this.config.uploadMaxFileSizeBytes,
+      allowedMimeTypes: [...this.config.uploadAllowedMimeTypes],
+      imageOnlyTargets: ['AVATAR'],
+    };
+  }
+
+  async presignUpload(
+    actor: AuthenticatedUser,
+    input: PresignUploadRequestDto,
+  ): Promise<{
+    method: 'PUT';
+    url: string;
+    key: string;
+    bucket: string;
+    target: (typeof UPLOAD_TARGETS)[number];
+    entityId?: string;
+    contentType: string;
+    expiresAt: string;
+  }> {
+    if (!UPLOAD_TARGETS.includes(input.target)) {
+      throw new BadRequestException('target is invalid.');
+    }
+
+    if (!input.fileName?.trim()) {
+      throw new BadRequestException('fileName is required.');
+    }
+
+    if (!input.contentType?.trim()) {
+      throw new BadRequestException('contentType is required.');
+    }
+
+    if (!Number.isFinite(input.size) || input.size <= 0) {
+      throw new BadRequestException('size is invalid.');
+    }
+
+    if (input.size > this.config.uploadMaxFileSizeBytes) {
+      throw new BadRequestException(
+        `file exceeds ${this.config.uploadMaxFileSizeBytes} bytes.`,
+      );
+    }
+
+    const contentType = input.contentType.toLowerCase();
+    if (!this.config.uploadAllowedMimeTypes.includes(contentType)) {
+      throw new BadRequestException('file type is not allowed.');
+    }
+
+    if (input.target === 'AVATAR' && !contentType.startsWith('image/')) {
+      throw new BadRequestException('Avatar uploads must be images.');
+    }
+
+    await this.assertTargetAccess(actor, {
+      target: input.target,
+      entityId: input.entityId,
+    });
+
+    const normalizedTarget = this.normalizeSegment(input.target.toLowerCase());
+    const actorSegment = this.normalizeSegment(actor.id);
+    const entitySegment = input.entityId
+      ? this.normalizeSegment(input.entityId)
+      : undefined;
+    const fileName = this.buildStoredFileName(input.fileName);
+    const keyParts = [
+      this.normalizeSegment(this.config.uploadKeyPrefix),
+      normalizedTarget,
+      actorSegment,
+    ];
+
+    if (entitySegment) {
+      keyParts.push(entitySegment);
+    }
+
+    const key = `${keyParts.join('/')}/${createUlid()}-${fileName}`;
+    const presigned = await this.s3StorageService.createPresignedUploadUrl({
+      bucket: this.config.s3BucketName,
+      key,
+      contentType,
+      expiresInSeconds: this.config.uploadPresignTtlSeconds,
+    });
+
+    return {
+      method: 'PUT',
+      url: presigned.url,
+      key,
+      bucket: this.config.s3BucketName,
+      target: input.target,
+      entityId: input.entityId,
+      contentType,
+      expiresAt: presigned.expiresAt,
+    };
+  }
+
+  async presignDownload(
+    actor: AuthenticatedUser,
+    input: PresignDownloadRequestDto,
+  ): Promise<{ method: 'GET'; url: string; key: string; expiresAt: string }> {
+    if (!UPLOAD_TARGETS.includes(input.target)) {
+      throw new BadRequestException('target is invalid.');
+    }
+
+    if (!input.key?.trim()) {
+      throw new BadRequestException('key is required.');
+    }
+
+    if (input.target !== 'AVATAR') {
+      await this.assertTargetAccess(actor, {
+        target: input.target,
+        entityId: input.entityId,
+      });
+    }
+
+    this.assertKeyMatchesTarget(input);
+
+    const presigned = await this.s3StorageService.createPresignedDownloadUrl({
+      bucket: this.config.s3BucketName,
+      key: input.key,
+      expiresInSeconds: this.config.uploadPresignTtlSeconds,
+    });
+
+    return {
+      method: 'GET',
+      url: presigned.url,
+      key: input.key,
+      expiresAt: presigned.expiresAt,
+    };
+  }
+
+  async deleteMedia(
+    actor: AuthenticatedUser,
+    input: DeleteUploadRequestDto,
+  ): Promise<{ deleted: true; key: string; removedAt: string }> {
+    if (!UPLOAD_TARGETS.includes(input.target)) {
+      throw new BadRequestException('target is invalid.');
+    }
+
+    if (!input.key?.trim()) {
+      throw new BadRequestException('key is required.');
+    }
+
+    await this.assertTargetAccess(actor, {
+      target: input.target,
+      entityId: input.entityId,
+    });
+    this.assertKeyOwnership(actor, input);
+
+    await this.s3StorageService.deleteObject({
+      bucket: this.config.s3BucketName,
+      key: input.key,
+    });
+
+    return {
+      deleted: true,
+      key: input.key,
+      removedAt: nowIso(),
+    };
+  }
+
   private buildStoredFileName(originalName: string): string {
     const trimmed = originalName.trim();
 
@@ -141,9 +311,80 @@ export class UploadsService {
     return normalized || 'default';
   }
 
+  private assertKeyOwnership(
+    actor: AuthenticatedUser,
+    input: DeleteUploadRequestDto,
+  ): void {
+    const key = input.key.trim().replace(/^\/+|\/+$/g, '');
+    const parts = key.split('/').filter(Boolean);
+    const expectedPrefix = this.normalizeSegment(this.config.uploadKeyPrefix);
+    const expectedTarget = this.normalizeSegment(input.target.toLowerCase());
+    const expectedActor = this.normalizeSegment(actor.id);
+    const expectedEntity = input.entityId
+      ? this.normalizeSegment(input.entityId)
+      : undefined;
+
+    if (
+      parts.length < 4 ||
+      parts[0] !== expectedPrefix ||
+      parts[1] !== expectedTarget ||
+      parts[2] !== expectedActor
+    ) {
+      throw new ForbiddenException('You cannot delete this upload.');
+    }
+
+    if (expectedEntity) {
+      if (parts.length < 5 || parts[3] !== expectedEntity) {
+        throw new ForbiddenException('You cannot delete this upload.');
+      }
+      return;
+    }
+
+    if (parts.length > 4) {
+      throw new BadRequestException(
+        'entityId is required to delete this upload.',
+      );
+    }
+  }
+
+  private assertKeyMatchesTarget(input: {
+    target: (typeof UPLOAD_TARGETS)[number];
+    entityId?: string;
+    key: string;
+  }): void {
+    const key = input.key.trim().replace(/^\/+|\/+$/g, '');
+    const parts = key.split('/').filter(Boolean);
+    const expectedPrefix = this.normalizeSegment(this.config.uploadKeyPrefix);
+    const expectedTarget = this.normalizeSegment(input.target.toLowerCase());
+    const expectedEntity = input.entityId
+      ? this.normalizeSegment(input.entityId)
+      : undefined;
+
+    if (parts.length < 4 || parts[0] !== expectedPrefix) {
+      throw new BadRequestException('key is invalid.');
+    }
+
+    if (parts[1] !== expectedTarget) {
+      throw new BadRequestException('key does not match target.');
+    }
+
+    if (expectedEntity) {
+      if (parts.length < 5 || parts[3] !== expectedEntity) {
+        throw new BadRequestException('key does not match entityId.');
+      }
+      return;
+    }
+
+    if (parts.length > 4) {
+      throw new BadRequestException(
+        'entityId is required to access this upload.',
+      );
+    }
+  }
+
   private async assertTargetAccess(
     actor: AuthenticatedUser,
-    input: UploadMediaRequestDto,
+    input: { target: (typeof UPLOAD_TARGETS)[number]; entityId?: string },
   ): Promise<void> {
     const entityId = input.entityId?.trim();
 
