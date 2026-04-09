@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiClient } from '../../lib/api-client';
+import { uploadMedia } from '@/services/api/upload.api';
 
 export interface UserProfile {
   id: string;
@@ -7,6 +8,7 @@ export interface UserProfile {
   phone?: string;
   email?: string;
   role: string;
+  status?: string;
   locationCode?: string;
   avatarUrl?: string;
 }
@@ -28,46 +30,15 @@ export const useUpdateProfile = () => {
   });
 };
 
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
-import { readWebToken } from '@/lib/web-token-storage';
-
 export const useUploadAvatar = () => {
   return useMutation({
     mutationFn: async (uri: string) => {
-      let token = '';
-      if (Platform.OS === 'web') {
-        token = readWebToken() || '';
-      } else {
-        token = await SecureStore.getItemAsync('auth_token') || '';
-      }
-
-      const formData = new FormData();
-      formData.append('target', 'USER');
-      
-      const filename = uri.split('/').pop() || 'avatar.jpg';
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : `image`;
-
-      formData.append('file', {
-        uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
-        name: filename,
-        type,
-      } as any);
-
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001'}/uploads/media`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`
-        },
-        body: formData,
+      const uploadedAsset = await uploadMedia({
+        uri,
+        target: 'AVATAR',
       });
 
-      if (!response.ok) {
-        throw new Error('Upload failed');
-      }
-      const result = await response.json();
-      return result.data?.url || result.url;
+      return uploadedAsset.url;
     },
   });
 };

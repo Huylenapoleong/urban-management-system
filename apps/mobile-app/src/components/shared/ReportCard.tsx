@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { Card, Text, Chip, useTheme } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ReportItem } from '@urban/shared-types';
+import { convertToS3Url } from '@/constants/s3';
 
 interface ReportCardProps {
   report: ReportItem;
@@ -19,6 +20,7 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }>
 export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
   const theme = useTheme();
   const statusConfig = STATUS_CONFIG[report.status] || { bg: '#f5f5f5', text: '#666', label: report.status };
+  const coverImageUrl = report.mediaUrls?.[0] ? convertToS3Url(report.mediaUrls[0]) : null;
 
   return (
     <Card 
@@ -27,6 +29,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
       mode="elevated" 
       elevation={1}
     >
+      {coverImageUrl ? <Card.Cover source={{ uri: coverImageUrl }} style={styles.coverImage} /> : null}
       <Card.Content style={{ padding: 16 }}>
         <View style={styles.header}>
           <Text variant="titleMedium" style={styles.title} numberOfLines={1}>
@@ -73,6 +76,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#ffffff',
     overflow: 'hidden',
+  },
+  coverImage: {
+    height: 156,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
   },
   header: {
     flexDirection: 'row',

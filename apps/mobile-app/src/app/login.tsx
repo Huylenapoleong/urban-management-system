@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, ImageBackground, StatusBar } from 'react-native';
+import { View, StyleSheet, KeyboardAvoidingView, Platform, ImageBackground, StatusBar, Pressable } from 'react-native';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { useAuth } from '../providers/AuthProvider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 export default function LoginScreen() {
   const { login } = useAuth();
+  const router = useRouter();
   
   const [loginVal, setLoginVal] = useState('');
   const [password, setPassword] = useState('');
@@ -104,7 +106,9 @@ export default function LoginScreen() {
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Bạn chưa có tài khoản? </Text>
-            <Text style={styles.footerLink}>Đăng ký ngay</Text>
+            <Pressable onPress={() => router.push('/register')}>
+              <Text style={styles.footerLink}>Đăng ký ngay</Text>
+            </Pressable>
           </View>
         </Surface>
       </KeyboardAvoidingView>

@@ -13,6 +13,14 @@ interface AuthContextType {
   user: JwtClaims | null;
   isLoading: boolean;
   login: (phone: string, password: string) => Promise<void>;
+  register: (payload: {
+    fullName: string;
+    password: string;
+    locationCode: string;
+    email?: string;
+    phone?: string;
+    avatarUrl?: string;
+  }) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -81,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === 'login';
+    const inAuthGroup = segments[0] === 'login' || segments[0] === 'register';
     const isRoot = !segments[0];
 
     if (!user && !inAuthGroup) {
@@ -143,8 +151,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
+  const register = async (payload: {
+    fullName: string;
+    password: string;
+    locationCode: string;
+    email?: string;
+    phone?: string;
+    avatarUrl?: string;
+  }) => {
+    try {
+      const response = await ApiClient.post<{ tokens: { accessToken: string } }>('/auth/register', payload);
+
+      if (response && response.tokens && response.tokens.accessToken) {
+        const token = response.tokens.accessToken;
+
+        socketClient.disconnect();
+        disconnectChatSocket();
+        await persistToken(token);
+
+        const decoded = jwtDecode<JwtClaims>(token);
+        setUser(decoded);
+      } else {
+        throw new Error('Đăng ký thất bại.');
+      }
+    } catch (e: any) {
+      throw new Error(e.message || 'Lỗi kết nối.');
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

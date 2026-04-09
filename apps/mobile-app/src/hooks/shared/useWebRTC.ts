@@ -22,6 +22,12 @@ interface CallConfig {
 
 export const useWebRTC = (conversationId?: string) => {
   const { user } = useAuth();
+
+  const safeEmit = useCallback((event: string, payload: any) => {
+    void socketClient.emitWithAck(event, payload).catch((error) => {
+      console.warn(`[useWebRTC] ${event} skipped: socket unavailable`, error);
+    });
+  }, []);
   
   const [callState, setCallState] = useState<CallState>('IDLE');
   const [activeConfig, setActiveConfig] = useState<CallConfig | null>(null);
@@ -31,6 +37,25 @@ export const useWebRTC = (conversationId?: string) => {
   const [isMicOn, setIsMicOn] = useState(true);
   
   const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const pendingIceCandidatesRef = useRef<any[]>([]);
+
+  const flushPendingIceCandidates = useCallback(async () => {
+    const pc = peerConnection.current;
+    if (!pc || !pc.remoteDescription || pendingIceCandidatesRef.current.length === 0) {
+      return;
+    }
+
+    const queued = [...pendingIceCandidatesRef.current];
+    pendingIceCandidatesRef.current = [];
+
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error('[useWebRTC] Failed to apply queued ice candidate', e);
+      }
+    }
+  }, []);
 
   // Configuration for ICE servers
   const getIceServers = () => {
@@ -79,6 +104,7 @@ export const useWebRTC = (conversationId?: string) => {
       peerConnection.current.close();
       peerConnection.current = null;
     }
+    pendingIceCandidatesRef.current = [];
     setCallState('IDLE');
     setActiveConfig(null);
   }, [localStream, remoteStream]);
@@ -92,7 +118,7 @@ export const useWebRTC = (conversationId?: string) => {
     pc.onicecandidate = (event: any) => {
       if (event.candidate && config.conversationId) {
         const targetConvId = !isCaller && config.callerId ? `dm:${config.callerId}` : config.conversationId;
-        socketClient.emitWithAck(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
+        safeEmit(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
           conversationId: targetConvId,
           candidate: event.candidate,
         });
@@ -138,7 +164,7 @@ export const useWebRTC = (conversationId?: string) => {
       const offer = await pc.createOffer({});
       await pc.setLocalDescription(offer);
       
-      socketClient.emitWithAck(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
+      safeEmit(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
         conversationId: config.conversationId,
         offer,
       });
@@ -155,7 +181,7 @@ export const useWebRTC = (conversationId?: string) => {
     const config = { isVideo, targetUserId: targetId, conversationId: convId };
     setActiveConfig(config);
 
-    socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CALL_INIT, {
+    safeEmit(CHAT_SOCKET_EVENTS.CALL_INIT, {
       conversationId: convId,
       callerId: user?.sub,
       callerName: (user as any)?.fullName || 'Người gọi',
@@ -171,7 +197,7 @@ export const useWebRTC = (conversationId?: string) => {
     // For incoming call, the signalling target is the Caller
     const targetConvId = activeConfig.callerId ? `dm:${activeConfig.callerId}` : activeConfig.conversationId;
 
-    socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
+    safeEmit(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
       conversationId: targetConvId,
       calleeId: user?.sub,
     });
@@ -184,7 +210,7 @@ export const useWebRTC = (conversationId?: string) => {
   const rejectCall = () => {
     if (activeConfig?.conversationId) {
       const targetConvId = activeConfig.callerId ? `dm:${activeConfig.callerId}` : activeConfig.conversationId;
-      socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CALL_REJECT, {
+      safeEmit(CHAT_SOCKET_EVENTS.CALL_REJECT, {
         conversationId: targetConvId,
         calleeId: user?.sub,
       });
@@ -196,7 +222,7 @@ export const useWebRTC = (conversationId?: string) => {
   const endCall = () => {
     if (activeConfig?.conversationId) {
       const targetConvId = activeConfig.callerId ? `dm:${activeConfig.callerId}` : activeConfig.conversationId;
-      socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CALL_END, {
+      safeEmit(CHAT_SOCKET_EVENTS.CALL_END, {
         conversationId: targetConvId,
         userId: user?.sub,
       });
@@ -280,12 +306,13 @@ export const useWebRTC = (conversationId?: string) => {
     const onOffer = async (data: any) => {
       if (!peerConnection.current) return;
       await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+      await flushPendingIceCandidates();
       const answer = await peerConnection.current.createAnswer();
       await peerConnection.current.setLocalDescription(answer);
       
       const targetConvId = activeConfig?.callerId ? `dm:${activeConfig.callerId}` : data.conversationId;
 
-      socketClient.emitWithAck(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, {
+      safeEmit(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, {
         conversationId: targetConvId,
         answer,
       });
@@ -294,10 +321,17 @@ export const useWebRTC = (conversationId?: string) => {
     const onAnswer = async (data: any) => {
       if (!peerConnection.current) return;
       await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+      await flushPendingIceCandidates();
     };
 
     const onIceCandidate = async (data: any) => {
       if (!peerConnection.current || !data.candidate) return;
+
+      if (!peerConnection.current.remoteDescription) {
+        pendingIceCandidatesRef.current.push(data.candidate);
+        return;
+      }
+
       try {
         await peerConnection.current.addIceCandidate(new RTCIceCandidate(data.candidate));
       } catch (e) {
@@ -322,7 +356,7 @@ export const useWebRTC = (conversationId?: string) => {
       socketClient.off(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, onAnswer);
       socketClient.off(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIceCandidate);
     };
-  }, [callState, activeConfig, user?.sub, setupPeerConnection, cleanup]);
+  }, [callState, activeConfig, user?.sub, setupPeerConnection, cleanup, flushPendingIceCandidates, safeEmit]);
 
   return {
     callState,

@@ -3,7 +3,9 @@ import { View, ScrollView, StyleSheet, Alert, SafeAreaView } from 'react-native'
 import { Text, Chip, Button, ActivityIndicator, useTheme, Surface, Divider, Dialog, Portal, RadioButton, Appbar } from 'react-native-paper';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useReport, useUpdateReportStatus, useLinkedConversations } from '../../../hooks/shared/useReports';
+import { convertToS3Url } from '@/constants/s3';
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   NEW: { color: '#f44336', label: 'Chờ xử lý' },
@@ -53,6 +55,7 @@ export default function ReportDetailsScreen() {
   }
 
   const statusConfig = STATUS_CONFIG[report.status] || { color: theme.colors.surfaceVariant, label: report.status };
+  const imageUrls = (report.mediaUrls || []).map((url) => convertToS3Url(url));
 
   const handleUpdateStatus = () => {
     if (selectedStatus && selectedStatus !== report.status) {
@@ -113,6 +116,20 @@ export default function ReportDetailsScreen() {
         <Text variant="titleMedium" style={styles.sectionTitle}>Nội dung phản ánh</Text>
         <Text variant="bodyMedium">{report.description || 'Không có mô tả chi tiết.'}</Text>
       </Surface>
+
+      {imageUrls.length > 0 ? (
+        <Surface style={styles.mediaSurface} elevation={1}>
+          <View style={styles.mediaHeader}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>Hình ảnh sự cố</Text>
+            <Text variant="labelSmall" style={styles.mediaCount}>{`${imageUrls.length} ảnh`}</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaList}>
+            {imageUrls.map((url) => (
+              <Image key={url} source={{ uri: url }} style={styles.mediaImage} contentFit="cover" />
+            ))}
+          </ScrollView>
+        </Surface>
+      ) : null}
 
       <View style={styles.actionContainer}>
         <Button 
@@ -182,6 +199,22 @@ const styles = StyleSheet.create({
   iconText: { marginLeft: 8, color: '#444' },
   descSurface: { padding: 16, marginBottom: 8 },
   sectionTitle: { fontWeight: 'bold', marginBottom: 8 },
+  mediaSurface: { paddingVertical: 14, marginBottom: 8 },
+  mediaHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  mediaCount: { color: '#666', fontWeight: '600' },
+  mediaList: { paddingHorizontal: 16, gap: 10 },
+  mediaImage: {
+    width: 180,
+    height: 128,
+    borderRadius: 14,
+    backgroundColor: '#eceff1',
+  },
   actionContainer: { padding: 16, paddingBottom: 32 },
   actionBtn: { marginBottom: 12 },
 });
