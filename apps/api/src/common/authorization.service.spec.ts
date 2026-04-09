@@ -185,10 +185,20 @@ describe('AuthorizationService', () => {
     );
   });
 
-  it('does not allow citizen to start a direct conversation with another citizen', () => {
+  it('allows citizen direct conversation candidate in same ward before friend policy', () => {
     expect(service.canAccessDirectConversation(citizenActor, targetUser)).toBe(
-      false,
+      true,
     );
+  });
+
+  it('does not allow citizen direct conversation candidate outside ward scope', () => {
+    expect(
+      service.canAccessDirectConversation(citizenActor, {
+        ...targetUser,
+        userId: 'citizen-3',
+        locationCode: 'VN-HCM-BQ2-P03',
+      }),
+    ).toBe(false);
   });
 
   it('allows citizen to start a direct conversation with an in-scope officer', () => {

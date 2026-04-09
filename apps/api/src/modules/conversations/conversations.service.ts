@@ -406,6 +406,12 @@ export class ConversationsService {
       throw new ForbiddenException('You cannot access this conversation.');
     }
 
+    if (!(await this.usersService.canStartCitizenDm(actor, targetUser))) {
+      throw new ForbiddenException(
+        'Citizens can only send direct messages to friends.',
+      );
+    }
+
     const conversationId = makeDmConversationId(actor.id, targetUser.userId);
     return this.createMessage(
       actor,
@@ -1701,6 +1707,10 @@ export class ConversationsService {
       throw new BadRequestException('Invalid DM conversation id.');
     }
 
+    if (!participantIds.includes(actor.id)) {
+      throw new ForbiddenException('You cannot access this conversation.');
+    }
+
     const otherParticipantId =
       participantIds.find((participantId) => participantId !== actor.id) ??
       participantIds[0];
@@ -1712,6 +1722,15 @@ export class ConversationsService {
       !this.authorizationService.canAccessDirectConversation(actor, targetUser)
     ) {
       throw new ForbiddenException('You cannot access this conversation.');
+    }
+
+    if (
+      requireSendAccess &&
+      !(await this.usersService.canStartCitizenDm(actor, targetUser))
+    ) {
+      throw new ForbiddenException(
+        'Citizens can only send direct messages to friends.',
+      );
     }
 
     return participantIds;
