@@ -28,6 +28,7 @@ import { AuthOtpService } from './security/auth-otp.service';
 import { PasswordPolicyService } from './security/password-policy.service';
 import { PasswordService } from './security/password.service';
 import { RefreshSessionService } from './security/refresh-session.service';
+import { MediaAssetService } from './storage/media-asset.service';
 import { S3StorageService } from './storage/s3-storage.service';
 
 @Global()
@@ -44,6 +45,7 @@ import { S3StorageService } from './storage/s3-storage.service';
     AuthOtpService,
     JwtTokenService,
     RefreshSessionService,
+    MediaAssetService,
     S3StorageService,
     RealtimeRedisService,
     PushNotificationService,
@@ -88,6 +90,7 @@ import { S3StorageService } from './storage/s3-storage.service';
     AuthOtpService,
     JwtTokenService,
     RefreshSessionService,
+    MediaAssetService,
     S3StorageService,
     RealtimeRedisService,
     PushNotificationService,

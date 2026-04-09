@@ -99,6 +99,7 @@ describe('AuthorizationService', () => {
     locationCode: 'VN-HCM-BQ1-P01',
     status: 'NEW',
     priority: 'MEDIUM',
+    mediaAssets: [],
     mediaUrls: [],
     assignedOfficerId: undefined,
     deletedAt: null,

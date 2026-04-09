@@ -67,6 +67,9 @@ describe('AuthService', () => {
     put: jest.fn(),
     delete: jest.fn(),
   };
+  const mediaAssetService = {
+    resolveAvatarFields: jest.fn((value: unknown) => Promise.resolve(value)),
+  };
   const config = {
     dynamodbUsersTableName: 'Users',
     authLoginMaxAttempts: 5,
@@ -145,6 +148,7 @@ describe('AuthService', () => {
       chatRealtimeService as never,
       observabilityService as never,
       repository as never,
+      mediaAssetService as never,
       config as never,
     );
     passwordPolicyService.validateOrThrow.mockImplementation(() => undefined);

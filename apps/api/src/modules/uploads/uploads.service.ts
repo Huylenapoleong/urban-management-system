@@ -16,6 +16,7 @@ import { AuthorizationService } from '../../common/authorization.service';
 import type { StoredReport } from '../../common/storage-records';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { S3StorageService } from '../../infrastructure/storage/s3-storage.service';
 import type {
   DeleteUploadRequestDto,
@@ -32,11 +33,14 @@ interface UploadedBinaryFile {
   size: number;
 }
 
+type UploadMediaInput = Pick<UploadMediaRequestDto, 'target' | 'entityId'>;
+
 @Injectable()
 export class UploadsService {
   constructor(
     private readonly config: AppConfigService,
     private readonly s3StorageService: S3StorageService,
+    private readonly mediaAssetService: MediaAssetService,
     private readonly repository: UrbanTableRepository,
     private readonly authorizationService: AuthorizationService,
     private readonly conversationsService: ConversationsService,
@@ -44,7 +48,7 @@ export class UploadsService {
 
   async uploadMedia(
     actor: AuthenticatedUser,
-    input: UploadMediaRequestDto,
+    input: UploadMediaInput,
     file?: UploadedBinaryFile,
   ): Promise<UploadedAsset> {
     if (!file) {
@@ -78,14 +82,16 @@ export class UploadsService {
       throw new BadRequestException('Avatar uploads must be images.');
     }
 
-    const normalizedTarget = this.normalizeSegment(input.target.toLowerCase());
-    const actorSegment = this.normalizeSegment(actor.id);
+    const normalizedTarget = this.mediaAssetService.normalizeSegment(
+      input.target.toLowerCase(),
+    );
+    const actorSegment = this.mediaAssetService.normalizeSegment(actor.id);
     const entitySegment = input.entityId
-      ? this.normalizeSegment(input.entityId)
+      ? this.mediaAssetService.normalizeSegment(input.entityId)
       : undefined;
     const fileName = this.buildStoredFileName(file.originalname);
     const keyParts = [
-      this.normalizeSegment(this.config.uploadKeyPrefix),
+      this.mediaAssetService.normalizeSegment(this.config.uploadKeyPrefix),
       normalizedTarget,
       actorSegment,
     ];
@@ -179,14 +185,16 @@ export class UploadsService {
       entityId: input.entityId,
     });
 
-    const normalizedTarget = this.normalizeSegment(input.target.toLowerCase());
-    const actorSegment = this.normalizeSegment(actor.id);
+    const normalizedTarget = this.mediaAssetService.normalizeSegment(
+      input.target.toLowerCase(),
+    );
+    const actorSegment = this.mediaAssetService.normalizeSegment(actor.id);
     const entitySegment = input.entityId
-      ? this.normalizeSegment(input.entityId)
+      ? this.mediaAssetService.normalizeSegment(input.entityId)
       : undefined;
     const fileName = this.buildStoredFileName(input.fileName);
     const keyParts = [
-      this.normalizeSegment(this.config.uploadKeyPrefix),
+      this.mediaAssetService.normalizeSegment(this.config.uploadKeyPrefix),
       normalizedTarget,
       actorSegment,
     ];
@@ -232,9 +240,10 @@ export class UploadsService {
         target: input.target,
         entityId: input.entityId,
       });
+      this.mediaAssetService.assertKeyMatchesTarget(input);
+    } else {
+      this.mediaAssetService.assertKeyTarget(input);
     }
-
-    this.assertKeyMatchesTarget(input);
 
     const presigned = await this.s3StorageService.createPresignedDownloadUrl({
       bucket: this.config.s3BucketName,
@@ -266,7 +275,12 @@ export class UploadsService {
       target: input.target,
       entityId: input.entityId,
     });
-    this.assertKeyOwnership(actor, input);
+    this.mediaAssetService.assertKeyOwnership({
+      ownerUserId: actor.id,
+      target: input.target,
+      entityId: input.entityId,
+      key: input.key,
+    });
 
     await this.s3StorageService.deleteObject({
       bucket: this.config.s3BucketName,
@@ -297,89 +311,6 @@ export class UploadsService {
       .toLowerCase();
 
     return normalized || 'file.bin';
-  }
-
-  private normalizeSegment(value: string): string {
-    const normalized = value
-      .trim()
-      .replace(/[^a-zA-Z0-9/_-]+/g, '-')
-      .replace(/\/+/g, '/')
-      .replace(/\/\//g, '/')
-      .replace(/^\/+|\/+$/g, '')
-      .toLowerCase();
-
-    return normalized || 'default';
-  }
-
-  private assertKeyOwnership(
-    actor: AuthenticatedUser,
-    input: DeleteUploadRequestDto,
-  ): void {
-    const key = input.key.trim().replace(/^\/+|\/+$/g, '');
-    const parts = key.split('/').filter(Boolean);
-    const expectedPrefix = this.normalizeSegment(this.config.uploadKeyPrefix);
-    const expectedTarget = this.normalizeSegment(input.target.toLowerCase());
-    const expectedActor = this.normalizeSegment(actor.id);
-    const expectedEntity = input.entityId
-      ? this.normalizeSegment(input.entityId)
-      : undefined;
-
-    if (
-      parts.length < 4 ||
-      parts[0] !== expectedPrefix ||
-      parts[1] !== expectedTarget ||
-      parts[2] !== expectedActor
-    ) {
-      throw new ForbiddenException('You cannot delete this upload.');
-    }
-
-    if (expectedEntity) {
-      if (parts.length < 5 || parts[3] !== expectedEntity) {
-        throw new ForbiddenException('You cannot delete this upload.');
-      }
-      return;
-    }
-
-    if (parts.length > 4) {
-      throw new BadRequestException(
-        'entityId is required to delete this upload.',
-      );
-    }
-  }
-
-  private assertKeyMatchesTarget(input: {
-    target: (typeof UPLOAD_TARGETS)[number];
-    entityId?: string;
-    key: string;
-  }): void {
-    const key = input.key.trim().replace(/^\/+|\/+$/g, '');
-    const parts = key.split('/').filter(Boolean);
-    const expectedPrefix = this.normalizeSegment(this.config.uploadKeyPrefix);
-    const expectedTarget = this.normalizeSegment(input.target.toLowerCase());
-    const expectedEntity = input.entityId
-      ? this.normalizeSegment(input.entityId)
-      : undefined;
-
-    if (parts.length < 4 || parts[0] !== expectedPrefix) {
-      throw new BadRequestException('key is invalid.');
-    }
-
-    if (parts[1] !== expectedTarget) {
-      throw new BadRequestException('key does not match target.');
-    }
-
-    if (expectedEntity) {
-      if (parts.length < 5 || parts[3] !== expectedEntity) {
-        throw new BadRequestException('key does not match entityId.');
-      }
-      return;
-    }
-
-    if (parts.length > 4) {
-      throw new BadRequestException(
-        'entityId is required to access this upload.',
-      );
-    }
   }
 
   private async assertTargetAccess(

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { StoredReport } from '../../common/storage-records';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { UploadsService } from './uploads.service';
 
 describe('UploadsService', () => {
@@ -13,6 +14,7 @@ describe('UploadsService', () => {
     uploadAllowedMimeTypes: ['image/jpeg', 'image/png'],
     uploadKeyPrefix: 'uploads',
     uploadMaxFileSizeBytes: 2 * 1024 * 1024,
+    uploadPresignTtlSeconds: 300,
   };
   const s3StorageService = {
     uploadObject: jest.fn(),
@@ -61,6 +63,7 @@ describe('UploadsService', () => {
     locationCode: actor.locationCode,
     status: 'NEW',
     priority: 'MEDIUM',
+    mediaAssets: [],
     mediaUrls: [],
     deletedAt: null,
     createdAt: '2026-04-09T00:00:00.000Z',
@@ -68,12 +71,18 @@ describe('UploadsService', () => {
   };
 
   let service: UploadsService;
+  let mediaAssetService: MediaAssetService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mediaAssetService = new MediaAssetService(
+      config as never,
+      s3StorageService as never,
+    );
     service = new UploadsService(
       config as never,
       s3StorageService as never,
+      mediaAssetService as never,
       repository as never,
       authorizationService as never,
       conversationsService as never,
@@ -186,9 +195,7 @@ describe('UploadsService', () => {
         entityId: 'report-1',
         key: 'uploads/report/other-user/report-1/file.jpg',
       }),
-    ).rejects.toThrow(
-      new ForbiddenException('You cannot delete this upload.'),
-    );
+    ).rejects.toThrow(new ForbiddenException('You cannot delete this upload.'));
   });
 
   it('requires entityId when key contains an entity segment', async () => {

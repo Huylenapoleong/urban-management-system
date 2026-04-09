@@ -55,6 +55,21 @@ export interface LocationSegments {
   ward: string;
 }
 
+export interface MediaAsset {
+  key: string;
+  bucket?: string;
+  target: UploadTarget;
+  entityId?: string;
+  originalFileName?: string;
+  fileName?: string;
+  contentType?: string;
+  size?: number;
+  uploadedBy?: string;
+  uploadedAt?: string;
+  resolvedUrl?: string;
+  expiresAt?: string;
+}
+
 export interface UserProfile {
   id: string;
   phone?: string;
@@ -63,6 +78,7 @@ export interface UserProfile {
   role: UserRole;
   locationCode: string;
   unit?: string;
+  avatarAsset?: MediaAsset;
   avatarUrl?: string;
   status: UserStatus;
   deletedAt: string | null;
@@ -78,6 +94,7 @@ export interface AuthenticatedUser {
   role: UserRole;
   locationCode: string;
   unit?: string;
+  avatarAsset?: MediaAsset;
   avatarUrl?: string;
   status: UserStatus;
   createdAt: string;
@@ -89,6 +106,7 @@ export interface UserFriendItem {
   fullName: string;
   role: UserRole;
   locationCode: string;
+  avatarAsset?: MediaAsset;
   avatarUrl?: string;
   status: UserStatus;
   friendsSince: string;
@@ -99,6 +117,7 @@ export interface UserFriendRequestItem {
   fullName: string;
   role: UserRole;
   locationCode: string;
+  avatarAsset?: MediaAsset;
   avatarUrl?: string;
   status: UserStatus;
   direction: "INCOMING" | "OUTGOING";
@@ -110,6 +129,7 @@ export interface UserDirectoryItem {
   fullName: string;
   role: UserRole;
   locationCode: string;
+  avatarAsset?: MediaAsset;
   avatarUrl?: string;
   status: UserStatus;
   relationState: "FRIEND" | "INCOMING_REQUEST" | "OUTGOING_REQUEST" | "NONE";
@@ -145,9 +165,11 @@ export interface MessageItem {
   id: string;
   senderId: string;
   senderName: string;
+  senderAvatarAsset?: MediaAsset;
   senderAvatarUrl?: string;
   type: MessageType;
   content: string;
+  attachmentAsset?: MediaAsset;
   attachmentUrl?: string;
   replyTo?: string;
   deletedAt: string | null;
@@ -184,6 +206,7 @@ export interface ReportItem {
   locationCode: string;
   status: ReportStatus;
   priority: ReportPriority;
+  mediaAssets: MediaAsset[];
   mediaUrls: string[];
   assignedOfficerId?: string;
   deletedAt: string | null;
@@ -300,6 +323,7 @@ export interface ChatMessageSendPayload extends ChatConversationCommandPayload {
   clientMessageId?: string;
   type?: MessageType;
   content?: string;
+  attachmentKey?: string;
   attachmentUrl?: string;
   replyTo?: string;
 }
@@ -307,6 +331,7 @@ export interface ChatMessageSendPayload extends ChatConversationCommandPayload {
 export interface ChatMessageUpdatePayload extends ChatConversationCommandPayload {
   messageId: string;
   content?: string;
+  attachmentKey?: string;
   attachmentUrl?: string;
 }
 
@@ -431,6 +456,7 @@ export interface ChatTypingStateEvent {
   conversationKey: string;
   userId: string;
   fullName: string;
+  avatarAsset?: MediaAsset;
   avatarUrl?: string;
   isTyping: boolean;
   occurredAt: string;

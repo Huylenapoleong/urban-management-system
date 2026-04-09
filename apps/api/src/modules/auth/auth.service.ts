@@ -47,6 +47,7 @@ import { AuthOtpService } from '../../infrastructure/security/auth-otp.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import type { StoredAuthIdentityAttempt } from '../../common/storage-records';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 
 @Injectable()
 export class AuthService {
@@ -62,6 +63,7 @@ export class AuthService {
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly observabilityService: ObservabilityService,
     private readonly repository: UrbanTableRepository,
+    private readonly mediaAssetService: MediaAssetService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -238,7 +240,7 @@ export class AuthService {
     await this.clearAuthAttempts('LOGIN', identity);
     return {
       tokens: await this.issueTokenPairForUser(user, metadata),
-      user: toUserProfile(user),
+      user: await this.serializeUserProfile(user),
     };
   }
 
@@ -319,7 +321,7 @@ export class AuthService {
 
     return {
       tokens: await this.issueTokenPairForUser(user, metadata),
-      user: toUserProfile(user),
+      user: await this.serializeUserProfile(user),
     };
   }
 
@@ -707,7 +709,7 @@ export class AuthService {
 
     return {
       tokens: await this.issueTokenPairForUser(reactivatedUser, metadata),
-      user: toUserProfile(reactivatedUser),
+      user: await this.serializeUserProfile(reactivatedUser),
     };
   }
 
@@ -863,7 +865,7 @@ export class AuthService {
 
     return {
       tokens,
-      user: toUserProfile(user),
+      user: await this.serializeUserProfile(user),
     };
   }
 
@@ -1041,6 +1043,10 @@ export class AuthService {
 
   private toAuthUser(user: StoredUser): AuthenticatedUser {
     return toAuthenticatedUser(user);
+  }
+
+  private async serializeUserProfile(user: StoredUser) {
+    return this.mediaAssetService.resolveAvatarFields(toUserProfile(user));
   }
 
   private async resolveUserByLogin(
@@ -1271,7 +1277,9 @@ export class AuthService {
   }
 
   private addSeconds(timestamp: string, seconds: number): string {
-    return new Date(new Date(timestamp).getTime() + seconds * 1000).toISOString();
+    return new Date(
+      new Date(timestamp).getTime() + seconds * 1000,
+    ).toISOString();
   }
 
   private async consumeOtpBestEffort(input: {

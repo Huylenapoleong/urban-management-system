@@ -37,6 +37,28 @@ describe('ReportsService', () => {
   const pushNotificationService = {
     buildPushOutboxEvent: jest.fn(),
   };
+  const mediaAssetService = {
+    createOwnedAssetReference: jest.fn(
+      (input: {
+        key: string;
+        target: string;
+        entityId?: string;
+        ownerUserId: string;
+      }) => ({
+        key: input.key,
+        target: input.target,
+        entityId: input.entityId,
+        uploadedBy: input.ownerUserId,
+      }),
+    ),
+    resolveAssetCollectionWithLegacyUrls: jest.fn(
+      (assets: unknown, urls: string[] | undefined) =>
+        Promise.resolve({
+          assets: (assets as unknown[]) ?? [],
+          urls: urls ?? [],
+        }),
+    ),
+  };
   const config = {
     dynamodbReportsTableName: 'Reports',
     dynamodbReportsCategoryLocationIndexName: 'GSI1-CatLoc',
@@ -70,6 +92,7 @@ describe('ReportsService', () => {
     locationCode: 'VN-79-760-26734',
     status: 'NEW',
     priority: 'MEDIUM',
+    mediaAssets: [],
     mediaUrls: [],
     assignedOfficerId: undefined,
     deletedAt: null,
@@ -86,6 +109,7 @@ describe('ReportsService', () => {
       groupsService as never,
       auditTrailService as never,
       pushNotificationService as never,
+      mediaAssetService as never,
       config as never,
     );
     repository.get.mockResolvedValue(report);

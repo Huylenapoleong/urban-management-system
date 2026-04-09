@@ -182,6 +182,29 @@ export class S3StorageService implements OnApplicationShutdown {
     }
   }
 
+  async resolveObjectUrl(input: {
+    bucket: string;
+    key: string;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; expiresAt?: string }> {
+    if (this.config.s3PublicBaseUrl) {
+      return {
+        url: this.getObjectUrl(input),
+      };
+    }
+
+    return this.createPresignedDownloadUrl({
+      bucket: input.bucket,
+      key: input.key,
+      expiresInSeconds:
+        input.expiresInSeconds ?? this.config.uploadPresignTtlSeconds,
+    });
+  }
+
+  getObjectUrl(input: { bucket: string; key: string }): string {
+    return this.buildObjectUrl(input.bucket, input.key);
+  }
+
   getHealth(): { configured: boolean; detail: string } {
     if (!this.config.s3BucketName) {
       return {

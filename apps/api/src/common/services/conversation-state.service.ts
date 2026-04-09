@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { MESSAGE_TYPES } from '@urban/shared-constants';
-import type { ConversationSummary, MessageItem } from '@urban/shared-types';
+import type {
+  ConversationSummary,
+  MediaAsset,
+  MessageItem,
+} from '@urban/shared-types';
 import {
   getConversationKind,
   isDmConversationId,
@@ -263,9 +267,10 @@ export class ConversationStateService {
   hasMeaningfulMessageBody(
     type: SupportedMessageType,
     content: string,
+    attachmentAsset?: MediaAsset,
     attachmentUrl?: string,
   ): boolean {
-    if (attachmentUrl) {
+    if (attachmentAsset?.key || attachmentUrl) {
       return true;
     }
 
