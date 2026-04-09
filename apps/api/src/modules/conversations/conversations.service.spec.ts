@@ -22,6 +22,7 @@ describe('ConversationsService', () => {
     isAdmin: jest.fn(),
   };
   const usersService = {
+    canStartCitizenDm: jest.fn(),
     getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
   };
@@ -198,6 +199,7 @@ describe('ConversationsService', () => {
 
       throw new Error(`Unexpected user lookup: ${userId}`);
     });
+    usersService.canStartCitizenDm.mockResolvedValue(true);
     repository.delete.mockResolvedValue(undefined);
     repository.put.mockResolvedValue(undefined);
     repository.transactPut.mockResolvedValue(undefined);
@@ -530,6 +532,19 @@ describe('ConversationsService', () => {
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
+  it('rejects citizen direct messages when friend gate denies send access', async () => {
+    usersService.canStartCitizenDm.mockResolvedValueOnce(false);
+
+    await expect(
+      service.sendDirectMessage(actor, {
+        targetUserId: otherUser.userId,
+        content: '{"text":"Xin chao","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow('Citizens can only send direct messages to friends.');
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
   it('rejects direct messages to inactive targets before writing a message', async () => {
     usersService.getActiveByIdOrThrow.mockRejectedValueOnce(
       new Error('User account is not active.'),
@@ -543,5 +558,11 @@ describe('ConversationsService', () => {
       }),
     ).rejects.toThrow('User account is not active.');
     expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('blocks access when actor is not a participant of raw DM conversation id', async () => {
+    await expect(
+      service.listMessages(actor, 'DM#user-2#user-3', {}),
+    ).rejects.toThrow('You cannot access this conversation.');
   });
 });

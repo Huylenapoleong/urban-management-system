@@ -9,6 +9,8 @@ import type {
   PushDevice,
   ReportConversationLinkItem,
   ReportItem,
+  UserFriendItem,
+  UserFriendRequestItem,
   UserProfile,
 } from '@urban/shared-types';
 import type {
@@ -50,6 +52,38 @@ export function toUserProfile(user: StoredUser): UserProfile {
   };
 }
 
+export function toUserFriendItem(
+  user: StoredUser,
+  friendsSince: string,
+): UserFriendItem {
+  return {
+    userId: user.userId,
+    fullName: user.fullName,
+    role: user.role,
+    locationCode: user.locationCode,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    friendsSince,
+  };
+}
+
+export function toUserFriendRequestItem(
+  user: StoredUser,
+  direction: 'INCOMING' | 'OUTGOING',
+  requestedAt: string,
+): UserFriendRequestItem {
+  return {
+    userId: user.userId,
+    fullName: user.fullName,
+    role: user.role,
+    locationCode: user.locationCode,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    direction,
+    requestedAt,
+  };
+}
+
 export function toAuthenticatedUser(user: StoredUser): AuthenticatedUser {
   return {
     id: user.userId,
@@ -77,7 +111,9 @@ export function toAuthSessionInfo(
     updatedAt: session.updatedAt,
     lastUsedAt: session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
     expiresAt: session.expiresAt,
+    dismissedAt: session.dismissedAt ?? null,
     revokedAt: session.revokedAt,
+    sessionScope: session.sessionScope,
     userAgent: session.userAgent,
     ipAddress: session.ipAddress,
     deviceId: session.deviceId,

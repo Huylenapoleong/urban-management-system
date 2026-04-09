@@ -26,6 +26,7 @@ describe('GroupsService', () => {
     canReadGroup: jest.fn(),
   };
   const usersService = {
+    areFriends: jest.fn(),
     getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
   };
@@ -121,6 +122,7 @@ describe('GroupsService', () => {
     repository.transactWrite.mockResolvedValue(undefined);
     usersService.getActiveByIdOrThrow.mockResolvedValue(undefined);
     usersService.getByIdOrThrow.mockResolvedValue(undefined);
+    usersService.areFriends.mockResolvedValue(true);
     groupCleanupService.buildGroupDeleteCleanupTask.mockReturnValue(
       cleanupTask,
     );
@@ -243,5 +245,29 @@ describe('GroupsService', () => {
         id: group.groupId,
       }),
     );
+  });
+
+  it('blocks citizens from adding non-friend users to groups', async () => {
+    authorizationService.canManageGroup.mockReturnValue(true);
+    usersService.areFriends.mockResolvedValue(false);
+
+    await expect(
+      service.manageMember(
+        {
+          ...actor,
+          role: 'CITIZEN',
+        },
+        group.groupId,
+        'user-3',
+        {
+          action: 'add',
+        },
+      ),
+    ).rejects.toThrow(
+      new ForbiddenException(
+        'Citizens can only add their friends to groups.',
+      ),
+    );
+    expect(repository.transactWrite).not.toHaveBeenCalled();
   });
 });

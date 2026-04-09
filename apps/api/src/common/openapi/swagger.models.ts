@@ -4,10 +4,12 @@ import {
   GROUP_TYPES,
   MESSAGE_DELIVERY_STATES,
   MESSAGE_TYPES,
+  OTP_PURPOSES,
   PUSH_DEVICE_PROVIDERS,
   REPORT_CATEGORIES,
   REPORT_PRIORITIES,
   REPORT_STATUSES,
+  SESSION_SCOPES,
   UPLOAD_TARGETS,
   USER_ROLES,
   USER_STATUSES,
@@ -26,6 +28,9 @@ import {
 
 const GROUP_MEMBER_ACTIONS = ['add', 'update', 'remove'] as const;
 const BOOLEAN_QUERY_VALUES = ['true', 'false'] as const;
+const FRIEND_REQUEST_DIRECTION_VALUES = ['INCOMING', 'OUTGOING'] as const;
+const FRIEND_ACTION_VALUES = ['REJECTED', 'CANCELED'] as const;
+const USER_DISCOVERY_MODE_VALUES = ['all', 'chat', 'friend'] as const;
 const INTEGER_QUERY_PATTERN = /^\d+$/;
 
 export class HealthStatusDto {
@@ -189,6 +194,104 @@ export class PresenceStateDto {
   occurredAt!: string;
 }
 
+export class FriendUserItemDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Tran Van Citizen B' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-b.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  friendsSince!: string;
+}
+
+export class FriendRequestItemDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Tran Van Citizen B' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-b.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({
+    enum: FRIEND_REQUEST_DIRECTION_VALUES,
+    example: 'INCOMING',
+  })
+  direction!: (typeof FRIEND_REQUEST_DIRECTION_VALUES)[number];
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  requestedAt!: string;
+}
+
+export class FriendActionResultDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiPropertyOptional({ enum: FRIEND_ACTION_VALUES, example: 'REJECTED' })
+  action?: (typeof FRIEND_ACTION_VALUES)[number];
+
+  @ApiPropertyOptional({ example: '2026-03-20T06:05:00.000Z' })
+  occurredAt?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-20T06:05:00.000Z' })
+  removedAt?: string;
+}
+
+export class UserDirectoryItemDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Tran Van Citizen B' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-b.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({
+    enum: ['FRIEND', 'INCOMING_REQUEST', 'OUTGOING_REQUEST', 'NONE'],
+    example: 'NONE',
+  })
+  relationState!: 'FRIEND' | 'INCOMING_REQUEST' | 'OUTGOING_REQUEST' | 'NONE';
+
+  @ApiProperty({ example: true })
+  canMessage!: boolean;
+
+  @ApiProperty({ example: false })
+  canSendFriendRequest!: boolean;
+}
+
 export class PushDeviceDto {
   @ApiProperty({ example: 'device-admin-web-01' })
   deviceId!: string;
@@ -297,7 +400,13 @@ export class AuthSessionInfoDto {
   expiresAt!: string;
 
   @ApiPropertyOptional({ example: null, nullable: true })
+  dismissedAt!: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
   revokedAt!: string | null;
+
+  @ApiProperty({ enum: SESSION_SCOPES, example: 'WEB_DESKTOP' })
+  sessionScope!: (typeof SESSION_SCOPES)[number];
 
   @ApiPropertyOptional({ example: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
   userAgent?: string;
@@ -321,6 +430,14 @@ export class RevokeSessionResultDto {
 
   @ApiProperty({ example: true })
   currentSessionRevoked!: boolean;
+}
+
+export class DismissSessionHistoryResultDto {
+  @ApiProperty({ example: '01JSESSION0000000000000001' })
+  sessionId!: string;
+
+  @ApiProperty({ example: '2026-03-18T13:10:00.000Z' })
+  dismissedAt!: string;
 }
 
 export class LogoutAllResultDto {
@@ -546,9 +663,9 @@ export class RegisterRequestDto {
   @MaxLength(150)
   email?: string;
 
-  @ApiProperty({ example: 'Password123!' })
+  @ApiProperty({ example: 'Ums@2026Secure1' })
   @IsString()
-  @MinLength(8)
+  @MinLength(10)
   @MaxLength(100)
   password!: string;
 
@@ -570,6 +687,22 @@ export class RegisterRequestDto {
   avatarUrl?: string;
 }
 
+export class RegisterOtpRequestDto extends RegisterRequestDto {}
+
+export class RegisterOtpVerifyRequestDto {
+  @ApiProperty({ example: 'citizen.c@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  email!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
 export class LoginRequestDto {
   @ApiProperty({ example: 'citizen.a@smartcity.local' })
   @IsString()
@@ -577,11 +710,37 @@ export class LoginRequestDto {
   @MaxLength(150)
   login!: string;
 
-  @ApiProperty({ example: 'Password123!' })
+  @ApiProperty({ example: 'Ums@2026Secure1' })
   @IsString()
-  @MinLength(8)
+  @MinLength(10)
   @MaxLength(100)
   password!: string;
+}
+
+export class LoginOtpRequestDto extends LoginRequestDto {}
+
+export class LoginOtpVerifyRequestDto {
+  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  login!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
+export class ReactivateAccountOtpRequestDto extends LoginRequestDto {}
+
+export class ReactivateAccountOtpVerifyRequestDto extends LoginRequestDto {
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
 }
 
 export class RefreshRequestDto {
@@ -603,6 +762,149 @@ export class LogoutRequestDto {
 export class LogoutResultDto {
   @ApiProperty({ example: true })
   loggedOut!: true;
+}
+
+export class AuthOtpChallengeResultDto {
+  @ApiProperty({ example: true })
+  otpRequested!: true;
+
+  @ApiProperty({ enum: OTP_PURPOSES, example: 'FORGOT_PASSWORD' })
+  purpose!: (typeof OTP_PURPOSES)[number];
+
+  @ApiProperty({ example: 'ci***@smartcity.local' })
+  maskedEmail!: string;
+
+  @ApiProperty({ example: '2026-03-19T10:05:00.000Z' })
+  expiresAt!: string;
+
+  @ApiProperty({ example: '2026-03-19T10:01:00.000Z' })
+  resendAvailableAt!: string;
+}
+
+export class GenericAcceptedResultDto {
+  @ApiProperty({ example: true })
+  requested!: true;
+}
+
+export class ChangePasswordRequestDto {
+  @ApiProperty({ example: 'Ums@2026Secure1' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  currentPassword!: string;
+
+  @ApiProperty({ example: 'Ums@2026Secure2' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(100)
+  newPassword!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
+export class ChangePasswordResultDto {
+  @ApiProperty({ example: '2026-03-19T10:06:00.000Z' })
+  passwordChangedAt!: string;
+
+  @ApiProperty({ example: 2 })
+  revokedSessionCount!: number;
+
+  @ApiProperty({ example: false })
+  currentSessionRevoked!: boolean;
+}
+
+export class AccountLifecycleOtpVerifyRequestDto {
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
+export class AccountLifecycleResultDto {
+  @ApiProperty({ enum: USER_STATUSES, example: 'DEACTIVATED' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({ example: '2026-03-19T10:08:00.000Z' })
+  occurredAt!: string;
+
+  @ApiProperty({ example: 4 })
+  revokedSessionCount!: number;
+
+  @ApiProperty({ example: true })
+  currentSessionRevoked!: boolean;
+}
+
+export class DeleteAccountConfirmRequestDto {
+  @ApiProperty({ example: 'Ums@2026Secure1' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  currentPassword!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  acceptTerms!: boolean;
+}
+
+export class DeleteAccountResultDto {
+  @ApiProperty({ enum: USER_STATUSES, example: 'DELETED' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({ example: '2026-03-19T10:10:00.000Z' })
+  deletedAt!: string;
+
+  @ApiProperty({ example: 4 })
+  revokedSessionCount!: number;
+
+  @ApiProperty({ example: true })
+  currentSessionRevoked!: boolean;
+}
+
+export class ForgotPasswordRequestDto {
+  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  login!: string;
+}
+
+export class ForgotPasswordConfirmRequestDto {
+  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  login!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+
+  @ApiProperty({ example: 'Ums@2026Secure2' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(100)
+  newPassword!: string;
+}
+
+export class ForgotPasswordConfirmResultDto {
+  @ApiProperty({ example: '2026-03-19T10:07:00.000Z' })
+  passwordResetAt!: string;
+
+  @ApiProperty({ example: 3 })
+  revokedSessionCount!: number;
 }
 
 export class RegisterPushDeviceRequestDto {
@@ -705,9 +1007,9 @@ export class CreateUserRequestDto {
   @MaxLength(150)
   email?: string;
 
-  @ApiProperty({ example: 'Password123!' })
+  @ApiProperty({ example: 'Ums@2026Secure1' })
   @IsString()
-  @MinLength(8)
+  @MinLength(10)
   @MaxLength(100)
   password!: string;
 
@@ -1074,6 +1376,53 @@ export class ListUsersQueryDto {
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
   limit?: string;
+}
+
+export class ListFriendsQueryDto {
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class FriendRequestQueryDto extends ListFriendsQueryDto {
+  @ApiPropertyOptional({
+    enum: FRIEND_REQUEST_DIRECTION_VALUES,
+    example: 'INCOMING',
+  })
+  @IsOptional()
+  @IsIn(FRIEND_REQUEST_DIRECTION_VALUES)
+  direction?: (typeof FRIEND_REQUEST_DIRECTION_VALUES)[number];
+}
+
+export class SearchUsersForChatQueryDto extends ListFriendsQueryDto {
+  @ApiPropertyOptional({
+    example: 'tran van',
+    description: 'Search by name, phone or email in actor communication scope.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({
+    enum: USER_DISCOVERY_MODE_VALUES,
+    example: 'all',
+    description:
+      '"chat" returns only users that can be messaged now. "friend" returns friendship-focused results.',
+  })
+  @IsOptional()
+  @IsIn(USER_DISCOVERY_MODE_VALUES)
+  mode?: (typeof USER_DISCOVERY_MODE_VALUES)[number];
 }
 
 export class ListGroupsQueryDto {

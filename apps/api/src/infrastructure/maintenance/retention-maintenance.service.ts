@@ -2,6 +2,8 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { AuthenticatedUser } from '@urban/shared-types';
 import { nowIso } from '@urban/shared-utils';
 import type {
+  StoredAuthEmailOtp,
+  StoredAuthRegisterDraft,
   StoredChatOutboxEvent,
   StoredConversation,
   StoredPushOutboxEvent,
@@ -15,6 +17,9 @@ import { UrbanTableRepository } from '../dynamodb/urban-table.repository';
 
 export type RetentionCategory =
   | 'EXPIRED_REFRESH_SESSION'
+  | 'DISMISSED_REFRESH_SESSION'
+  | 'EXPIRED_AUTH_EMAIL_OTP'
+  | 'EXPIRED_AUTH_REGISTER_DRAFT'
   | 'EXPIRED_REFRESH_TOKEN_REVOCATION'
   | 'CHAT_OUTBOX_EVENT'
   | 'PUSH_OUTBOX_EVENT'
@@ -103,6 +108,8 @@ export class RetentionMaintenanceService {
     const generatedAt = nowIso();
     const [usersItems, conversationItems] = await Promise.all([
       this.repository.scanAll<
+        | StoredAuthEmailOtp
+        | StoredAuthRegisterDraft
         | StoredUser
         | StoredRefreshSession
         | StoredRefreshTokenRevocation
@@ -117,8 +124,15 @@ export class RetentionMaintenanceService {
       expiredRefreshSession: this.daysAgoIso(
         this.config.retentionExpiredSessionGraceDays,
       ),
+      dismissedRefreshSession: this.daysAgoIso(
+        this.config.retentionDismissedSessionDays,
+      ),
       revokedRefreshToken: this.daysAgoIso(
         this.config.retentionRevokedRefreshTokenGraceDays,
+      ),
+      authEmailOtp: this.daysAgoIso(this.config.retentionAuthEmailOtpDays),
+      authRegisterDraft: this.daysAgoIso(
+        this.config.retentionAuthRegisterDraftDays,
       ),
       chatOutbox: this.daysAgoIso(this.config.retentionChatOutboxDays),
       pushOutbox: this.daysAgoIso(this.config.retentionPushOutboxDays),
@@ -145,18 +159,38 @@ export class RetentionMaintenanceService {
 
   private collectUserTableCandidates(
     item:
+      | StoredAuthEmailOtp
+      | StoredAuthRegisterDraft
       | StoredUser
       | StoredRefreshSession
       | StoredRefreshTokenRevocation
       | StoredPushOutboxEvent,
     cutoffs: {
       expiredRefreshSession: string;
+      dismissedRefreshSession: string;
       revokedRefreshToken: string;
+      authEmailOtp: string;
+      authRegisterDraft: string;
       pushOutbox: string;
     },
   ): RetentionCandidate[] {
     switch (item.entityType) {
       case 'USER_REFRESH_SESSION': {
+        if (
+          item.dismissedAt &&
+          item.dismissedAt < cutoffs.dismissedRefreshSession
+        ) {
+          return [
+            {
+              category: 'DISMISSED_REFRESH_SESSION',
+              eligibleAt: item.dismissedAt,
+              pk: item.PK,
+              sk: item.SK,
+              tableName: this.config.dynamodbUsersTableName,
+            },
+          ];
+        }
+
         const eligibleAt = item.revokedAt ?? item.expiresAt;
 
         if (eligibleAt >= cutoffs.expiredRefreshSession) {
@@ -166,6 +200,40 @@ export class RetentionMaintenanceService {
         return [
           {
             category: 'EXPIRED_REFRESH_SESSION',
+            eligibleAt,
+            pk: item.PK,
+            sk: item.SK,
+            tableName: this.config.dynamodbUsersTableName,
+          },
+        ];
+      }
+      case 'AUTH_EMAIL_OTP': {
+        const eligibleAt = item.consumedAt ?? item.expiresAt;
+
+        if (eligibleAt >= cutoffs.authEmailOtp) {
+          return [];
+        }
+
+        return [
+          {
+            category: 'EXPIRED_AUTH_EMAIL_OTP',
+            eligibleAt,
+            pk: item.PK,
+            sk: item.SK,
+            tableName: this.config.dynamodbUsersTableName,
+          },
+        ];
+      }
+      case 'AUTH_REGISTER_DRAFT': {
+        const eligibleAt = item.consumedAt ?? item.expiresAt;
+
+        if (eligibleAt >= cutoffs.authRegisterDraft) {
+          return [];
+        }
+
+        return [
+          {
+            category: 'EXPIRED_AUTH_REGISTER_DRAFT',
             eligibleAt,
             pk: item.PK,
             sk: item.SK,
@@ -258,7 +326,10 @@ export class RetentionMaintenanceService {
     candidates: RetentionCandidate[],
     cutoffs: {
       expiredRefreshSession: string;
+      dismissedRefreshSession: string;
       revokedRefreshToken: string;
+      authEmailOtp: string;
+      authRegisterDraft: string;
       chatOutbox: string;
       pushOutbox: string;
       deletedConversationSummary: string;
@@ -298,7 +369,10 @@ export class RetentionMaintenanceService {
     category: RetentionCategory,
     cutoffs: {
       expiredRefreshSession: string;
+      dismissedRefreshSession: string;
       revokedRefreshToken: string;
+      authEmailOtp: string;
+      authRegisterDraft: string;
       chatOutbox: string;
       pushOutbox: string;
       deletedConversationSummary: string;
@@ -307,8 +381,14 @@ export class RetentionMaintenanceService {
     switch (category) {
       case 'EXPIRED_REFRESH_SESSION':
         return cutoffs.expiredRefreshSession;
+      case 'DISMISSED_REFRESH_SESSION':
+        return cutoffs.dismissedRefreshSession;
       case 'EXPIRED_REFRESH_TOKEN_REVOCATION':
         return cutoffs.revokedRefreshToken;
+      case 'EXPIRED_AUTH_EMAIL_OTP':
+        return cutoffs.authEmailOtp;
+      case 'EXPIRED_AUTH_REGISTER_DRAFT':
+        return cutoffs.authRegisterDraft;
       case 'CHAT_OUTBOX_EVENT':
         return cutoffs.chatOutbox;
       case 'PUSH_OUTBOX_EVENT':
