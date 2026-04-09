@@ -7,6 +7,7 @@ import type {
   ReportCategory,
   ReportPriority,
   ReportStatus,
+  SessionScope,
   UploadTarget,
   UserRole,
   UserStatus,
@@ -27,7 +28,9 @@ export interface AuthSessionInfo {
   updatedAt: string;
   lastUsedAt: string;
   expiresAt: string;
+  dismissedAt?: string | null;
   revokedAt: string | null;
+  sessionScope: SessionScope;
   userAgent?: string;
   ipAddress?: string;
   deviceId?: string;
@@ -79,6 +82,39 @@ export interface AuthenticatedUser {
   status: UserStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UserFriendItem {
+  userId: string;
+  fullName: string;
+  role: UserRole;
+  locationCode: string;
+  avatarUrl?: string;
+  status: UserStatus;
+  friendsSince: string;
+}
+
+export interface UserFriendRequestItem {
+  userId: string;
+  fullName: string;
+  role: UserRole;
+  locationCode: string;
+  avatarUrl?: string;
+  status: UserStatus;
+  direction: "INCOMING" | "OUTGOING";
+  requestedAt: string;
+}
+
+export interface UserDirectoryItem {
+  userId: string;
+  fullName: string;
+  role: UserRole;
+  locationCode: string;
+  avatarUrl?: string;
+  status: UserStatus;
+  relationState: "FRIEND" | "INCOMING_REQUEST" | "OUTGOING_REQUEST" | "NONE";
+  canMessage: boolean;
+  canSendFriendRequest: boolean;
 }
 
 export interface GroupMetadata {
@@ -268,15 +304,13 @@ export interface ChatMessageSendPayload extends ChatConversationCommandPayload {
   replyTo?: string;
 }
 
-export interface ChatMessageUpdatePayload
-  extends ChatConversationCommandPayload {
+export interface ChatMessageUpdatePayload extends ChatConversationCommandPayload {
   messageId: string;
   content?: string;
   attachmentUrl?: string;
 }
 
-export interface ChatMessageDeletePayload
-  extends ChatConversationCommandPayload {
+export interface ChatMessageDeletePayload extends ChatConversationCommandPayload {
   messageId: string;
 }
 
@@ -421,7 +455,3 @@ export interface ChatPresenceUpdatedEvent {
   presence: ChatPresenceState;
   occurredAt: string;
 }
-
-
-
-

@@ -24,6 +24,8 @@ import { RetentionMaintenanceSchedulerService } from './maintenance/retention-ma
 import { ChatReconciliationSchedulerService } from './maintenance/chat-reconciliation-scheduler.service';
 import { CircuitBreakerService } from './resilience/circuit-breaker.service';
 import { JwtTokenService } from './security/jwt-token.service';
+import { AuthOtpService } from './security/auth-otp.service';
+import { PasswordPolicyService } from './security/password-policy.service';
 import { PasswordService } from './security/password.service';
 import { RefreshSessionService } from './security/refresh-session.service';
 import { S3StorageService } from './storage/s3-storage.service';
@@ -37,7 +39,9 @@ import { S3StorageService } from './storage/s3-storage.service';
     CircuitBreakerService,
     DynamoDbService,
     UrbanTableRepository,
+    PasswordPolicyService,
     PasswordService,
+    AuthOtpService,
     JwtTokenService,
     RefreshSessionService,
     S3StorageService,
@@ -79,7 +83,9 @@ import { S3StorageService } from './storage/s3-storage.service';
     AuditTrailService,
     CircuitBreakerService,
     UrbanTableRepository,
+    PasswordPolicyService,
     PasswordService,
+    AuthOtpService,
     JwtTokenService,
     RefreshSessionService,
     S3StorageService,
