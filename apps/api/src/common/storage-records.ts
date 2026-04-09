@@ -20,6 +20,7 @@ export type StorageEntityType =
   | 'USER_REFRESH_SESSION'
   | 'USER_SESSION_SLOT'
   | 'USER_REFRESH_TOKEN_REVOCATION'
+  | 'AUTH_IDENTITY_ATTEMPT'
   | 'AUTH_EMAIL_OTP'
   | 'AUTH_REGISTER_DRAFT'
   | 'USER_PUSH_DEVICE'
@@ -113,6 +114,20 @@ export interface StoredRefreshTokenRevocation extends TableItemBase {
   tokenHash: string;
   expiresAt: string;
   revokedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredAuthIdentityAttempt extends TableItemBase {
+  entityType: 'AUTH_IDENTITY_ATTEMPT';
+  purpose: 'LOGIN' | 'REGISTER';
+  identityType: 'EMAIL' | 'PHONE';
+  identityValue: string;
+  attemptCount: number;
+  firstAttemptAt: string;
+  lastAttemptAt: string;
+  lockedUntil: string | null;
+  expiresAt: string;
   createdAt: string;
   updatedAt: string;
 }

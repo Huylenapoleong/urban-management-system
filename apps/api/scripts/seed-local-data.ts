@@ -240,6 +240,7 @@ function makeReport(input: {
     locationCode: input.locationCode,
     status: input.status,
     priority: input.priority,
+    mediaAssets: [],
     mediaUrls: input.mediaUrls,
     assignedOfficerId: input.assignedOfficerId,
     deletedAt: null,

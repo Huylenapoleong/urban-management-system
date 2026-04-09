@@ -264,9 +264,7 @@ describe('GroupsService', () => {
         },
       ),
     ).rejects.toThrow(
-      new ForbiddenException(
-        'Citizens can only add their friends to groups.',
-      ),
+      new ForbiddenException('Citizens can only add their friends to groups.'),
     );
     expect(repository.transactWrite).not.toHaveBeenCalled();
   });

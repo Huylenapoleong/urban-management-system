@@ -39,6 +39,27 @@ describe('UsersService', () => {
   const refreshSessionService = {
     revokeAllSessionsForUser: jest.fn(),
   };
+  const mediaAssetService = {
+    createOwnedAssetReference: jest.fn(
+      (input: {
+        key: string;
+        target: string;
+        entityId?: string;
+        ownerUserId: string;
+      }) => ({
+        key: input.key,
+        target: input.target,
+        entityId: input.entityId,
+        uploadedBy: input.ownerUserId,
+      }),
+    ),
+    resolveAssetWithLegacyUrl: jest.fn((asset: unknown, url: unknown) =>
+      Promise.resolve({
+        asset,
+        url,
+      }),
+    ),
+  };
   const pushNotificationService = {
     deleteDevice: jest.fn(),
     listDevices: jest.fn(),
@@ -103,6 +124,7 @@ describe('UsersService', () => {
       chatPresenceService as never,
       chatRealtimeService as never,
       refreshSessionService as never,
+      mediaAssetService as never,
       pushNotificationService as never,
       observabilityService as never,
       config as never,
@@ -687,7 +709,10 @@ describe('UsersService', () => {
       },
     );
 
-    const result = await service.acceptFriendRequest(actor, otherCitizen.userId);
+    const result = await service.acceptFriendRequest(
+      actor,
+      otherCitizen.userId,
+    );
 
     expect(repository.transactWrite).toHaveBeenCalledWith(
       expect.arrayContaining([

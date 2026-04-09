@@ -9,7 +9,11 @@ export interface SessionClientMetadata {
   sessionScope?: SessionScope;
 }
 
-type RequestLike = Pick<Request, 'headers' | 'ip' | 'socket'>;
+type RequestLike = Pick<Request, 'headers' | 'ip'> & {
+  socket?: {
+    remoteAddress?: string | null;
+  };
+};
 
 export function extractSessionClientMetadata(
   request: RequestLike,

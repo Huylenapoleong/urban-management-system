@@ -92,6 +92,10 @@
       "value": "GENERAL"
     },
     {
+      "key": "uploadKey",
+      "value": ""
+    },
+    {
       "key": "appVariant",
       "value": "postman"
     },
@@ -1642,9 +1646,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
-                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json?.success && json?.data?.id); }"
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "if (json?.success && json?.data?.avatarAsset?.key) { pm.environment.set('avatarKey', json.data.avatarAsset.key); }"
                 ]
               }
             }
@@ -1658,7 +1663,7 @@
             "url": "{{baseUrl}}/users/me",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fullName\": \"Admin Postman Updated\",\n  \"avatarUrl\": \"https://cdn.example.com/admin-postman.jpg\"\n}",
+              "raw": "{\n  \"fullName\": \"Admin Postman Updated\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1672,7 +1677,42 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "if (json?.success && json?.data?.avatarAsset?.key) { pm.environment.set('avatarKey', json.data.avatarAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Me Avatar",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/users/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avatarKey\": \"{{avatarKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload avatar first with `uploadTarget=AVATAR`.\nIf `uploadEntityId` is blank, Postman will auto-use `currentUserId` when available.\nUpload responses automatically save the returned key into `avatarKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "if (json?.success && json?.data?.avatarAsset?.key) { pm.environment.set('avatarKey', json.data.avatarAsset.key); }"
                 ]
               }
             }
@@ -2345,7 +2385,7 @@
             "url": "{{baseUrl}}/reports",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Postman report {{$timestamp}}\",\n  \"description\": \"Infrastructure issue created from Postman\",\n  \"category\": \"INFRASTRUCTURE\",\n  \"priority\": \"MEDIUM\",\n  \"locationCode\": \"{{locationCode}}\",\n  \"mediaUrls\": []\n}",
+              "raw": "{\n  \"title\": \"Postman report {{$timestamp}}\",\n  \"description\": \"Infrastructure issue created from Postman\",\n  \"category\": \"INFRASTRUCTURE\",\n  \"priority\": \"MEDIUM\",\n  \"locationCode\": \"{{locationCode}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2359,9 +2399,50 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
-                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json?.success && json?.data?.id); }"
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Report With Media",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman report with media {{$timestamp}}\",\n  \"description\": \"Infrastructure issue with uploaded media\",\n  \"category\": \"INFRASTRUCTURE\",\n  \"priority\": \"MEDIUM\",\n  \"locationCode\": \"{{locationCode}}\",\n  \"mediaKeys\": {{reportMediaKeysJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload report media first with `uploadTarget=REPORT`.\nUse `Upload Media` or `Presign Upload`; the response stores the key into `reportMediaKey` and `reportMediaKeysJson`.\nThis request sends `mediaKeys` directly from `reportMediaKeysJson`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
                 ]
               }
             }
@@ -2399,7 +2480,14 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
                 ]
               }
             }
@@ -2427,7 +2515,50 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Report Media",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mediaKeys\": {{reportMediaKeysJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use this after uploading new report media with `uploadTarget=REPORT`.\nIf `uploadEntityId` is blank, Postman auto-resolves it from `reportId`.\nThe request body is driven by `reportMediaKeysJson`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
                 ]
               }
             }
@@ -2620,10 +2751,44 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
                   "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
-                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }"
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Direct Message With Attachment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/direct",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUserId\": \"{{userId}}\",\n  \"clientMessageId\": \"postman-dm-asset-{{$timestamp}}\",\n  \"type\": \"TEXT\",\n  \"content\": \"{\\\"text\\\":\\\"Xin chao kem attachment tu Postman\\\",\\\"mention\\\":[]}\",\n  \"attachmentKey\": \"{{messageAttachmentKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload attachment first with `uploadTarget=MESSAGE`.\nThe upload response stores the returned key into `messageAttachmentKey`.\nThis request uses `attachmentKey={{messageAttachmentKey}}`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
                 ]
               }
             }
@@ -2642,7 +2807,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.id) { pm.environment.set('messageId', json.data[0].id); }",
+                  "if (json?.success && Array.isArray(json.data)) {",
+                  "  const attached = json.data.find((item) => item?.attachmentAsset?.key);",
+                  "  if (attached?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', attached.attachmentAsset.key); }",
+                  "}"
                 ]
               }
             }
@@ -2670,9 +2841,44 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
-                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json?.success && json?.data?.id); }"
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Message With Attachment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientMessageId\": \"postman-msg-asset-{{$timestamp}}\",\n  \"type\": \"TEXT\",\n  \"content\": \"{\\\"text\\\":\\\"Hello from Postman with attachment\\\",\\\"mention\\\":[]}\",\n  \"attachmentKey\": \"{{messageAttachmentKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload attachment first with `uploadTarget=MESSAGE`.\nIf `uploadEntityId` is blank, Postman auto-resolves it from `conversationId`.\nThe upload response stores the returned key into `messageAttachmentKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
                 ]
               }
             }
@@ -2700,7 +2906,44 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Message Attachment",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attachmentKey\": \"{{messageAttachmentKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use after uploading a replacement attachment with `uploadTarget=MESSAGE`.\nThis request updates only the attachment field via `attachmentKey`.\nThe latest message attachment key is stored in `messageAttachmentKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
                 ]
               }
             }
@@ -2901,6 +3144,158 @@
       "name": "Uploads",
       "item": [
         {
+          "name": "Get Upload Limits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/limits"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Presign Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/presign/upload",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{resolvedUploadTarget}}\",\n  \"entityId\": \"{{resolvedUploadEntityId}}\",\n  \"fileName\": \"{{uploadFileName}}\",\n  \"contentType\": \"{{uploadContentType}}\",\n  \"size\": {{uploadFileSize}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Controls: `uploadTarget`, `uploadEntityId`, `uploadFileName`, `uploadContentType`, `uploadFileSize`.\nAuto-resolves `entityId` from `currentUserId` / `conversationId` / `reportId` when `uploadEntityId` is blank.\nOn success, Postman stores `uploadKey` and the target-specific key variable (`avatarKey`, `messageAttachmentKey`, or `reportMediaKey`)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.key) {",
+                  "  const key = json.data.key;",
+                  "  const target = String(json.data.target || pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
+                  "  pm.environment.set('uploadKey', key);",
+                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); }",
+                  "  if (target === 'MESSAGE') { pm.environment.set('messageAttachmentKey', key); }",
+                  "  if (target === 'REPORT') {",
+                  "    pm.environment.set('reportMediaKey', key);",
+                  "    pm.environment.set('reportMediaKeysJson', JSON.stringify([key]));",
+                  "  }",
+                  "}",
+                  "if (json?.success && json?.data?.url) { pm.environment.set('presignedUploadUrl', json.data.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Presign Download",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/presign/download",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{resolvedUploadTarget}}\",\n  \"entityId\": \"{{resolvedUploadEntityId}}\",\n  \"key\": \"{{resolvedUploadKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reads `resolvedUploadKey` from `uploadKey` by default.\nIf `uploadKey` is blank, Postman falls back to `avatarKey`, `messageAttachmentKey`, or `reportMediaKey` based on `uploadTarget`.\nThe signed URL is saved into `presignedDownloadUrl`."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.url) { pm.environment.set('presignedDownloadUrl', json.data.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Upload Media",
           "request": {
             "method": "POST",
@@ -2911,12 +3306,12 @@
               "formdata": [
                 {
                   "key": "target",
-                  "value": "{{uploadTarget}}",
+                  "value": "{{resolvedUploadTarget}}",
                   "type": "text"
                 },
                 {
                   "key": "entityId",
-                  "value": "{{reportId}}",
+                  "value": "{{resolvedUploadEntityId}}",
                   "type": "text"
                 },
                 {
@@ -2925,15 +3320,124 @@
                   "src": ""
                 }
               ]
-            }
+            },
+            "description": "Multipart upload helper for quick manual testing.\nAuto-resolves `entityId` from `currentUserId` / `conversationId` / `reportId` when `uploadEntityId` is blank.\nOn success, Postman stores `uploadKey`, the target-specific key variable, and `uploadedAssetUrl`."
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.key) {",
+                  "  const key = json.data.key;",
+                  "  const target = String(json.data.target || pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
+                  "  pm.environment.set('uploadKey', key);",
+                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); }",
+                  "  if (target === 'MESSAGE') { pm.environment.set('messageAttachmentKey', key); }",
+                  "  if (target === 'REPORT') {",
+                  "    pm.environment.set('reportMediaKey', key);",
+                  "    pm.environment.set('reportMediaKeysJson', JSON.stringify([key]));",
+                  "  }",
+                  "}",
+                  "if (json?.success && json?.data?.url) { pm.environment.set('uploadedAssetUrl', json.data.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Upload",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/media",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{resolvedUploadTarget}}\",\n  \"entityId\": \"{{resolvedUploadEntityId}}\",\n  \"key\": \"{{resolvedUploadKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Deletes the currently selected upload key for the chosen target.\nWhen `uploadKey` is blank, Postman falls back to the target-specific key variable.\nSuccessful deletion clears the matching stored key from the environment."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success) {",
+                  "  const target = String(pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
+                  "  const key = String(pm.variables.get('resolvedUploadKey') || '').trim();",
+                  "  if (pm.environment.get('uploadKey') === key) { pm.environment.set('uploadKey', ''); }",
+                  "  if (target === 'AVATAR' && pm.environment.get('avatarKey') === key) { pm.environment.set('avatarKey', ''); }",
+                  "  if (target === 'MESSAGE' && pm.environment.get('messageAttachmentKey') === key) { pm.environment.set('messageAttachmentKey', ''); }",
+                  "  if (target === 'REPORT' && pm.environment.get('reportMediaKey') === key) {",
+                  "    pm.environment.set('reportMediaKey', '');",
+                  "    pm.environment.set('reportMediaKeysJson', '[]');",
+                  "  }",
+                  "}"
                 ]
               }
             }

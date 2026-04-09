@@ -10,6 +10,7 @@ import type {
   ApiResponseMeta,
   ApiSuccessResponse,
   AuthenticatedUser,
+  MediaAsset,
   PushDevice,
   UserDirectoryItem,
   UserFriendItem,
@@ -52,6 +53,7 @@ import {
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { ChatRealtimeService } from '../../modules/conversations/chat-realtime.service';
 import {
   PasswordPolicyService,
@@ -86,6 +88,7 @@ export class UsersService {
     private readonly chatPresenceService: ChatPresenceService,
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly refreshSessionService: RefreshSessionService,
+    private readonly mediaAssetService: MediaAssetService,
     private readonly pushNotificationService: PushNotificationService,
     private readonly observabilityService: ObservabilityService,
     private readonly config: AppConfigService,
@@ -228,7 +231,7 @@ export class UsersService {
     await this.persistUserWithIdentityClaims({
       nextUser: user,
     });
-    return toUserProfile(user);
+    return this.serializeUserProfile(user);
   }
 
   async updatePassword(
@@ -404,6 +407,7 @@ export class UsersService {
         passwordHash: `deleted#${createUlid()}`,
         fullName: 'Deleted User',
         unit: undefined,
+        avatarAsset: undefined,
         avatarUrl: undefined,
         status: 'DELETED',
         deletedAt,
@@ -454,7 +458,7 @@ export class UsersService {
       requiredString(body, 'locationCode'),
     );
     const unit = optionalString(body, 'unit', { maxLength: 200 });
-    const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
+    const avatarInput = this.resolveAvatarInput(body, actor.id);
     this.passwordPolicyService.validateOrThrow(
       password,
       {
@@ -486,7 +490,8 @@ export class UsersService {
       role,
       locationCode,
       unit,
-      avatarUrl,
+      avatarAsset: avatarInput.asset,
+      avatarUrl: avatarInput.url,
       status: 'ACTIVE',
       deletedAt: null,
       createdAt: now,
@@ -497,7 +502,7 @@ export class UsersService {
     await this.persistUserWithIdentityClaims({
       nextUser: user,
     });
-    return toUserProfile(user);
+    return this.serializeUserProfile(user);
   }
 
   async listUsers(
@@ -553,7 +558,9 @@ export class UsersService {
     );
 
     return buildPaginatedResponse(
-      page.items.map(toUserProfile),
+      await Promise.all(
+        page.items.map((item) => this.serializeUserProfile(item)),
+      ),
       page.nextCursor,
     );
   }
@@ -568,7 +575,7 @@ export class UsersService {
       throw new ForbiddenException('You cannot access this profile.');
     }
 
-    return toUserProfile(target);
+    return this.serializeUserProfile(target);
   }
 
   async updateProfile(
@@ -581,7 +588,7 @@ export class UsersService {
       minLength: 2,
       maxLength: 100,
     });
-    const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
+    const avatarInput = this.resolveAvatarInput(body, actor.id, actor.id);
     const unit = optionalString(body, 'unit', { maxLength: 200 });
     const locationCodeInput = optionalString(body, 'locationCode');
     const identity = requirePhoneOrEmail({
@@ -612,7 +619,12 @@ export class UsersService {
       email: identity.email,
       fullName: fullName ?? current.fullName,
       unit: unit ?? current.unit,
-      avatarUrl: avatarUrl ?? current.avatarUrl,
+      avatarAsset:
+        avatarInput.asset !== undefined
+          ? avatarInput.asset
+          : current.avatarAsset,
+      avatarUrl:
+        avatarInput.url !== undefined ? avatarInput.url : current.avatarUrl,
       locationCode: nextLocationCode,
       updatedAt: nowIso(),
     };
@@ -627,7 +639,7 @@ export class UsersService {
       previousUser: current,
       expectedUpdatedAt: current.updatedAt,
     });
-    return toUserProfile(nextUser);
+    return this.serializeUserProfile(nextUser);
   }
 
   async updateStatus(
@@ -682,7 +694,7 @@ export class UsersService {
       );
     }
 
-    return toUserProfile(nextUser);
+    return this.serializeUserProfile(nextUser);
   }
 
   async listPushDevices(
@@ -744,22 +756,24 @@ export class UsersService {
       page.items.map((item) => item.friendUserId),
     );
     const friendMap = new Map(friends.map((friend) => [friend.userId, friend]));
-    const data = page.items
-      .map((item) => {
-        const friend = friendMap.get(item.friendUserId);
+    const data = (
+      await Promise.all(
+        page.items.map(async (item) => {
+          const friend = friendMap.get(item.friendUserId);
 
-        if (
-          !friend ||
-          friend.deletedAt ||
-          friend.status === 'DELETED' ||
-          friend.status === 'LOCKED'
-        ) {
-          return undefined;
-        }
+          if (
+            !friend ||
+            friend.deletedAt ||
+            friend.status === 'DELETED' ||
+            friend.status === 'LOCKED'
+          ) {
+            return undefined;
+          }
 
-        return toUserFriendItem(friend, item.createdAt);
-      })
-      .filter((item): item is UserFriendItem => item !== undefined);
+          return this.serializeUserFriendItem(friend, item.createdAt);
+        }),
+      )
+    ).filter((item): item is UserFriendItem => item !== undefined);
 
     return buildPaginatedResponse(data, page.nextCursor);
   }
@@ -814,30 +828,32 @@ export class UsersService {
     );
     const users = await this.getUsersByIds(counterpartIds);
     const userMap = new Map(users.map((user) => [user.userId, user]));
-    const data = page.items
-      .map((request) => {
-        const otherUserId =
-          request.direction === 'INCOMING'
-            ? request.requesterUserId
-            : request.targetUserId;
-        const user = userMap.get(otherUserId);
+    const data = (
+      await Promise.all(
+        page.items.map(async (request) => {
+          const otherUserId =
+            request.direction === 'INCOMING'
+              ? request.requesterUserId
+              : request.targetUserId;
+          const user = userMap.get(otherUserId);
 
-        if (
-          !user ||
-          user.deletedAt ||
-          user.status === 'DELETED' ||
-          user.status === 'LOCKED'
-        ) {
-          return undefined;
-        }
+          if (
+            !user ||
+            user.deletedAt ||
+            user.status === 'DELETED' ||
+            user.status === 'LOCKED'
+          ) {
+            return undefined;
+          }
 
-        return toUserFriendRequestItem(
-          user,
-          request.direction,
-          request.createdAt,
-        );
-      })
-      .filter((item): item is UserFriendRequestItem => item !== undefined);
+          return this.serializeUserFriendRequestItem(
+            user,
+            request.direction,
+            request.createdAt,
+          );
+        }),
+      )
+    ).filter((item): item is UserFriendRequestItem => item !== undefined);
 
     return buildPaginatedResponse(data, page.nextCursor);
   }
@@ -930,6 +946,7 @@ export class UsersService {
           fullName: user.fullName,
           role: user.role,
           locationCode: user.locationCode,
+          avatarAsset: user.avatarAsset,
           avatarUrl: user.avatarUrl,
           status: user.status,
           relationState,
@@ -960,17 +977,22 @@ export class UsersService {
     );
 
     return buildPaginatedResponse(
-      page.items.map((item) => ({
-        userId: item.userId,
-        fullName: item.fullName,
-        role: item.role,
-        locationCode: item.locationCode,
-        avatarUrl: item.avatarUrl,
-        status: item.status,
-        relationState: item.relationState,
-        canMessage: item.canMessage,
-        canSendFriendRequest: item.canSendFriendRequest,
-      })),
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeUserDirectoryItem({
+            userId: item.userId,
+            fullName: item.fullName,
+            role: item.role,
+            locationCode: item.locationCode,
+            avatarAsset: item.avatarAsset,
+            avatarUrl: item.avatarUrl,
+            status: item.status,
+            relationState: item.relationState,
+            canMessage: item.canMessage,
+            canSendFriendRequest: item.canSendFriendRequest,
+          }),
+        ),
+      ),
       page.nextCursor,
     );
   }
@@ -984,12 +1006,12 @@ export class UsersService {
     this.assertFriendshipEligiblePair(requester, target);
 
     if (requester.userId === target.userId) {
-      throw new BadRequestException('Cannot send a friend request to yourself.');
+      throw new BadRequestException(
+        'Cannot send a friend request to yourself.',
+      );
     }
 
-    if (
-      !this.authorizationService.canAccessDirectConversation(actor, target)
-    ) {
+    if (!this.authorizationService.canAccessDirectConversation(actor, target)) {
       throw new ForbiddenException(
         'You cannot send a friend request to this user.',
       );
@@ -1012,7 +1034,11 @@ export class UsersService {
     );
 
     if (outgoingExisting) {
-      return toUserFriendRequestItem(target, 'OUTGOING', outgoingExisting.createdAt);
+      return this.serializeUserFriendRequestItem(
+        target,
+        'OUTGOING',
+        outgoingExisting.createdAt,
+      );
     }
 
     const incomingExisting = await this.getFriendRequest(
@@ -1061,7 +1087,7 @@ export class UsersService {
       },
     ]);
 
-    return toUserFriendRequestItem(target, 'OUTGOING', now);
+    return this.serializeUserFriendRequestItem(target, 'OUTGOING', now);
   }
 
   async acceptFriendRequest(
@@ -1093,7 +1119,10 @@ export class UsersService {
       receiver.userId,
       'OUTGOING',
     );
-    const existingEdge = await this.getFriendEdge(receiver.userId, requester.userId);
+    const existingEdge = await this.getFriendEdge(
+      receiver.userId,
+      requester.userId,
+    );
     const now = existingEdge?.createdAt ?? nowIso();
     const receiverEdge = this.buildFriendEdgeRecord(
       receiver.userId,
@@ -1105,27 +1134,28 @@ export class UsersService {
       receiver.userId,
       now,
     );
-    const transactionItems: Parameters<UrbanTableRepository['transactWrite']>[0] =
-      [
-        {
-          kind: 'put',
-          tableName: this.config.dynamodbUsersTableName,
-          item: receiverEdge,
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: receiverEdge,
+      },
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: requesterEdge,
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: incomingRequest.PK,
+          SK: incomingRequest.SK,
         },
-        {
-          kind: 'put',
-          tableName: this.config.dynamodbUsersTableName,
-          item: requesterEdge,
-        },
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: incomingRequest.PK,
-            SK: incomingRequest.SK,
-          },
-        },
-      ];
+      },
+    ];
 
     if (outgoingRequest) {
       transactionItems.push({
@@ -1139,7 +1169,7 @@ export class UsersService {
     }
 
     await this.repository.transactWrite(transactionItems);
-    return toUserFriendItem(requester, now);
+    return this.serializeUserFriendItem(requester, now);
   }
 
   async rejectIncomingFriendRequest(
@@ -1166,17 +1196,18 @@ export class UsersService {
       actor.id,
       'OUTGOING',
     );
-    const transactionItems: Parameters<UrbanTableRepository['transactWrite']>[0] =
-      [
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: incomingRequest.PK,
-            SK: incomingRequest.SK,
-          },
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: incomingRequest.PK,
+          SK: incomingRequest.SK,
         },
-      ];
+      },
+    ];
 
     if (outgoingRequest) {
       transactionItems.push({
@@ -1221,17 +1252,18 @@ export class UsersService {
       targetUserId,
       'INCOMING',
     );
-    const transactionItems: Parameters<UrbanTableRepository['transactWrite']>[0] =
-      [
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: outgoingRequest.PK,
-            SK: outgoingRequest.SK,
-          },
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: outgoingRequest.PK,
+          SK: outgoingRequest.SK,
         },
-      ];
+      },
+    ];
 
     if (incomingRequest) {
       transactionItems.push({
@@ -1270,49 +1302,50 @@ export class UsersService {
     }
 
     const reverseEdge = await this.getFriendEdge(friendUserId, actor.id);
-    const transactionItems: Parameters<UrbanTableRepository['transactWrite']>[0] =
-      [
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: currentEdge.PK,
-            SK: currentEdge.SK,
-          },
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: currentEdge.PK,
+          SK: currentEdge.SK,
         },
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: makeUserPk(actor.id),
-            SK: this.makeOutgoingFriendRequestSk(friendUserId),
-          },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(actor.id),
+          SK: this.makeOutgoingFriendRequestSk(friendUserId),
         },
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: makeUserPk(actor.id),
-            SK: this.makeIncomingFriendRequestSk(friendUserId),
-          },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(actor.id),
+          SK: this.makeIncomingFriendRequestSk(friendUserId),
         },
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: makeUserPk(friendUserId),
-            SK: this.makeOutgoingFriendRequestSk(actor.id),
-          },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(friendUserId),
+          SK: this.makeOutgoingFriendRequestSk(actor.id),
         },
-        {
-          kind: 'delete',
-          tableName: this.config.dynamodbUsersTableName,
-          key: {
-            PK: makeUserPk(friendUserId),
-            SK: this.makeIncomingFriendRequestSk(actor.id),
-          },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(friendUserId),
+          SK: this.makeIncomingFriendRequestSk(actor.id),
         },
-      ];
+      },
+    ];
 
     if (reverseEdge) {
       transactionItems.push({
@@ -1582,6 +1615,114 @@ export class UsersService {
     role: StoredUser['role'],
   ): PasswordPolicyProfile {
     return role === 'CITIZEN' ? 'standard' : 'privileged';
+  }
+
+  private resolveAvatarInput(
+    body: Record<string, unknown>,
+    ownerUserId: string,
+    entityId?: string,
+  ): { asset?: MediaAsset; url?: string } {
+    const hasAvatarKey = Object.prototype.hasOwnProperty.call(
+      body,
+      'avatarKey',
+    );
+    const hasAvatarUrl = Object.prototype.hasOwnProperty.call(
+      body,
+      'avatarUrl',
+    );
+    const avatarKey = optionalString(body, 'avatarKey', { maxLength: 500 });
+    const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
+
+    if (hasAvatarKey && hasAvatarUrl) {
+      throw new BadRequestException(
+        'Provide either avatarKey or avatarUrl, not both.',
+      );
+    }
+
+    if (avatarKey) {
+      return {
+        asset: this.mediaAssetService.createOwnedAssetReference({
+          key: avatarKey,
+          target: 'AVATAR',
+          ownerUserId,
+          entityId,
+        }),
+        url: undefined,
+      };
+    }
+
+    return {
+      asset: undefined,
+      url: avatarUrl,
+    };
+  }
+
+  private async serializeUserProfile(user: StoredUser): Promise<UserProfile> {
+    const profile = toUserProfile(user);
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        profile.avatarAsset,
+        profile.avatarUrl,
+      );
+
+    return {
+      ...profile,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
+  }
+
+  private async serializeUserFriendItem(
+    user: StoredUser,
+    friendsSince: string,
+  ): Promise<UserFriendItem> {
+    const item = toUserFriendItem(user, friendsSince);
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        item.avatarAsset,
+        item.avatarUrl,
+      );
+
+    return {
+      ...item,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
+  }
+
+  private async serializeUserFriendRequestItem(
+    user: StoredUser,
+    direction: 'INCOMING' | 'OUTGOING',
+    requestedAt: string,
+  ): Promise<UserFriendRequestItem> {
+    const item = toUserFriendRequestItem(user, direction, requestedAt);
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        item.avatarAsset,
+        item.avatarUrl,
+      );
+
+    return {
+      ...item,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
+  }
+
+  private async serializeUserDirectoryItem(
+    item: UserDirectoryItem,
+  ): Promise<UserDirectoryItem> {
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        item.avatarAsset,
+        item.avatarUrl,
+      );
+
+    return {
+      ...item,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
   }
 
   private async persistUserWithIdentityClaims(input: {

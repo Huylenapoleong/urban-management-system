@@ -585,10 +585,7 @@ describe('Endpoint Role Matrix (e2e)', () => {
         transform: true,
       }),
     );
-    app.useGlobalGuards(
-      app.get(TestJwtAuthGuard),
-      app.get(RolesGuard),
-    );
+    app.useGlobalGuards(app.get(TestJwtAuthGuard), app.get(RolesGuard));
     app.useGlobalInterceptors(
       new ResponseEnvelopeInterceptor(app.get(Reflector)),
     );

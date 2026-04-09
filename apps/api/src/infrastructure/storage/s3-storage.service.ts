@@ -1,4 +1,10 @@
-import { S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import {
   Injectable,
@@ -66,6 +72,137 @@ export class S3StorageService implements OnApplicationShutdown {
       key: input.key,
       url: this.buildObjectUrl(input.bucket, input.key),
     };
+  }
+
+  async deleteObject(input: { bucket: string; key: string }): Promise<void> {
+    if (!input.bucket) {
+      throw new InternalServerErrorException('S3 bucket is not configured.');
+    }
+
+    try {
+      await this.circuitBreakerService.execute('s3', 'S3', () =>
+        this.client.send(
+          new DeleteObjectCommand({
+            Bucket: input.bucket,
+            Key: input.key,
+          }),
+        ),
+      );
+    } catch (error) {
+      throw createInfrastructureOperationError({
+        context: {
+          bucket: input.bucket,
+          key: input.key,
+        },
+        error,
+        operation: 'Delete',
+        publicMessage: 'Temporary file storage failure. Please retry.',
+        serviceLabel: 'S3',
+      });
+    }
+  }
+
+  async createPresignedUploadUrl(input: {
+    bucket: string;
+    key: string;
+    contentType: string;
+    expiresInSeconds: number;
+  }): Promise<{ url: string; expiresAt: string }> {
+    if (!input.bucket) {
+      throw new InternalServerErrorException('S3 bucket is not configured.');
+    }
+
+    const expiresInSeconds = Math.max(60, input.expiresInSeconds);
+
+    try {
+      const url = await getSignedUrl(
+        this.client as never,
+        new PutObjectCommand({
+          Bucket: input.bucket,
+          Key: input.key,
+          ContentType: input.contentType,
+        }) as never,
+        { expiresIn: expiresInSeconds },
+      );
+
+      return {
+        url,
+        expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+      };
+    } catch (error) {
+      throw createInfrastructureOperationError({
+        context: {
+          bucket: input.bucket,
+          key: input.key,
+        },
+        error,
+        operation: 'PresignUpload',
+        publicMessage: 'Temporary file storage failure. Please retry.',
+        serviceLabel: 'S3',
+      });
+    }
+  }
+
+  async createPresignedDownloadUrl(input: {
+    bucket: string;
+    key: string;
+    expiresInSeconds: number;
+  }): Promise<{ url: string; expiresAt: string }> {
+    if (!input.bucket) {
+      throw new InternalServerErrorException('S3 bucket is not configured.');
+    }
+
+    const expiresInSeconds = Math.max(60, input.expiresInSeconds);
+
+    try {
+      const url = await getSignedUrl(
+        this.client as never,
+        new GetObjectCommand({
+          Bucket: input.bucket,
+          Key: input.key,
+        }) as never,
+        { expiresIn: expiresInSeconds },
+      );
+
+      return {
+        url,
+        expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+      };
+    } catch (error) {
+      throw createInfrastructureOperationError({
+        context: {
+          bucket: input.bucket,
+          key: input.key,
+        },
+        error,
+        operation: 'PresignDownload',
+        publicMessage: 'Temporary file storage failure. Please retry.',
+        serviceLabel: 'S3',
+      });
+    }
+  }
+
+  async resolveObjectUrl(input: {
+    bucket: string;
+    key: string;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; expiresAt?: string }> {
+    if (this.config.s3PublicBaseUrl) {
+      return {
+        url: this.getObjectUrl(input),
+      };
+    }
+
+    return this.createPresignedDownloadUrl({
+      bucket: input.bucket,
+      key: input.key,
+      expiresInSeconds:
+        input.expiresInSeconds ?? this.config.uploadPresignTtlSeconds,
+    });
+  }
+
+  getObjectUrl(input: { bucket: string; key: string }): string {
+    return this.buildObjectUrl(input.bucket, input.key);
   }
 
   getHealth(): { configured: boolean; detail: string } {

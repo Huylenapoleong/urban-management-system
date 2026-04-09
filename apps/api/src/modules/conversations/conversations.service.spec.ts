@@ -57,6 +57,27 @@ describe('ConversationsService', () => {
   const pushNotificationService = {
     buildPushOutboxEvent: jest.fn(),
   };
+  const mediaAssetService = {
+    createOwnedAssetReference: jest.fn(
+      (input: {
+        key: string;
+        target: string;
+        entityId?: string;
+        ownerUserId: string;
+      }) => ({
+        key: input.key,
+        target: input.target,
+        entityId: input.entityId,
+        uploadedBy: input.ownerUserId,
+      }),
+    ),
+    resolveAssetWithLegacyUrl: jest.fn((asset: unknown, url: unknown) =>
+      Promise.resolve({
+        asset,
+        url,
+      }),
+    ),
+  };
   const config = {
     chatOutboxBatchSize: 10,
     chatOutboxPollIntervalMs: 1000,
@@ -173,6 +194,7 @@ describe('ConversationsService', () => {
       chatRealtimeService as never,
       auditTrailService as never,
       pushNotificationService as never,
+      mediaAssetService as never,
       config as never,
     );
     authorizationService.canAccessDirectConversation.mockReturnValue(true);
