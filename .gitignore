@@ -9,3 +9,11 @@ coverage
 !.env.example
 .DS_Store
 .gitnexus
+/.claude/skills/gitnexus/gitnexus-cli
+/.claude
+AGENTS.md
+api-log.txt
+apps/api/seed-output.txt
+chatbot-response.txt
+CLAUDE.md
+/md
