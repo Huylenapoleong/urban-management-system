@@ -409,6 +409,7 @@ export class ConversationsGateway
         conversationKey: access.conversationKey,
         userId: user.id,
         fullName: user.fullName,
+        avatarAsset: user.avatarAsset,
         avatarUrl: user.avatarUrl,
         isTyping,
         occurredAt: nowIso(),

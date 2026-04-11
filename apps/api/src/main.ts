@@ -50,12 +50,18 @@ async function bootstrap() {
     new AppSocketIoAdapter(app, config, realtimeRedisService),
   );
   app.setGlobalPrefix(config.apiPrefix);
-  // app.enableCors({
-  //   origin: config.corsOriginSetting,
-  //   credentials: true,
-  // });
   app.enableCors({
-    origin: true,
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) => {
+      if (config.isCorsOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Not allowed by CORS.'));
+    },
     credentials: true,
   });
   app.useGlobalPipes(

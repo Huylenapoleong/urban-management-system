@@ -21,6 +21,7 @@ import {
   type ConversationSyncResult,
 } from './conversation-summary.service';
 import { ChatRealtimeService } from './chat-realtime.service';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 
 @Injectable()
 export class ConversationDispatchService {
@@ -28,16 +29,17 @@ export class ConversationDispatchService {
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly conversationStateService: ConversationStateService,
     private readonly conversationSummaryService: ConversationSummaryService,
+    private readonly mediaAssetService: MediaAssetService,
   ) {}
 
-  emitMessageCreated(
+  async emitMessageCreated(
     eventId: string,
     actorUserId: string,
     message: StoredMessage,
     participants: string[],
     summariesByUser: Map<string, StoredConversation>,
     clientMessageId?: string,
-  ): void {
+  ): Promise<void> {
     for (const participantId of participants) {
       const summary = summariesByUser.get(participantId);
 
@@ -52,7 +54,7 @@ export class ConversationDispatchService {
           message.conversationId,
         ),
         conversationKey: message.conversationId,
-        message: this.serializeMessage(participantId, message),
+        message: await this.serializeMessage(participantId, message),
         summary: this.serializeConversationSummary(participantId, summary),
         sentByUserId: actorUserId,
         clientMessageId:
@@ -76,13 +78,13 @@ export class ConversationDispatchService {
     }
   }
 
-  emitMessageUpdated(
+  async emitMessageUpdated(
     eventId: string,
     actorUserId: string,
     message: StoredMessage,
     conversationKey: string,
     syncResult: ConversationSyncResult,
-  ): void {
+  ): Promise<void> {
     for (const [participantId] of syncResult.summariesByUser.entries()) {
       const payload: ChatMessageUpdatedEvent = {
         eventId,
@@ -91,7 +93,7 @@ export class ConversationDispatchService {
           conversationKey,
         ),
         conversationKey,
-        message: this.serializeMessage(participantId, message),
+        message: await this.serializeMessage(participantId, message),
         updatedByUserId: actorUserId,
         occurredAt: message.updatedAt,
       };
@@ -290,16 +292,32 @@ export class ConversationDispatchService {
     );
   }
 
-  private serializeMessage(
+  private async serializeMessage(
     actorId: string,
     message: StoredMessage,
     deliveryContext?: MessageDeliveryContext,
   ) {
-    return this.conversationStateService.serializeMessage(
+    const item = this.conversationStateService.serializeMessage(
       actorId,
       message,
       deliveryContext,
     );
+    const senderAvatar = await this.mediaAssetService.resolveAssetWithLegacyUrl(
+      item.senderAvatarAsset,
+      item.senderAvatarUrl,
+    );
+    const attachment = await this.mediaAssetService.resolveAssetWithLegacyUrl(
+      item.attachmentAsset,
+      item.attachmentUrl,
+    );
+
+    return {
+      ...item,
+      senderAvatarAsset: senderAvatar.asset,
+      senderAvatarUrl: senderAvatar.url,
+      attachmentAsset: attachment.asset,
+      attachmentUrl: attachment.url,
+    };
   }
 
   private toPublicConversationId(actorId: string, conversationId: string) {

@@ -8,6 +8,7 @@ const USER_ROLES = Object.freeze([
 const USER_STATUSES = Object.freeze([
   "PENDING_OTP",
   "ACTIVE",
+  "DEACTIVATED",
   "LOCKED",
   "DELETED",
 ]);
@@ -29,6 +30,21 @@ const MESSAGE_TYPES = Object.freeze([
 const MESSAGE_DELIVERY_STATES = Object.freeze(["SENT", "DELIVERED", "READ"]);
 
 const PUSH_DEVICE_PROVIDERS = Object.freeze(["FCM", "APNS", "WEB", "WEBHOOK"]);
+const SESSION_SCOPES = Object.freeze([
+  "MOBILE_APP",
+  "WEB_DESKTOP",
+  "WEB_MOBILE",
+  "UNKNOWN",
+]);
+const OTP_PURPOSES = Object.freeze([
+  "REGISTER",
+  "LOGIN",
+  "FORGOT_PASSWORD",
+  "CHANGE_PASSWORD",
+  "DEACTIVATE_ACCOUNT",
+  "REACTIVATE_ACCOUNT",
+  "DELETE_ACCOUNT",
+]);
 
 const REPORT_CATEGORIES = Object.freeze([
   "INFRASTRUCTURE",
@@ -98,11 +114,12 @@ module.exports = {
   MESSAGE_TYPES,
   PUSH_DEVICE_PROVIDERS,
   PHONE_PATTERN,
+  OTP_PURPOSES,
   REPORT_CATEGORIES,
   REPORT_PRIORITIES,
   REPORT_STATUSES,
+  SESSION_SCOPES,
   UPLOAD_TARGETS,
   USER_ROLES,
   USER_STATUSES,
 };
-

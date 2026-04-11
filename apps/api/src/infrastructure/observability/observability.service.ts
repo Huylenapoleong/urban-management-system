@@ -29,8 +29,13 @@ export type SessionRevocationReason =
   | 'logout_all'
   | 'refresh_rotation'
   | 'session_revoke'
+  | 'session_scope_replace'
   | 'user_status'
-  | 'legacy_refresh_migration';
+  | 'legacy_refresh_migration'
+  | 'password_change'
+  | 'password_forgot_reset'
+  | 'account_deactivate'
+  | 'account_delete';
 
 interface HttpRequestMetric {
   durationMs: number;

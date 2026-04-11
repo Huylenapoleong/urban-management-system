@@ -6,6 +6,7 @@ import { toAuthenticatedUser } from '../../common/mappers';
 import type { StoredUser } from '../../common/storage-records';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { JwtTokenService } from '../../infrastructure/security/jwt-token.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
 
@@ -23,6 +24,7 @@ export class ChatSocketAuthService {
     private readonly repository: UrbanTableRepository,
     private readonly config: AppConfigService,
     private readonly refreshSessionService: RefreshSessionService,
+    private readonly mediaAssetService: MediaAssetService,
   ) {}
 
   async authenticate(client: Socket): Promise<SocketAuthenticationContext> {
@@ -43,7 +45,9 @@ export class ChatSocketAuthService {
       claims,
       sessionId: claims.sid?.trim() || undefined,
       token,
-      user: toAuthenticatedUser(user),
+      user: await this.mediaAssetService.resolveAvatarFields(
+        toAuthenticatedUser(user),
+      ),
     };
   }
 
