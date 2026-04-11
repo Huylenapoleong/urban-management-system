@@ -29,11 +29,14 @@ import Reports from "./pages/Reports/Reports";
 // Smart City Modules - Analytics & Dashboard
 import DashboardHeatmap from "./pages/Dashboard/DashboardHeatmap";
 import Rankings from "./pages/Rankings/Rankings";
+import SlaStats from "./pages/SlaStats/SlaStats";
+import ExportReports from "./pages/ExportReports/ExportReports";
 
 // Smart City Modules - Admin & Settings
 import Permissions from "./pages/Permissions/Permissions";
 import AuditLogs from "./pages/AuditLogs/AuditLogs";
 import ChatbotSettings from "./pages/Settings/ChatbotSettings";
+import SecuritySessions from "./pages/Settings/SecuritySessions";
 
 export default function App() {
   return (
@@ -65,11 +68,15 @@ export default function App() {
             {/* Smart City Analytics & Dashboard Routes */}
             <Route path="/dashboard/heatmap" element={<DashboardHeatmap />} />
             <Route path="/rankings" element={<Rankings />} />
+            <Route path="/sla-stats" element={<SlaStats />} />
+            <Route path="/export-reports" element={<ExportReports />} />
 
             {/* Smart City Admin & Settings Routes */}
             <Route path="/permissions" element={<Permissions />} />
             <Route path="/audit-logs" element={<AuditLogs />} />
             <Route path="/settings/chatbot" element={<ChatbotSettings />} />
+            <Route path="/settings/security-sessions" element={<SecuritySessions />} />
+            <Route path="/settings/general" element={<SecuritySessions />} />
 
             {/* Others Page */}
             <Route path="/profile" element={<UserProfiles />} />

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
+import BrandingConfig from "../config/branding";
 import { useI18n } from "../i18n/I18nContext";
 import {
   ChevronDownIcon,
@@ -25,8 +26,8 @@ const getNavItems = (t: (key: string) => string): NavItem[] => [
     icon: <GridIcon />,
     name: t("navigation.dashboard"),
     subItems: [
-      { name: "Analytics", path: "/", pro: false },
-      { name: "Map Heatmap", path: "/dashboard/heatmap", pro: false },
+      { name: t("home.overview"), path: "/", pro: false },
+      { name: t("dashboardHeatmap.title"), path: "/dashboard/heatmap", pro: false },
     ],
   },
   {
@@ -60,9 +61,9 @@ const getOthersItems = (t: (key: string) => string): NavItem[] => [
     icon: <PlugInIcon />,
     name: t("navigation.settings"),
     subItems: [
+      { name: t("securitySessions.pageTitle"), path: "/settings/security-sessions", pro: false },
       { name: t("navigation.chatbotConfig"), path: "/settings/chatbot", pro: false },
       { name: t("navigation.auditLogs"), path: "/audit-logs", pro: false },
-      { name: "Settings", path: "/settings/general", pro: false },
     ],
   }
 ];
@@ -260,11 +261,11 @@ const AppSidebar: React.FC = () => {
         <Link to="/">
           {isExpanded || isHovered || isMobileOpen ? (
             <>
-              <img className="dark:hidden" src="/images/logo/logo.svg" alt="Logo" width={150} height={40} />
-              <img className="hidden dark:block" src="/images/logo/logo-dark.svg" alt="Logo" width={150} height={40} />
+              <img className="dark:hidden" src={BrandingConfig.logos.light} alt={BrandingConfig.appNameEn} width={40} height={40} />
+              <img className="hidden dark:block" src={BrandingConfig.logos.dark} alt={BrandingConfig.appNameEn} width={40} height={40} />
             </>
           ) : (
-            <img src="/images/logo/logo-icon.svg" alt="Logo" width={32} height={32} />
+            <img src={BrandingConfig.logos.icon} alt={BrandingConfig.appNameEn} width={32} height={32} />
           )}
         </Link>
       </div>

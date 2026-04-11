@@ -32,8 +32,10 @@ export const BrandingConfig = {
   // Logo URLs
   logos: {
     light: "/images/logo/logo.svg",
-    dark: "/images/logo/logo-dark.svg",
-    favicon: "/images/logo/favicon.ico",
+    dark: "/images/logo/logo.svg",
+    auth: "/images/logo/logo.svg",
+    icon: "/images/logo/logo.svg",
+    favicon: "/images/logo/logo.svg",
   },
 
   // Typography

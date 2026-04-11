@@ -7,7 +7,7 @@ interface ProtectedRouteProps {
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, currentUser } = useAuth();
 
   if (loading) {
     // Show a loading screen while checking authentication
@@ -22,6 +22,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   }
 
   if (!isAuthenticated) {
+    return <Navigate to="/signin" replace />;
+  }
+
+  const role = currentUser?.role?.toUpperCase();
+  const isSystemAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+  const twoFactorVerifiedAt = localStorage.getItem("twoFactorVerifiedAt");
+
+  if (isSystemAdmin && !twoFactorVerifiedAt) {
     return <Navigate to="/signin" replace />;
   }
 

@@ -30,16 +30,74 @@ export interface UpdateUserRequest {
 }
 
 class UsersService {
+  async listUsersRaw(params?: {
+    limit?: number;
+    cursor?: string;
+    search?: string;
+    locationCode?: string;
+  }): Promise<ApiResponse<User[]>> {
+    return apiClient.get<User[]>("/users", {
+      params: {
+        limit: params?.limit ?? 100,
+        cursor: params?.cursor,
+        q: params?.search || undefined,
+        locationCode: params?.locationCode || undefined,
+      },
+    });
+  }
+
+  async getAllUsers(options?: {
+    search?: string;
+    locationCode?: string;
+    maxPages?: number;
+    pageSize?: number;
+  }): Promise<ApiResponse<User[]>> {
+    const all: User[] = [];
+    let cursor: string | undefined;
+    const maxPages = options?.maxPages ?? 20;
+    const pageSize = options?.pageSize ?? 100;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const response = await this.listUsersRaw({
+        limit: pageSize,
+        cursor,
+        search: options?.search,
+        locationCode: options?.locationCode,
+      });
+
+      if (!response.success) {
+        return {
+          success: false,
+          error: response.error || "Failed to fetch users",
+          data: all,
+        };
+      }
+
+      const chunk = response.data || [];
+      all.push(...chunk);
+
+      const nextCursor = response.meta?.nextCursor;
+      if (!nextCursor || chunk.length === 0) {
+        break;
+      }
+      cursor = nextCursor;
+    }
+
+    return {
+      success: true,
+      data: all,
+    };
+  }
+
   async getUsers(
     page: number = 1,
     limit: number = 10,
     search?: string
   ): Promise<ApiResponse<ListResponse<User>>> {
-    const response = await apiClient.get<User[]>("/users", {
-      params: {
-        limit: 100,
-        q: search || undefined,
-      },
+    const response = await this.getAllUsers({
+      search,
+      pageSize: 100,
+      maxPages: 20,
     });
 
     if (response.success && Array.isArray(response.data)) {

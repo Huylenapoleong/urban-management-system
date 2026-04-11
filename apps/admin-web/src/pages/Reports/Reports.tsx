@@ -12,6 +12,8 @@ import {
   ReportStatus,
   ReportPriority,
   ReportCategory,
+  AuditEventItem,
+  ReportConversationLink,
   CreateReportRequest,
   UpdateReportRequest,
 } from "../../services/reports.service";
@@ -106,12 +108,16 @@ const Reports: React.FC = () => {
   const [isModalOpen, setModal]     = useState(false);
   const [editingReport, setEditing] = useState<Report | null>(null);
   const [viewingReport, setViewing] = useState<Report | null>(null);
+  const [reportAuditTrail, setReportAuditTrail] = useState<AuditEventItem[]>([]);
+  const [linkedConversations, setLinkedConversations] = useState<ReportConversationLink[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [saving, setSaving]         = useState(false);
   const [deleteConfirm, setDelConf] = useState<string | null>(null);
   const [formErrors, setFErrors]    = useState<Record<string, string>>({});
 
   const emptyForm = () => ({
-    title: "", description: "", category: "INFRASTRUCTURE" as ReportCategory,
+    title: "", description: "", mediaUrlsText: "", category: "INFRASTRUCTURE" as ReportCategory,
     locationCode: currentUser?.locationCode ?? "VN-HCM-BQ1-P01",
     priority: "MEDIUM" as ReportPriority, status: "NEW" as ReportStatus,
   });
@@ -134,6 +140,45 @@ const Reports: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const loadDetails = async () => {
+      if (!viewingReport) {
+        setReportAuditTrail([]);
+        setLinkedConversations([]);
+        setDetailError(null);
+        return;
+      }
+
+      setDetailLoading(true);
+      setDetailError(null);
+
+      try {
+        const [auditResponse, conversationResponse] = await Promise.all([
+          reportsService.getReportAuditEvents(viewingReport.id, { maxPages: 5, pageSize: 20 }),
+          reportsService.getReportLinkedConversations(viewingReport.id, { maxPages: 5, pageSize: 20 }),
+        ]);
+
+        if (auditResponse.success && auditResponse.data) {
+          setReportAuditTrail(auditResponse.data);
+        } else {
+          setDetailError(auditResponse.error || "Failed to load audit trail");
+        }
+
+        if (conversationResponse.success && conversationResponse.data) {
+          setLinkedConversations(conversationResponse.data);
+        } else if (!detailError) {
+          setDetailError(conversationResponse.error || "Failed to load linked conversations");
+        }
+      } catch {
+        setDetailError("Failed to load report details");
+      } finally {
+        setDetailLoading(false);
+      }
+    };
+
+    loadDetails();
+  }, [viewingReport]);
+
   // derived stats
   const stats = {
     total:      reports.length,
@@ -146,7 +191,8 @@ const Reports: React.FC = () => {
   const openEdit   = (r: Report) => {
     setEditing(r);
     setForm({ title: r.title, description: r.description || "", category: r.category,
-      locationCode: r.locationCode, priority: r.priority, status: r.status });
+      locationCode: r.locationCode, priority: r.priority, status: r.status,
+      mediaUrlsText: (r.mediaUrls || []).join("\n") });
     setFErrors({}); setModal(true);
   };
   const closeModal = () => { setModal(false); setEditing(null); setForm(emptyForm()); setFErrors({}); };
@@ -168,6 +214,9 @@ const Reports: React.FC = () => {
         const updateData: UpdateReportRequest = {
           title: form.title, description: form.description || undefined,
           category: form.category, locationCode: form.locationCode, priority: form.priority,
+          mediaUrls: (form as any).mediaUrlsText
+            ? (form as any).mediaUrlsText.split(/\r?\n/).map((value: string) => value.trim()).filter(Boolean)
+            : undefined,
         };
         const res = await reportsService.updateReport(editingReport.id, updateData);
         // Update status separately if changed
@@ -180,6 +229,9 @@ const Reports: React.FC = () => {
         const createData: CreateReportRequest = {
           title: form.title, description: form.description || undefined,
           category: form.category, locationCode: form.locationCode, priority: form.priority,
+          mediaUrls: (form as any).mediaUrlsText
+            ? (form as any).mediaUrlsText.split(/\r?\n/).map((value: string) => value.trim()).filter(Boolean)
+            : undefined,
         };
         const res = await reportsService.createReport(createData);
         if (res.success) { await load(); closeModal(); }
@@ -381,6 +433,16 @@ const Reports: React.FC = () => {
                   className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all resize-none"/>
               </Field>
 
+              <Field label="Image URLs">
+                <textarea
+                  value={(form as any).mediaUrlsText || ""}
+                  onChange={e => setForm({ ...form, mediaUrlsText: e.target.value } as any)}
+                  placeholder="Paste one image URL per line"
+                  rows={3}
+                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all resize-none"
+                />
+              </Field>
+
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Category" required>
                   <select value={form.category} onChange={e => setForm({...form, category: e.target.value as ReportCategory})}
@@ -425,52 +487,121 @@ const Reports: React.FC = () => {
       {/* ── View Modal ── */}
       {viewingReport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setViewing(null)}>
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg border border-gray-100 dark:border-gray-800" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden border border-gray-100 dark:border-gray-800" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 dark:border-gray-800">
               <h2 className="text-base font-semibold text-gray-900 dark:text-white">Report Details</h2>
               <button onClick={() => setViewing(null)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
-            <div className="px-6 py-5 space-y-4">
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Title</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-white">{viewingReport.title}</p>
-              </div>
-              {viewingReport.description && (
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Description</p>
-                  <p className="text-sm text-gray-600 dark:text-gray-300">{viewingReport.description}</p>
+            <div className="overflow-y-auto px-6 py-5 space-y-6 max-h-[calc(90vh-72px)]">
+              {detailError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300">
+                  {detailError}
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Category</p>
-                  <p className="text-sm text-gray-700 dark:text-gray-200">
-                    {CATEGORY_CONFIG[viewingReport.category]?.icon} {CATEGORY_CONFIG[viewingReport.category]?.label ?? viewingReport.category}
-                  </p>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Title</p>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{viewingReport.title}</p>
+                  </div>
+                  {viewingReport.description && (
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Description</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">{viewingReport.description}</p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Category</p>
+                      <p className="text-sm text-gray-700 dark:text-gray-200">
+                        {CATEGORY_CONFIG[viewingReport.category]?.icon} {CATEGORY_CONFIG[viewingReport.category]?.label ?? viewingReport.category}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Priority</p>
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${PRIORITY_CONFIG[viewingReport.priority]?.badge ?? "bg-gray-100 text-gray-600"}`}>
+                        {PRIORITY_CONFIG[viewingReport.priority]?.label ?? viewingReport.priority}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Status</p>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[viewingReport.status]?.badge ?? "bg-gray-100 text-gray-600"}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_CONFIG[viewingReport.status]?.dot ?? "bg-gray-400"}`}/>
+                        {STATUS_CONFIG[viewingReport.status]?.label ?? viewingReport.status}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Location</p>
+                      <p className="text-sm font-mono text-gray-600 dark:text-gray-300">{viewingReport.locationCode}</p>
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs text-gray-400">
+                    <span>Created {new Date(viewingReport.createdAt).toLocaleString("en-GB")}</span>
+                    {viewingReport.assignedOfficerId && <span>Assigned to: {viewingReport.assignedOfficerId}</span>}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Priority</p>
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${PRIORITY_CONFIG[viewingReport.priority]?.badge ?? "bg-gray-100 text-gray-600"}`}>
-                    {PRIORITY_CONFIG[viewingReport.priority]?.label ?? viewingReport.priority}
-                  </span>
+
+                <div className="space-y-4">
+                  {!!viewingReport.mediaUrls?.length && (
+                    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Images</h3>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {viewingReport.mediaUrls.map((url) => (
+                          <a key={url} href={url} target="_blank" rel="noreferrer" className="group overflow-hidden rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30">
+                            <img src={url} alt={viewingReport.title} className="h-40 w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]" />
+                            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 break-all">{url}</div>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Linked Conversations</h3>
+                      {detailLoading && <span className="text-xs text-gray-400">Loading...</span>}
+                    </div>
+                    {linkedConversations.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">No linked conversations</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {linkedConversations.map((link) => (
+                          <div key={link.groupId} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/30">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">{link.conversationId}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Group: {link.groupId}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Linked by {link.linkedByUserId}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Audit Trail</h3>
+                      {detailLoading && <span className="text-xs text-gray-400">Loading...</span>}
+                    </div>
+                    {reportAuditTrail.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">No audit events</p>
+                    ) : (
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        {reportAuditTrail.map((event) => (
+                          <div key={event.id} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/30">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">{event.action}</p>
+                              <span className="text-xs text-gray-400">{new Date(event.occurredAt).toLocaleString("en-GB")}</span>
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Actor: {event.actorUserId}</p>
+                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{event.summary}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Status</p>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[viewingReport.status]?.badge ?? "bg-gray-100 text-gray-600"}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${STATUS_CONFIG[viewingReport.status]?.dot ?? "bg-gray-400"}`}/>
-                    {STATUS_CONFIG[viewingReport.status]?.label ?? viewingReport.status}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Location</p>
-                  <p className="text-sm font-mono text-gray-600 dark:text-gray-300">{viewingReport.locationCode}</p>
-                </div>
-              </div>
-              <div className="pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs text-gray-400">
-                <span>Created {new Date(viewingReport.createdAt).toLocaleString("en-GB")}</span>
-                {viewingReport.assignedOfficerId && <span>Assigned to: {viewingReport.assignedOfficerId}</span>}
               </div>
             </div>
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800">

@@ -1,54 +1,144 @@
-/**
- * Audit Logs Page
- * Display system audit trail of admin actions
- */
-
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import PageBreadCrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import ComponentCard from "../../components/common/ComponentCard";
 import { useI18n } from "../../i18n/I18nContext";
+import { reportsService, AuditEventItem, Report } from "../../services/reports.service";
+import {
+  conversationsService,
+  ConversationAuditEventItem,
+  ConversationSummary,
+} from "../../services/conversations.service";
 
-interface AuditLog {
-  id: number;
-  timestamp: string;
-  admin: string;
+type ScopeFilter = "ALL" | "REPORT" | "CONVERSATION";
+
+type CombinedAuditEvent = {
+  id: string;
+  scope: "REPORT" | "CONVERSATION";
   action: string;
+  actorUserId: string;
+  occurredAt: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
   resource: string;
-  status: "success" | "failure";
-  ipAddress: string;
+};
+
+const MAX_REPORT_SOURCES = 8;
+const MAX_CONVERSATION_SOURCES = 8;
+const MAX_AUDIT_PAGES = 2;
+const AUDIT_PAGE_SIZE = 25;
+
+function normalizeReportAudit(report: Report, item: AuditEventItem): CombinedAuditEvent {
+  return {
+    ...item,
+    resource: `${report.title} (${report.id})`,
+  };
+}
+
+function normalizeConversationAudit(
+  conversation: ConversationSummary,
+  item: ConversationAuditEventItem
+): CombinedAuditEvent {
+  return {
+    ...item,
+    resource: `${conversation.groupName || conversation.conversationId}`,
+  };
 }
 
 const AuditLogs: React.FC = () => {
   const { t } = useI18n();
-  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [logs, setLogs] = useState<CombinedAuditEvent[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("ALL");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadAuditLogs = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [reportsResponse, conversationsResponse] = await Promise.all([
+        reportsService.getReports(1, MAX_REPORT_SOURCES),
+        conversationsService.getAllConversations({
+          pageSize: MAX_CONVERSATION_SOURCES,
+          maxPages: 1,
+        }),
+      ]);
+
+      if (!reportsResponse.success && !conversationsResponse.success) {
+        setError(t("auditLogs.error"));
+        setLogs([]);
+        return;
+      }
+
+      const reports = reportsResponse.data?.items ?? [];
+      const conversations = conversationsResponse.data ?? [];
+
+      const reportAuditPromises = reports.map(async (report) => {
+        const response = await reportsService.getReportAuditEvents(report.id, {
+          maxPages: MAX_AUDIT_PAGES,
+          pageSize: AUDIT_PAGE_SIZE,
+        });
+        if (!response.success || !response.data) return [] as CombinedAuditEvent[];
+        return response.data.map((event) => normalizeReportAudit(report, event));
+      });
+
+      const conversationAuditPromises = conversations.map(async (conversation) => {
+        const response = await conversationsService.getConversationAuditEvents(
+          conversation.conversationId,
+          {
+            maxPages: MAX_AUDIT_PAGES,
+            pageSize: AUDIT_PAGE_SIZE,
+          }
+        );
+        if (!response.success || !response.data) return [] as CombinedAuditEvent[];
+        return response.data.map((event) => normalizeConversationAudit(conversation, event));
+      });
+
+      const [reportAuditGroups, conversationAuditGroups] = await Promise.all([
+        Promise.all(reportAuditPromises),
+        Promise.all(conversationAuditPromises),
+      ]);
+
+      const merged = [...reportAuditGroups.flat(), ...conversationAuditGroups.flat()].sort(
+        (a, b) =>
+          new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
+      );
+
+      setLogs(merged);
+    } catch {
+      setError(t("auditLogs.error"));
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Simulate loading audit logs from API
-    // In a real app, you would fetch from an API service
-    const allLogs: AuditLog[] = [
-      { id: 1, timestamp: "2024-01-15 10:30:15", admin: "admin@example.com", action: "CREATE_USER", resource: "User: John Doe", status: "success", ipAddress: "192.168.1.1" },
-      { id: 2, timestamp: "2024-01-15 09:15:42", admin: "admin@example.com", action: "UPDATE_PERMISSIONS", resource: "Role: OFFICER", status: "success", ipAddress: "192.168.1.1" },
-      { id: 3, timestamp: "2024-01-15 08:45:30", admin: "manager@example.com", action: "DELETE_CATEGORY", resource: "Category: Old Category", status: "success", ipAddress: "192.168.1.50" },
-      { id: 4, timestamp: "2024-01-14 17:23:12", admin: "admin@example.com", action: "FAILED_LOGIN", resource: "User: unknown_user", status: "failure", ipAddress: "203.0.113.45" },
-    ];
-    setLogs(allLogs);
-    setLoading(false);
+    loadAuditLogs();
   }, []);
 
   const handleSearch = (value: string) => {
     setSearchTerm(value);
   };
 
-  const filteredLogs = searchTerm.trim() === "" 
-    ? logs 
-    : logs.filter(log => 
-        log.admin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.resource.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredLogs = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+
+    return logs.filter((log) => {
+      if (scopeFilter !== "ALL" && log.scope !== scopeFilter) return false;
+
+      if (!normalizedSearch) return true;
+
+      return (
+        log.actorUserId.toLowerCase().includes(normalizedSearch) ||
+        log.action.toLowerCase().includes(normalizedSearch) ||
+        log.resource.toLowerCase().includes(normalizedSearch) ||
+        (log.summary || "").toLowerCase().includes(normalizedSearch)
       );
+    });
+  }, [logs, scopeFilter, searchTerm]);
 
   return (
     <>
@@ -56,6 +146,12 @@ const AuditLogs: React.FC = () => {
       <PageBreadCrumb pageTitle={t("auditLogs.title")} />
 
       <ComponentCard title={t("auditLogs.adminActivityHistory")}>
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+            {error}
+          </div>
+        )}
+
         <div className="flex items-center gap-4 mb-6">
           <input
             type="text"
@@ -64,6 +160,22 @@ const AuditLogs: React.FC = () => {
             onChange={(e) => handleSearch(e.target.value)}
             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
           />
+          <select
+            value={scopeFilter}
+            onChange={(e) => setScopeFilter(e.target.value as ScopeFilter)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+          >
+            <option value="ALL">All Scopes</option>
+            <option value="REPORT">Report</option>
+            <option value="CONVERSATION">Conversation</option>
+          </select>
+          <button
+            type="button"
+            onClick={loadAuditLogs}
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+          >
+            {t("common.refresh")}
+          </button>
         </div>
 
         {loading ? (
@@ -83,15 +195,15 @@ const AuditLogs: React.FC = () => {
                   <th className="p-4 text-left font-semibold text-gray-700">{t("auditLogs.admin")}</th>
                   <th className="p-4 text-left font-semibold text-gray-700">{t("auditLogs.action")}</th>
                   <th className="p-4 text-left font-semibold text-gray-700">{t("auditLogs.resource")}</th>
-                  <th className="p-4 text-left font-semibold text-gray-700">{t("auditLogs.status")}</th>
-                  <th className="p-4 text-left font-semibold text-gray-700">IP Address</th>
+                  <th className="p-4 text-left font-semibold text-gray-700">Scope</th>
+                  <th className="p-4 text-left font-semibold text-gray-700">Summary</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredLogs.map((log) => (
-                  <tr key={log.id} className="border-b hover:bg-gray-50 transition-colors">
-                    <td className="p-4 text-gray-600">{log.timestamp}</td>
-                    <td className="p-4 font-medium">{log.admin}</td>
+                  <tr key={`${log.scope}-${log.id}`} className="border-b hover:bg-gray-50 transition-colors">
+                    <td className="p-4 text-gray-600">{new Date(log.occurredAt).toLocaleString()}</td>
+                    <td className="p-4 font-medium">{log.actorUserId}</td>
                     <td className="p-4">
                       <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
                         {log.action}
@@ -99,15 +211,11 @@ const AuditLogs: React.FC = () => {
                     </td>
                     <td className="p-4 text-gray-600">{log.resource}</td>
                     <td className="p-4">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        log.status === "success"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}>
-                        {log.status === "success" ? t("auditLogs.success") : t("auditLogs.failure")}
+                      <span className="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                        {log.scope}
                       </span>
                     </td>
-                    <td className="p-4 text-gray-600">{log.ipAddress}</td>
+                    <td className="p-4 text-gray-600">{log.summary}</td>
                   </tr>
                 ))}
               </tbody>

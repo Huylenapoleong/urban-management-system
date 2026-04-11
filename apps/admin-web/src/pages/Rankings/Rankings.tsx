@@ -1,30 +1,106 @@
-/**
- * Rankings/Performance Page
- * Display performance rankings for districts/wards
- */
-
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import ComponentCard from "../../components/common/ComponentCard";
 import PageBreadCrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
-import ComponentCard from "../../components/common/ComponentCard";
+import { useI18n } from "../../i18n/I18nContext";
+import { Report, ReportStatus, reportsService } from "../../services/reports.service";
 
 interface Ranking {
   rank: number;
   region: string;
   totalReports: number;
   resolved: number;
-  avgResolutionTime: string;
+  avgResolutionTimeDays: number;
   slaCompliance: number;
+  satisfactionScore: number;
+  rankingScore: number;
+}
+
+const RESOLVED_STATUSES: ReportStatus[] = ["RESOLVED", "CLOSED"];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function diffInDays(from: string, to: string) {
+  return Math.max(0, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / DAY_MS));
+}
+
+function getSlaTargetDays(priority: Report["priority"]) {
+  if (priority === "URGENT") return 1;
+  if (priority === "HIGH") return 2;
+  if (priority === "MEDIUM") return 4;
+  return 7;
 }
 
 const Rankings: React.FC = () => {
-  const [rankings] = useState<Ranking[]>([
-    { rank: 1, region: "District 1", totalReports: 145, resolved: 142, avgResolutionTime: "2.5 days", slaCompliance: 97.9 },
-    { rank: 2, region: "District 2", totalReports: 132, resolved: 128, avgResolutionTime: "2.8 days", slaCompliance: 96.9 },
-    { rank: 3, region: "District 3", totalReports: 121, resolved: 115, avgResolutionTime: "3.2 days", slaCompliance: 95.0 },
-    { rank: 4, region: "District 4", totalReports: 98, resolved: 90, avgResolutionTime: "3.8 days", slaCompliance: 91.8 },
-    { rank: 5, region: "District 5", totalReports: 87, resolved: 78, avgResolutionTime: "4.1 days", slaCompliance: 89.7 },
-  ]);
+  const { t } = useI18n();
+  const [reports, setReports] = useState<Report[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await reportsService.getReports(1, 300);
+        if (response.success && response.data) {
+          setReports(response.data.items);
+        } else {
+          setError(response.error || t("rankings.error"));
+        }
+      } catch {
+        setError(t("rankings.error"));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [t]);
+
+  const rankings = useMemo<Ranking[]>(() => {
+    const byRegion = new Map<string, Report[]>();
+    reports.forEach((report) => {
+      const key = report.locationCode || "UNKNOWN";
+      const list = byRegion.get(key) || [];
+      list.push(report);
+      byRegion.set(key, list);
+    });
+
+    const rows: Ranking[] = Array.from(byRegion.entries()).map(([region, items]) => {
+      const resolvedItems = items.filter((r) => RESOLVED_STATUSES.includes(r.status));
+      const resolved = resolvedItems.length;
+      const totalReports = items.length;
+      const totalResolutionDays = resolvedItems.reduce((sum, item) => sum + diffInDays(item.createdAt, item.updatedAt), 0);
+      const avgResolutionTimeDays = resolved > 0 ? Number((totalResolutionDays / resolved).toFixed(1)) : 0;
+      const withinSlaCount = items.filter(
+        (item) =>
+          diffInDays(item.createdAt, RESOLVED_STATUSES.includes(item.status) ? item.updatedAt : new Date().toISOString()) <=
+          getSlaTargetDays(item.priority)
+      ).length;
+      const slaCompliance = totalReports > 0 ? Number(((withinSlaCount / totalReports) * 100).toFixed(1)) : 0;
+      const satisfactionScore = Number(
+        (slaCompliance * 0.6 + (resolved > 0 ? Math.max(0, 100 - avgResolutionTimeDays * 10) : 0) * 0.4).toFixed(1)
+      );
+      const rankingScore = Number((satisfactionScore * 0.5 + slaCompliance * 0.5).toFixed(1));
+
+      return {
+        rank: 0,
+        region,
+        totalReports,
+        resolved,
+        avgResolutionTimeDays,
+        slaCompliance,
+        satisfactionScore,
+        rankingScore,
+      };
+    });
+
+    return rows
+      .sort((a, b) => {
+        if (b.rankingScore !== a.rankingScore) return b.rankingScore - a.rankingScore;
+        if (a.avgResolutionTimeDays !== b.avgResolutionTimeDays) return a.avgResolutionTimeDays - b.avgResolutionTimeDays;
+        return b.resolved - a.resolved;
+      })
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+  }, [reports]);
 
   const getMedalColor = (rank: number) => {
     if (rank === 1) return "bg-yellow-400 text-white shadow-yellow-200 shadow-md";
@@ -39,22 +115,22 @@ const Rankings: React.FC = () => {
     return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
   };
 
-  const getResolutionRate = (resolved: number, total: number) =>
-    total > 0 ? Math.round((resolved / total) * 100) : 0;
+  const getResolutionRate = (resolved: number, total: number) => (total > 0 ? Math.round((resolved / total) * 100) : 0);
+
+  const totalResolved = rankings.reduce((sum, item) => sum + item.resolved, 0);
 
   return (
     <>
-      <PageMeta title="Performance Rankings" description="View incident resolution performance rankings by region" />
-      <PageBreadCrumb pageTitle="Performance Rankings" />
+      <PageMeta title={t("rankings.title")} description={t("rankings.description")} />
+      <PageBreadCrumb pageTitle={t("rankings.title")} />
 
       <div className="grid gap-4">
-        {/* Summary cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
             {
-              label: "Top Performer",
+              label: t("rankings.topPerformer"),
               value: rankings[0]?.region ?? "—",
-              sub: `${rankings[0]?.slaCompliance}% SLA compliance`,
+              sub: `${rankings[0]?.slaCompliance ?? 0}% ${t("rankings.slaCompliance")}`,
               color: "text-yellow-600",
               bg: "bg-yellow-50 dark:bg-yellow-900/10",
               icon: (
@@ -64,9 +140,9 @@ const Rankings: React.FC = () => {
               ),
             },
             {
-              label: "Avg SLA Compliance",
-              value: `${(rankings.reduce((a, b) => a + b.slaCompliance, 0) / rankings.length).toFixed(1)}%`,
-              sub: "Across all districts",
+              label: t("rankings.avgSlaCompliance"),
+              value: rankings.length > 0 ? `${(rankings.reduce((sum, item) => sum + item.slaCompliance, 0) / rankings.length).toFixed(1)}%` : "0%",
+              sub: t("rankings.acrossAllDistricts"),
               color: "text-blue-600",
               bg: "bg-blue-50 dark:bg-blue-900/10",
               icon: (
@@ -76,9 +152,9 @@ const Rankings: React.FC = () => {
               ),
             },
             {
-              label: "Total Reports",
-              value: rankings.reduce((a, b) => a + b.totalReports, 0).toLocaleString(),
-              sub: `${rankings.reduce((a, b) => a + b.resolved, 0)} resolved`,
+              label: t("rankings.totalReports"),
+              value: rankings.reduce((sum, item) => sum + item.totalReports, 0).toLocaleString(),
+              sub: `${totalResolved} ${t("rankings.resolved")}`,
               color: "text-emerald-600",
               bg: "bg-emerald-50 dark:bg-emerald-900/10",
               icon: (
@@ -99,57 +175,77 @@ const Rankings: React.FC = () => {
           ))}
         </div>
 
-        {/* Rankings table */}
-        <ComponentCard title="Incident Resolution Performance Rankings">
+        <ComponentCard title={t("rankings.tableTitle")}>
+          {error && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400">
+              {error}
+            </div>
+          )}
           <div className="overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-800">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Rank</th>
-                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Region</th>
-                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Reports</th>
-                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Resolved</th>
-                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Resolution Rate</th>
-                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Avg. Time</th>
-                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">SLA Compliance</th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.rank")}</th>
+                  <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.region")}</th>
+                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.totalReports")}</th>
+                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.resolved")}</th>
+                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.resolutionRate")}</th>
+                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.avgTime")}</th>
+                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.slaCompliance")}</th>
+                  <th className="text-center px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("rankings.satisfaction")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
-                {rankings.map((item) => {
-                  const rate = getResolutionRate(item.resolved, item.totalReports);
-                  return (
-                    <tr key={item.rank} className="hover:bg-gray-50 dark:hover:bg-white/[0.02] transition-colors">
-                      <td className="px-5 py-4">
-                        <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${getMedalColor(item.rank)}`}>
-                          {item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 font-semibold text-gray-800 dark:text-white">{item.region}</td>
-                      <td className="px-5 py-4 text-center text-gray-600 dark:text-gray-300">{item.totalReports}</td>
-                      <td className="px-5 py-4 text-center font-medium text-emerald-600 dark:text-emerald-400">{item.resolved}</td>
-                      <td className="px-5 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <div className="w-16 h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-emerald-500 rounded-full"
-                              style={{ width: `${rate}%` }}
-                            />
+                {loading ? (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                      {t("rankings.loading")}
+                    </td>
+                  </tr>
+                ) : rankings.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                      {t("rankings.noData")}
+                    </td>
+                  </tr>
+                ) : (
+                  rankings.map((item) => {
+                    const rate = getResolutionRate(item.resolved, item.totalReports);
+                    return (
+                      <tr key={item.rank} className="hover:bg-gray-50 dark:hover:bg-white/[0.02] transition-colors">
+                        <td className="px-5 py-4">
+                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${getMedalColor(item.rank)}`}>
+                            {item.rank}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 font-semibold text-gray-800 dark:text-white">{item.region}</td>
+                        <td className="px-5 py-4 text-center text-gray-600 dark:text-gray-300">{item.totalReports}</td>
+                        <td className="px-5 py-4 text-center font-medium text-emerald-600 dark:text-emerald-400">{item.resolved}</td>
+                        <td className="px-5 py-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="w-16 h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${rate}%` }} />
+                            </div>
+                            <span className="text-xs text-gray-500 dark:text-gray-400 w-8">{rate}%</span>
                           </div>
-                          <span className="text-xs text-gray-500 dark:text-gray-400 w-8">{rate}%</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-center text-gray-600 dark:text-gray-300">{item.avgResolutionTime}</td>
-                      <td className="px-5 py-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getSlaColor(item.slaCompliance)}`}>
-                          {item.slaCompliance}%
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="px-5 py-4 text-center text-gray-600 dark:text-gray-300">
+                          {item.avgResolutionTimeDays.toFixed(1)} {t("common.days")}
+                        </td>
+                        <td className="px-5 py-4 text-center">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getSlaColor(item.slaCompliance)}`}>
+                            {item.slaCompliance}%
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-center text-blue-600 dark:text-blue-400 font-semibold">{item.satisfactionScore}%</td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
+          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">* {t("rankings.satisfactionNote")}</p>
         </ComponentCard>
       </div>
     </>

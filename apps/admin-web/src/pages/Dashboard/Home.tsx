@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
+import { useI18n } from "../../i18n/I18nContext";
 import { usersService, User } from "../../services/users.service";
 
 // ── tiny stat card ──────────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, sub, icon, accent, tr
 );
 
 // ── role badge ───────────────────────────────────────────────────────────────
-const RoleBadge: React.FC<{ role: string }> = ({ role }) => {
+const RoleBadge: React.FC<{ role: string; t: (key: string) => string }> = ({ role, t }) => {
   const map: Record<string, string> = {
     ADMIN: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
     PROVINCE_OFFICER: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
@@ -43,10 +44,10 @@ const RoleBadge: React.FC<{ role: string }> = ({ role }) => {
     CITIZEN: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
   };
   const labels: Record<string, string> = {
-    ADMIN: "Admin",
-    PROVINCE_OFFICER: "Province Officer",
-    WARD_OFFICER: "Ward Officer",
-    CITIZEN: "Citizen",
+    ADMIN: t("home.admin") || "Admin",
+    PROVINCE_OFFICER: t("home.provinceOfficer"),
+    WARD_OFFICER: t("home.wardOfficer"),
+    CITIZEN: t("home.citizens"),
   };
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${map[role] ?? map.CITIZEN}`}>
@@ -56,13 +57,18 @@ const RoleBadge: React.FC<{ role: string }> = ({ role }) => {
 };
 
 // ── status dot ───────────────────────────────────────────────────────────────
-const StatusDot: React.FC<{ status: string }> = ({ status }) => {
+const StatusDot: React.FC<{ status: string; t: (key: string) => string }> = ({ status, t }) => {
   const s = status?.toUpperCase();
+  const labels: Record<string, string> = {
+    ACTIVE: t("home.active"),
+    INACTIVE: t("home.inactive"),
+    DEACTIVATED: t("home.deactivated"),
+  };
   return (
     <span className="flex items-center gap-1.5 text-xs">
       <span className={`w-2 h-2 rounded-full ${s === "ACTIVE" ? "bg-emerald-500" : s === "INACTIVE" ? "bg-amber-400" : "bg-red-400"}`} />
       <span className={s === "ACTIVE" ? "text-emerald-600" : s === "INACTIVE" ? "text-amber-500" : "text-red-500"}>
-        {s === "ACTIVE" ? "Active" : s === "INACTIVE" ? "Inactive" : "Deactivated"}
+        {labels[s] || s}
       </span>
     </span>
   );
@@ -70,6 +76,7 @@ const StatusDot: React.FC<{ status: string }> = ({ status }) => {
 
 // ── main component ────────────────────────────────────────────────────────────
 export default function Home() {
+  const { t } = useI18n();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -107,8 +114,8 @@ export default function Home() {
   return (
     <>
       <PageMeta
-        title="Dashboard — Smart City Admin"
-        description="Smart City Management System overview dashboard"
+        title={`${t("home.overview")} — Smart City Admin`}
+        description={t("home.systemName")}
       />
 
       <div className="space-y-6">
@@ -117,24 +124,24 @@ export default function Home() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-              Overview
+              {t("home.overview")}
             </h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              Smart City Management System · {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+              {t("home.systemName")} · {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             </p>
           </div>
           <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-full border border-emerald-200 dark:border-emerald-800">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">System Online</span>
+            <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">{t("home.systemOnline")}</span>
           </div>
         </div>
 
         {/* ── Stat cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            label="Total Users"
+            label={t("home.totalUsers")}
             value={loading ? "—" : total}
-            sub="All registered accounts"
+            sub={t("home.allRegisteredAccounts")}
             accent="bg-blue-50 dark:bg-blue-900/20"
             trend={{ value: 12, up: true }}
             icon={
@@ -144,9 +151,9 @@ export default function Home() {
             }
           />
           <StatCard
-            label="Active Users"
+            label={t("home.activeUsers")}
             value={loading ? "—" : active}
-            sub={loading ? "" : `${total ? Math.round(active / total * 100) : 0}% of total`}
+            sub={loading ? "" : `${total ? Math.round(active / total * 100) : 0}% ${t("home.ofTotal")}`}
             accent="bg-emerald-50 dark:bg-emerald-900/20"
             trend={{ value: 5, up: true }}
             icon={
@@ -156,9 +163,9 @@ export default function Home() {
             }
           />
           <StatCard
-            label="Officers"
+            label={t("home.officers")}
             value={loading ? "—" : officers}
-            sub="Ward & Province staff"
+            sub={t("home.wardProvinceStaff")}
             accent="bg-purple-50 dark:bg-purple-900/20"
             icon={
               <svg className="w-5 h-5 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,9 +174,9 @@ export default function Home() {
             }
           />
           <StatCard
-            label="Citizens"
+            label={t("home.citizens")}
             value={loading ? "—" : citizens}
-            sub="Registered residents"
+            sub={t("home.registeredResidents")}
             accent="bg-amber-50 dark:bg-amber-900/20"
             trend={{ value: 8, up: true }}
             icon={
@@ -187,29 +194,29 @@ export default function Home() {
           <div className="lg:col-span-2 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Recent Users</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Latest registered accounts</p>
+                <h3 className="text-sm font-semibold text-gray-800 dark:text-white">{t("home.recentUsers")}</h3>
+                <p className="text-xs text-gray-400 mt-0.5">{t("home.latestRegisteredAccounts")}</p>
               </div>
               <a href="/users" className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
-                View all →
+                {t("home.viewAll")}
               </a>
             </div>
             <div className="overflow-x-auto">
               {loading ? (
                 <div className="p-8 text-center">
                   <div className="inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-sm text-gray-400 mt-2">Loading users…</p>
+                  <p className="text-sm text-gray-400 mt-2">{t("home.loadingUsers")}</p>
                 </div>
               ) : recent.length === 0 ? (
-                <div className="p-8 text-center text-sm text-gray-400">No users found</div>
+                <div className="p-8 text-center text-sm text-gray-400">{t("home.noUsersFound")}</div>
               ) : (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 dark:border-gray-800">
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">User</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Role</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">Joined</th>
+                      <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("home.user")}</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("home.role")}</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("home.status")}</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">{t("home.joined")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
@@ -227,10 +234,10 @@ export default function Home() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <RoleBadge role={user.role?.toUpperCase()} />
+                          <RoleBadge role={user.role?.toUpperCase()} t={t} />
                         </td>
                         <td className="px-4 py-3">
-                          <StatusDot status={user.status} />
+                          <StatusDot status={user.status} t={t} />
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-400 hidden md:table-cell">
                           {new Date(user.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
@@ -248,7 +255,7 @@ export default function Home() {
 
             {/* Role distribution */}
             <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] p-5">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-white mb-4">User Distribution</h3>
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-white mb-4">{t("home.userDistribution")}</h3>
               {loading ? (
                 <div className="space-y-3">
                   {[1,2,3,4].map(i => <div key={i} className="h-8 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" />)}
@@ -257,16 +264,16 @@ export default function Home() {
                 <div className="space-y-3">
                   {Object.entries(roleCounts).map(([role, count]) => {
                     const pct = total ? Math.round(count / total * 100) : 0;
-                    const labels: Record<string, string> = {
-                      ADMIN: "Admin",
-                      PROVINCE_OFFICER: "Province Officer",
-                      WARD_OFFICER: "Ward Officer",
-                      CITIZEN: "Citizen",
+                    const roleLabel: Record<string, string> = {
+                      ADMIN: t("home.admin") || "Admin",
+                      PROVINCE_OFFICER: t("home.provinceOfficer"),
+                      WARD_OFFICER: t("home.wardOfficer"),
+                      CITIZEN: t("home.citizens"),
                     };
                     return (
                       <div key={role}>
                         <div className="flex justify-between text-xs mb-1">
-                          <span className="text-gray-600 dark:text-gray-300 font-medium">{labels[role] ?? role}</span>
+                          <span className="text-gray-600 dark:text-gray-300 font-medium">{roleLabel[role] ?? role}</span>
                           <span className="text-gray-400">{count} · {pct}%</span>
                         </div>
                         <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
@@ -284,12 +291,12 @@ export default function Home() {
 
             {/* Quick actions */}
             <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] p-5">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-white mb-3">Quick Actions</h3>
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-white mb-3">{t("home.quickActions")}</h3>
               <div className="space-y-2">
                 {[
-                  { label: "Manage Users", href: "/users", icon: "M17 20h5v-2a4 4 0 00-5-3.87M9 20H4v-2a4 4 0 015-3.87m6-4.13a4 4 0 11-8 0 4 4 0 018 0z", color: "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400" },
-                  { label: "View Reports", href: "/reports", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z", color: "text-purple-600 bg-purple-50 dark:bg-purple-900/20 dark:text-purple-400" },
-                  { label: "System Settings", href: "/settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z", color: "text-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-gray-400" },
+                  { label: t("home.manageUsers"), href: "/users", icon: "M17 20h5v-2a4 4 0 00-5-3.87M9 20H4v-2a4 4 0 015-3.87m6-4.13a4 4 0 11-8 0 4 4 0 018 0z", color: "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400" },
+                  { label: t("home.viewReports"), href: "/reports", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z", color: "text-purple-600 bg-purple-50 dark:bg-purple-900/20 dark:text-purple-400" },
+                  { label: t("home.systemSettings"), href: "/settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z", color: "text-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-gray-400" },
                 ].map(({ label, href, icon, color }) => (
                   <a
                     key={label}

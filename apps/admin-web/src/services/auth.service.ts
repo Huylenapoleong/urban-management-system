@@ -27,6 +27,32 @@ export interface CurrentUser {
   createdAt?: string;
 }
 
+export interface AuthSessionInfo {
+  sessionId: string;
+  isCurrent: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  userAgent?: string;
+  ipAddress?: string;
+  deviceId?: string;
+  appVariant?: string;
+}
+
+export interface RevokeSessionResult {
+  sessionId: string;
+  revokedAt: string;
+  currentSessionRevoked: boolean;
+}
+
+export interface LogoutAllResult {
+  revokedSessionCount: number;
+  revokedAt: string;
+  currentSessionRevoked: boolean;
+}
+
 class AuthService {
   private currentUser: CurrentUser | null = null;
 
@@ -73,6 +99,7 @@ class AuthService {
       }>("/auth/login", { login, password });
 
       if (response.success && response.data) {
+        localStorage.removeItem("twoFactorVerifiedAt");
         const token = response.data.tokens.accessToken;
         const apiUser = response.data.user;
 
@@ -132,6 +159,7 @@ class AuthService {
     localStorage.removeItem("authToken");
     localStorage.removeItem("currentUser");
     localStorage.removeItem("refreshToken");
+    localStorage.removeItem("twoFactorVerifiedAt");
     
     // Clear API client token
     apiClient.setToken(null);
@@ -162,6 +190,18 @@ class AuthService {
 
   getToken(): string | null {
     return localStorage.getItem("authToken");
+  }
+
+  async getSessions() {
+    return apiClient.get<AuthSessionInfo[]>("/auth/sessions");
+  }
+
+  async revokeSession(sessionId: string) {
+    return apiClient.delete<RevokeSessionResult>(`/auth/sessions/${encodeURIComponent(sessionId)}`);
+  }
+
+  async logoutAll() {
+    return apiClient.post<LogoutAllResult>("/auth/logout-all");
   }
 }
 
