@@ -33,5 +33,7 @@ export interface StoredKnowledgeDocument {
     chapter?: string;
     section?: string;
   };
+  /** Vector embedding cho Vector Search — sinh bởi seed-knowledge script */
+  embedding?: number[];
   updatedAt: string;
 }

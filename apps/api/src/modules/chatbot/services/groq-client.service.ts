@@ -57,4 +57,44 @@ export class GroqClientService {
       return content;
     });
   }
+
+  /**
+   * Streaming variant — trả về AsyncGenerator yield từng chunk text.
+   * Dùng cho SSE (Server-Sent Events) endpoint.
+   *
+   * Circuit breaker bảo vệ bước khởi tạo stream.
+   * Khi stream đã bắt đầu, các chunk sẽ được yield trực tiếp.
+   */
+  async *streamRAGResponse(
+    systemPrompt: string,
+    userMessage: string,
+  ): AsyncGenerator<string, void, unknown> {
+    const stream = await this.circuitBreaker.execute(
+      'groq',
+      'Groq AI (stream)',
+      async () => {
+        this.logger.debug(
+          `Streaming Groq (model=${this.config.groqModel}, promptLen=${systemPrompt.length})`,
+        );
+
+        return this.client.chat.completions.create({
+          model: this.config.groqModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+          max_tokens: 1024,
+          temperature: 0.3,
+          stream: true,
+        });
+      },
+    );
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta) {
+        yield delta;
+      }
+    }
+  }
 }

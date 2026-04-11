@@ -1,5 +1,6 @@
 /**
  * Seed Script: Xóa và tạo lại bảng DynamoDB KnowledgeBase với design đúng.
+ * Phase 2: Thêm bước generate embedding cho mỗi document trước khi lưu.
  *
  * Chạy lại bất cứ khi nào cần reset data:
  *   npx ts-node -r tsconfig-paths/register apps/api/src/modules/chatbot/scripts/seed-knowledge.ts
@@ -10,6 +11,7 @@
  *   GSI "category-index":
  *     PK = category             (field thật — "land", "construction", ...)
  *     SK = docId
+ *   embedding: number[]         (vector embedding cho Vector Search)
  */
 
 // Load .env TRƯỚC KHI khởi tạo bất kỳ AWS client nào
@@ -50,11 +52,39 @@ interface SeedDocument {
   metadata?: Record<string, string>;
 }
 
+interface EmbeddingService {
+  generateEmbedding(text: string): Promise<number[]>;
+}
+
 // ─── Step 1: Xóa table cũ nếu đang tồn tại ───────────────────────────────────
 async function dropTableIfExists(): Promise<void> {
   try {
-    await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
-    console.log(`[INFO] Table "${TABLE_NAME}" exists — deleting...`);
+    const describeResult = await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+    const status = describeResult.Table?.TableStatus;
+    console.log(`[INFO] Table "${TABLE_NAME}" exists (status: ${status})`);
+
+    // Nếu table đang CREATING/UPDATING, đợi nó xong trước
+    if (status !== 'ACTIVE') {
+      console.log('[INFO] Waiting for table to become ACTIVE before deleting...');
+      for (let i = 0; i < 30; i++) {
+        await sleep(3000);
+        try {
+          const res = await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+          if (res.Table?.TableStatus === 'ACTIVE') {
+            console.log('[OK] Table is now ACTIVE.');
+            break;
+          }
+          console.log(`  ... status: ${res.Table?.TableStatus}`);
+        } catch (err) {
+          if (err instanceof ResourceNotFoundException) {
+            console.log('[OK] Table was deleted while waiting.');
+            return;
+          }
+        }
+      }
+    }
+
+    console.log('[INFO] Deleting table...');
     await client.send(new DeleteTableCommand({ TableName: TABLE_NAME }));
 
     console.log('[INFO] Waiting for table to be fully deleted...');
@@ -122,8 +152,38 @@ async function createTable(): Promise<void> {
   throw new Error('Table did not become ACTIVE in time.');
 }
 
-// ─── Step 3: Đọc file JSON và nạp dữ liệu ────────────────────────────────────
-async function seedData(): Promise<void> {
+// ─── Step 2.5: Khởi tạo Embedding Service ────────────────────────────────────
+async function initEmbeddingService(): Promise<EmbeddingService | null> {
+  try {
+    console.log('[INFO] Loading embedding model (all-MiniLM-L6-v2)...');
+    const { pipeline } = await import('@xenova/transformers');
+    const extractor = await pipeline(
+      'feature-extraction',
+      'Xenova/all-MiniLM-L6-v2',
+    );
+
+    console.log('[OK] Embedding model loaded successfully.');
+
+    return {
+      generateEmbedding: async (text: string): Promise<number[]> => {
+        const output = await extractor(text, {
+          pooling: 'mean',
+          normalize: true,
+        });
+        return Array.from(output.data as Float32Array);
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[WARN] Could not load embedding model — skipping embeddings: ${message}`,
+    );
+    return null;
+  }
+}
+
+// ─── Step 3: Đọc file JSON và nạp dữ liệu (with embeddings) ──────────────────
+async function seedData(embeddingService: EmbeddingService | null): Promise<void> {
   const dataPath = path.join(__dirname, 'knowledge-seed-data.json');
   const raw: SeedDocument[] = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
 
@@ -132,10 +192,27 @@ async function seedData(): Promise<void> {
   const BATCH_SIZE = 25;
   const now = new Date().toISOString();
 
+  // Generate embeddings for all documents
+  const embeddings: (number[] | undefined)[] = [];
+  if (embeddingService) {
+    console.log('[INFO] Generating embeddings for all documents...');
+    for (const doc of raw) {
+      const text = `${doc.title}. ${doc.content}`;
+      const embedding = await embeddingService.generateEmbedding(text);
+      embeddings.push(embedding);
+      console.log(
+        `  [OK] ${doc.docId}: embedding generated (${embedding.length} dimensions)`,
+      );
+    }
+  } else {
+    console.log('[WARN] No embedding service — documents will be saved without embeddings.');
+    raw.forEach(() => embeddings.push(undefined));
+  }
+
   for (let i = 0; i < raw.length; i += BATCH_SIZE) {
     const batch = raw.slice(i, i + BATCH_SIZE);
 
-    const requestItems = batch.map((doc) => ({
+    const requestItems = batch.map((doc, batchIndex) => ({
       PutRequest: {
         Item: {
           PK: 'KNOWLEDGE_DOCUMENT', // constant entity type
@@ -146,6 +223,7 @@ async function seedData(): Promise<void> {
           content: doc.content,
           source: doc.source,
           metadata: doc.metadata,
+          embedding: embeddings[i + batchIndex],
           updatedAt: now,
         },
       },
@@ -169,7 +247,7 @@ function sleep(ms: number): Promise<void> {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
-  console.log(`\n=== Knowledge Base Seed Script (clean design) ===`);
+  console.log(`\n=== Knowledge Base Seed Script (Phase 2 — with embeddings) ===`);
   console.log(`Table : ${TABLE_NAME}`);
   console.log(`Region: ${REGION}`);
   console.log(`Endpoint: ${ENDPOINT ?? 'AWS (production)'}\n`);
@@ -177,7 +255,8 @@ async function main(): Promise<void> {
   try {
     await dropTableIfExists();
     await createTable();
-    await seedData();
+    const embeddingService = await initEmbeddingService();
+    await seedData(embeddingService);
   } catch (err) {
     console.error('[ERROR]', err);
     process.exit(1);
