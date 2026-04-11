@@ -54,6 +54,11 @@ const getNavItems = (t: (key: string) => string): NavItem[] => [
     name: t("navigation.permissions"),
     path: "/permissions",
   },
+  {
+    icon: <PlugInIcon />,
+    name: "Maintenance",
+    path: "/maintenance",
+  },
 ];
 
 const getOthersItems = (t: (key: string) => string): NavItem[] => [

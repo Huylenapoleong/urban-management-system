@@ -35,6 +35,7 @@ import ExportReports from "./pages/ExportReports/ExportReports";
 // Smart City Modules - Admin & Settings
 import Permissions from "./pages/Permissions/Permissions";
 import AuditLogs from "./pages/AuditLogs/AuditLogs";
+import Maintenance from "./pages/Maintenance";
 import ChatbotSettings from "./pages/Settings/ChatbotSettings";
 import SecuritySessions from "./pages/Settings/SecuritySessions";
 
@@ -74,6 +75,7 @@ export default function App() {
             {/* Smart City Admin & Settings Routes */}
             <Route path="/permissions" element={<Permissions />} />
             <Route path="/audit-logs" element={<AuditLogs />} />
+            <Route path="/maintenance" element={<Maintenance />} />
             <Route path="/settings/chatbot" element={<ChatbotSettings />} />
             <Route path="/settings/security-sessions" element={<SecuritySessions />} />
             <Route path="/settings/general" element={<SecuritySessions />} />

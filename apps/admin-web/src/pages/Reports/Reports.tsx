@@ -17,7 +17,14 @@ import {
   CreateReportRequest,
   UpdateReportRequest,
 } from "../../services/reports.service";
+import { uploadsService } from "../../services/uploads.service";
 import { useAuth } from "../../context/AuthContext";
+
+type ReportMediaItem = {
+  key?: string;
+  url: string;
+  name: string;
+};
 
 // ── config maps ────────────────────────────────────────────────────────────────
 
@@ -113,11 +120,13 @@ const Reports: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [saving, setSaving]         = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [mediaItems, setMediaItems] = useState<ReportMediaItem[]>([]);
   const [deleteConfirm, setDelConf] = useState<string | null>(null);
   const [formErrors, setFErrors]    = useState<Record<string, string>>({});
 
   const emptyForm = () => ({
-    title: "", description: "", mediaUrlsText: "", category: "INFRASTRUCTURE" as ReportCategory,
+    title: "", description: "", category: "INFRASTRUCTURE" as ReportCategory,
     locationCode: currentUser?.locationCode ?? "VN-HCM-BQ1-P01",
     priority: "MEDIUM" as ReportPriority, status: "NEW" as ReportStatus,
   });
@@ -192,10 +201,45 @@ const Reports: React.FC = () => {
     setEditing(r);
     setForm({ title: r.title, description: r.description || "", category: r.category,
       locationCode: r.locationCode, priority: r.priority, status: r.status,
-      mediaUrlsText: (r.mediaUrls || []).join("\n") });
+    });
+    setMediaItems((r.mediaUrls || []).map((url) => ({
+      url,
+      name: url.split("/").pop() || url,
+    })));
     setFErrors({}); setModal(true);
   };
-  const closeModal = () => { setModal(false); setEditing(null); setForm(emptyForm()); setFErrors({}); };
+  const closeModal = () => { setModal(false); setEditing(null); setForm(emptyForm()); setMediaItems([]); setFErrors({}); };
+
+  const handleMediaUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    setUploadingMedia(true);
+    setError(null);
+
+    try {
+      for (const file of Array.from(files)) {
+        const response = await uploadsService.uploadReportMedia(file, editingReport?.id);
+        if (!response.success || !response.data) {
+          setError(response.error || `Failed to upload ${file.name}`);
+          continue;
+        }
+
+        const data = response.data;
+        setMediaItems((current) => [
+          ...current,
+          {
+            key: data.key,
+            url: data.url,
+            name: data.originalFileName || file.name,
+          },
+        ]);
+      }
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -210,13 +254,19 @@ const Reports: React.FC = () => {
     setSaving(true);
     try {
       if (editingReport) {
+        const mediaKeys = mediaItems.length > 0 && mediaItems.every((item) => item.key)
+          ? mediaItems.map((item) => item.key as string)
+          : undefined;
+        const mediaUrls = !mediaKeys && mediaItems.length > 0
+          ? mediaItems.map((item) => item.url)
+          : undefined;
+
         // Update fields
         const updateData: UpdateReportRequest = {
           title: form.title, description: form.description || undefined,
           category: form.category, locationCode: form.locationCode, priority: form.priority,
-          mediaUrls: (form as any).mediaUrlsText
-            ? (form as any).mediaUrlsText.split(/\r?\n/).map((value: string) => value.trim()).filter(Boolean)
-            : undefined,
+          mediaKeys,
+          mediaUrls,
         };
         const res = await reportsService.updateReport(editingReport.id, updateData);
         // Update status separately if changed
@@ -226,12 +276,18 @@ const Reports: React.FC = () => {
         if (res.success) { await load(); closeModal(); }
         else setError(res.error || "Update failed");
       } else {
+        const mediaKeys = mediaItems.length > 0 && mediaItems.every((item) => item.key)
+          ? mediaItems.map((item) => item.key as string)
+          : undefined;
+        const mediaUrls = !mediaKeys && mediaItems.length > 0
+          ? mediaItems.map((item) => item.url)
+          : undefined;
+
         const createData: CreateReportRequest = {
           title: form.title, description: form.description || undefined,
           category: form.category, locationCode: form.locationCode, priority: form.priority,
-          mediaUrls: (form as any).mediaUrlsText
-            ? (form as any).mediaUrlsText.split(/\r?\n/).map((value: string) => value.trim()).filter(Boolean)
-            : undefined,
+          mediaKeys,
+          mediaUrls,
         };
         const res = await reportsService.createReport(createData);
         if (res.success) { await load(); closeModal(); }
@@ -433,14 +489,27 @@ const Reports: React.FC = () => {
                   className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all resize-none"/>
               </Field>
 
-              <Field label="Image URLs">
-                <textarea
-                  value={(form as any).mediaUrlsText || ""}
-                  onChange={e => setForm({ ...form, mediaUrlsText: e.target.value } as any)}
-                  placeholder="Paste one image URL per line"
-                  rows={3}
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all resize-none"
-                />
+              <Field label="Images">
+                <div className="space-y-3">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(event) => void handleMediaUpload(event.target.files)}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-700"
+                  />
+                  {uploadingMedia && <p className="text-xs text-gray-400">Uploading images...</p>}
+                  {mediaItems.length > 0 && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {mediaItems.map((item) => (
+                        <div key={`${item.key || item.url}`} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                          <img src={item.url} alt={item.name} className="h-32 w-full object-cover" />
+                          <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 break-all">{item.name}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </Field>
 
               <div className="grid grid-cols-2 gap-4">
@@ -545,13 +614,29 @@ const Reports: React.FC = () => {
                 </div>
 
                 <div className="space-y-4">
-                  {!!viewingReport.mediaUrls?.length && (
+                  {!!(viewingReport.mediaAssets?.length || viewingReport.mediaUrls?.length) && (
                     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
                       <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Images</h3>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {viewingReport.mediaUrls.map((url) => (
+                        {/* Render mediaAssets with resolved URLs first */}
+                        {viewingReport.mediaAssets?.map((asset) => (
+                          <div key={asset.key} className="group overflow-hidden rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30">
+                            {asset.resolvedUrl ? (
+                              <>
+                                <img src={asset.resolvedUrl} alt={asset.fileName || viewingReport.title} className="h-40 w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]" />
+                                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 break-all">{asset.fileName || asset.key}</div>
+                              </>
+                            ) : (
+                              <div className="h-40 w-full flex items-center justify-center bg-gray-100 dark:bg-gray-800">
+                                <span className="text-xs text-gray-400">No URL available</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {/* Fallback to mediaUrls for legacy images */}
+                        {(!viewingReport.mediaAssets || viewingReport.mediaAssets.length === 0) && viewingReport.mediaUrls?.map((url) => (
                           <a key={url} href={url} target="_blank" rel="noreferrer" className="group overflow-hidden rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30">
-                            <img src={url} alt={viewingReport.title} className="h-40 w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]" />
+                            <img src={url} alt={viewingReport.title} className="h-40 w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]" onError={(e) => { e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23e5e7eb%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 font-size=%2212%22 fill=%22%239ca3af%22 text-anchor=%22middle%22 dy=%22.3em%22%3EImage not found%3C/text%3E%3C/svg%3E'; }} />
                             <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 break-all">{url}</div>
                           </a>
                         ))}

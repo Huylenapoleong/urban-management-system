@@ -5,6 +5,21 @@ export type ReportStatus   = "NEW" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | 
 export type ReportPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type ReportCategory = "INFRASTRUCTURE" | "TRAFFIC" | "ENVIRONMENT" | "SECURITY" | "PUBLIC_ORDER" | "PUBLIC_SERVICES";
 
+export interface MediaAsset {
+  key: string;
+  bucket?: string;
+  target: string;
+  entityId?: string;
+  originalFileName?: string;
+  fileName?: string;
+  contentType?: string;
+  size?: number;
+  uploadedBy?: string;
+  uploadedAt?: string;
+  resolvedUrl?: string;
+  expiresAt?: string;
+}
+
 export interface Report {
   id: string;
   userId: string;
@@ -15,6 +30,7 @@ export interface Report {
   locationCode: string;
   status: ReportStatus;
   priority: ReportPriority;
+  mediaAssets?: MediaAsset[];
   mediaUrls: string[];
   assignedOfficerId?: string;
   deletedAt?: string | null;
@@ -28,6 +44,7 @@ export interface CreateReportRequest {
   category: ReportCategory;
   locationCode: string;
   priority: ReportPriority;
+  mediaKeys?: string[];
   mediaUrls?: string[];
   groupId?: string;
 }
@@ -38,6 +55,7 @@ export interface UpdateReportRequest {
   category?: ReportCategory;
   locationCode?: string;
   priority?: ReportPriority;
+  mediaKeys?: string[];
   mediaUrls?: string[];
 }
 

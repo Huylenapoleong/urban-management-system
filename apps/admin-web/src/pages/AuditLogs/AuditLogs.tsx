@@ -9,12 +9,13 @@ import {
   ConversationAuditEventItem,
   ConversationSummary,
 } from "../../services/conversations.service";
+import { maintenanceService, MaintenanceAuditEvent } from "../../services/maintenance.service";
 
-type ScopeFilter = "ALL" | "REPORT" | "CONVERSATION";
+type ScopeFilter = "ALL" | "REPORT" | "CONVERSATION" | "MAINTENANCE";
 
 type CombinedAuditEvent = {
   id: string;
-  scope: "REPORT" | "CONVERSATION";
+  scope: "REPORT" | "CONVERSATION" | "MAINTENANCE";
   action: string;
   actorUserId: string;
   occurredAt: string;
@@ -42,6 +43,29 @@ function normalizeConversationAudit(
   return {
     ...item,
     resource: `${conversation.groupName || conversation.conversationId}`,
+  };
+}
+
+function normalizeMaintenanceAudit(event: MaintenanceAuditEvent): CombinedAuditEvent {
+  const actionMap: Record<string, string> = {
+    RETENTION_PREVIEW: "Preview Retention",
+    RETENTION_PURGE: "Purge Retention",
+    CHAT_PREVIEW: "Scan Chat Issues",
+    CHAT_REPAIR: "Repair Chat",
+  };
+
+  const summary = `${actionMap[event.type] || event.type}: ${event.status}${event.details.error ? " - " + event.details.error : ""}`;
+  const resource = event.details.candidates ? `${event.details.candidates} candidates` : "System Maintenance";
+
+  return {
+    id: event.id,
+    scope: "MAINTENANCE",
+    action: event.type,
+    actorUserId: event.actorUserId || "System",
+    occurredAt: event.timestamp,
+    summary,
+    resource,
+    metadata: event.details,
   };
 }
 
@@ -101,7 +125,15 @@ const AuditLogs: React.FC = () => {
         Promise.all(conversationAuditPromises),
       ]);
 
-      const merged = [...reportAuditGroups.flat(), ...conversationAuditGroups.flat()].sort(
+      // Fetch maintenance audit events
+      const maintenanceEvents = maintenanceService.getAuditEvents();
+      const maintenanceAuditGroups = maintenanceEvents.map(normalizeMaintenanceAudit);
+
+      const merged = [
+        ...reportAuditGroups.flat(),
+        ...conversationAuditGroups.flat(),
+        ...maintenanceAuditGroups,
+      ].sort(
         (a, b) =>
           new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
       );
@@ -168,6 +200,7 @@ const AuditLogs: React.FC = () => {
             <option value="ALL">All Scopes</option>
             <option value="REPORT">Report</option>
             <option value="CONVERSATION">Conversation</option>
+            <option value="MAINTENANCE">Maintenance</option>
           </select>
           <button
             type="button"

@@ -110,10 +110,12 @@ class ApiClient {
     return this.refreshPromise;
   }
 
-  private getHeaders(headers?: Record<string, string>) {
-    const defaultHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+  private getHeaders(headers?: Record<string, string>, bodyIsFormData?: boolean) {
+    const defaultHeaders: Record<string, string> = bodyIsFormData
+      ? {}
+      : {
+          "Content-Type": "application/json",
+        };
 
     const token = localStorage.getItem("authToken");
     if (token) {
@@ -149,8 +151,12 @@ class ApiClient {
 
       const response = await fetch(url, {
         method,
-        headers: this.getHeaders(options?.headers),
-        body: options?.body ? JSON.stringify(options.body) : undefined,
+        headers: this.getHeaders(options?.headers, options?.body instanceof FormData),
+        body: options?.body
+          ? options?.body instanceof FormData
+            ? options.body
+            : JSON.stringify(options.body)
+          : undefined,
       });
 
       const data = await this.parseResponseBody(response);
