@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Search, Phone, Video, Info, UserRound, Send } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useWebRTC } from "@/hooks/shared/useWebRTC";
 import { CallModal } from "@/components/CallModal";
@@ -47,12 +46,12 @@ export function ChatPage() {
   };
 
   return (
-    <div className="flex h-full w-full relative">
+    <div className="flex h-full w-full relative overflow-hidden">
       <CallModal rtc={rtc} />
       
       {/* Cột trái: Master (Danh sách hội thoại) */}
-      <div className="w-[340px] flex-shrink-0 border-r border-gray-200 bg-white flex flex-col">
-        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+      <div className="w-[340px] flex-shrink-0 border-r border-gray-200 bg-white flex flex-col h-full overflow-hidden">
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
           <div className="relative w-full">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
             <Input 
@@ -63,7 +62,7 @@ export function ChatPage() {
           </div>
         </div>
         
-        <ScrollArea className="flex-1">
+        <div className="flex-1 overflow-y-auto min-h-0">
           {loadingConversations && <div className="p-4 text-center text-gray-500 text-sm">Đang tải cuộc trò chuyện...</div>}
           {!loadingConversations && conversations.length === 0 && (
              <div className="p-4 text-center text-gray-500 text-sm">Chưa có hội thoại nào</div>
@@ -101,11 +100,11 @@ export function ChatPage() {
               </div>
             </div>
           ))}
-        </ScrollArea>
+        </div>
       </div>
 
       {/* Cột phải: Detail (Chi tiết Chat) */}
-      <div className="flex-1 flex flex-col bg-slate-50 relative">
+      <div className="flex-1 flex flex-col bg-slate-50 relative overflow-hidden h-full">
         {!activeChat ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-4 mt-20">
             <UserRound size={60} className="opacity-20" />
@@ -149,7 +148,7 @@ export function ChatPage() {
             </div>
 
             {/* Nội dung tin nhắn */}
-            <ScrollArea className="flex-1 p-4 relative">
+            <div className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 relative">
               {loadingMessages && <div className="text-center py-4 text-sm text-gray-500">Đang tải tin nhắn...</div>}
               
               <div className="flex flex-col gap-3 pb-4">
@@ -165,7 +164,16 @@ export function ChatPage() {
                             : "bg-white text-gray-800 border border-gray-100 rounded-bl-sm"
                         }`}
                       >
-                        <p className="text-[15px]">{msg.content}</p>
+                        <p className="text-[15px]">
+                          {(() => {
+                            try {
+                              const parsed = JSON.parse(msg.content);
+                              return parsed.text || msg.content;
+                            } catch {
+                              return msg.content;
+                            }
+                          })()}
+                        </p>
                       </div>
                       <span className={`text-[10px] text-gray-400 mt-1 ${isMe ? "text-right" : "text-left"}`}>
                         {format(new Date(msg.sentAt), "HH:mm")}
@@ -175,10 +183,10 @@ export function ChatPage() {
                 })}
                 <div ref={messagesEndRef} />
               </div>
-            </ScrollArea>
+            </div>
 
             {/* Vùng nhập liệu */}
-            <form onSubmit={handleSend} className="p-4 bg-white border-t border-gray-200 flex gap-2">
+            <form onSubmit={handleSend} className="p-4 bg-white border-t border-gray-200 flex gap-2 shrink-0 z-10 relative">
               <Input 
                 type="text" 
                 placeholder="Nhập tin nhắn..." 

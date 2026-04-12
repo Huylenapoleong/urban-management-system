@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, Link } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { login, type LoginRequest } from "@/services/auth.api"
 import { useAuth } from "@/providers/AuthProvider"
@@ -87,7 +87,7 @@ export function LoginPage() {
           </Button>
 
           <div className="text-center text-sm text-gray-500 mt-4">
-            Hoặc tính năng khác (Đăng ký)
+            Chưa có tài khoản? <Link to="/register" className="text-blue-600 font-medium hover:underline">Đăng ký ngay</Link>
           </div>
         </form>
       </div>

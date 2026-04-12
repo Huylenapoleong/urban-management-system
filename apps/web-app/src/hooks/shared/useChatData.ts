@@ -68,6 +68,10 @@ export function useMessages(conversationId?: string) {
         // Optimistically update or invalidate
         queryClient.setQueryData<MessageItem[]>(["messages", conversationId], (oldData) => {
           if (!oldData) return [newMsg];
+          // Deduplicate
+          if (oldData.some(msg => msg.id === newMsg.id)) {
+            return oldData;
+          }
           // Determine if we need to append at the beginning or end based on order.
           // Usually listMessages returns newest first (descending), so newMsg goes at index 0
           return [newMsg, ...oldData];
@@ -88,6 +92,7 @@ export function useMessages(conversationId?: string) {
     onSuccess: (data) => {
       queryClient.setQueryData<MessageItem[]>(["messages", conversationId], (oldData) => {
         if (!oldData) return [data];
+        if (oldData.some(msg => msg.id === data.id)) return oldData;
         return [data, ...oldData];
       });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
