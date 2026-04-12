@@ -74,8 +74,28 @@ function makeUserRefreshSessionSk(sessionId) {
   return `SESSION#${sessionId}`;
 }
 
+function makeUserSessionSlotSk(sessionScope) {
+  return `SESSION_SLOT#${sessionScope}`;
+}
+
 function makeUserPushDeviceSk(deviceId) {
   return `PUSH_DEVICE#${deviceId}`;
+}
+
+function makeAuthEmailOtpPk(email) {
+  return `AUTH#EMAIL#${email}`;
+}
+
+function makeAuthEmailOtpSk(purpose) {
+  return `OTP#${purpose}`;
+}
+
+function makeAuthRegisterDraftPk(email) {
+  return `AUTH#REGISTER#${email}`;
+}
+
+function makeAuthRegisterDraftSk() {
+  return "DRAFT";
 }
 
 function makePhoneLookupKey(phone) {
@@ -200,6 +220,10 @@ module.exports = {
   makeConversationSummarySk,
   makeDmConversationId,
   makeEmailLookupKey,
+  makeAuthEmailOtpPk,
+  makeAuthEmailOtpSk,
+  makeAuthRegisterDraftPk,
+  makeAuthRegisterDraftSk,
   makeGroupMetadataSk,
   makeGroupPk,
   makeGroupTypeLocationKey,
@@ -222,6 +246,7 @@ module.exports = {
   makeUserProfileSk,
   makeUserPushDeviceSk,
   makeUserRefreshSessionSk,
+  makeUserSessionSlotSk,
   normalizeEmail,
   normalizePhone,
   nowIso,

@@ -22,5 +22,6 @@ import { UsersModule } from '../users/users.module';
     ChatSocketAuthService,
     ConversationsGateway,
   ],
+  exports: [ConversationsService],
 })
 export class ConversationsModule {}

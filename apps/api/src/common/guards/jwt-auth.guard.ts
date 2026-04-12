@@ -7,6 +7,7 @@ import type { StoredUser } from '../storage-records';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { JwtTokenService } from '../../infrastructure/security/jwt-token.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
 
@@ -18,6 +19,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly repository: UrbanTableRepository,
     private readonly config: AppConfigService,
     private readonly refreshSessionService: RefreshSessionService,
+    private readonly mediaAssetService: MediaAssetService,
   ) {}
 
   async canActivate(
@@ -56,7 +58,9 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('User account is unavailable.');
     }
 
-    request.user = toAuthenticatedUser(user);
+    request.user = await this.mediaAssetService.resolveAvatarFields(
+      toAuthenticatedUser(user),
+    );
     request.authClaims = claims;
     return true;
   }

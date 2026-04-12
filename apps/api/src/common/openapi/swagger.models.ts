@@ -4,10 +4,12 @@ import {
   GROUP_TYPES,
   MESSAGE_DELIVERY_STATES,
   MESSAGE_TYPES,
+  OTP_PURPOSES,
   PUSH_DEVICE_PROVIDERS,
   REPORT_CATEGORIES,
   REPORT_PRIORITIES,
   REPORT_STATUSES,
+  SESSION_SCOPES,
   UPLOAD_TARGETS,
   USER_ROLES,
   USER_STATUSES,
@@ -17,6 +19,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -26,6 +29,9 @@ import {
 
 const GROUP_MEMBER_ACTIONS = ['add', 'update', 'remove'] as const;
 const BOOLEAN_QUERY_VALUES = ['true', 'false'] as const;
+const FRIEND_REQUEST_DIRECTION_VALUES = ['INCOMING', 'OUTGOING'] as const;
+const FRIEND_ACTION_VALUES = ['REJECTED', 'CANCELED'] as const;
+const USER_DISCOVERY_MODE_VALUES = ['all', 'chat', 'friend'] as const;
 const INTEGER_QUERY_PATTERN = /^\d+$/;
 
 export class HealthStatusDto {
@@ -117,6 +123,50 @@ export class ResponseMetaDto {
   nextCursor?: string;
 }
 
+export class MediaAssetDto {
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  key!: string;
+
+  @ApiPropertyOptional({ example: 'smartcity-assets' })
+  bucket?: string;
+
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  entityId?: string;
+
+  @ApiPropertyOptional({ example: 'street-light.jpg' })
+  originalFileName?: string;
+
+  @ApiPropertyOptional({ example: 'street-light.jpg' })
+  fileName?: string;
+
+  @ApiPropertyOptional({ example: 'image/jpeg' })
+  contentType?: string;
+
+  @ApiPropertyOptional({ example: 345678 })
+  size?: number;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENA00000000' })
+  uploadedBy?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-17T10:30:00.000Z' })
+  uploadedAt?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'https://smartcity-assets.s3.ap-southeast-1.amazonaws.com/uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  resolvedUrl?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-20T10:10:00.000Z' })
+  expiresAt?: string;
+}
+
 export class AuthTokenPairDto {
   @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
   accessToken!: string;
@@ -156,6 +206,9 @@ export class UserProfileDto {
   @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
   unit?: string;
 
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  avatarAsset?: MediaAssetDto;
+
   @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-a.jpg' })
   avatarUrl?: string;
 
@@ -187,6 +240,113 @@ export class PresenceStateDto {
 
   @ApiProperty({ example: '2026-03-18T03:11:15.000Z' })
   occurredAt!: string;
+}
+
+export class FriendUserItemDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Tran Van Citizen B' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  avatarAsset?: MediaAssetDto;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-b.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  friendsSince!: string;
+}
+
+export class FriendRequestItemDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Tran Van Citizen B' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  avatarAsset?: MediaAssetDto;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-b.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({
+    enum: FRIEND_REQUEST_DIRECTION_VALUES,
+    example: 'INCOMING',
+  })
+  direction!: (typeof FRIEND_REQUEST_DIRECTION_VALUES)[number];
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  requestedAt!: string;
+}
+
+export class FriendActionResultDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiPropertyOptional({ enum: FRIEND_ACTION_VALUES, example: 'REJECTED' })
+  action?: (typeof FRIEND_ACTION_VALUES)[number];
+
+  @ApiPropertyOptional({ example: '2026-03-20T06:05:00.000Z' })
+  occurredAt?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-20T06:05:00.000Z' })
+  removedAt?: string;
+}
+
+export class UserDirectoryItemDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Tran Van Citizen B' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  avatarAsset?: MediaAssetDto;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-b.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({
+    enum: ['FRIEND', 'INCOMING_REQUEST', 'OUTGOING_REQUEST', 'NONE'],
+    example: 'NONE',
+  })
+  relationState!: 'FRIEND' | 'INCOMING_REQUEST' | 'OUTGOING_REQUEST' | 'NONE';
+
+  @ApiProperty({ example: true })
+  canMessage!: boolean;
+
+  @ApiProperty({ example: false })
+  canSendFriendRequest!: boolean;
 }
 
 export class PushDeviceDto {
@@ -297,7 +457,13 @@ export class AuthSessionInfoDto {
   expiresAt!: string;
 
   @ApiPropertyOptional({ example: null, nullable: true })
+  dismissedAt!: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
   revokedAt!: string | null;
+
+  @ApiProperty({ enum: SESSION_SCOPES, example: 'WEB_DESKTOP' })
+  sessionScope!: (typeof SESSION_SCOPES)[number];
 
   @ApiPropertyOptional({ example: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
   userAgent?: string;
@@ -321,6 +487,14 @@ export class RevokeSessionResultDto {
 
   @ApiProperty({ example: true })
   currentSessionRevoked!: boolean;
+}
+
+export class DismissSessionHistoryResultDto {
+  @ApiProperty({ example: '01JSESSION0000000000000001' })
+  sessionId!: string;
+
+  @ApiProperty({ example: '2026-03-18T13:10:00.000Z' })
+  dismissedAt!: string;
 }
 
 export class LogoutAllResultDto {
@@ -401,6 +575,9 @@ export class MessageItemDto {
   @ApiProperty({ example: 'Le Thi Citizen A' })
   senderName!: string;
 
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  senderAvatarAsset?: MediaAssetDto;
+
   @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-a.jpg' })
   senderAvatarUrl?: string;
 
@@ -409,6 +586,9 @@ export class MessageItemDto {
 
   @ApiProperty({ example: '{"text":"O ga truoc so 123 Le Loi","mention":[]}' })
   content!: string;
+
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  attachmentAsset?: MediaAssetDto;
 
   @ApiPropertyOptional({ example: 'https://cdn.example.com/file.jpg' })
   attachmentUrl?: string;
@@ -515,6 +695,19 @@ export class ReportItemDto {
   priority!: (typeof REPORT_PRIORITIES)[number];
 
   @ApiProperty({
+    type: [MediaAssetDto],
+    example: [
+      {
+        key: 'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-report-1.jpg',
+        target: 'REPORT',
+        entityId: '01JPCY2000REPORTNEW00000000',
+        resolvedUrl: 'https://cdn.example.com/report-1.jpg',
+      },
+    ],
+  })
+  mediaAssets!: MediaAssetDto[];
+
+  @ApiProperty({
     type: [String],
     example: ['https://cdn.example.com/report-1.jpg'],
   })
@@ -546,9 +739,9 @@ export class RegisterRequestDto {
   @MaxLength(150)
   email?: string;
 
-  @ApiProperty({ example: 'Password123!' })
+  @ApiProperty({ example: 'Ums@2026Secure1' })
   @IsString()
-  @MinLength(8)
+  @MinLength(10)
   @MaxLength(100)
   password!: string;
 
@@ -570,6 +763,22 @@ export class RegisterRequestDto {
   avatarUrl?: string;
 }
 
+export class RegisterOtpRequestDto extends RegisterRequestDto {}
+
+export class RegisterOtpVerifyRequestDto {
+  @ApiProperty({ example: 'citizen.c@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  email!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
 export class LoginRequestDto {
   @ApiProperty({ example: 'citizen.a@smartcity.local' })
   @IsString()
@@ -577,11 +786,37 @@ export class LoginRequestDto {
   @MaxLength(150)
   login!: string;
 
-  @ApiProperty({ example: 'Password123!' })
+  @ApiProperty({ example: 'Ums@2026Secure1' })
   @IsString()
-  @MinLength(8)
+  @MinLength(10)
   @MaxLength(100)
   password!: string;
+}
+
+export class LoginOtpRequestDto extends LoginRequestDto {}
+
+export class LoginOtpVerifyRequestDto {
+  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  login!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
+export class ReactivateAccountOtpRequestDto extends LoginRequestDto {}
+
+export class ReactivateAccountOtpVerifyRequestDto extends LoginRequestDto {
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
 }
 
 export class RefreshRequestDto {
@@ -603,6 +838,149 @@ export class LogoutRequestDto {
 export class LogoutResultDto {
   @ApiProperty({ example: true })
   loggedOut!: true;
+}
+
+export class AuthOtpChallengeResultDto {
+  @ApiProperty({ example: true })
+  otpRequested!: true;
+
+  @ApiProperty({ enum: OTP_PURPOSES, example: 'FORGOT_PASSWORD' })
+  purpose!: (typeof OTP_PURPOSES)[number];
+
+  @ApiProperty({ example: 'ci***@smartcity.local' })
+  maskedEmail!: string;
+
+  @ApiProperty({ example: '2026-03-19T10:05:00.000Z' })
+  expiresAt!: string;
+
+  @ApiProperty({ example: '2026-03-19T10:01:00.000Z' })
+  resendAvailableAt!: string;
+}
+
+export class GenericAcceptedResultDto {
+  @ApiProperty({ example: true })
+  requested!: true;
+}
+
+export class ChangePasswordRequestDto {
+  @ApiProperty({ example: 'Ums@2026Secure1' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  currentPassword!: string;
+
+  @ApiProperty({ example: 'Ums@2026Secure2' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(100)
+  newPassword!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
+export class ChangePasswordResultDto {
+  @ApiProperty({ example: '2026-03-19T10:06:00.000Z' })
+  passwordChangedAt!: string;
+
+  @ApiProperty({ example: 2 })
+  revokedSessionCount!: number;
+
+  @ApiProperty({ example: false })
+  currentSessionRevoked!: boolean;
+}
+
+export class AccountLifecycleOtpVerifyRequestDto {
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+}
+
+export class AccountLifecycleResultDto {
+  @ApiProperty({ enum: USER_STATUSES, example: 'DEACTIVATED' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({ example: '2026-03-19T10:08:00.000Z' })
+  occurredAt!: string;
+
+  @ApiProperty({ example: 4 })
+  revokedSessionCount!: number;
+
+  @ApiProperty({ example: true })
+  currentSessionRevoked!: boolean;
+}
+
+export class DeleteAccountConfirmRequestDto {
+  @ApiProperty({ example: 'Ums@2026Secure1' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  currentPassword!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  acceptTerms!: boolean;
+}
+
+export class DeleteAccountResultDto {
+  @ApiProperty({ enum: USER_STATUSES, example: 'DELETED' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({ example: '2026-03-19T10:10:00.000Z' })
+  deletedAt!: string;
+
+  @ApiProperty({ example: 4 })
+  revokedSessionCount!: number;
+
+  @ApiProperty({ example: true })
+  currentSessionRevoked!: boolean;
+}
+
+export class ForgotPasswordRequestDto {
+  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  login!: string;
+}
+
+export class ForgotPasswordConfirmRequestDto {
+  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(150)
+  login!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @MinLength(4)
+  @MaxLength(12)
+  otpCode!: string;
+
+  @ApiProperty({ example: 'Ums@2026Secure2' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(100)
+  newPassword!: string;
+}
+
+export class ForgotPasswordConfirmResultDto {
+  @ApiProperty({ example: '2026-03-19T10:07:00.000Z' })
+  passwordResetAt!: string;
+
+  @ApiProperty({ example: 3 })
+  revokedSessionCount!: number;
 }
 
 export class RegisterPushDeviceRequestDto {
@@ -685,7 +1063,21 @@ export class UpdateProfileRequestDto {
   @MaxLength(30)
   locationCode?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-a-new.jpg' })
+  @ApiPropertyOptional({
+    example:
+      'uploads/avatar/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-avatar-a-new.jpg',
+    description:
+      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  avatarKey?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/avatar-a-new.jpg',
+    deprecated: true,
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -705,9 +1097,9 @@ export class CreateUserRequestDto {
   @MaxLength(150)
   email?: string;
 
-  @ApiProperty({ example: 'Password123!' })
+  @ApiProperty({ example: 'Ums@2026Secure1' })
   @IsString()
-  @MinLength(8)
+  @MinLength(10)
   @MaxLength(100)
   password!: string;
 
@@ -732,7 +1124,21 @@ export class CreateUserRequestDto {
   @MaxLength(200)
   unit?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/officer.jpg' })
+  @ApiPropertyOptional({
+    example:
+      'uploads/avatar/01JPCY0000WARDOFFICER00000/01JPCYUPLOAD000000000000000-officer.jpg',
+    description:
+      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  avatarKey?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/officer.jpg',
+    deprecated: true,
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -847,7 +1253,21 @@ export class SendDirectMessageRequestDto {
   @MaxLength(4000)
   content?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/file.jpg' })
+  @ApiPropertyOptional({
+    example:
+      'uploads/message/01JPCY0000CITIZENA00000000/dm-01jpcy0000citizenb00000000/01JPCYUPLOAD000000000000000-file.jpg',
+    description:
+      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentKey?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/file.jpg',
+    deprecated: true,
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -888,7 +1308,21 @@ export class SendMessageRequestDto {
   @MaxLength(4000)
   content?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/file.jpg' })
+  @ApiPropertyOptional({
+    example:
+      'uploads/message/01JPCY0000CITIZENA00000000/group-01jpcy1000areagroup0000000/01JPCYUPLOAD000000000000000-file.jpg',
+    description:
+      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentKey?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/file.jpg',
+    deprecated: true,
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -918,9 +1352,21 @@ export class UpdateMessageRequestDto {
   content?: string;
 
   @ApiPropertyOptional({
+    example:
+      'uploads/message/01JPCY0000CITIZENA00000000/group-01jpcy1000areagroup0000000/01JPCYUPLOAD000000000000000-file-updated.jpg',
+    description:
+      'Preferred private-media input. Send an empty string to clear the current attachment.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentKey?: string;
+
+  @ApiPropertyOptional({
     example: 'https://cdn.example.com/file-updated.jpg',
     description:
-      'Updated attachment URL. Send an empty string to clear the current attachment.',
+      'Legacy URL input. Send an empty string to clear the current attachment.',
+    deprecated: true,
   })
   @IsOptional()
   @IsString()
@@ -956,7 +1402,24 @@ export class CreateReportRequestDto {
 
   @ApiPropertyOptional({
     type: [String],
+    example: [
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-report-1.jpg',
+    ],
+    description:
+      'Preferred private-media input. Use S3 keys returned by upload/presign.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(500, { each: true })
+  mediaKeys?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
     example: ['https://cdn.example.com/report-1.jpg'],
+    deprecated: true,
   })
   @IsOptional()
   @IsArray()
@@ -1005,7 +1468,24 @@ export class UpdateReportRequestDto {
 
   @ApiPropertyOptional({
     type: [String],
+    example: [
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-report-1-update.jpg',
+    ],
+    description:
+      'Preferred private-media input. Use S3 keys returned by upload/presign.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(500, { each: true })
+  mediaKeys?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
     example: ['https://cdn.example.com/report-1-update.jpg'],
+    deprecated: true,
   })
   @IsOptional()
   @IsArray()
@@ -1074,6 +1554,53 @@ export class ListUsersQueryDto {
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
   limit?: string;
+}
+
+export class ListFriendsQueryDto {
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
+export class FriendRequestQueryDto extends ListFriendsQueryDto {
+  @ApiPropertyOptional({
+    enum: FRIEND_REQUEST_DIRECTION_VALUES,
+    example: 'INCOMING',
+  })
+  @IsOptional()
+  @IsIn(FRIEND_REQUEST_DIRECTION_VALUES)
+  direction?: (typeof FRIEND_REQUEST_DIRECTION_VALUES)[number];
+}
+
+export class SearchUsersForChatQueryDto extends ListFriendsQueryDto {
+  @ApiPropertyOptional({
+    example: 'tran van',
+    description: 'Search by name, phone or email in actor communication scope.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({
+    enum: USER_DISCOVERY_MODE_VALUES,
+    example: 'all',
+    description:
+      '"chat" returns only users that can be messaged now. "friend" returns friendship-focused results.',
+  })
+  @IsOptional()
+  @IsIn(USER_DISCOVERY_MODE_VALUES)
+  mode?: (typeof USER_DISCOVERY_MODE_VALUES)[number];
 }
 
 export class ListGroupsQueryDto {
@@ -1340,4 +1867,151 @@ export class UploadMediaRequestDto {
   @ApiProperty({ type: 'string', format: 'binary' })
   @IsOptional()
   file!: string;
+}
+
+export class UploadLimitsDto {
+  @ApiProperty({ example: 10485760 })
+  maxFileSizeBytes!: number;
+
+  @ApiProperty({
+    type: [String],
+    example: ['image/jpeg', 'image/png', 'application/pdf'],
+  })
+  allowedMimeTypes!: string[];
+
+  @ApiProperty({
+    type: [String],
+    example: ['AVATAR'],
+  })
+  imageOnlyTargets!: (typeof UPLOAD_TARGETS)[number][];
+}
+
+export class DeleteUploadRequestDto {
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  key!: string;
+}
+
+export class DeleteUploadResultDto {
+  @ApiProperty({ example: true })
+  deleted!: true;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-sample.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
+  removedAt!: string;
+}
+
+export class PresignUploadRequestDto {
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiProperty({ example: 'street-light.jpg' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  fileName!: string;
+
+  @ApiProperty({ example: 'image/jpeg' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(100)
+  contentType!: string;
+
+  @ApiProperty({ example: 345678 })
+  @IsNumber()
+  size!: number;
+}
+
+export class PresignUploadResultDto {
+  @ApiProperty({ example: 'PUT' })
+  method!: 'PUT';
+
+  @ApiProperty({ example: 'https://s3.ap-southeast-1.amazonaws.com/...' })
+  url!: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-street-light.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: 'smartcity-assets' })
+  bucket!: string;
+
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  entityId?: string;
+
+  @ApiProperty({ example: 'image/jpeg' })
+  contentType!: string;
+
+  @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
+  expiresAt!: string;
+}
+
+export class PresignDownloadRequestDto {
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-street-light.jpg',
+  })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  key!: string;
+}
+
+export class PresignDownloadResultDto {
+  @ApiProperty({ example: 'GET' })
+  method!: 'GET';
+
+  @ApiProperty({ example: 'https://s3.ap-southeast-1.amazonaws.com/...' })
+  url!: string;
+
+  @ApiProperty({
+    example:
+      'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-street-light.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
+  expiresAt!: string;
 }

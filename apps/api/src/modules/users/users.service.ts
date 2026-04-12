@@ -10,7 +10,11 @@ import type {
   ApiResponseMeta,
   ApiSuccessResponse,
   AuthenticatedUser,
+  MediaAsset,
   PushDevice,
+  UserDirectoryItem,
+  UserFriendItem,
+  UserFriendRequestItem,
   UserProfile,
 } from '@urban/shared-types';
 import {
@@ -24,8 +28,14 @@ import {
   buildPaginatedResponse,
   paginateSortedItems,
 } from '../../common/pagination';
-import { toUserProfile } from '../../common/mappers';
+import {
+  toUserFriendItem,
+  toUserFriendRequestItem,
+  toUserProfile,
+} from '../../common/mappers';
 import type {
+  StoredUserFriendEdge,
+  StoredUserFriendRequest,
   StoredUser,
   StoredUserIdentityClaim,
 } from '../../common/storage-records';
@@ -33,6 +43,7 @@ import {
   ensureLocationCode,
   ensureObject,
   optionalQueryString,
+  parseLocationCodeQuery,
   optionalString,
   parseLimit,
   requirePhoneOrEmail,
@@ -42,21 +53,42 @@ import {
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { ChatRealtimeService } from '../../modules/conversations/chat-realtime.service';
+import {
+  PasswordPolicyService,
+  type PasswordPolicyProfile,
+} from '../../infrastructure/security/password-policy.service';
 import { PasswordService } from '../../infrastructure/security/password.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
 import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
 import { ObservabilityService } from '../../infrastructure/observability/observability.service';
+
+interface PreparedCitizenRegistrationInput {
+  phone?: string;
+  email?: string;
+  passwordHash: string;
+  fullName: string;
+  locationCode: string;
+  avatarUrl?: string;
+}
+
+const FRIEND_REQUEST_DIRECTIONS = ['INCOMING', 'OUTGOING'] as const;
+type FriendRequestDirection = (typeof FRIEND_REQUEST_DIRECTIONS)[number];
+const USER_DISCOVERY_MODES = ['all', 'chat', 'friend'] as const;
+type UserDiscoveryMode = (typeof USER_DISCOVERY_MODES)[number];
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly repository: UrbanTableRepository,
     private readonly passwordService: PasswordService,
+    private readonly passwordPolicyService: PasswordPolicyService,
     private readonly authorizationService: AuthorizationService,
     private readonly chatPresenceService: ChatPresenceService,
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly refreshSessionService: RefreshSessionService,
+    private readonly mediaAssetService: MediaAssetService,
     private readonly pushNotificationService: PushNotificationService,
     private readonly observabilityService: ObservabilityService,
     private readonly config: AppConfigService,
@@ -91,6 +123,11 @@ export class UsersService {
   }
 
   async findByPhone(phone: string): Promise<StoredUser | undefined> {
+    const claimedUser = await this.findByIdentityClaim('PHONE', phone);
+    if (claimedUser) {
+      return claimedUser;
+    }
+
     const items = await this.repository.queryByIndex<{
       PK: string;
       SK: string;
@@ -107,6 +144,11 @@ export class UsersService {
   }
 
   async findByEmail(email: string): Promise<StoredUser | undefined> {
+    const claimedUser = await this.findByIdentityClaim('EMAIL', email);
+    if (claimedUser) {
+      return claimedUser;
+    }
+
     const items = await this.repository.queryByIndex<{
       PK: string;
       SK: string;
@@ -126,7 +168,7 @@ export class UsersService {
     const body = ensureObject(payload);
     const identity = requirePhoneOrEmail(body);
     const password = requiredString(body, 'password', {
-      minLength: 8,
+      minLength: 10,
       maxLength: 100,
     });
     const fullName = requiredString(body, 'fullName', {
@@ -137,6 +179,31 @@ export class UsersService {
       requiredString(body, 'locationCode'),
     );
     const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
+    this.passwordPolicyService.validateOrThrow(
+      password,
+      {
+        phone: identity.phone,
+        email: identity.email,
+        fullName,
+      },
+      'standard',
+    );
+    const passwordHash = await this.passwordService.hashPassword(password);
+
+    return this.registerCitizenWithPreparedInput({
+      phone: identity.phone,
+      email: identity.email,
+      passwordHash,
+      fullName,
+      locationCode,
+      avatarUrl,
+    });
+  }
+
+  async registerCitizenWithPreparedInput(
+    input: PreparedCitizenRegistrationInput,
+  ): Promise<UserProfile> {
+    const locationCode = ensureLocationCode(input.locationCode);
 
     const now = nowIso();
     const userId = createUlid();
@@ -146,14 +213,14 @@ export class UsersService {
       entityType: 'USER_PROFILE',
       GSI1SK: 'USER',
       userId,
-      phone: identity.phone,
-      email: identity.email,
-      passwordHash: await this.passwordService.hashPassword(password),
-      fullName,
+      phone: input.phone,
+      email: input.email,
+      passwordHash: input.passwordHash,
+      fullName: input.fullName,
       role: 'CITIZEN',
       locationCode,
       unit: undefined,
-      avatarUrl,
+      avatarUrl: input.avatarUrl,
       status: 'ACTIVE',
       deletedAt: null,
       createdAt: now,
@@ -164,7 +231,212 @@ export class UsersService {
     await this.persistUserWithIdentityClaims({
       nextUser: user,
     });
-    return toUserProfile(user);
+    return this.serializeUserProfile(user);
+  }
+
+  async updatePassword(
+    userId: string,
+    passwordHash: string,
+  ): Promise<StoredUser> {
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = await this.getByIdOrThrow(userId);
+      const nextUser: StoredUser = {
+        ...current,
+        passwordHash,
+        updatedAt: nowIso(),
+      };
+
+      try {
+        await this.repository.transactPut([
+          {
+            tableName: this.config.dynamodbUsersTableName,
+            item: nextUser,
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+            expressionAttributeValues: {
+              ':expectedUpdatedAt': current.updatedAt,
+            },
+          },
+        ]);
+        return nextUser;
+      } catch (error) {
+        if (!this.isConditionalWriteConflict(error)) {
+          throw error;
+        }
+
+        if (attempt === maxAttempts - 1) {
+          throw new ConflictException(
+            'User profile was changed by another request. Please retry.',
+          );
+        }
+      }
+    }
+
+    throw new ConflictException(
+      'User profile was changed by another request. Please retry.',
+    );
+  }
+
+  async deactivateOwnAccount(userId: string): Promise<StoredUser> {
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = await this.getByIdOrThrow(userId);
+
+      if (current.status === 'DEACTIVATED') {
+        return current;
+      }
+
+      if (current.status !== 'ACTIVE') {
+        throw new BadRequestException(
+          'Only active accounts can be deactivated.',
+        );
+      }
+
+      const nextUser: StoredUser = {
+        ...current,
+        status: 'DEACTIVATED',
+        deletedAt: null,
+        updatedAt: nowIso(),
+      };
+
+      try {
+        await this.repository.transactPut([
+          {
+            tableName: this.config.dynamodbUsersTableName,
+            item: nextUser,
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+            expressionAttributeValues: {
+              ':expectedUpdatedAt': current.updatedAt,
+            },
+          },
+        ]);
+        return nextUser;
+      } catch (error) {
+        if (!this.isConditionalWriteConflict(error)) {
+          throw error;
+        }
+
+        if (attempt === maxAttempts - 1) {
+          throw new ConflictException(
+            'User profile was changed by another request. Please retry.',
+          );
+        }
+      }
+    }
+
+    throw new ConflictException(
+      'User profile was changed by another request. Please retry.',
+    );
+  }
+
+  async reactivateOwnAccount(userId: string): Promise<StoredUser> {
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = await this.getByIdOrThrow(userId);
+
+      if (current.status === 'ACTIVE') {
+        return current;
+      }
+
+      if (current.status !== 'DEACTIVATED') {
+        throw new BadRequestException(
+          'Only deactivated accounts can be reactivated.',
+        );
+      }
+
+      const nextUser: StoredUser = {
+        ...current,
+        status: 'ACTIVE',
+        deletedAt: null,
+        updatedAt: nowIso(),
+      };
+
+      try {
+        await this.repository.transactPut([
+          {
+            tableName: this.config.dynamodbUsersTableName,
+            item: nextUser,
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+            expressionAttributeValues: {
+              ':expectedUpdatedAt': current.updatedAt,
+            },
+          },
+        ]);
+        return nextUser;
+      } catch (error) {
+        if (!this.isConditionalWriteConflict(error)) {
+          throw error;
+        }
+
+        if (attempt === maxAttempts - 1) {
+          throw new ConflictException(
+            'User profile was changed by another request. Please retry.',
+          );
+        }
+      }
+    }
+
+    throw new ConflictException(
+      'User profile was changed by another request. Please retry.',
+    );
+  }
+
+  async deleteOwnAccountPermanently(userId: string): Promise<StoredUser> {
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = await this.getByIdOrThrow(userId);
+
+      if (current.status !== 'ACTIVE' && current.status !== 'DEACTIVATED') {
+        throw new BadRequestException(
+          'Only active or deactivated accounts can be permanently deleted.',
+        );
+      }
+
+      const deletedAt = nowIso();
+      const nextUser: StoredUser = {
+        ...current,
+        phone: undefined,
+        email: undefined,
+        passwordHash: `deleted#${createUlid()}`,
+        fullName: 'Deleted User',
+        unit: undefined,
+        avatarAsset: undefined,
+        avatarUrl: undefined,
+        status: 'DELETED',
+        deletedAt,
+        updatedAt: deletedAt,
+      };
+
+      try {
+        await this.writeUserWithIdentityClaims({
+          nextUser,
+          previousUser: current,
+          expectedUpdatedAt: current.updatedAt,
+        });
+        return nextUser;
+      } catch (error) {
+        if (!this.isConditionalWriteConflict(error)) {
+          throw error;
+        }
+
+        if (attempt === maxAttempts - 1) {
+          throw new ConflictException(
+            'User profile was changed by another request. Please retry.',
+          );
+        }
+      }
+    }
+
+    throw new ConflictException(
+      'User profile was changed by another request. Please retry.',
+    );
   }
 
   async createUser(
@@ -174,7 +446,7 @@ export class UsersService {
     const body = ensureObject(payload);
     const identity = requirePhoneOrEmail(body);
     const password = requiredString(body, 'password', {
-      minLength: 8,
+      minLength: 10,
       maxLength: 100,
     });
     const fullName = requiredString(body, 'fullName', {
@@ -186,7 +458,16 @@ export class UsersService {
       requiredString(body, 'locationCode'),
     );
     const unit = optionalString(body, 'unit', { maxLength: 200 });
-    const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
+    const avatarInput = this.resolveAvatarInput(body, actor.id);
+    this.passwordPolicyService.validateOrThrow(
+      password,
+      {
+        phone: identity.phone,
+        email: identity.email,
+        fullName,
+      },
+      this.resolvePasswordPolicyProfile(role),
+    );
 
     if (
       !this.authorizationService.canCreateUserRole(actor, role, locationCode)
@@ -209,7 +490,8 @@ export class UsersService {
       role,
       locationCode,
       unit,
-      avatarUrl,
+      avatarAsset: avatarInput.asset,
+      avatarUrl: avatarInput.url,
       status: 'ACTIVE',
       deletedAt: null,
       createdAt: now,
@@ -220,7 +502,7 @@ export class UsersService {
     await this.persistUserWithIdentityClaims({
       nextUser: user,
     });
-    return toUserProfile(user);
+    return this.serializeUserProfile(user);
   }
 
   async listUsers(
@@ -237,7 +519,7 @@ export class UsersService {
       .filter((user) => this.authorizationService.canReadUser(actor, user));
     const role = optionalQueryString(query.role, 'role');
     const status = optionalQueryString(query.status, 'status');
-    const locationCode = optionalQueryString(
+    const locationCode = parseLocationCodeQuery(
       query.locationCode,
       'locationCode',
     );
@@ -276,7 +558,9 @@ export class UsersService {
     );
 
     return buildPaginatedResponse(
-      page.items.map(toUserProfile),
+      await Promise.all(
+        page.items.map((item) => this.serializeUserProfile(item)),
+      ),
       page.nextCursor,
     );
   }
@@ -291,7 +575,7 @@ export class UsersService {
       throw new ForbiddenException('You cannot access this profile.');
     }
 
-    return toUserProfile(target);
+    return this.serializeUserProfile(target);
   }
 
   async searchExact(
@@ -327,7 +611,7 @@ export class UsersService {
       minLength: 2,
       maxLength: 100,
     });
-    const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
+    const avatarInput = this.resolveAvatarInput(body, actor.id, actor.id);
     const unit = optionalString(body, 'unit', { maxLength: 200 });
     const locationCodeInput = optionalString(body, 'locationCode');
     const identity = requirePhoneOrEmail({
@@ -358,7 +642,12 @@ export class UsersService {
       email: identity.email,
       fullName: fullName ?? current.fullName,
       unit: unit ?? current.unit,
-      avatarUrl: avatarUrl ?? current.avatarUrl,
+      avatarAsset:
+        avatarInput.asset !== undefined
+          ? avatarInput.asset
+          : current.avatarAsset,
+      avatarUrl:
+        avatarInput.url !== undefined ? avatarInput.url : current.avatarUrl,
       locationCode: nextLocationCode,
       updatedAt: nowIso(),
     };
@@ -373,7 +662,7 @@ export class UsersService {
       previousUser: current,
       expectedUpdatedAt: current.updatedAt,
     });
-    return toUserProfile(nextUser);
+    return this.serializeUserProfile(nextUser);
   }
 
   async updateStatus(
@@ -428,7 +717,7 @@ export class UsersService {
       );
     }
 
-    return toUserProfile(nextUser);
+    return this.serializeUserProfile(nextUser);
   }
 
   async listPushDevices(
@@ -460,6 +749,666 @@ export class UsersService {
 
     return this.chatPresenceService.getPresence(userId);
   }
+
+  async listFriends(
+    actor: AuthenticatedUser,
+    query: Record<string, unknown>,
+  ): Promise<ApiSuccessResponse<UserFriendItem[], ApiResponseMeta>> {
+    await this.getActiveByIdOrThrow(actor.id);
+    const limit = parseLimit(query.limit);
+    const edges = (
+      await this.repository.queryByPk<StoredUserFriendEdge>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'FRIEND#',
+        },
+      )
+    )
+      .filter((item) => item.entityType === 'USER_FRIEND_EDGE')
+      .filter((item) => item.friendUserId !== actor.id);
+    const page = paginateSortedItems(
+      edges,
+      limit,
+      query.cursor,
+      (edge) => edge.createdAt,
+      (edge) => edge.friendUserId,
+    );
+
+    const friends = await this.getUsersByIds(
+      page.items.map((item) => item.friendUserId),
+    );
+    const friendMap = new Map(friends.map((friend) => [friend.userId, friend]));
+    const data = (
+      await Promise.all(
+        page.items.map(async (item) => {
+          const friend = friendMap.get(item.friendUserId);
+
+          if (
+            !friend ||
+            friend.deletedAt ||
+            friend.status === 'DELETED' ||
+            friend.status === 'LOCKED'
+          ) {
+            return undefined;
+          }
+
+          return this.serializeUserFriendItem(friend, item.createdAt);
+        }),
+      )
+    ).filter((item): item is UserFriendItem => item !== undefined);
+
+    return buildPaginatedResponse(data, page.nextCursor);
+  }
+
+  async listFriendRequests(
+    actor: AuthenticatedUser,
+    query: Record<string, unknown>,
+  ): Promise<ApiSuccessResponse<UserFriendRequestItem[], ApiResponseMeta>> {
+    await this.getActiveByIdOrThrow(actor.id);
+    const limit = parseLimit(query.limit);
+    const directionRaw = optionalQueryString(query.direction, 'direction');
+    let direction: FriendRequestDirection | undefined;
+
+    if (directionRaw) {
+      if (
+        FRIEND_REQUEST_DIRECTIONS.includes(
+          directionRaw as FriendRequestDirection,
+        )
+      ) {
+        direction = directionRaw as FriendRequestDirection;
+      } else {
+        throw new BadRequestException('direction is invalid.');
+      }
+    }
+
+    const requests = (
+      await this.repository.queryByPk<StoredUserFriendRequest>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'FRIEND_REQUEST#',
+        },
+      )
+    )
+      .filter((item) => item.entityType === 'USER_FRIEND_REQUEST')
+      .filter((item) => (direction ? item.direction === direction : true));
+    const page = paginateSortedItems(
+      requests,
+      limit,
+      query.cursor,
+      (request) => request.createdAt,
+      (request) =>
+        request.direction === 'INCOMING'
+          ? request.requesterUserId
+          : request.targetUserId,
+    );
+
+    const counterpartIds = page.items.map((request) =>
+      request.direction === 'INCOMING'
+        ? request.requesterUserId
+        : request.targetUserId,
+    );
+    const users = await this.getUsersByIds(counterpartIds);
+    const userMap = new Map(users.map((user) => [user.userId, user]));
+    const data = (
+      await Promise.all(
+        page.items.map(async (request) => {
+          const otherUserId =
+            request.direction === 'INCOMING'
+              ? request.requesterUserId
+              : request.targetUserId;
+          const user = userMap.get(otherUserId);
+
+          if (
+            !user ||
+            user.deletedAt ||
+            user.status === 'DELETED' ||
+            user.status === 'LOCKED'
+          ) {
+            return undefined;
+          }
+
+          return this.serializeUserFriendRequestItem(
+            user,
+            request.direction,
+            request.createdAt,
+          );
+        }),
+      )
+    ).filter((item): item is UserFriendRequestItem => item !== undefined);
+
+    return buildPaginatedResponse(data, page.nextCursor);
+  }
+
+  async searchUsersForChatAndFriend(
+    actor: AuthenticatedUser,
+    query: Record<string, unknown>,
+  ): Promise<ApiSuccessResponse<UserDirectoryItem[], ApiResponseMeta>> {
+    await this.getActiveByIdOrThrow(actor.id);
+    const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
+    const limit = parseLimit(query.limit);
+    const modeRaw = optionalQueryString(query.mode, 'mode') ?? 'all';
+
+    if (!USER_DISCOVERY_MODES.includes(modeRaw as UserDiscoveryMode)) {
+      throw new BadRequestException('mode is invalid.');
+    }
+
+    const mode = modeRaw as UserDiscoveryMode;
+    const [allUsers, edges, requests] = await Promise.all([
+      this.repository.scanAll<StoredUser>(this.config.dynamodbUsersTableName),
+      this.repository.queryByPk<StoredUserFriendEdge>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'FRIEND#',
+        },
+      ),
+      this.repository.queryByPk<StoredUserFriendRequest>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'FRIEND_REQUEST#',
+        },
+      ),
+    ]);
+
+    const friendUserIds = new Set(
+      edges
+        .filter((edge) => edge.entityType === 'USER_FRIEND_EDGE')
+        .map((edge) => edge.friendUserId),
+    );
+    const incomingRequestUserIds = new Set(
+      requests
+        .filter((request) => request.entityType === 'USER_FRIEND_REQUEST')
+        .filter((request) => request.direction === 'INCOMING')
+        .map((request) => request.requesterUserId),
+    );
+    const outgoingRequestUserIds = new Set(
+      requests
+        .filter((request) => request.entityType === 'USER_FRIEND_REQUEST')
+        .filter((request) => request.direction === 'OUTGOING')
+        .map((request) => request.targetUserId),
+    );
+
+    const candidates = allUsers
+      .filter((user) => user.entityType === 'USER_PROFILE')
+      .filter((user) => !user.deletedAt && user.status === 'ACTIVE')
+      .filter((user) => user.userId !== actor.id)
+      .filter((user) =>
+        this.authorizationService.canAccessDirectConversation(actor, user),
+      )
+      .filter((user) => {
+        if (!keyword) {
+          return true;
+        }
+
+        return [user.fullName, user.phone ?? '', user.email ?? '']
+          .join(' ')
+          .toLowerCase()
+          .includes(keyword);
+      })
+      .map((user) => {
+        const relationState = this.resolveFriendRelationState(
+          user.userId,
+          friendUserIds,
+          incomingRequestUserIds,
+          outgoingRequestUserIds,
+        );
+        const canMessage =
+          user.role === 'CITIZEN' && actor.role === 'CITIZEN'
+            ? friendUserIds.has(user.userId)
+            : true;
+        const canSendFriendRequest =
+          actor.role === 'CITIZEN' &&
+          user.role === 'CITIZEN' &&
+          relationState === 'NONE';
+
+        return {
+          userId: user.userId,
+          fullName: user.fullName,
+          role: user.role,
+          locationCode: user.locationCode,
+          avatarAsset: user.avatarAsset,
+          avatarUrl: user.avatarUrl,
+          status: user.status,
+          relationState,
+          canMessage,
+          canSendFriendRequest,
+          updatedAt: user.updatedAt,
+        };
+      })
+      .filter((item) => {
+        if (mode === 'chat') {
+          return item.canMessage;
+        }
+
+        if (mode === 'friend') {
+          return (
+            item.relationState !== 'NONE' || item.canSendFriendRequest === true
+          );
+        }
+
+        return true;
+      });
+    const page = paginateSortedItems(
+      candidates,
+      limit,
+      query.cursor,
+      (item) => item.updatedAt,
+      (item) => item.userId,
+    );
+
+    return buildPaginatedResponse(
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeUserDirectoryItem({
+            userId: item.userId,
+            fullName: item.fullName,
+            role: item.role,
+            locationCode: item.locationCode,
+            avatarAsset: item.avatarAsset,
+            avatarUrl: item.avatarUrl,
+            status: item.status,
+            relationState: item.relationState,
+            canMessage: item.canMessage,
+            canSendFriendRequest: item.canSendFriendRequest,
+          }),
+        ),
+      ),
+      page.nextCursor,
+    );
+  }
+
+  async sendFriendRequest(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+  ): Promise<UserFriendRequestItem> {
+    const requester = await this.getActiveByIdOrThrow(actor.id);
+    const target = await this.getActiveByIdOrThrow(targetUserId);
+    this.assertFriendshipEligiblePair(requester, target);
+
+    if (requester.userId === target.userId) {
+      throw new BadRequestException(
+        'Cannot send a friend request to yourself.',
+      );
+    }
+
+    if (!this.authorizationService.canAccessDirectConversation(actor, target)) {
+      throw new ForbiddenException(
+        'You cannot send a friend request to this user.',
+      );
+    }
+
+    const existingFriendship = await this.getFriendEdge(
+      requester.userId,
+      target.userId,
+    );
+
+    if (existingFriendship) {
+      throw new BadRequestException('Users are already friends.');
+    }
+
+    const outgoingExisting = await this.getFriendRequest(
+      requester.userId,
+      requester.userId,
+      target.userId,
+      'OUTGOING',
+    );
+
+    if (outgoingExisting) {
+      return this.serializeUserFriendRequestItem(
+        target,
+        'OUTGOING',
+        outgoingExisting.createdAt,
+      );
+    }
+
+    const incomingExisting = await this.getFriendRequest(
+      requester.userId,
+      target.userId,
+      requester.userId,
+      'INCOMING',
+    );
+
+    if (incomingExisting) {
+      throw new ConflictException(
+        'This user already sent you a friend request. Accept it instead.',
+      );
+    }
+
+    const now = nowIso();
+    const outgoingRequest = this.buildFriendRequestRecord({
+      ownerUserId: requester.userId,
+      requesterUserId: requester.userId,
+      targetUserId: target.userId,
+      direction: 'OUTGOING',
+      occurredAt: now,
+    });
+    const incomingRequest = this.buildFriendRequestRecord({
+      ownerUserId: target.userId,
+      requesterUserId: requester.userId,
+      targetUserId: target.userId,
+      direction: 'INCOMING',
+      occurredAt: now,
+    });
+
+    await this.repository.transactWrite([
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: outgoingRequest,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: incomingRequest,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+    ]);
+
+    return this.serializeUserFriendRequestItem(target, 'OUTGOING', now);
+  }
+
+  async acceptFriendRequest(
+    actor: AuthenticatedUser,
+    requesterUserId: string,
+  ): Promise<UserFriendItem> {
+    const receiver = await this.getActiveByIdOrThrow(actor.id);
+    const requester = await this.getActiveByIdOrThrow(requesterUserId);
+    this.assertFriendshipEligiblePair(receiver, requester);
+
+    if (receiver.userId === requester.userId) {
+      throw new BadRequestException('Cannot accept your own friend request.');
+    }
+
+    const incomingRequest = await this.getFriendRequest(
+      receiver.userId,
+      requester.userId,
+      receiver.userId,
+      'INCOMING',
+    );
+
+    if (!incomingRequest) {
+      throw new NotFoundException('Friend request not found.');
+    }
+
+    const outgoingRequest = await this.getFriendRequest(
+      requester.userId,
+      requester.userId,
+      receiver.userId,
+      'OUTGOING',
+    );
+    const existingEdge = await this.getFriendEdge(
+      receiver.userId,
+      requester.userId,
+    );
+    const now = existingEdge?.createdAt ?? nowIso();
+    const receiverEdge = this.buildFriendEdgeRecord(
+      receiver.userId,
+      requester.userId,
+      now,
+    );
+    const requesterEdge = this.buildFriendEdgeRecord(
+      requester.userId,
+      receiver.userId,
+      now,
+    );
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: receiverEdge,
+      },
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: requesterEdge,
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: incomingRequest.PK,
+          SK: incomingRequest.SK,
+        },
+      },
+    ];
+
+    if (outgoingRequest) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: outgoingRequest.PK,
+          SK: outgoingRequest.SK,
+        },
+      });
+    }
+
+    await this.repository.transactWrite(transactionItems);
+    return this.serializeUserFriendItem(requester, now);
+  }
+
+  async rejectIncomingFriendRequest(
+    actor: AuthenticatedUser,
+    requesterUserId: string,
+  ): Promise<{ userId: string; action: 'REJECTED'; occurredAt: string }> {
+    await this.getActiveByIdOrThrow(actor.id);
+    await this.getByIdOrThrow(requesterUserId);
+
+    const incomingRequest = await this.getFriendRequest(
+      actor.id,
+      requesterUserId,
+      actor.id,
+      'INCOMING',
+    );
+
+    if (!incomingRequest) {
+      throw new NotFoundException('Friend request not found.');
+    }
+
+    const outgoingRequest = await this.getFriendRequest(
+      requesterUserId,
+      requesterUserId,
+      actor.id,
+      'OUTGOING',
+    );
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: incomingRequest.PK,
+          SK: incomingRequest.SK,
+        },
+      },
+    ];
+
+    if (outgoingRequest) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: outgoingRequest.PK,
+          SK: outgoingRequest.SK,
+        },
+      });
+    }
+
+    await this.repository.transactWrite(transactionItems);
+    return {
+      userId: requesterUserId,
+      action: 'REJECTED',
+      occurredAt: nowIso(),
+    };
+  }
+
+  async cancelOutgoingFriendRequest(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+  ): Promise<{ userId: string; action: 'CANCELED'; occurredAt: string }> {
+    await this.getActiveByIdOrThrow(actor.id);
+    await this.getByIdOrThrow(targetUserId);
+
+    const outgoingRequest = await this.getFriendRequest(
+      actor.id,
+      actor.id,
+      targetUserId,
+      'OUTGOING',
+    );
+
+    if (!outgoingRequest) {
+      throw new NotFoundException('Friend request not found.');
+    }
+
+    const incomingRequest = await this.getFriendRequest(
+      targetUserId,
+      actor.id,
+      targetUserId,
+      'INCOMING',
+    );
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: outgoingRequest.PK,
+          SK: outgoingRequest.SK,
+        },
+      },
+    ];
+
+    if (incomingRequest) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: incomingRequest.PK,
+          SK: incomingRequest.SK,
+        },
+      });
+    }
+
+    await this.repository.transactWrite(transactionItems);
+    return {
+      userId: targetUserId,
+      action: 'CANCELED',
+      occurredAt: nowIso(),
+    };
+  }
+
+  async removeFriend(
+    actor: AuthenticatedUser,
+    friendUserId: string,
+  ): Promise<{ userId: string; removedAt: string }> {
+    await this.getActiveByIdOrThrow(actor.id);
+    await this.getByIdOrThrow(friendUserId);
+
+    if (actor.id === friendUserId) {
+      throw new BadRequestException('Cannot remove yourself from friends.');
+    }
+
+    const currentEdge = await this.getFriendEdge(actor.id, friendUserId);
+
+    if (!currentEdge) {
+      throw new NotFoundException('Friend not found.');
+    }
+
+    const reverseEdge = await this.getFriendEdge(friendUserId, actor.id);
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: currentEdge.PK,
+          SK: currentEdge.SK,
+        },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(actor.id),
+          SK: this.makeOutgoingFriendRequestSk(friendUserId),
+        },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(actor.id),
+          SK: this.makeIncomingFriendRequestSk(friendUserId),
+        },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(friendUserId),
+          SK: this.makeOutgoingFriendRequestSk(actor.id),
+        },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(friendUserId),
+          SK: this.makeIncomingFriendRequestSk(actor.id),
+        },
+      },
+    ];
+
+    if (reverseEdge) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: reverseEdge.PK,
+          SK: reverseEdge.SK,
+        },
+      });
+    }
+
+    await this.repository.transactWrite(transactionItems);
+
+    return {
+      userId: friendUserId,
+      removedAt: nowIso(),
+    };
+  }
+
+  async areFriends(userId: string, otherUserId: string): Promise<boolean> {
+    if (userId === otherUserId) {
+      return false;
+    }
+
+    const edge = await this.getFriendEdge(userId, otherUserId);
+    return Boolean(edge);
+  }
+
+  async canStartCitizenDm(
+    actor: AuthenticatedUser,
+    target: StoredUser,
+  ): Promise<boolean> {
+    if (actor.role !== 'CITIZEN' || target.role !== 'CITIZEN') {
+      return true;
+    }
+
+    return this.areFriends(actor.id, target.userId);
+  }
+
   private async hydrateFirst(
     items: Array<{ PK: string; SK: string }>,
   ): Promise<StoredUser | undefined> {
@@ -478,6 +1427,325 @@ export class UsersService {
     );
 
     return user;
+  }
+
+  private async findByIdentityClaim(
+    identityType: 'PHONE' | 'EMAIL',
+    identityValue: string,
+  ): Promise<StoredUser | undefined> {
+    const claim = await this.repository.get<StoredUserIdentityClaim>(
+      this.config.dynamodbUsersTableName,
+      this.makeIdentityClaimPk(identityType, identityValue.trim()),
+      this.makeIdentityClaimSk(),
+    );
+
+    if (!claim || claim.entityType !== 'USER_IDENTITY_CLAIM') {
+      return undefined;
+    }
+
+    const claimedUser = await this.findById(claim.userId);
+
+    if (
+      claimedUser &&
+      !claimedUser.deletedAt &&
+      claimedUser.status !== 'DELETED'
+    ) {
+      return claimedUser;
+    }
+
+    await this.cleanupStaleIdentityClaim(claim);
+    return undefined;
+  }
+
+  private async cleanupStaleIdentityClaim(
+    claim: StoredUserIdentityClaim,
+  ): Promise<void> {
+    try {
+      await this.repository.transactWrite([
+        {
+          kind: 'delete',
+          tableName: this.config.dynamodbUsersTableName,
+          key: {
+            PK: claim.PK,
+            SK: claim.SK,
+          },
+          conditionExpression:
+            'entityType = :expectedEntityType AND userId = :expectedUserId',
+          expressionAttributeValues: {
+            ':expectedEntityType': 'USER_IDENTITY_CLAIM',
+            ':expectedUserId': claim.userId,
+          },
+        },
+      ]);
+    } catch (error) {
+      if (!this.isConditionalWriteConflict(error)) {
+        throw error;
+      }
+    }
+  }
+
+  private resolveFriendRelationState(
+    userId: string,
+    friendUserIds: Set<string>,
+    incomingRequestUserIds: Set<string>,
+    outgoingRequestUserIds: Set<string>,
+  ): 'FRIEND' | 'INCOMING_REQUEST' | 'OUTGOING_REQUEST' | 'NONE' {
+    if (friendUserIds.has(userId)) {
+      return 'FRIEND';
+    }
+
+    if (incomingRequestUserIds.has(userId)) {
+      return 'INCOMING_REQUEST';
+    }
+
+    if (outgoingRequestUserIds.has(userId)) {
+      return 'OUTGOING_REQUEST';
+    }
+
+    return 'NONE';
+  }
+
+  private async getUsersByIds(userIds: string[]): Promise<StoredUser[]> {
+    const uniqueIds = Array.from(
+      new Set(userIds.filter((userId) => userId.trim().length > 0)),
+    );
+
+    if (uniqueIds.length === 0) {
+      return [];
+    }
+
+    const users = await this.repository.batchGet<StoredUser>(
+      this.config.dynamodbUsersTableName,
+      uniqueIds.map((userId) => ({
+        PK: makeUserPk(userId),
+        SK: makeUserProfileSk(),
+      })),
+    );
+
+    return users.filter((user) => user.entityType === 'USER_PROFILE');
+  }
+
+  private assertFriendshipEligiblePair(
+    leftUser: StoredUser,
+    rightUser: StoredUser,
+  ): void {
+    if (leftUser.role !== 'CITIZEN' || rightUser.role !== 'CITIZEN') {
+      throw new BadRequestException(
+        'Friend requests are only supported between citizen accounts.',
+      );
+    }
+  }
+
+  private buildFriendEdgeRecord(
+    userId: string,
+    friendUserId: string,
+    occurredAt: string,
+  ): StoredUserFriendEdge {
+    return {
+      PK: makeUserPk(userId),
+      SK: this.makeFriendEdgeSk(friendUserId),
+      entityType: 'USER_FRIEND_EDGE',
+      userId,
+      friendUserId,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    };
+  }
+
+  private buildFriendRequestRecord(input: {
+    ownerUserId: string;
+    requesterUserId: string;
+    targetUserId: string;
+    direction: FriendRequestDirection;
+    occurredAt: string;
+  }): StoredUserFriendRequest {
+    return {
+      PK: makeUserPk(input.ownerUserId),
+      SK:
+        input.direction === 'INCOMING'
+          ? this.makeIncomingFriendRequestSk(input.requesterUserId)
+          : this.makeOutgoingFriendRequestSk(input.targetUserId),
+      entityType: 'USER_FRIEND_REQUEST',
+      requesterUserId: input.requesterUserId,
+      targetUserId: input.targetUserId,
+      direction: input.direction,
+      createdAt: input.occurredAt,
+      updatedAt: input.occurredAt,
+    };
+  }
+
+  private async getFriendEdge(
+    userId: string,
+    friendUserId: string,
+  ): Promise<StoredUserFriendEdge | undefined> {
+    const edge = await this.repository.get<StoredUserFriendEdge>(
+      this.config.dynamodbUsersTableName,
+      makeUserPk(userId),
+      this.makeFriendEdgeSk(friendUserId),
+    );
+
+    if (!edge || edge.entityType !== 'USER_FRIEND_EDGE') {
+      return undefined;
+    }
+
+    return edge;
+  }
+
+  private async getFriendRequest(
+    ownerUserId: string,
+    requesterUserId: string,
+    targetUserId: string,
+    direction: FriendRequestDirection,
+  ): Promise<StoredUserFriendRequest | undefined> {
+    const sk =
+      direction === 'INCOMING'
+        ? this.makeIncomingFriendRequestSk(requesterUserId)
+        : this.makeOutgoingFriendRequestSk(targetUserId);
+    const request = await this.repository.get<StoredUserFriendRequest>(
+      this.config.dynamodbUsersTableName,
+      makeUserPk(ownerUserId),
+      sk,
+    );
+
+    if (!request || request.entityType !== 'USER_FRIEND_REQUEST') {
+      return undefined;
+    }
+
+    if (
+      request.requesterUserId !== requesterUserId ||
+      request.targetUserId !== targetUserId ||
+      request.direction !== direction
+    ) {
+      return undefined;
+    }
+
+    return request;
+  }
+
+  private makeFriendEdgeSk(friendUserId: string): string {
+    return `FRIEND#${friendUserId}`;
+  }
+
+  private makeIncomingFriendRequestSk(requesterUserId: string): string {
+    return `FRIEND_REQUEST#FROM#${requesterUserId}`;
+  }
+
+  private makeOutgoingFriendRequestSk(targetUserId: string): string {
+    return `FRIEND_REQUEST#TO#${targetUserId}`;
+  }
+
+  private resolvePasswordPolicyProfile(
+    role: StoredUser['role'],
+  ): PasswordPolicyProfile {
+    return role === 'CITIZEN' ? 'standard' : 'privileged';
+  }
+
+  private resolveAvatarInput(
+    body: Record<string, unknown>,
+    ownerUserId: string,
+    entityId?: string,
+  ): { asset?: MediaAsset; url?: string } {
+    const hasAvatarKey = Object.prototype.hasOwnProperty.call(
+      body,
+      'avatarKey',
+    );
+    const hasAvatarUrl = Object.prototype.hasOwnProperty.call(
+      body,
+      'avatarUrl',
+    );
+    const avatarKey = optionalString(body, 'avatarKey', { maxLength: 500 });
+    const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
+
+    if (hasAvatarKey && hasAvatarUrl) {
+      throw new BadRequestException(
+        'Provide either avatarKey or avatarUrl, not both.',
+      );
+    }
+
+    if (avatarKey) {
+      return {
+        asset: this.mediaAssetService.createOwnedAssetReference({
+          key: avatarKey,
+          target: 'AVATAR',
+          ownerUserId,
+          entityId,
+        }),
+        url: undefined,
+      };
+    }
+
+    return {
+      asset: undefined,
+      url: avatarUrl,
+    };
+  }
+
+  private async serializeUserProfile(user: StoredUser): Promise<UserProfile> {
+    const profile = toUserProfile(user);
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        profile.avatarAsset,
+        profile.avatarUrl,
+      );
+
+    return {
+      ...profile,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
+  }
+
+  private async serializeUserFriendItem(
+    user: StoredUser,
+    friendsSince: string,
+  ): Promise<UserFriendItem> {
+    const item = toUserFriendItem(user, friendsSince);
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        item.avatarAsset,
+        item.avatarUrl,
+      );
+
+    return {
+      ...item,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
+  }
+
+  private async serializeUserFriendRequestItem(
+    user: StoredUser,
+    direction: 'INCOMING' | 'OUTGOING',
+    requestedAt: string,
+  ): Promise<UserFriendRequestItem> {
+    const item = toUserFriendRequestItem(user, direction, requestedAt);
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        item.avatarAsset,
+        item.avatarUrl,
+      );
+
+    return {
+      ...item,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
+  }
+
+  private async serializeUserDirectoryItem(
+    item: UserDirectoryItem,
+  ): Promise<UserDirectoryItem> {
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        item.avatarAsset,
+        item.avatarUrl,
+      );
+
+    return {
+      ...item,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
   }
 
   private async persistUserWithIdentityClaims(input: {

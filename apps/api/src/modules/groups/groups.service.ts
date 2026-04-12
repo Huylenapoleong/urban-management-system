@@ -45,6 +45,7 @@ import {
   optionalBoolean,
   optionalEnum,
   optionalQueryString,
+  parseLocationCodeQuery,
   optionalString,
   parseBooleanQuery,
   parseLimit,
@@ -152,7 +153,7 @@ export class GroupsService {
   ): Promise<ApiSuccessResponse<GroupMetadata[], ApiResponseMeta>> {
     const mine = parseBooleanQuery(query.mine, 'mine') ?? false;
     const groupType = optionalQueryString(query.groupType, 'groupType');
-    const locationCode = optionalQueryString(
+    const locationCode = parseLocationCodeQuery(
       query.locationCode,
       'locationCode',
     );
@@ -544,6 +545,17 @@ export class GroupsService {
 
     if (action === 'add') {
       await this.usersService.getActiveByIdOrThrow(userId);
+
+      if (
+        actor.role === 'CITIZEN' &&
+        userId !== actor.id &&
+        !(await this.usersService.areFriends(actor.id, userId))
+      ) {
+        throw new ForbiddenException(
+          'Citizens can only add their friends to groups.',
+        );
+      }
+
       if (existingMembership && !existingMembership.deletedAt) {
         throw new BadRequestException('Membership already exists.');
       }
