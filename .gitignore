@@ -8,3 +8,11 @@ coverage
 .env.*
 !.env.example
 .DS_Store
+/.claude
+/.gitnexus
+AGENTS.md
+api-log.txt
+apps/api/seed-output.txt
+chatbot-response.txt
+CLAUDE.md
+/md
