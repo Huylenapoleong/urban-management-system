@@ -9,6 +9,8 @@ import type {
   PushDevice,
   ReportConversationLinkItem,
   ReportItem,
+  UserFriendItem,
+  UserFriendRequestItem,
   UserProfile,
 } from '@urban/shared-types';
 import type {
@@ -42,11 +44,46 @@ export function toUserProfile(user: StoredUser): UserProfile {
     role: user.role,
     locationCode: user.locationCode,
     unit: user.unit,
+    avatarAsset: user.avatarAsset,
     avatarUrl: user.avatarUrl,
     status: user.status,
     deletedAt: user.deletedAt,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
+  };
+}
+
+export function toUserFriendItem(
+  user: StoredUser,
+  friendsSince: string,
+): UserFriendItem {
+  return {
+    userId: user.userId,
+    fullName: user.fullName,
+    role: user.role,
+    locationCode: user.locationCode,
+    avatarAsset: user.avatarAsset,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    friendsSince,
+  };
+}
+
+export function toUserFriendRequestItem(
+  user: StoredUser,
+  direction: 'INCOMING' | 'OUTGOING',
+  requestedAt: string,
+): UserFriendRequestItem {
+  return {
+    userId: user.userId,
+    fullName: user.fullName,
+    role: user.role,
+    locationCode: user.locationCode,
+    avatarAsset: user.avatarAsset,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    direction,
+    requestedAt,
   };
 }
 
@@ -59,6 +96,7 @@ export function toAuthenticatedUser(user: StoredUser): AuthenticatedUser {
     role: user.role,
     locationCode: user.locationCode,
     unit: user.unit,
+    avatarAsset: user.avatarAsset,
     avatarUrl: user.avatarUrl,
     status: user.status,
     createdAt: user.createdAt,
@@ -77,7 +115,9 @@ export function toAuthSessionInfo(
     updatedAt: session.updatedAt,
     lastUsedAt: session.lastUsedAt ?? session.updatedAt ?? session.createdAt,
     expiresAt: session.expiresAt,
+    dismissedAt: session.dismissedAt ?? null,
     revokedAt: session.revokedAt,
+    sessionScope: session.sessionScope,
     userAgent: session.userAgent,
     ipAddress: session.ipAddress,
     deviceId: session.deviceId,
@@ -132,9 +172,11 @@ export function toMessage(message: StoredMessage): MessageItem {
     id: message.messageId,
     senderId: message.senderId,
     senderName: message.senderName,
+    senderAvatarAsset: message.senderAvatarAsset,
     senderAvatarUrl: message.senderAvatarUrl,
     type: message.type,
     content: message.content,
+    attachmentAsset: message.attachmentAsset,
     attachmentUrl: message.attachmentUrl,
     replyTo: message.replyTo,
     deletedAt: message.deletedAt,
@@ -172,6 +214,7 @@ export function toReport(report: StoredReport): ReportItem {
     locationCode: report.locationCode,
     status: report.status,
     priority: report.priority,
+    mediaAssets: report.mediaAssets ?? [],
     mediaUrls: report.mediaUrls,
     assignedOfficerId: report.assignedOfficerId,
     deletedAt: report.deletedAt,

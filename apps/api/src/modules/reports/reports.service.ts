@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -14,6 +15,7 @@ import type {
   ApiSuccessResponse,
   AuditEventItem,
   AuthenticatedUser,
+  MediaAsset,
   ReportConversationLinkItem,
   ReportItem,
 } from '@urban/shared-types';
@@ -45,6 +47,7 @@ import {
   optionalQueryString,
   optionalString,
   optionalStringArray,
+  parseLocationCodeQuery,
   parseBooleanQuery,
   parseEnumQuery,
   parseIsoDateQuery,
@@ -56,6 +59,7 @@ import { AuditTrailService } from '../../infrastructure/audit/audit-trail.servic
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { GroupsService } from '../groups/groups.service';
 import { UsersService } from '../users/users.service';
 
@@ -68,6 +72,7 @@ export class ReportsService {
     private readonly groupsService: GroupsService,
     private readonly auditTrailService: AuditTrailService,
     private readonly pushNotificationService: PushNotificationService,
+    private readonly mediaAssetService: MediaAssetService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -88,7 +93,7 @@ export class ReportsService {
     const locationCode = ensureLocationCode(
       requiredString(body, 'locationCode'),
     );
-    const mediaUrls = optionalStringArray(body, 'mediaUrls', 10, 500) ?? [];
+    const mediaInput = this.resolveReportMediaInput(body, actor.id);
     const groupId = optionalString(body, 'groupId', { maxLength: 50 });
 
     if (!this.authorizationService.canCreateReport(actor, locationCode)) {
@@ -118,7 +123,8 @@ export class ReportsService {
       locationCode,
       status: 'NEW',
       priority,
-      mediaUrls,
+      mediaAssets: mediaInput.assets ?? [],
+      mediaUrls: mediaInput.urls ?? [],
       assignedOfficerId: undefined,
       deletedAt: null,
       createdAt: now,
@@ -150,7 +156,7 @@ export class ReportsService {
           'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       },
     ]);
-    return toReport(report);
+    return this.serializeReport(report);
   }
 
   async listReports(
@@ -176,7 +182,7 @@ export class ReportsService {
       query.assignedOfficerId,
       'assignedOfficerId',
     );
-    const locationCode = optionalQueryString(
+    const locationCode = parseLocationCodeQuery(
       query.locationCode,
       'locationCode',
     );
@@ -229,7 +235,8 @@ export class ReportsService {
     }
 
     const filtered = reports
-      .filter((report) => report.entityType === 'REPORT' && !report.deletedAt)
+      .filter((report) => report.entityType === 'REPORT')
+      .filter((report) => !report.deletedAt)
       .filter((report) =>
         this.authorizationService.canReadReport(actor, report),
       )
@@ -286,7 +293,10 @@ export class ReportsService {
       (report) => report.reportId,
     );
 
-    return buildPaginatedResponse(page.items.map(toReport), page.nextCursor);
+    return buildPaginatedResponse(
+      await Promise.all(page.items.map((item) => this.serializeReport(item))),
+      page.nextCursor,
+    );
   }
 
   async getReport(
@@ -299,7 +309,7 @@ export class ReportsService {
       throw new ForbiddenException('You cannot access this report.');
     }
 
-    return toReport(report);
+    return this.serializeReport(report);
   }
 
   async listAuditEvents(
@@ -466,7 +476,11 @@ export class ReportsService {
       maxLength: 2000,
     });
     const priority = optionalEnum(body, 'priority', REPORT_PRIORITIES);
-    const mediaUrls = optionalStringArray(body, 'mediaUrls', 10, 500);
+    const mediaInput = this.resolveReportMediaInput(
+      body,
+      actor.id,
+      report.reportId,
+    );
     const category = optionalEnum(body, 'category', REPORT_CATEGORIES);
     const locationCodeInput = optionalString(body, 'locationCode');
     const nextLocationCode = locationCodeInput
@@ -498,7 +512,12 @@ export class ReportsService {
       title: title ?? report.title,
       description: description ?? report.description,
       priority: priority ?? report.priority,
-      mediaUrls: mediaUrls ?? report.mediaUrls,
+      mediaAssets:
+        mediaInput.assets !== undefined
+          ? mediaInput.assets
+          : report.mediaAssets,
+      mediaUrls:
+        mediaInput.urls !== undefined ? mediaInput.urls : report.mediaUrls,
       category: category ?? report.category,
       locationCode: nextLocationCode,
       updatedAt: nowIso(),
@@ -541,7 +560,7 @@ export class ReportsService {
 
       throw error;
     }
-    return toReport(nextReport);
+    return this.serializeReport(nextReport);
   }
 
   async deleteReport(
@@ -555,7 +574,7 @@ export class ReportsService {
     }
 
     if (report.deletedAt) {
-      return toReport(report);
+      return this.serializeReport(report);
     }
 
     const deletedAt = nowIso();
@@ -597,7 +616,7 @@ export class ReportsService {
 
       throw error;
     }
-    return toReport(nextReport);
+    return this.serializeReport(nextReport);
   }
 
   async assignReport(
@@ -695,7 +714,7 @@ export class ReportsService {
 
       throw error;
     }
-    return toReport(nextReport);
+    return this.serializeReport(nextReport);
   }
   async updateStatus(
     actor: AuthenticatedUser,
@@ -791,7 +810,68 @@ export class ReportsService {
 
       throw error;
     }
-    return toReport(nextReport);
+    return this.serializeReport(nextReport);
+  }
+
+  private resolveReportMediaInput(
+    body: Record<string, unknown>,
+    ownerUserId: string,
+    entityId?: string,
+  ): { assets?: MediaAsset[]; urls?: string[] } {
+    const hasMediaKeys = Object.prototype.hasOwnProperty.call(
+      body,
+      'mediaKeys',
+    );
+    const hasMediaUrls = Object.prototype.hasOwnProperty.call(
+      body,
+      'mediaUrls',
+    );
+
+    if (hasMediaKeys && hasMediaUrls) {
+      throw new BadRequestException(
+        'Provide either mediaKeys or mediaUrls, not both.',
+      );
+    }
+
+    if (hasMediaKeys) {
+      const mediaKeys = optionalStringArray(body, 'mediaKeys', 10, 500) ?? [];
+
+      return {
+        assets: mediaKeys.map((key) =>
+          this.mediaAssetService.createOwnedAssetReference({
+            key,
+            target: 'REPORT',
+            ownerUserId,
+            entityId,
+          }),
+        ),
+        urls: [],
+      };
+    }
+
+    if (hasMediaUrls) {
+      return {
+        assets: [],
+        urls: optionalStringArray(body, 'mediaUrls', 10, 500) ?? [],
+      };
+    }
+
+    return {};
+  }
+
+  private async serializeReport(report: StoredReport): Promise<ReportItem> {
+    const item = toReport(report);
+    const { assets, urls } =
+      await this.mediaAssetService.resolveAssetCollectionWithLegacyUrls(
+        item.mediaAssets,
+        item.mediaUrls,
+      );
+
+    return {
+      ...item,
+      mediaAssets: assets,
+      mediaUrls: urls,
+    };
   }
 
   private isConditionalWriteConflict(error: unknown): boolean {

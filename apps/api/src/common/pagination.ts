@@ -69,11 +69,22 @@ function decodeCursorPayload(
 }
 
 function compareDescending(
-  leftSortValue: string,
+  leftSortValue: string | undefined,
   leftId: string,
-  rightSortValue: string,
+  rightSortValue: string | undefined,
   rightId: string,
 ): number {
+  // Handle undefined values - undefined values should sort last (ascending)
+  if (leftSortValue === undefined && rightSortValue === undefined) {
+    return rightId.localeCompare(leftId);
+  }
+  if (leftSortValue === undefined) {
+    return 1; // left sorts after right
+  }
+  if (rightSortValue === undefined) {
+    return -1; // left sorts before right
+  }
+
   const sortComparison = rightSortValue.localeCompare(leftSortValue);
 
   if (sortComparison !== 0) {
@@ -87,7 +98,7 @@ export function paginateSortedItems<T>(
   items: T[],
   limit: number,
   cursorValue: unknown,
-  getSortValue: (item: T) => string,
+  getSortValue: (item: T) => string | undefined,
   getId: (item: T) => string,
 ): {
   items: T[];
@@ -123,7 +134,7 @@ export function paginateSortedItems<T>(
       hasMore && lastItem
         ? encodeCursorPayload({
             id: getId(lastItem),
-            sortValue: getSortValue(lastItem),
+            sortValue: getSortValue(lastItem) || '',
           })
         : undefined,
   };

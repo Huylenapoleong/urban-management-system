@@ -203,7 +203,7 @@ export class ChatOutboxService
             message,
           );
 
-        this.conversationDispatchService.emitMessageCreated(
+        await this.conversationDispatchService.emitMessageCreated(
           event.eventId,
           event.actorUserId,
           message,
@@ -228,7 +228,7 @@ export class ChatOutboxService
             access,
           );
 
-        this.conversationDispatchService.emitMessageUpdated(
+        await this.conversationDispatchService.emitMessageUpdated(
           event.eventId,
           event.actorUserId,
           message,

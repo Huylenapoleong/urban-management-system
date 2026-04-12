@@ -13,6 +13,7 @@ import type {
   AuditEventItem,
   AuthenticatedUser,
   ConversationSummary,
+  MediaAsset,
   MessageItem,
 } from '@urban/shared-types';
 import {
@@ -63,6 +64,7 @@ import {
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ConversationDispatchService } from './conversation-dispatch.service';
 import { ChatOutboxService } from './chat-outbox.service';
@@ -100,6 +102,7 @@ export class ConversationsService {
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly auditTrailService: AuditTrailService,
     private readonly pushNotificationService: PushNotificationService,
+    private readonly mediaAssetService: MediaAssetService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -350,6 +353,7 @@ export class ConversationsService {
       return [
         item.senderName,
         this.buildPreview(item),
+        item.attachmentAsset?.key ?? '',
         item.attachmentUrl ?? '',
       ]
         .join(' ')
@@ -369,8 +373,10 @@ export class ConversationsService {
     );
 
     return buildPaginatedResponse(
-      page.items.map((item) =>
-        this.serializeMessage(actor.id, item, deliveryContext),
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeMessage(actor.id, item, deliveryContext),
+        ),
       ),
       page.nextCursor,
     );
@@ -390,6 +396,7 @@ export class ConversationsService {
     return this.createMessage(
       actor,
       access.conversationKey,
+      access.conversationId,
       access.participants,
       payload,
     );
@@ -417,10 +424,17 @@ export class ConversationsService {
       throw new ForbiddenException('You cannot access this conversation.');
     }
 
+    if (!(await this.usersService.canStartCitizenDm(actor, targetUser))) {
+      throw new ForbiddenException(
+        'Citizens can only send direct messages to friends.',
+      );
+    }
+
     const conversationId = makeDmConversationId(actor.id, targetUser.userId);
     return this.createMessage(
       actor,
       conversationId,
+      this.toPublicConversationId(actor.id, conversationId),
       [actor.id, targetUser.userId],
       body,
     );
@@ -594,14 +608,13 @@ export class ConversationsService {
       body,
       'content',
     );
-    const hasAttachmentField = Object.prototype.hasOwnProperty.call(
-      body,
-      'attachmentUrl',
-    );
+    const hasAttachmentField =
+      Object.prototype.hasOwnProperty.call(body, 'attachmentUrl') ||
+      Object.prototype.hasOwnProperty.call(body, 'attachmentKey');
 
     if (!hasContentField && !hasAttachmentField) {
       throw new BadRequestException(
-        'content or attachmentUrl must be provided.',
+        'content, attachmentKey or attachmentUrl must be provided.',
       );
     }
 
@@ -611,14 +624,21 @@ export class ConversationsService {
           maxLength: 4000,
         }) ?? '')
       : message.content;
-    const nextAttachmentUrlInput = hasAttachmentField
-      ? optionalString(body, 'attachmentUrl', {
-          allowEmpty: true,
-          maxLength: 500,
-        })
-      : message.attachmentUrl;
+    const nextAttachment = hasAttachmentField
+      ? this.resolveMessageAttachmentInput(
+          body,
+          actor.id,
+          access.conversationId,
+          {
+            allowClear: true,
+          },
+        )
+      : undefined;
+    const nextAttachmentAsset = hasAttachmentField
+      ? nextAttachment?.asset
+      : message.attachmentAsset;
     const nextAttachmentUrl = hasAttachmentField
-      ? nextAttachmentUrlInput || undefined
+      ? nextAttachment?.url
       : message.attachmentUrl;
     const messageType = this.asSupportedMessageType(message.type);
     const nextContent = hasContentField
@@ -629,14 +649,18 @@ export class ConversationsService {
       !this.hasMeaningfulMessageBody(
         messageType,
         nextContent,
+        nextAttachmentAsset,
         nextAttachmentUrl,
       )
     ) {
-      throw new BadRequestException('content or attachmentUrl is required.');
+      throw new BadRequestException(
+        'content, attachmentKey or attachmentUrl is required.',
+      );
     }
 
     if (
       nextContent === message.content &&
+      this.areMediaAssetsEqual(nextAttachmentAsset, message.attachmentAsset) &&
       nextAttachmentUrl === message.attachmentUrl
     ) {
       return this.serializeMessage(actor.id, message);
@@ -671,6 +695,7 @@ export class ConversationsService {
     const nextMessage: StoredMessage = {
       ...message,
       content: nextContent,
+      attachmentAsset: nextAttachmentAsset,
       attachmentUrl: nextAttachmentUrl,
       updatedAt: nowIso(),
     };
@@ -729,7 +754,7 @@ export class ConversationsService {
         await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
           access,
         );
-      this.conversationDispatchService.emitMessageUpdated(
+      await this.conversationDispatchService.emitMessageUpdated(
         outboxRecord.eventId,
         actor.id,
         nextMessage,
@@ -873,6 +898,7 @@ export class ConversationsService {
   private async createMessage(
     actor: AuthenticatedUser,
     conversationId: string,
+    publicConversationId: string,
     participants: string[],
     payload: unknown,
   ): Promise<MessageItem> {
@@ -882,16 +908,20 @@ export class ConversationsService {
     const rawContent =
       optionalString(body, 'content', { allowEmpty: true, maxLength: 4000 }) ??
       '';
-    const attachmentUrl = optionalString(body, 'attachmentUrl', {
-      maxLength: 500,
-    });
+    const attachment = this.resolveMessageAttachmentInput(
+      body,
+      actor.id,
+      publicConversationId,
+    );
     const replyTo = optionalString(body, 'replyTo', { maxLength: 50 });
     const clientMessageId = optionalString(body, 'clientMessageId', {
       maxLength: 100,
     });
 
-    if (!rawContent && !attachmentUrl) {
-      throw new BadRequestException('content or attachmentUrl is required.');
+    if (!rawContent && !attachment.asset && !attachment.url) {
+      throw new BadRequestException(
+        'content, attachmentKey or attachmentUrl is required.',
+      );
     }
 
     if (clientMessageId) {
@@ -920,10 +950,12 @@ export class ConversationsService {
       conversationId,
       senderId: actor.id,
       senderName: actor.fullName,
+      senderAvatarAsset: actor.avatarAsset,
       senderAvatarUrl: actor.avatarUrl,
       type,
       content,
-      attachmentUrl,
+      attachmentAsset: attachment.asset,
+      attachmentUrl: attachment.url,
       replyTo,
       deletedAt: null,
       sentAt,
@@ -1048,7 +1080,7 @@ export class ConversationsService {
           participants,
           message,
         );
-      this.conversationDispatchService.emitMessageCreated(
+      await this.conversationDispatchService.emitMessageCreated(
         outboxRecord.eventId,
         actor.id,
         message,
@@ -1296,12 +1328,88 @@ export class ConversationsService {
   private hasMeaningfulMessageBody(
     type: SupportedMessageType,
     content: string,
+    attachmentAsset?: MediaAsset,
     attachmentUrl?: string,
   ): boolean {
     return this.conversationStateService.hasMeaningfulMessageBody(
       type,
       content,
+      attachmentAsset,
       attachmentUrl,
+    );
+  }
+
+  private resolveMessageAttachmentInput(
+    body: Record<string, unknown>,
+    ownerUserId: string,
+    entityId?: string,
+    options: { allowClear?: boolean } = {},
+  ): { asset?: MediaAsset; url?: string } {
+    const hasAttachmentKey = Object.prototype.hasOwnProperty.call(
+      body,
+      'attachmentKey',
+    );
+    const hasAttachmentUrl = Object.prototype.hasOwnProperty.call(
+      body,
+      'attachmentUrl',
+    );
+    const attachmentKey = optionalString(body, 'attachmentKey', {
+      allowEmpty: options.allowClear,
+      maxLength: 500,
+    });
+    const attachmentUrl = optionalString(body, 'attachmentUrl', {
+      allowEmpty: options.allowClear,
+      maxLength: 500,
+    });
+
+    if (hasAttachmentKey && hasAttachmentUrl) {
+      throw new BadRequestException(
+        'Provide either attachmentKey or attachmentUrl, not both.',
+      );
+    }
+
+    if (attachmentKey !== undefined) {
+      if (!attachmentKey) {
+        return {
+          asset: undefined,
+          url: undefined,
+        };
+      }
+
+      return {
+        asset: this.mediaAssetService.createOwnedAssetReference({
+          key: attachmentKey,
+          target: 'MESSAGE',
+          ownerUserId,
+          entityId,
+        }),
+        url: undefined,
+      };
+    }
+
+    if (attachmentUrl !== undefined) {
+      return {
+        asset: undefined,
+        url: attachmentUrl || undefined,
+      };
+    }
+
+    return {};
+  }
+
+  private areMediaAssetsEqual(left?: MediaAsset, right?: MediaAsset): boolean {
+    if (!left && !right) {
+      return true;
+    }
+
+    if (!left || !right) {
+      return false;
+    }
+
+    return (
+      left.key === right.key &&
+      left.target === right.target &&
+      (left.entityId ?? '') === (right.entityId ?? '')
     );
   }
 
@@ -1623,16 +1731,32 @@ export class ConversationsService {
     );
   }
 
-  private serializeMessage(
+  private async serializeMessage(
     actorId: string,
     message: StoredMessage,
     deliveryContext?: MessageDeliveryContext,
-  ): MessageItem {
-    return this.conversationStateService.serializeMessage(
+  ): Promise<MessageItem> {
+    const item = this.conversationStateService.serializeMessage(
       actorId,
       message,
       deliveryContext,
     );
+    const senderAvatar = await this.mediaAssetService.resolveAssetWithLegacyUrl(
+      item.senderAvatarAsset,
+      item.senderAvatarUrl,
+    );
+    const attachment = await this.mediaAssetService.resolveAssetWithLegacyUrl(
+      item.attachmentAsset,
+      item.attachmentUrl,
+    );
+
+    return {
+      ...item,
+      senderAvatarAsset: senderAvatar.asset,
+      senderAvatarUrl: senderAvatar.url,
+      attachmentAsset: attachment.asset,
+      attachmentUrl: attachment.url,
+    };
   }
 
   private toPublicConversationId(
@@ -1748,6 +1872,10 @@ export class ConversationsService {
       throw new BadRequestException('Invalid DM conversation id.');
     }
 
+    if (!participantIds.includes(actor.id)) {
+      throw new ForbiddenException('You cannot access this conversation.');
+    }
+
     const otherParticipantId =
       participantIds.find((participantId) => participantId !== actor.id) ??
       participantIds[0];
@@ -1759,6 +1887,15 @@ export class ConversationsService {
       !this.authorizationService.canAccessDirectConversation(actor, targetUser)
     ) {
       throw new ForbiddenException('You cannot access this conversation.');
+    }
+
+    if (
+      requireSendAccess &&
+      !(await this.usersService.canStartCitizenDm(actor, targetUser))
+    ) {
+      throw new ForbiddenException(
+        'Citizens can only send direct messages to friends.',
+      );
     }
 
     return participantIds;

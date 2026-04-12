@@ -1,13 +1,15 @@
 import { BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { hash } from 'bcryptjs';
 import { createDynamoClients } from './lib/dynamodb-client';
 import type {
   StoredConversation,
+  StoredUserFriendEdge,
+  StoredUserFriendRequest,
   StoredGroup,
   StoredMembership,
   StoredMessage,
   StoredMessageRef,
   StoredReport,
+  StoredUserIdentityClaim,
   StoredUser,
 } from '../src/common/storage-records';
 import {
@@ -31,13 +33,14 @@ import {
   makeUserProfileSk,
 } from '@urban/shared-utils';
 
-const PASSWORD = 'Password123!';
+const PASSWORD = 'Ums@2026Secure1';
 const FIXTURE_IDS = {
   admin: '01JPCY0000ADMIN00000000000',
   provinceOfficer: '01JPCY0000PROVINCE00000000',
   wardOfficer: '01JPCY0000WARDOFFICER00000',
   citizenA: '01JPCY0000CITIZENA00000000',
   citizenB: '01JPCY0000CITIZENB00000000',
+  citizenC: '01JPCY0000CITIZENC00000000',
   areaGroup: '01JPCY1000AREAGROUP0000000',
   officialGroup: '01JPCY1000OFFICIAL00000000',
   privateGroup: '01JPCY1000PRIVATE000000000',
@@ -49,12 +52,21 @@ const FIXTURE_IDS = {
   groupMessage3: '01JPCY3000GROUPMSG00000003',
   dmMessage1: '01JPCY3000DIRECTMSG0000001',
   dmMessage2: '01JPCY3000DIRECTMSG0000002',
+  friendDmMessage1: '01JPCY3000FRIENDDM0000001',
+  friendDmMessage2: '01JPCY3000FRIENDDM0000002',
 } as const;
 
 const LOCATIONS = {
   ward1: 'VN-HCM-BQ1-P01',
   ward2: 'VN-HCM-BQ1-P02',
 };
+
+let bcryptModulePromise: Promise<typeof import('bcryptjs')> | undefined;
+
+async function loadBcrypt(): Promise<typeof import('bcryptjs')> {
+  bcryptModulePromise ??= import('bcryptjs');
+  return bcryptModulePromise;
+}
 
 function makeUser(input: {
   id: string;
@@ -84,6 +96,64 @@ function makeUser(input: {
     avatarUrl: input.avatarUrl,
     status: 'ACTIVE',
     deletedAt: null,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+function makeIdentityClaim(input: {
+  userId: string;
+  identityType: 'PHONE' | 'EMAIL';
+  identityValue: string;
+  createdAt: string;
+}): StoredUserIdentityClaim {
+  return {
+    PK: `IDENTITY#${input.identityType}#${input.identityValue}`,
+    SK: 'CLAIM',
+    entityType: 'USER_IDENTITY_CLAIM',
+    userId: input.userId,
+    identityType: input.identityType,
+    identityValue: input.identityValue,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+function makeFriendEdge(input: {
+  userId: string;
+  friendUserId: string;
+  createdAt: string;
+}): StoredUserFriendEdge {
+  return {
+    PK: makeUserPk(input.userId),
+    SK: `FRIEND#${input.friendUserId}`,
+    entityType: 'USER_FRIEND_EDGE',
+    userId: input.userId,
+    friendUserId: input.friendUserId,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+function makeFriendRequest(input: {
+  ownerUserId: string;
+  requesterUserId: string;
+  targetUserId: string;
+  direction: 'INCOMING' | 'OUTGOING';
+  createdAt: string;
+}): StoredUserFriendRequest {
+  const sk =
+    input.direction === 'INCOMING'
+      ? `FRIEND_REQUEST#FROM#${input.requesterUserId}`
+      : `FRIEND_REQUEST#TO#${input.targetUserId}`;
+
+  return {
+    PK: makeUserPk(input.ownerUserId),
+    SK: sk,
+    entityType: 'USER_FRIEND_REQUEST',
+    requesterUserId: input.requesterUserId,
+    targetUserId: input.targetUserId,
+    direction: input.direction,
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
   };
@@ -170,6 +240,7 @@ function makeReport(input: {
     locationCode: input.locationCode,
     status: input.status,
     priority: input.priority,
+    mediaAssets: [],
     mediaUrls: input.mediaUrls,
     assignedOfficerId: input.assignedOfficerId,
     deletedAt: null,
@@ -284,7 +355,8 @@ async function batchWriteAll<T extends object>(
 
 async function main(): Promise<void> {
   const { config } = createDynamoClients();
-  const passwordHash = await hash(PASSWORD, config.bcryptRounds);
+  const bcrypt = await loadBcrypt();
+  const passwordHash = await bcrypt.hash(PASSWORD, config.bcryptRounds);
 
   const users: StoredUser[] = [
     makeUser({
@@ -339,6 +411,74 @@ async function main(): Promise<void> {
       locationCode: LOCATIONS.ward1,
       createdAt: '2026-03-17T06:20:00.000Z',
       passwordHash,
+    }),
+    makeUser({
+      id: FIXTURE_IDS.citizenC,
+      phone: '0901000006',
+      email: 'citizen.c@smartcity.local',
+      fullName: 'Vo Thi Citizen C',
+      role: 'CITIZEN',
+      locationCode: LOCATIONS.ward2,
+      createdAt: '2026-03-17T06:22:00.000Z',
+      passwordHash,
+    }),
+  ];
+
+  const identityClaims: StoredUserIdentityClaim[] = users.flatMap((user) => {
+    const claims: StoredUserIdentityClaim[] = [];
+
+    if (user.phone) {
+      claims.push(
+        makeIdentityClaim({
+          userId: user.userId,
+          identityType: 'PHONE',
+          identityValue: user.phone,
+          createdAt: user.createdAt,
+        }),
+      );
+    }
+
+    if (user.email) {
+      claims.push(
+        makeIdentityClaim({
+          userId: user.userId,
+          identityType: 'EMAIL',
+          identityValue: user.email,
+          createdAt: user.createdAt,
+        }),
+      );
+    }
+
+    return claims;
+  });
+
+  const friendEdges: StoredUserFriendEdge[] = [
+    makeFriendEdge({
+      userId: FIXTURE_IDS.citizenA,
+      friendUserId: FIXTURE_IDS.citizenB,
+      createdAt: '2026-03-17T07:30:00.000Z',
+    }),
+    makeFriendEdge({
+      userId: FIXTURE_IDS.citizenB,
+      friendUserId: FIXTURE_IDS.citizenA,
+      createdAt: '2026-03-17T07:30:00.000Z',
+    }),
+  ];
+
+  const friendRequests: StoredUserFriendRequest[] = [
+    makeFriendRequest({
+      ownerUserId: FIXTURE_IDS.citizenA,
+      requesterUserId: FIXTURE_IDS.citizenC,
+      targetUserId: FIXTURE_IDS.citizenA,
+      direction: 'INCOMING',
+      createdAt: '2026-03-17T07:35:00.000Z',
+    }),
+    makeFriendRequest({
+      ownerUserId: FIXTURE_IDS.citizenC,
+      requesterUserId: FIXTURE_IDS.citizenC,
+      targetUserId: FIXTURE_IDS.citizenA,
+      direction: 'OUTGOING',
+      createdAt: '2026-03-17T07:35:00.000Z',
     }),
   ];
 
@@ -480,6 +620,10 @@ async function main(): Promise<void> {
     FIXTURE_IDS.citizenA,
     FIXTURE_IDS.wardOfficer,
   );
+  const friendDmConversationId = makeDmConversationId(
+    FIXTURE_IDS.citizenA,
+    FIXTURE_IDS.citizenB,
+  );
   const messages: StoredMessage[] = [
     makeMessage({
       id: FIXTURE_IDS.groupMessage1,
@@ -543,6 +687,31 @@ async function main(): Promise<void> {
       replyTo: FIXTURE_IDS.dmMessage1,
       sentAt: '2026-03-17T08:25:00.000Z',
     }),
+    makeMessage({
+      id: FIXTURE_IDS.friendDmMessage1,
+      conversationId: friendDmConversationId,
+      senderId: FIXTURE_IDS.citizenA,
+      senderName: 'Le Thi Citizen A',
+      type: 'TEXT',
+      content: JSON.stringify({
+        text: 'Chao ban, minh vua gui loi moi ket ban.',
+        mention: [],
+      }),
+      sentAt: '2026-03-17T08:26:00.000Z',
+    }),
+    makeMessage({
+      id: FIXTURE_IDS.friendDmMessage2,
+      conversationId: friendDmConversationId,
+      senderId: FIXTURE_IDS.citizenB,
+      senderName: 'Pham Van Citizen B',
+      type: 'TEXT',
+      content: JSON.stringify({
+        text: 'Da nhan, minh thay thong bao su co ben phuong 1.',
+        mention: [],
+      }),
+      replyTo: FIXTURE_IDS.friendDmMessage1,
+      sentAt: '2026-03-17T08:28:00.000Z',
+    }),
   ];
 
   const messageRefs: StoredMessageRef[] = messages.map((message) =>
@@ -600,9 +769,34 @@ async function main(): Promise<void> {
       isGroup: false,
       updatedAt: '2026-03-17T08:25:00.000Z',
     }),
+    makeConversationSummary({
+      userId: FIXTURE_IDS.citizenA,
+      conversationId: friendDmConversationId,
+      groupName: 'Pham Van Citizen B',
+      lastMessagePreview: 'Da nhan, minh thay thong bao su co ben phuong 1.',
+      lastSenderName: 'Pham Van Citizen B',
+      unreadCount: 1,
+      isGroup: false,
+      updatedAt: '2026-03-17T08:28:00.000Z',
+    }),
+    makeConversationSummary({
+      userId: FIXTURE_IDS.citizenB,
+      conversationId: friendDmConversationId,
+      groupName: 'Le Thi Citizen A',
+      lastMessagePreview: 'Da nhan, minh thay thong bao su co ben phuong 1.',
+      lastSenderName: 'Pham Van Citizen B',
+      unreadCount: 0,
+      isGroup: false,
+      updatedAt: '2026-03-17T08:28:00.000Z',
+    }),
   ];
 
-  await batchWriteAll(config.dynamodbUsersTableName, users);
+  await batchWriteAll(config.dynamodbUsersTableName, [
+    ...users,
+    ...identityClaims,
+    ...friendEdges,
+    ...friendRequests,
+  ]);
   await batchWriteAll(config.dynamodbGroupsTableName, groups);
   await batchWriteAll(config.dynamodbMembershipsTableName, memberships);
   await batchWriteAll(config.dynamodbReportsTableName, reports);
@@ -613,7 +807,9 @@ async function main(): Promise<void> {
   await batchWriteAll(config.dynamodbConversationsTableName, conversations);
 
   console.log('Seed complete:');
-  console.log(`  Users: ${users.length} -> ${config.dynamodbUsersTableName}`);
+  console.log(
+    `  Users: ${users.length} + claims ${identityClaims.length} + friends ${friendEdges.length} + requests ${friendRequests.length} -> ${config.dynamodbUsersTableName}`,
+  );
   console.log(
     `  Groups: ${groups.length} -> ${config.dynamodbGroupsTableName}`,
   );
@@ -630,11 +826,12 @@ async function main(): Promise<void> {
     `  Conversations: ${conversations.length} -> ${config.dynamodbConversationsTableName}`,
   );
   console.log('Seeded accounts:');
-  console.log('  admin@smartcity.local / Password123!');
-  console.log('  province.officer@smartcity.local / Password123!');
-  console.log('  ward.officer@smartcity.local / Password123!');
-  console.log('  citizen.a@smartcity.local / Password123!');
-  console.log('  citizen.b@smartcity.local / Password123!');
+  console.log('  admin@smartcity.local / Ums@2026Secure1');
+  console.log('  province.officer@smartcity.local / Ums@2026Secure1');
+  console.log('  ward.officer@smartcity.local / Ums@2026Secure1');
+  console.log('  citizen.a@smartcity.local / Ums@2026Secure1');
+  console.log('  citizen.b@smartcity.local / Ums@2026Secure1');
+  console.log('  citizen.c@smartcity.local / Ums@2026Secure1');
 }
 
 void main();

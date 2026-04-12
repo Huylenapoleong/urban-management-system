@@ -12,7 +12,7 @@ NestJS backend for SmartCity OTT using six DynamoDB tables on AWS.
 
 ## Modules
 
-- `auth`: citizen registration, login, refresh token, logout, current user
+- `auth`: citizen registration/login, OTP-based register/login flows, refresh token, logout, password change/reset, current user
 - `users`: self profile, user listing, staff creation, status update, presence lookup, push device registry
 - `groups`: group CRUD, membership management, join/leave
 - `conversations`: inbox, direct messages, group messages, realtime chat, mark as read, audit, archive/mute/pin preferences
@@ -63,6 +63,23 @@ Important variables:
 - `CHAT_OUTBOX_SHARD_COUNT=8`
 - `PUSH_PROVIDER=log`
 - `PUSH_WEBHOOK_URL` optional bridge endpoint when `PUSH_PROVIDER=webhook`
+- `AUTH_OTP_PROVIDER=log`
+- `AUTH_OTP_WEBHOOK_URL` optional bridge endpoint when `AUTH_OTP_PROVIDER=webhook`
+- `AUTH_OTP_SMTP_HOST=smtp.gmail.com`
+- `AUTH_OTP_SMTP_PORT=465`
+- `AUTH_OTP_SMTP_SECURE=true`
+- `AUTH_OTP_SMTP_USERNAME=your-email@gmail.com`
+- `AUTH_OTP_SMTP_PASSWORD=your-app-password`
+- `AUTH_OTP_SMTP_FROM=Urban Management <your-email@gmail.com>`
+- `AUTH_OTP_SMTP_HELO` optional SMTP HELO host
+- `AUTH_OTP_CODE_LENGTH=6`
+- `AUTH_OTP_TTL_SECONDS=300`
+- `AUTH_OTP_RESEND_COOLDOWN_SECONDS=60`
+- `AUTH_OTP_MAX_ATTEMPTS=5`
+- `AUTH_OTP_REQUEST_RATE_LIMIT_WINDOW_SECONDS=3600`
+- `AUTH_OTP_REQUEST_RATE_LIMIT_MAX_PER_WINDOW=10`
+- `AUTH_OTP_REDIS_LOCK_SECONDS=5`
+- `AUTH_REGISTER_DRAFT_TTL_SECONDS=900`
 - `PUSH_SKIP_ACTIVE_USERS=true`
 - `PUSH_OUTBOX_POLL_INTERVAL_MS=4000`
 - `PUSH_OUTBOX_BATCH_SIZE=100`
@@ -74,9 +91,21 @@ Important variables:
 - `UPLOAD_MAX_FILE_SIZE_BYTES=10485760`
 - `JWT_ACCESS_SECRET=change-me-access-secret`
 - `JWT_REFRESH_SECRET=change-me-refresh-secret`
+- `PASSWORD_MIN_LENGTH=10`
+- `PASSWORD_MAX_LENGTH=64`
+- `PASSWORD_MIN_CHARACTER_CLASSES=3`
+- `PASSWORD_REQUIRE_SYMBOL=false`
+- `PASSWORD_PRIVILEGED_MIN_LENGTH=12`
+- `PASSWORD_PRIVILEGED_MIN_CHARACTER_CLASSES=4`
+- `PASSWORD_PRIVILEGED_REQUIRE_SYMBOL=true`
+- `PASSWORD_BLOCKLIST_ENABLED=true`
+- `PASSWORD_BLOCKLIST_TERMS` optional extra comma-separated weak terms
 - `CHAT_MESSAGE_RATE_LIMIT_WINDOW_SECONDS=10`
 - `CHAT_MESSAGE_RATE_LIMIT_MAX_PER_WINDOW=20`
 - `RETENTION_EXPIRED_SESSION_GRACE_DAYS=30`
+- `RETENTION_DISMISSED_SESSION_DAYS=14`
+- `RETENTION_AUTH_EMAIL_OTP_DAYS=2`
+- `RETENTION_AUTH_REGISTER_DRAFT_DAYS=2`
 - `RETENTION_REVOKED_REFRESH_TOKEN_GRACE_DAYS=30`
 - `RETENTION_CHAT_OUTBOX_DAYS=7`
 - `RETENTION_PUSH_OUTBOX_DAYS=7`
@@ -108,9 +137,9 @@ AWS credentials:
 - If needed, add `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` to `apps/api/.env`.
 - Only set `DYNAMODB_ENDPOINT` when connecting to DynamoDB Local or another custom endpoint.
 - Optional upload vars: `S3_PUBLIC_BASE_URL`, `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `UPLOAD_ALLOWED_MIME_TYPES`.
-- Redis is optional for local single-instance development; if `REDIS_URL` is unset the API falls back to in-memory presence and local outbox locking.
+- Redis is optional for local single-instance development; if `REDIS_URL` is unset the API falls back to in-memory presence and local outbox locking, and OTP still works with DynamoDB cooldown/attempt guards.
 - `CORS_ORIGIN` is a comma-separated exact allowlist for browser origins; requests without an `Origin` header, such as server-to-server calls or Postman, are still accepted.
-- In production, the API fails fast on unsafe config such as default JWT secrets, identical access/refresh secrets, wildcard `CORS_ORIGIN`, or `PUSH_PROVIDER=webhook` without `PUSH_WEBHOOK_URL`.
+- In production, the API fails fast on unsafe config such as default JWT secrets, identical access/refresh secrets, wildcard `CORS_ORIGIN`, `PUSH_PROVIDER=webhook` without `PUSH_WEBHOOK_URL`, `AUTH_OTP_PROVIDER=webhook` without `AUTH_OTP_WEBHOOK_URL`, or `AUTH_OTP_PROVIDER=smtp` without required SMTP settings.
 
 ## AWS DynamoDB
 
@@ -170,11 +199,11 @@ Seeded message data also writes `MESSAGE_REF` records into the `Messages` table 
 
 Seeded accounts all use the same password:
 
-- `admin@smartcity.local` / `Password123!`
-- `province.officer@smartcity.local` / `Password123!`
-- `ward.officer@smartcity.local` / `Password123!`
-- `citizen.a@smartcity.local` / `Password123!`
-- `citizen.b@smartcity.local` / `Password123!`
+- `admin@smartcity.local` / `Ums@2026Secure1`
+- `province.officer@smartcity.local` / `Ums@2026Secure1`
+- `ward.officer@smartcity.local` / `Ums@2026Secure1`
+- `citizen.a@smartcity.local` / `Ums@2026Secure1`
+- `citizen.b@smartcity.local` / `Ums@2026Secure1`
 
 ## Message Migration
 
@@ -212,15 +241,40 @@ Recommended client behavior:
 - `message.send`: only retry when reusing the same `clientMessageId` for the same logical message.
 - `message.update` and `message.delete`: safe to retry only when the client can tolerate duplicate socket events by `eventId`.
 
-## Auth Sessions
+## Auth Sessions and OTP
 
 - Refresh tokens are persisted as hashed session records inside the `Users` table under the same `USER#<id>` partition.
 - `POST /api/auth/refresh` rotates the refresh session and revokes the previous refresh token.
 - `POST /api/auth/logout` revokes the refresh session identified by the provided refresh token.
-- `GET /api/auth/sessions` lists non-expired sessions for the current user and marks the active session with `isCurrent=true`.
+- `GET /api/auth/sessions` lists active sessions and recent session history for the current user and marks the active session with `isCurrent=true`.
 - `DELETE /api/auth/sessions/:sessionId` revokes one specific session and disconnects its sockets immediately.
+- `DELETE /api/auth/sessions/:sessionId/history` hides one revoked or expired session from the current user's security history (`dismissedAt`).
 - `POST /api/auth/logout-all` revokes every non-expired session for the current user and disconnects all of their sockets immediately.
 - `POST /api/auth/register`, `POST /api/auth/login`, and `POST /api/auth/refresh` capture optional session metadata from `User-Agent`, `X-Device-Id`, `X-App-Variant`, and client IP.
+- OTP-based auth endpoints:
+  - `POST /api/auth/register/request-otp`
+  - `POST /api/auth/register/verify-otp`
+  - `POST /api/auth/login/request-otp`
+  - `POST /api/auth/login/verify-otp`
+  - `POST /api/auth/password/forgot/request`
+  - `POST /api/auth/password/forgot/confirm`
+  - `POST /api/auth/password/change/request-otp`
+  - `POST /api/auth/password/change`
+- OTP delivery providers:
+  - `log`: write OTP to server log (dev/local)
+  - `webhook`: forward OTP payload to external mail service
+  - `smtp`: send email directly via SMTP (supports personal mailbox + app password)
+- For `webhook` and `smtp`, OTP delivery is enqueued asynchronously (Redis-backed when available, local in-process queue as fallback) so request-OTP APIs respond faster; worker retries transient delivery failures.
+- OTP safety controls:
+  - DynamoDB challenge state includes expiry, resend cooldown, and max verification attempts.
+  - when Redis is connected, OTP request flow adds a short distributed lock per `purpose+email` to reduce concurrent race conditions.
+  - when Redis is connected, OTP request flow adds per-window request rate limiting per `purpose+email`.
+- Password policy:
+  - Standard accounts: default `10-64` chars, at least `3/4` character classes.
+  - Privileged accounts (`ADMIN`, `WARD_OFFICER`, `PROVINCE_OFFICER`): default minimum `12` chars, all `4/4` classes, symbol required.
+  - New passwords are blocked when they are common/predictable or include personal identifiers (email local-part, name token, phone digits).
+- Resetting password revokes all refresh sessions and disconnects realtime sockets for that user.
+- Changing password revokes other sessions but keeps the current session active.
 - Access tokens now carry the same session id and are rejected immediately after that session is revoked.
 - Legacy access tokens without a session id are rejected immediately and must use `POST /api/auth/refresh` once to obtain a session-based token pair.
 - Legacy refresh tokens issued before the session-based rollout can still be used exactly once to migrate into a session-based token pair without forcing sign-in again.
@@ -228,7 +282,7 @@ Recommended client behavior:
 
 ## Retention Maintenance
 
-- `GET /api/maintenance/retention/preview` previews purge candidates for expired refresh sessions, expired refresh-token revocations, old chat outbox events, old push outbox events, and inbox summaries soft-deleted for longer than the configured retention window.
+- `GET /api/maintenance/retention/preview` previews purge candidates for expired refresh sessions, dismissed refresh-session history entries, expired auth OTP challenges, expired registration drafts, expired refresh-token revocations, old chat outbox events, old push outbox events, and inbox summaries soft-deleted for longer than the configured retention window.
 - `POST /api/maintenance/retention/purge` deletes those candidates.
 - When `RETENTION_MAINTENANCE_ENABLED=true`, an automatic scheduler runs the same purge flow every `RETENTION_MAINTENANCE_INTERVAL_MS`.
 - If Redis is configured and connected, the automatic scheduler uses a Redis lock with `RETENTION_MAINTENANCE_LOCK_TTL_MS` to avoid duplicate runs across multiple API instances.
@@ -460,7 +514,3 @@ Notes:
 
 - `GET /api/conversations/:conversationId/messages` now returns aggregate sender-facing state fields when available: `recipientCount`, `deliveredCount`, `readByCount`, `deliveryState`, `lastReadAt`.
 - These states are server-side aggregates derived from conversation summaries and read markers, not device-level acknowledgements.
-
-
-
-

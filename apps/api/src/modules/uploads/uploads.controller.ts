@@ -1,6 +1,8 @@
 import {
   Body,
   Controller,
+  Delete,
+  Get,
   Post,
   UploadedFile,
   UseInterceptors,
@@ -18,9 +20,17 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { AuthenticatedUser } from '@urban/shared-types';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiCreatedEnvelopeResponse } from '../../common/openapi/swagger-envelope';
+import { ApiOkEnvelopeResponse } from '../../common/openapi/swagger-envelope';
 import {
+  DeleteUploadRequestDto,
+  DeleteUploadResultDto,
   ErrorResponseDto,
+  PresignDownloadRequestDto,
+  PresignDownloadResultDto,
+  PresignUploadRequestDto,
+  PresignUploadResultDto,
   UploadMediaRequestDto,
+  UploadLimitsDto,
   UploadedAssetDto,
 } from '../../common/openapi/swagger.models';
 import { UploadsService } from './uploads.service';
@@ -60,5 +70,49 @@ export class UploadsController {
     @UploadedFile() file?: UploadedBinaryFile,
   ) {
     return this.uploadsService.uploadMedia(user, body, file);
+  }
+
+  @Get('limits')
+  @ApiOperation({ summary: 'Get upload limits and accepted mime types' })
+  @ApiOkEnvelopeResponse(UploadLimitsDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  getUploadLimits() {
+    return this.uploadsService.getUploadLimits();
+  }
+
+  @Delete('media')
+  @ApiOperation({ summary: 'Delete an uploaded media file by key' })
+  @ApiBody({ type: DeleteUploadRequestDto })
+  @ApiOkEnvelopeResponse(DeleteUploadResultDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  deleteMedia(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: DeleteUploadRequestDto,
+  ) {
+    return this.uploadsService.deleteMedia(user, body);
+  }
+
+  @Post('presign/upload')
+  @ApiOperation({ summary: 'Create a presigned upload URL for S3' })
+  @ApiBody({ type: PresignUploadRequestDto })
+  @ApiOkEnvelopeResponse(PresignUploadResultDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  presignUpload(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: PresignUploadRequestDto,
+  ) {
+    return this.uploadsService.presignUpload(user, body);
+  }
+
+  @Post('presign/download')
+  @ApiOperation({ summary: 'Create a presigned download URL for S3' })
+  @ApiBody({ type: PresignDownloadRequestDto })
+  @ApiOkEnvelopeResponse(PresignDownloadResultDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  presignDownload(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: PresignDownloadRequestDto,
+  ) {
+    return this.uploadsService.presignDownload(user, body);
   }
 }

@@ -72,6 +72,7 @@ export class UrbanTableRepository {
               PK: pk,
               SK: sk,
             },
+            ConsistentRead: true,
           }),
         ),
       );

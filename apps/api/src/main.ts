@@ -51,7 +51,17 @@ async function bootstrap() {
   );
   app.setGlobalPrefix(config.apiPrefix);
   app.enableCors({
-    origin: config.corsOriginSetting,
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) => {
+      if (config.isCorsOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Not allowed by CORS.'));
+    },
     credentials: true,
   });
   app.useGlobalPipes(
