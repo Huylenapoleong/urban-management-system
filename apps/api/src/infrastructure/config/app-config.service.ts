@@ -6,6 +6,12 @@ loadEnvFiles();
 const DEFAULT_ACCESS_SECRET = 'dev-access-secret-change-me';
 const DEFAULT_REFRESH_SECRET = 'dev-refresh-secret-change-me';
 const ALLOWED_PUSH_PROVIDERS = new Set(['disabled', 'log', 'webhook']);
+const ALLOWED_AUTH_OTP_PROVIDERS = new Set([
+  'disabled',
+  'log',
+  'webhook',
+  'smtp',
+]);
 
 function readNumber(name: string, fallback: number): number {
   const value = process.env[name];
@@ -49,6 +55,17 @@ function readCommaSeparatedList(
   return source
     .split(',')
     .map((item) => normalizeCorsOrigin(item))
+    .filter(Boolean);
+}
+
+function readCommaSeparatedStrings(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((item) => item.trim())
     .filter(Boolean);
 }
 
@@ -112,6 +129,35 @@ export class AppConfigService {
     604800,
   );
   readonly bcryptRounds = readNumber('BCRYPT_ROUNDS', 12);
+  readonly passwordMinLength = readNumber('PASSWORD_MIN_LENGTH', 10);
+  readonly passwordMaxLength = readNumber('PASSWORD_MAX_LENGTH', 64);
+  readonly passwordMinCharacterClasses = readNumber(
+    'PASSWORD_MIN_CHARACTER_CLASSES',
+    3,
+  );
+  readonly passwordRequireSymbol = readBoolean(
+    'PASSWORD_REQUIRE_SYMBOL',
+    false,
+  );
+  readonly passwordPrivilegedMinLength = readNumber(
+    'PASSWORD_PRIVILEGED_MIN_LENGTH',
+    12,
+  );
+  readonly passwordPrivilegedMinCharacterClasses = readNumber(
+    'PASSWORD_PRIVILEGED_MIN_CHARACTER_CLASSES',
+    4,
+  );
+  readonly passwordPrivilegedRequireSymbol = readBoolean(
+    'PASSWORD_PRIVILEGED_REQUIRE_SYMBOL',
+    true,
+  );
+  readonly passwordBlocklistEnabled = readBoolean(
+    'PASSWORD_BLOCKLIST_ENABLED',
+    true,
+  );
+  readonly passwordBlocklistTerms = readCommaSeparatedStrings(
+    process.env.PASSWORD_BLOCKLIST_TERMS,
+  ).map((term) => term.toLowerCase());
   readonly corsOrigins = readCommaSeparatedList(process.env.CORS_ORIGIN, [
     'http://localhost:3000',
     'http://localhost:8081',
@@ -145,6 +191,64 @@ export class AppConfigService {
     .trim()
     .toLowerCase();
   readonly pushWebhookUrl = process.env.PUSH_WEBHOOK_URL || undefined;
+  readonly authOtpProvider = (process.env.AUTH_OTP_PROVIDER ?? 'log')
+    .trim()
+    .toLowerCase();
+  readonly authOtpWebhookUrl = process.env.AUTH_OTP_WEBHOOK_URL || undefined;
+  readonly authOtpSmtpHost = process.env.AUTH_OTP_SMTP_HOST || undefined;
+  readonly authOtpSmtpPort = readNumber('AUTH_OTP_SMTP_PORT', 465);
+  readonly authOtpSmtpSecure = readBoolean('AUTH_OTP_SMTP_SECURE', true);
+  readonly authOtpSmtpUsername =
+    process.env.AUTH_OTP_SMTP_USERNAME || undefined;
+  readonly authOtpSmtpPassword =
+    process.env.AUTH_OTP_SMTP_PASSWORD || undefined;
+  readonly authOtpSmtpFrom = process.env.AUTH_OTP_SMTP_FROM || undefined;
+  readonly authOtpSmtpHelo = process.env.AUTH_OTP_SMTP_HELO || undefined;
+  readonly authOtpCodeLength = readNumber('AUTH_OTP_CODE_LENGTH', 6);
+  readonly authOtpTtlSeconds = readNumber('AUTH_OTP_TTL_SECONDS', 300);
+  readonly authOtpResendCooldownSeconds = readNumber(
+    'AUTH_OTP_RESEND_COOLDOWN_SECONDS',
+    60,
+  );
+  readonly authOtpMaxAttempts = readNumber('AUTH_OTP_MAX_ATTEMPTS', 5);
+  readonly authOtpRequestRateLimitWindowSeconds = readNumber(
+    'AUTH_OTP_REQUEST_RATE_LIMIT_WINDOW_SECONDS',
+    3600,
+  );
+  readonly authOtpRequestRateLimitMaxPerWindow = readNumber(
+    'AUTH_OTP_REQUEST_RATE_LIMIT_MAX_PER_WINDOW',
+    10,
+  );
+  readonly authOtpRedisLockSeconds = readNumber(
+    'AUTH_OTP_REDIS_LOCK_SECONDS',
+    5,
+  );
+  readonly authRegisterDraftTtlSeconds = readNumber(
+    'AUTH_REGISTER_DRAFT_TTL_SECONDS',
+    900,
+  );
+  readonly authLoginMaxAttempts = readNumber('AUTH_LOGIN_MAX_ATTEMPTS', 5);
+  readonly authLoginWindowSeconds = readNumber(
+    'AUTH_LOGIN_WINDOW_SECONDS',
+    900,
+  );
+  readonly authLoginLockSeconds = readNumber('AUTH_LOGIN_LOCK_SECONDS', 900);
+  readonly authRegisterMaxAttempts = readNumber(
+    'AUTH_REGISTER_MAX_ATTEMPTS',
+    5,
+  );
+  readonly authRegisterWindowSeconds = readNumber(
+    'AUTH_REGISTER_WINDOW_SECONDS',
+    900,
+  );
+  readonly authRegisterLockSeconds = readNumber(
+    'AUTH_REGISTER_LOCK_SECONDS',
+    900,
+  );
+  readonly uploadPresignTtlSeconds = readNumber(
+    'UPLOAD_PRESIGN_TTL_SECONDS',
+    300,
+  );
   readonly pushSkipActiveUsers = readBoolean('PUSH_SKIP_ACTIVE_USERS', true);
   readonly pushOutboxPollIntervalMs = readNumber(
     'PUSH_OUTBOX_POLL_INTERVAL_MS',
@@ -163,6 +267,18 @@ export class AppConfigService {
   readonly retentionExpiredSessionGraceDays = readNumber(
     'RETENTION_EXPIRED_SESSION_GRACE_DAYS',
     30,
+  );
+  readonly retentionDismissedSessionDays = readNumber(
+    'RETENTION_DISMISSED_SESSION_DAYS',
+    14,
+  );
+  readonly retentionAuthEmailOtpDays = readNumber(
+    'RETENTION_AUTH_EMAIL_OTP_DAYS',
+    2,
+  );
+  readonly retentionAuthRegisterDraftDays = readNumber(
+    'RETENTION_AUTH_REGISTER_DRAFT_DAYS',
+    2,
   );
   readonly retentionRevokedRefreshTokenGraceDays = readNumber(
     'RETENTION_REVOKED_REFRESH_TOKEN_GRACE_DAYS',
@@ -313,6 +429,20 @@ export class AppConfigService {
     this.ensurePositive('JWT_ACCESS_TTL_SECONDS', this.accessTokenTtlSeconds);
     this.ensurePositive('JWT_REFRESH_TTL_SECONDS', this.refreshTokenTtlSeconds);
     this.ensurePositive('BCRYPT_ROUNDS', this.bcryptRounds);
+    this.ensurePositive('PASSWORD_MIN_LENGTH', this.passwordMinLength);
+    this.ensurePositive('PASSWORD_MAX_LENGTH', this.passwordMaxLength);
+    this.ensurePositive(
+      'PASSWORD_MIN_CHARACTER_CLASSES',
+      this.passwordMinCharacterClasses,
+    );
+    this.ensurePositive(
+      'PASSWORD_PRIVILEGED_MIN_LENGTH',
+      this.passwordPrivilegedMinLength,
+    );
+    this.ensurePositive(
+      'PASSWORD_PRIVILEGED_MIN_CHARACTER_CLASSES',
+      this.passwordPrivilegedMinCharacterClasses,
+    );
     this.ensurePositive(
       'CHAT_MESSAGE_RATE_LIMIT_WINDOW_SECONDS',
       this.chatMessageRateLimitWindowSeconds,
@@ -332,6 +462,52 @@ export class AppConfigService {
     this.ensurePositive(
       'CHAT_PRESENCE_LAST_SEEN_TTL_SECONDS',
       this.chatPresenceLastSeenTtlSeconds,
+    );
+    this.ensurePositive('AUTH_OTP_CODE_LENGTH', this.authOtpCodeLength);
+    this.ensurePositive('AUTH_OTP_SMTP_PORT', this.authOtpSmtpPort);
+    this.ensurePositive('AUTH_OTP_TTL_SECONDS', this.authOtpTtlSeconds);
+    this.ensurePositive(
+      'AUTH_OTP_RESEND_COOLDOWN_SECONDS',
+      this.authOtpResendCooldownSeconds,
+    );
+    this.ensurePositive('AUTH_OTP_MAX_ATTEMPTS', this.authOtpMaxAttempts);
+    this.ensurePositive(
+      'AUTH_OTP_REQUEST_RATE_LIMIT_WINDOW_SECONDS',
+      this.authOtpRequestRateLimitWindowSeconds,
+    );
+    this.ensurePositive(
+      'AUTH_OTP_REQUEST_RATE_LIMIT_MAX_PER_WINDOW',
+      this.authOtpRequestRateLimitMaxPerWindow,
+    );
+    this.ensurePositive(
+      'AUTH_OTP_REDIS_LOCK_SECONDS',
+      this.authOtpRedisLockSeconds,
+    );
+    this.ensurePositive(
+      'AUTH_REGISTER_DRAFT_TTL_SECONDS',
+      this.authRegisterDraftTtlSeconds,
+    );
+    this.ensurePositive('AUTH_LOGIN_MAX_ATTEMPTS', this.authLoginMaxAttempts);
+    this.ensurePositive(
+      'AUTH_LOGIN_WINDOW_SECONDS',
+      this.authLoginWindowSeconds,
+    );
+    this.ensurePositive('AUTH_LOGIN_LOCK_SECONDS', this.authLoginLockSeconds);
+    this.ensurePositive(
+      'AUTH_REGISTER_MAX_ATTEMPTS',
+      this.authRegisterMaxAttempts,
+    );
+    this.ensurePositive(
+      'AUTH_REGISTER_WINDOW_SECONDS',
+      this.authRegisterWindowSeconds,
+    );
+    this.ensurePositive(
+      'AUTH_REGISTER_LOCK_SECONDS',
+      this.authRegisterLockSeconds,
+    );
+    this.ensurePositive(
+      'UPLOAD_PRESIGN_TTL_SECONDS',
+      this.uploadPresignTtlSeconds,
     );
     this.ensurePositive(
       'CHAT_OUTBOX_POLL_INTERVAL_MS',
@@ -357,10 +533,63 @@ export class AppConfigService {
       'UPLOAD_MAX_FILE_SIZE_BYTES',
       this.uploadMaxFileSizeBytes,
     );
+    this.ensurePositive(
+      'RETENTION_DISMISSED_SESSION_DAYS',
+      this.retentionDismissedSessionDays,
+    );
+    this.ensurePositive(
+      'RETENTION_AUTH_EMAIL_OTP_DAYS',
+      this.retentionAuthEmailOtpDays,
+    );
+    this.ensurePositive(
+      'RETENTION_AUTH_REGISTER_DRAFT_DAYS',
+      this.retentionAuthRegisterDraftDays,
+    );
 
     if (this.chatPresenceHeartbeatSeconds >= this.chatPresenceTtlSeconds) {
       throw new Error(
         'CHAT_PRESENCE_HEARTBEAT_SECONDS must be lower than CHAT_PRESENCE_TTL_SECONDS.',
+      );
+    }
+
+    if (this.passwordMinLength < 8) {
+      throw new Error('PASSWORD_MIN_LENGTH must be at least 8.');
+    }
+
+    if (this.passwordMaxLength < this.passwordMinLength) {
+      throw new Error(
+        'PASSWORD_MAX_LENGTH must be greater than or equal to PASSWORD_MIN_LENGTH.',
+      );
+    }
+
+    if (this.passwordMaxLength > 72) {
+      throw new Error(
+        'PASSWORD_MAX_LENGTH must not exceed 72 because of bcrypt input limits.',
+      );
+    }
+
+    if (
+      this.passwordMinCharacterClasses < 1 ||
+      this.passwordMinCharacterClasses > 4
+    ) {
+      throw new Error(
+        'PASSWORD_MIN_CHARACTER_CLASSES must be between 1 and 4.',
+      );
+    }
+
+    if (this.passwordPrivilegedMinLength < this.passwordMinLength) {
+      throw new Error(
+        'PASSWORD_PRIVILEGED_MIN_LENGTH must be greater than or equal to PASSWORD_MIN_LENGTH.',
+      );
+    }
+
+    if (
+      this.passwordPrivilegedMinCharacterClasses <
+        this.passwordMinCharacterClasses ||
+      this.passwordPrivilegedMinCharacterClasses > 4
+    ) {
+      throw new Error(
+        'PASSWORD_PRIVILEGED_MIN_CHARACTER_CLASSES must be between PASSWORD_MIN_CHARACTER_CLASSES and 4.',
       );
     }
 
@@ -380,6 +609,41 @@ export class AppConfigService {
       throw new Error(
         'PUSH_WEBHOOK_URL is required when PUSH_PROVIDER=webhook.',
       );
+    }
+
+    if (!ALLOWED_AUTH_OTP_PROVIDERS.has(this.authOtpProvider)) {
+      throw new Error(
+        'AUTH_OTP_PROVIDER must be one of: disabled, log, webhook, smtp.',
+      );
+    }
+
+    if (this.authOtpProvider === 'webhook' && !this.authOtpWebhookUrl) {
+      throw new Error(
+        'AUTH_OTP_WEBHOOK_URL is required when AUTH_OTP_PROVIDER=webhook.',
+      );
+    }
+
+    if (this.authOtpProvider === 'smtp') {
+      if (!this.authOtpSmtpHost) {
+        throw new Error(
+          'AUTH_OTP_SMTP_HOST is required when AUTH_OTP_PROVIDER=smtp.',
+        );
+      }
+      if (!this.authOtpSmtpUsername) {
+        throw new Error(
+          'AUTH_OTP_SMTP_USERNAME is required when AUTH_OTP_PROVIDER=smtp.',
+        );
+      }
+      if (!this.authOtpSmtpPassword) {
+        throw new Error(
+          'AUTH_OTP_SMTP_PASSWORD is required when AUTH_OTP_PROVIDER=smtp.',
+        );
+      }
+      if (!this.authOtpSmtpFrom) {
+        throw new Error(
+          'AUTH_OTP_SMTP_FROM is required when AUTH_OTP_PROVIDER=smtp.',
+        );
+      }
     }
 
     if (!this.accessTokenSecret.trim()) {

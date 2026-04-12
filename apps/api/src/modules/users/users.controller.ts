@@ -29,13 +29,20 @@ import {
   ApiOkEnvelopeResponse,
 } from '../../common/openapi/swagger-envelope';
 import {
+  FriendActionResultDto,
+  FriendRequestItemDto,
+  FriendRequestQueryDto,
+  FriendUserItemDto,
+  SearchUsersForChatQueryDto,
   CreateUserRequestDto,
   ErrorResponseDto,
+  ListFriendsQueryDto,
   ListUsersQueryDto,
   PresenceStateDto,
   PushDeviceDto,
   PushDeviceRemovalResultDto,
   RegisterPushDeviceRequestDto,
+  UserDirectoryItemDto,
   UpdateProfileRequestDto,
   UpdateUserStatusRequestDto,
   UserProfileDto,
@@ -69,6 +76,122 @@ export class UsersController {
   @ApiOkEnvelopeResponse(PushDeviceDto, { isArray: true })
   listMyPushDevices(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.listPushDevices(user);
+  }
+
+  @Get('me/friends')
+  @ApiOperation({ summary: 'List my friends' })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkEnvelopeResponse(FriendUserItemDto, { isArray: true })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  listMyFriends(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListFriendsQueryDto,
+  ) {
+    return this.usersService.listFriends(
+      user,
+      query as Record<string, unknown>,
+    );
+  }
+
+  @Get('me/friend-requests')
+  @ApiOperation({ summary: 'List my incoming/outgoing friend requests' })
+  @ApiQuery({
+    name: 'direction',
+    required: false,
+    enum: ['INCOMING', 'OUTGOING'],
+  })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkEnvelopeResponse(FriendRequestItemDto, { isArray: true })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  listMyFriendRequests(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: FriendRequestQueryDto,
+  ) {
+    return this.usersService.listFriendRequests(
+      user,
+      query as Record<string, unknown>,
+    );
+  }
+
+  @Post('me/friends/:userId/request')
+  @ApiOperation({ summary: 'Send a friend request' })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiCreatedEnvelopeResponse(FriendRequestItemDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  sendFriendRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.sendFriendRequest(user, userId);
+  }
+
+  @Post('me/friend-requests/:userId/accept')
+  @ApiOperation({ summary: 'Accept incoming friend request' })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(FriendUserItemDto)
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  acceptFriendRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.acceptFriendRequest(user, userId);
+  }
+
+  @Post('me/friend-requests/:userId/reject')
+  @ApiOperation({ summary: 'Reject incoming friend request' })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(FriendActionResultDto)
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  rejectFriendRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.rejectIncomingFriendRequest(user, userId);
+  }
+
+  @Post('me/friend-requests/:userId/cancel')
+  @ApiOperation({ summary: 'Cancel outgoing friend request' })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(FriendActionResultDto)
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  cancelFriendRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.cancelOutgoingFriendRequest(user, userId);
+  }
+
+  @Delete('me/friends/:userId')
+  @ApiOperation({ summary: 'Remove a friend' })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(FriendActionResultDto)
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  removeFriend(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.removeFriend(user, userId);
+  }
+
+  @Get('discover')
+  @ApiOperation({ summary: 'Search users for chat/friend actions' })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'mode', required: false, enum: ['all', 'chat', 'friend'] })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkEnvelopeResponse(UserDirectoryItemDto, { isArray: true })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  discoverUsers(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SearchUsersForChatQueryDto,
+  ) {
+    return this.usersService.searchUsersForChatAndFriend(
+      user,
+      query as Record<string, unknown>,
+    );
   }
 
   @Post('me/push-devices')
@@ -136,6 +259,19 @@ export class UsersController {
     @Body() body: CreateUserRequestDto,
   ) {
     return this.usersService.createUser(user, body);
+  }
+
+  @Get('search')
+  @ApiOperation({ summary: 'Search user by exact phone or email' })
+  @ApiQuery({ name: 'q', type: String, description: 'Phone number or email address' })
+  @ApiOkEnvelopeResponse(UserProfileDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  searchExact(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('q') query: string,
+  ) {
+    return this.usersService.searchExact(user, query);
   }
 
   @Get(':userId/presence')

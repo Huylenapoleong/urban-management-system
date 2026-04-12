@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NextFunction, Request, Response } from 'express';
 import { createUlid } from '@urban/shared-utils';
@@ -50,12 +50,18 @@ async function bootstrap() {
     new AppSocketIoAdapter(app, config, realtimeRedisService),
   );
   app.setGlobalPrefix(config.apiPrefix);
-  // app.enableCors({
-  //   origin: config.corsOriginSetting,
-  //   credentials: true,
-  // });
   app.enableCors({
-    origin: true,
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) => {
+      if (config.isCorsOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Not allowed by CORS.'));
+    },
     credentials: true,
   });
   app.useGlobalPipes(
@@ -69,7 +75,7 @@ async function bootstrap() {
     }),
   );
   setupSwagger(app, config);
-  await app.listen(config.port);
+  await app.listen(config.port, '0.0.0.0');
 }
 
 function readRequestId(

@@ -9,6 +9,7 @@ export type UserRole = (typeof USER_ROLES)[number];
 export const USER_STATUSES: readonly [
   "PENDING_OTP",
   "ACTIVE",
+  "DEACTIVATED",
   "LOCKED",
   "DELETED",
 ];
@@ -36,6 +37,25 @@ export type MessageDeliveryState = (typeof MESSAGE_DELIVERY_STATES)[number];
 
 export const PUSH_DEVICE_PROVIDERS: readonly ["FCM", "APNS", "WEB", "WEBHOOK"];
 export type PushDeviceProvider = (typeof PUSH_DEVICE_PROVIDERS)[number];
+
+export const SESSION_SCOPES: readonly [
+  "MOBILE_APP",
+  "WEB_DESKTOP",
+  "WEB_MOBILE",
+  "UNKNOWN",
+];
+export type SessionScope = (typeof SESSION_SCOPES)[number];
+
+export const OTP_PURPOSES: readonly [
+  "REGISTER",
+  "LOGIN",
+  "FORGOT_PASSWORD",
+  "CHANGE_PASSWORD",
+  "DEACTIVATE_ACCOUNT",
+  "REACTIVATE_ACCOUNT",
+  "DELETE_ACCOUNT",
+];
+export type OtpPurpose = (typeof OTP_PURPOSES)[number];
 
 export const REPORT_CATEGORIES: readonly [
   "INFRASTRUCTURE",
@@ -89,6 +109,13 @@ export const CHAT_SOCKET_EVENTS: {
   readonly TYPING_STATE: "typing.state";
   readonly PRESENCE_SNAPSHOT: "presence.snapshot";
   readonly PRESENCE_UPDATED: "presence.updated";
+  readonly CALL_INIT: "call.init";
+  readonly CALL_ACCEPT: "call.accept";
+  readonly CALL_REJECT: "call.reject";
+  readonly CALL_END: "call.end";
+  readonly WEBRTC_OFFER: "webrtc.offer";
+  readonly WEBRTC_ANSWER: "webrtc.answer";
+  readonly WEBRTC_ICE_CANDIDATE: "webrtc.ice-candidate";
 };
 export type ChatSocketEvent =
   (typeof CHAT_SOCKET_EVENTS)[keyof typeof CHAT_SOCKET_EVENTS];
@@ -98,4 +125,3 @@ export const EMAIL_PATTERN: RegExp;
 export const LOCATION_CODE_PATTERN: RegExp;
 export const DEFAULT_PAGE_SIZE: number;
 export const MAX_PAGE_SIZE: number;
-

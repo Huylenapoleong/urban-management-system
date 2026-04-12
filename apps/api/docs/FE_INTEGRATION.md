@@ -43,6 +43,7 @@ All error responses follow this envelope:
 ```
 
 Notes:
+
 - Read `X-Request-Id` from every HTTP response and surface it in FE error reporting.
 - Treat `meta.nextCursor` as opaque.
 - Only array responses include `meta`.
@@ -50,6 +51,7 @@ Notes:
 ## Auth Flow
 
 Recommended sequence:
+
 1. `POST /auth/login` or `POST /auth/register`
 2. store `accessToken` and `refreshToken`
 3. call protected APIs with `Authorization: Bearer <accessToken>`
@@ -57,19 +59,48 @@ Recommended sequence:
 5. if refresh fails, force sign-in again
 
 Session APIs available for account/device management:
+
 - `GET /auth/sessions`
 - `DELETE /auth/sessions/:sessionId`
+- `DELETE /auth/sessions/:sessionId/history`
 - `POST /auth/logout`
 - `POST /auth/logout-all`
 
+OTP/password APIs for stronger auth:
+
+- `POST /auth/register/request-otp`
+- `POST /auth/register/verify-otp`
+- `POST /auth/login/request-otp`
+- `POST /auth/login/verify-otp`
+- `POST /auth/password/forgot/request`
+- `POST /auth/password/forgot/confirm`
+- `POST /auth/password/change/request-otp`
+- `POST /auth/password/change`
+
+OTP behavior:
+
+- OTP endpoint responses do not include OTP code.
+- Backend can deliver OTP via `log`, `webhook`, or `smtp` provider based on environment config.
+- OTP requests may return `429` due to cooldown, redis lock conflict, or per-window rate limiting.
+
 Useful client metadata headers:
+
 - `X-Device-Id`
 - `X-App-Variant`
 - `User-Agent`
 
+Session-scope behavior:
+
+- one active session per scope (`MOBILE_APP`, `WEB_DESKTOP`, `WEB_MOBILE`, `UNKNOWN`)
+- a new login in the same scope replaces the previous session
+- revoked or expired sessions can be hidden from history with `DELETE /auth/sessions/:sessionId/history`
+- sessions with `dismissedAt` are hidden from default `GET /auth/sessions`
+- successful `password/change` and `password/forgot/confirm` revoke all sessions for that user
+
 ## Pagination And Search
 
 Endpoints using cursor pagination:
+
 - `GET /users`
 - `GET /groups`
 - `GET /reports`
@@ -77,6 +108,7 @@ Endpoints using cursor pagination:
 - `GET /conversations/:conversationId/messages`
 
 Client rules:
+
 - send the returned `meta.nextCursor` back as `cursor`
 - reset cursor when any filter changes
 - keep FE filters stable while paginating
@@ -84,6 +116,7 @@ Client rules:
 ## Conversation Id Rules
 
 Use only route-safe ids in FE:
+
 - group conversation: `group:<groupId>`
 - direct message: `dm:<userId>`
 
@@ -110,16 +143,18 @@ The backend currently enforces these product rules and FE should align UI/UX wit
 ## Chat Rules
 
 For sending messages:
+
 - always send a unique `clientMessageId`
 - reuse the same `clientMessageId` only when retrying the same logical message
 - `replyTo` must be the API message `id`, not `conversationId` or `groupId`
 - `content` for `TEXT/EMOJI/SYSTEM` should be canonical JSON string, for example:
 
 ```json
-{"text":"Da tiep nhan, se cu can bo kiem tra.","mention":[]}
+{ "text": "Da tiep nhan, se cu can bo kiem tra.", "mention": [] }
 ```
 
 For deleting a conversation:
+
 - `DELETE /conversations/:conversationId` means delete from current user inbox only
 - shared messages stay intact for other participants
 - the inbox is recreated automatically when a new message arrives
@@ -129,10 +164,12 @@ For deleting a conversation:
 Namespace: `/chat`
 
 Handshake auth:
+
 - `auth.token` or `auth.accessToken` with Bearer token
 - or `Authorization` header in the handshake
 
 Client command events:
+
 - `conversation.join`
 - `conversation.leave`
 - `conversation.delete`
@@ -144,6 +181,7 @@ Client command events:
 - `typing.stop`
 
 Server push events:
+
 - `chat.ready`
 - `message.created`
 - `message.updated`
@@ -157,6 +195,7 @@ Server push events:
 - `chat.error`
 
 Client rules:
+
 - deduplicate socket side effects by `eventId`
 - deduplicate send retries by `clientMessageId`
 - rejoin active conversations after reconnect
@@ -167,11 +206,13 @@ Client rules:
 Endpoint: `POST /uploads/media` with `multipart/form-data`.
 
 Fields:
+
 - `target`: `REPORT | MESSAGE | AVATAR | GENERAL`
 - `entityId` optional
 - `file` binary
 
 Recommended FE flow:
+
 1. upload file first
 2. take `data.url` or `data.key` from response
 3. include that URL in report/message payloads
@@ -187,6 +228,7 @@ Recommended FE flow:
 - `503`: transient infra issue, retry with backoff
 
 Retry guidance:
+
 - `401`: refresh once
 - `429`: exponential backoff + jitter
 - `503`: limited retries + backoff

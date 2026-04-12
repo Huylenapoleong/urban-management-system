@@ -267,6 +267,13 @@ export class AuthorizationService {
     }
 
     if (actor.role === 'CITIZEN') {
+      if (target.role === 'CITIZEN') {
+        return (
+          this.canAccessLocationScope(actor, target.locationCode) ||
+          this.canAccessLocationScope(target, actor.locationCode)
+        );
+      }
+
       return (
         target.role !== 'CITIZEN' &&
         this.canAccessLocationScope(target, actor.locationCode)
@@ -275,6 +282,10 @@ export class AuthorizationService {
 
     if (target.role === 'CITIZEN') {
       return this.canAccessLocationScope(actor, target.locationCode);
+    }
+
+    if (this.isStaff(actor) && target.role !== 'CITIZEN') {
+      return isSameProvince(actor.locationCode, target.locationCode);
     }
 
     return (

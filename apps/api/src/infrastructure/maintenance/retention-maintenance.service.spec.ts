@@ -14,6 +14,9 @@ describe('RetentionMaintenanceService', () => {
     dynamodbUsersTableName: 'Users',
     retentionChatOutboxDays: 7,
     retentionDeletedConversationSummaryDays: 30,
+    retentionDismissedSessionDays: 14,
+    retentionAuthEmailOtpDays: 2,
+    retentionAuthRegisterDraftDays: 2,
     retentionExpiredSessionGraceDays: 30,
     retentionPushOutboxDays: 7,
     retentionRevokedRefreshTokenGraceDays: 30,
@@ -38,6 +41,8 @@ describe('RetentionMaintenanceService', () => {
           PK: 'USER#1',
           SK: 'SESSION#old',
           entityType: 'USER_REFRESH_SESSION',
+          sessionScope: 'MOBILE_APP',
+          dismissedAt: '2025-01-05T00:00:00.000Z',
           revokedAt: '2025-01-01T00:00:00.000Z',
           expiresAt: '2025-02-01T00:00:00.000Z',
         },
@@ -81,7 +86,7 @@ describe('RetentionMaintenanceService', () => {
     expect(result.buckets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          category: 'EXPIRED_REFRESH_SESSION',
+          category: 'DISMISSED_REFRESH_SESSION',
           count: 1,
           tableName: 'Users',
         }),
@@ -116,6 +121,8 @@ describe('RetentionMaintenanceService', () => {
           PK: 'USER#1',
           SK: 'SESSION#old',
           entityType: 'USER_REFRESH_SESSION',
+          sessionScope: 'MOBILE_APP',
+          dismissedAt: '2025-01-05T00:00:00.000Z',
           revokedAt: '2025-01-01T00:00:00.000Z',
           expiresAt: '2025-02-01T00:00:00.000Z',
         },

@@ -9,12 +9,20 @@ import type {
   ReportItem,
   UserProfile,
 } from '@urban/shared-types';
+import type { SessionScope } from '@urban/shared-constants';
+import type { OtpPurpose } from '@urban/shared-constants';
 
 export type StorageEntityType =
   | 'USER_PROFILE'
   | 'USER_IDENTITY_CLAIM'
+  | 'USER_FRIEND_EDGE'
+  | 'USER_FRIEND_REQUEST'
   | 'USER_REFRESH_SESSION'
+  | 'USER_SESSION_SLOT'
   | 'USER_REFRESH_TOKEN_REVOCATION'
+  | 'AUTH_IDENTITY_ATTEMPT'
+  | 'AUTH_EMAIL_OTP'
+  | 'AUTH_REGISTER_DRAFT'
   | 'USER_PUSH_DEVICE'
   | 'PUSH_OUTBOX_EVENT'
   | 'GROUP_METADATA'
@@ -55,12 +63,31 @@ export interface StoredUserIdentityClaim extends TableItemBase {
   updatedAt: string;
 }
 
+export interface StoredUserFriendEdge extends TableItemBase {
+  entityType: 'USER_FRIEND_EDGE';
+  userId: string;
+  friendUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredUserFriendRequest extends TableItemBase {
+  entityType: 'USER_FRIEND_REQUEST';
+  requesterUserId: string;
+  targetUserId: string;
+  direction: 'INCOMING' | 'OUTGOING';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoredRefreshSession extends TableItemBase {
   entityType: 'USER_REFRESH_SESSION';
   userId: string;
   sessionId: string;
+  sessionScope: SessionScope;
   tokenHash: string;
   expiresAt: string;
+  dismissedAt?: string | null;
   revokedAt: string | null;
   replacedBySessionId?: string;
   userAgent?: string;
@@ -72,12 +99,65 @@ export interface StoredRefreshSession extends TableItemBase {
   updatedAt: string;
 }
 
+export interface StoredUserSessionSlot extends TableItemBase {
+  entityType: 'USER_SESSION_SLOT';
+  userId: string;
+  sessionScope: SessionScope;
+  currentSessionId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoredRefreshTokenRevocation extends TableItemBase {
   entityType: 'USER_REFRESH_TOKEN_REVOCATION';
   userId: string;
   tokenHash: string;
   expiresAt: string;
   revokedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredAuthIdentityAttempt extends TableItemBase {
+  entityType: 'AUTH_IDENTITY_ATTEMPT';
+  purpose: 'LOGIN' | 'REGISTER';
+  identityType: 'EMAIL' | 'PHONE';
+  identityValue: string;
+  attemptCount: number;
+  firstAttemptAt: string;
+  lastAttemptAt: string;
+  lockedUntil: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredAuthEmailOtp extends TableItemBase {
+  entityType: 'AUTH_EMAIL_OTP';
+  otpId: string;
+  purpose: OtpPurpose;
+  email: string;
+  userId?: string;
+  codeHash: string;
+  expiresAt: string;
+  resendAvailableAt: string;
+  attemptCount: number;
+  maxAttempts: number;
+  consumedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredAuthRegisterDraft extends TableItemBase {
+  entityType: 'AUTH_REGISTER_DRAFT';
+  email: string;
+  phone?: string;
+  passwordHash: string;
+  fullName: string;
+  locationCode: string;
+  avatarUrl?: string;
+  expiresAt: string;
+  consumedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
