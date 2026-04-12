@@ -319,6 +319,36 @@ export interface ChatTypingCommandPayload {
   clientTimestamp?: string;
 }
 
+export interface ChatCallInitPayload extends ChatConversationCommandPayload {
+  callerId: string;
+  callerName: string;
+  isVideo: boolean;
+}
+
+export interface ChatCallAcceptPayload extends ChatConversationCommandPayload {
+  calleeId: string;
+}
+
+export interface ChatCallRejectPayload extends ChatConversationCommandPayload {
+  calleeId: string;
+}
+
+export interface ChatCallEndPayload extends ChatConversationCommandPayload {
+  userId: string;
+}
+
+export interface ChatWebRTCOfferPayload extends ChatConversationCommandPayload {
+  offer: any;
+}
+
+export interface ChatWebRTCAnswerPayload extends ChatConversationCommandPayload {
+  answer: any;
+}
+
+export interface ChatWebRTCIceCandidatePayload extends ChatConversationCommandPayload {
+  candidate: any;
+}
+
 export interface ChatMessageSendPayload extends ChatConversationCommandPayload {
   clientMessageId?: string;
   type?: MessageType;

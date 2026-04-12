@@ -1,9 +1,24 @@
 const { monotonicFactory } = require("ulid");
 
-const createMonotonicUlid = monotonicFactory();
+let createMonotonicUlid;
+
+function getCreateMonotonicUlid() {
+  if (createMonotonicUlid) {
+    return createMonotonicUlid;
+  }
+
+  try {
+    createMonotonicUlid = monotonicFactory();
+  } catch {
+    // Fallback for runtimes without secure PRNG (for example some RN builds).
+    createMonotonicUlid = monotonicFactory(Math.random);
+  }
+
+  return createMonotonicUlid;
+}
 
 function createUlid(date = new Date()) {
-  return createMonotonicUlid(date.getTime());
+  return getCreateMonotonicUlid()(date.getTime());
 }
 
 function nowIso() {
