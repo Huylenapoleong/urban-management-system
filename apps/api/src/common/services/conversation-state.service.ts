@@ -166,7 +166,15 @@ export class ConversationStateService {
       current.lastReadAt !== next.lastReadAt ||
       (current.isPinned ?? false) !== (next.isPinned ?? false) ||
       (current.archivedAt ?? null) !== (next.archivedAt ?? null) ||
-      (current.mutedUntil ?? null) !== (next.mutedUntil ?? null)
+      (current.mutedUntil ?? null) !== (next.mutedUntil ?? null) ||
+      (current.requestStatus ?? null) !== (next.requestStatus ?? null) ||
+      (current.requestDirection ?? null) !== (next.requestDirection ?? null) ||
+      (current.requestRequestedAt ?? null) !==
+        (next.requestRequestedAt ?? null) ||
+      (current.requestRespondedAt ?? null) !==
+        (next.requestRespondedAt ?? null) ||
+      (current.requestRespondedByUserId ?? null) !==
+        (next.requestRespondedByUserId ?? null)
     );
   }
 

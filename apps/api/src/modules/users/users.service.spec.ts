@@ -614,6 +614,68 @@ describe('UsersService', () => {
     );
   });
 
+  it('allows citizen friend requests across different locations', async () => {
+    const remoteCitizen: StoredUser = {
+      ...otherCitizen,
+      PK: 'USER#user-9',
+      userId: 'user-9',
+      fullName: 'Citizen Nine',
+      locationCode: 'VN-HCM-BQ2-P01',
+      email: 'citizen.nine@example.com',
+      phone: '+84904444444',
+    };
+
+    authorizationService.canAccessDirectConversation.mockReturnValue(false);
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (tableName !== 'Users') {
+          return undefined;
+        }
+
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === remoteCitizen.PK && sk === remoteCitizen.SK) {
+          return remoteCitizen;
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.sendFriendRequest(actor, remoteCitizen.userId);
+
+    expect(repository.transactWrite).toHaveBeenCalledWith([
+      expect.objectContaining({
+        kind: 'put',
+        tableName: 'Users',
+        item: expect.objectContaining({
+          entityType: 'USER_FRIEND_REQUEST',
+          direction: 'OUTGOING',
+          requesterUserId: actor.id,
+          targetUserId: remoteCitizen.userId,
+        }),
+      }),
+      expect.objectContaining({
+        kind: 'put',
+        tableName: 'Users',
+        item: expect.objectContaining({
+          entityType: 'USER_FRIEND_REQUEST',
+          direction: 'INCOMING',
+          requesterUserId: actor.id,
+          targetUserId: remoteCitizen.userId,
+        }),
+      }),
+    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: remoteCitizen.userId,
+        direction: 'OUTGOING',
+      }),
+    );
+  });
+
   it('requires accepting existing incoming request instead of creating duplicate', async () => {
     repository.get.mockImplementation(
       (tableName: string, pk: string, sk: string) => {
@@ -743,6 +805,170 @@ describe('UsersService', () => {
     );
   });
 
+  it('rejects an incoming friend request and deletes both pending request records', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (tableName !== 'Users') {
+          return undefined;
+        }
+
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === otherCitizen.PK && sk === otherCitizen.SK) {
+          return otherCitizen;
+        }
+
+        if (
+          pk === currentUser.PK &&
+          sk === `FRIEND_REQUEST#FROM#${otherCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_REQUEST',
+            requesterUserId: otherCitizen.userId,
+            targetUserId: currentUser.userId,
+            direction: 'INCOMING',
+            createdAt: '2026-03-20T00:05:00.000Z',
+            updatedAt: '2026-03-20T00:05:00.000Z',
+          };
+        }
+
+        if (
+          pk === otherCitizen.PK &&
+          sk === `FRIEND_REQUEST#TO#${currentUser.userId}`
+        ) {
+          return {
+            PK: otherCitizen.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_REQUEST',
+            requesterUserId: otherCitizen.userId,
+            targetUserId: currentUser.userId,
+            direction: 'OUTGOING',
+            createdAt: '2026-03-20T00:05:00.000Z',
+            updatedAt: '2026-03-20T00:05:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.rejectIncomingFriendRequest(
+      actor,
+      otherCitizen.userId,
+    );
+
+    expect(repository.transactWrite).toHaveBeenCalledWith([
+      expect.objectContaining({
+        kind: 'delete',
+        tableName: 'Users',
+        key: {
+          PK: currentUser.PK,
+          SK: `FRIEND_REQUEST#FROM#${otherCitizen.userId}`,
+        },
+      }),
+      expect.objectContaining({
+        kind: 'delete',
+        tableName: 'Users',
+        key: {
+          PK: otherCitizen.PK,
+          SK: `FRIEND_REQUEST#TO#${currentUser.userId}`,
+        },
+      }),
+    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: otherCitizen.userId,
+        action: 'REJECTED',
+      }),
+    );
+  });
+
+  it('cancels an outgoing friend request and deletes both pending request records', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (tableName !== 'Users') {
+          return undefined;
+        }
+
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === otherCitizen.PK && sk === otherCitizen.SK) {
+          return otherCitizen;
+        }
+
+        if (
+          pk === currentUser.PK &&
+          sk === `FRIEND_REQUEST#TO#${otherCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_REQUEST',
+            requesterUserId: currentUser.userId,
+            targetUserId: otherCitizen.userId,
+            direction: 'OUTGOING',
+            createdAt: '2026-03-20T00:05:00.000Z',
+            updatedAt: '2026-03-20T00:05:00.000Z',
+          };
+        }
+
+        if (
+          pk === otherCitizen.PK &&
+          sk === `FRIEND_REQUEST#FROM#${currentUser.userId}`
+        ) {
+          return {
+            PK: otherCitizen.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_REQUEST',
+            requesterUserId: currentUser.userId,
+            targetUserId: otherCitizen.userId,
+            direction: 'INCOMING',
+            createdAt: '2026-03-20T00:05:00.000Z',
+            updatedAt: '2026-03-20T00:05:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.cancelOutgoingFriendRequest(
+      actor,
+      otherCitizen.userId,
+    );
+
+    expect(repository.transactWrite).toHaveBeenCalledWith([
+      expect.objectContaining({
+        kind: 'delete',
+        tableName: 'Users',
+        key: {
+          PK: currentUser.PK,
+          SK: `FRIEND_REQUEST#TO#${otherCitizen.userId}`,
+        },
+      }),
+      expect.objectContaining({
+        kind: 'delete',
+        tableName: 'Users',
+        key: {
+          PK: otherCitizen.PK,
+          SK: `FRIEND_REQUEST#FROM#${currentUser.userId}`,
+        },
+      }),
+    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: otherCitizen.userId,
+        action: 'CANCELED',
+      }),
+    );
+  });
+
   it('blocks citizen DM start when friendship edge does not exist', async () => {
     repository.get.mockImplementation(
       (tableName: string, pk: string, sk: string) => {
@@ -784,6 +1010,24 @@ describe('UsersService', () => {
       phone: '+84909999999',
       updatedAt: '2026-03-20T00:07:00.000Z',
     };
+    const acceptedRequestCitizen: StoredUser = {
+      ...currentUser,
+      PK: 'USER#user-5',
+      userId: 'user-5',
+      fullName: 'Citizen Five',
+      email: 'citizen.five@example.com',
+      phone: '+84906666666',
+      updatedAt: '2026-03-20T00:07:45.000Z',
+    };
+    const strangerCitizen: StoredUser = {
+      ...currentUser,
+      PK: 'USER#user-4',
+      userId: 'user-4',
+      fullName: 'Citizen Four',
+      email: 'citizen.four@example.com',
+      phone: '+84905555555',
+      updatedAt: '2026-03-20T00:07:30.000Z',
+    };
     const outOfScopeCitizen: StoredUser = {
       ...currentUser,
       PK: 'USER#user-9',
@@ -800,6 +1044,8 @@ describe('UsersService', () => {
       otherCitizen,
       incomingCitizen,
       wardOfficer,
+      acceptedRequestCitizen,
+      strangerCitizen,
       outOfScopeCitizen,
     ]);
     repository.queryByPk.mockImplementation(
@@ -844,6 +1090,21 @@ describe('UsersService', () => {
       (currentActor: { id: string }, target: { userId: string }) =>
         currentActor.id === 'user-1' && target.userId !== 'user-9',
     );
+    repository.batchGet.mockResolvedValue([
+      {
+        PK: 'DMREQ#DM#user-1#user-5',
+        SK: 'STATE',
+        entityType: 'DIRECT_MESSAGE_REQUEST',
+        conversationId: 'DM#user-1#user-5',
+        requesterUserId: 'user-1',
+        targetUserId: 'user-5',
+        status: 'ACCEPTED',
+        createdAt: '2026-03-20T00:05:30.000Z',
+        updatedAt: '2026-03-20T00:06:00.000Z',
+        respondedAt: '2026-03-20T00:06:00.000Z',
+        respondedByUserId: 'user-5',
+      },
+    ]);
 
     const result = await service.searchUsersForChatAndFriend(actor, {
       mode: 'all',
@@ -852,6 +1113,10 @@ describe('UsersService', () => {
     const friend = result.data.find((item) => item.userId === 'user-2');
     const incoming = result.data.find((item) => item.userId === 'user-3');
     const officer = result.data.find((item) => item.userId === 'officer-1');
+    const acceptedRequester = result.data.find(
+      (item) => item.userId === 'user-5',
+    );
+    const stranger = result.data.find((item) => item.userId === 'user-4');
     const outOfScope = result.data.find((item) => item.userId === 'user-9');
 
     expect(friend).toEqual(
@@ -859,6 +1124,7 @@ describe('UsersService', () => {
         relationState: 'FRIEND',
         canMessage: true,
         canSendFriendRequest: false,
+        canSendMessageRequest: false,
       }),
     );
     expect(incoming).toEqual(
@@ -866,6 +1132,7 @@ describe('UsersService', () => {
         relationState: 'INCOMING_REQUEST',
         canMessage: false,
         canSendFriendRequest: false,
+        canSendMessageRequest: false,
       }),
     );
     expect(officer).toEqual(
@@ -873,9 +1140,33 @@ describe('UsersService', () => {
         relationState: 'NONE',
         canMessage: true,
         canSendFriendRequest: false,
+        canSendMessageRequest: false,
       }),
     );
-    expect(outOfScope).toBeUndefined();
+    expect(acceptedRequester).toEqual(
+      expect.objectContaining({
+        relationState: 'NONE',
+        canMessage: true,
+        canSendFriendRequest: true,
+        canSendMessageRequest: false,
+      }),
+    );
+    expect(stranger).toEqual(
+      expect.objectContaining({
+        relationState: 'NONE',
+        canMessage: false,
+        canSendFriendRequest: true,
+        canSendMessageRequest: true,
+      }),
+    );
+    expect(outOfScope).toEqual(
+      expect.objectContaining({
+        relationState: 'NONE',
+        canMessage: false,
+        canSendFriendRequest: true,
+        canSendMessageRequest: false,
+      }),
+    );
   });
 
   it('filters discovery by chat mode to only immediate message candidates', async () => {
@@ -889,5 +1180,37 @@ describe('UsersService', () => {
     });
 
     expect(result.data).toHaveLength(0);
+  });
+
+  it('includes non-friend citizens in friend discovery mode even when chat access is blocked', async () => {
+    const remoteCitizen: StoredUser = {
+      ...otherCitizen,
+      PK: 'USER#user-9',
+      userId: 'user-9',
+      fullName: 'Citizen Nine',
+      locationCode: 'VN-HCM-BQ2-P01',
+      email: 'citizen.nine@example.com',
+      phone: '+84904444444',
+      updatedAt: '2026-03-20T00:08:00.000Z',
+    };
+
+    repository.scanAll.mockResolvedValue([currentUser, remoteCitizen]);
+    repository.queryByPk.mockResolvedValue([]);
+    authorizationService.canAccessDirectConversation.mockReturnValue(false);
+
+    const result = await service.searchUsersForChatAndFriend(actor, {
+      mode: 'friend',
+      limit: '20',
+    });
+
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        userId: remoteCitizen.userId,
+        relationState: 'NONE',
+        canMessage: false,
+        canSendFriendRequest: true,
+        canSendMessageRequest: false,
+      }),
+    ]);
   });
 });

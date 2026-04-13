@@ -31,9 +31,11 @@ import {
   AuditEventItemDto,
   ConversationDeletedResultDto,
   ConversationSummaryDto,
+  CreateDirectMessageRequestDto,
   ErrorResponseDto,
   ListAuditQueryDto,
   ListConversationsQueryDto,
+  ListDirectRequestsQueryDto,
   ListMessagesQueryDto,
   MessageItemDto,
   UpdateConversationPreferencesRequestDto,
@@ -71,6 +73,34 @@ export class ConversationsController {
     );
   }
 
+  @Get('direct-requests')
+  @ApiOperation({
+    summary: 'List direct message requests for the current user',
+  })
+  @ApiQuery({
+    name: 'direction',
+    required: false,
+    enum: ['INCOMING', 'OUTGOING'],
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDING', 'IGNORED', 'REJECTED', 'BLOCKED'],
+  })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkEnvelopeResponse(ConversationSummaryDto, { isArray: true })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  listDirectRequests(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListDirectRequestsQueryDto,
+  ) {
+    return this.conversationsService.listDirectRequests(
+      user,
+      query as Record<string, unknown>,
+    );
+  }
+
   @Post('direct')
   @ApiOperation({ summary: 'Create or continue a direct message conversation' })
   @ApiBody({ type: SendDirectMessageRequestDto })
@@ -83,6 +113,107 @@ export class ConversationsController {
     @Body() body: SendDirectMessageRequestDto,
   ) {
     return this.conversationsService.sendDirectMessage(user, body);
+  }
+
+  @Post('direct-requests')
+  @ApiOperation({
+    summary:
+      'Create a direct message request for a same-scope stranger citizen',
+  })
+  @ApiBody({ type: CreateDirectMessageRequestDto })
+  @ApiCreatedEnvelopeResponse(ConversationSummaryDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  createDirectMessageRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: CreateDirectMessageRequestDto,
+  ) {
+    return this.conversationsService.createDirectMessageRequest(user, body);
+  }
+
+  @Post('direct-requests/:conversationId/accept')
+  @ApiOperation({ summary: 'Accept an incoming direct message request' })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like dm:<userId>. Legacy ids DM#... also work when URL-encoded.',
+  })
+  @ApiOkEnvelopeResponse(ConversationSummaryDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  acceptDirectMessageRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.acceptDirectMessageRequest(
+      user,
+      conversationId,
+    );
+  }
+
+  @Post('direct-requests/:conversationId/ignore')
+  @ApiOperation({ summary: 'Ignore an incoming direct message request' })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like dm:<userId>. Legacy ids DM#... also work when URL-encoded.',
+  })
+  @ApiOkEnvelopeResponse(ConversationSummaryDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  ignoreDirectMessageRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.ignoreDirectMessageRequest(
+      user,
+      conversationId,
+    );
+  }
+
+  @Post('direct-requests/:conversationId/reject')
+  @ApiOperation({ summary: 'Reject an incoming direct message request' })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like dm:<userId>. Legacy ids DM#... also work when URL-encoded.',
+  })
+  @ApiOkEnvelopeResponse(ConversationSummaryDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  rejectDirectMessageRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.rejectDirectMessageRequest(
+      user,
+      conversationId,
+    );
+  }
+
+  @Post('direct-requests/:conversationId/block')
+  @ApiOperation({ summary: 'Block a direct message request conversation' })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like dm:<userId>. Legacy ids DM#... also work when URL-encoded.',
+  })
+  @ApiOkEnvelopeResponse(ConversationSummaryDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  blockDirectMessageRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.blockDirectMessageRequest(
+      user,
+      conversationId,
+    );
   }
 
   @Get(':conversationId/messages')
