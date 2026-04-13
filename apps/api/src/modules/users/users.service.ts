@@ -580,6 +580,29 @@ export class UsersService {
     return this.serializeUserProfile(target);
   }
 
+  async searchExact(
+    actor: AuthenticatedUser,
+    query: string,
+  ): Promise<UserProfile> {
+    const q = query?.trim() ?? '';
+    if (!q) {
+      throw new BadRequestException('Search query is required.');
+    }
+
+    let user: StoredUser | undefined;
+    if (q.includes('@')) {
+      user = await this.findByEmail(q);
+    } else {
+      user = await this.findByPhone(q);
+    }
+
+    if (!user || user.deletedAt || user.status === 'DELETED') {
+      throw new NotFoundException('Không tìm thấy người dùng với thông tin này.');
+    }
+
+    return toUserProfile(user);
+  }
+
   async updateProfile(
     actor: AuthenticatedUser,
     payload: unknown,

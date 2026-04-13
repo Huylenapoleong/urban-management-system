@@ -109,6 +109,13 @@ export const CHAT_SOCKET_EVENTS: {
   readonly TYPING_STATE: "typing.state";
   readonly PRESENCE_SNAPSHOT: "presence.snapshot";
   readonly PRESENCE_UPDATED: "presence.updated";
+  readonly CALL_INIT: "call.init";
+  readonly CALL_ACCEPT: "call.accept";
+  readonly CALL_REJECT: "call.reject";
+  readonly CALL_END: "call.end";
+  readonly WEBRTC_OFFER: "webrtc.offer";
+  readonly WEBRTC_ANSWER: "webrtc.answer";
+  readonly WEBRTC_ICE_CANDIDATE: "webrtc.ice-candidate";
 };
 export type ChatSocketEvent =
   (typeof CHAT_SOCKET_EVENTS)[keyof typeof CHAT_SOCKET_EVENTS];

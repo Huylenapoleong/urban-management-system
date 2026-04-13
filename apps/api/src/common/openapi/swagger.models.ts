@@ -1962,6 +1962,7 @@ export class UploadMediaRequestDto {
   entityId?: string;
 
   @ApiProperty({ type: 'string', format: 'binary' })
+  @IsOptional()
   file!: string;
 }
 

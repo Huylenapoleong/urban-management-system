@@ -261,6 +261,19 @@ export class UsersController {
     return this.usersService.createUser(user, body);
   }
 
+  @Get('search')
+  @ApiOperation({ summary: 'Search user by exact phone or email' })
+  @ApiQuery({ name: 'q', type: String, description: 'Phone number or email address' })
+  @ApiOkEnvelopeResponse(UserProfileDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  searchExact(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('q') query: string,
+  ) {
+    return this.usersService.searchExact(user, query);
+  }
+
   @Get(':userId/presence')
   @ApiOperation({ summary: 'Get active presence state for a user' })
   @ApiParam({ name: 'userId', type: String })

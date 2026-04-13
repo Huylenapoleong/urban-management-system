@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NextFunction, Request, Response } from 'express';
 import { createUlid } from '@urban/shared-utils';
@@ -75,7 +75,7 @@ async function bootstrap() {
     }),
   );
   setupSwagger(app, config);
-  await app.listen(config.port);
+  await app.listen(config.port, '0.0.0.0');
 }
 
 function readRequestId(

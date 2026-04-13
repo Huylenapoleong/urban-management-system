@@ -144,7 +144,18 @@ export class ConversationsService {
         beginsWith: 'CONV#',
       },
     );
-    const filtered = items.filter((item) => {
+
+    // Deduplicate by conversationId (to handle legacy data or race-condition duplicates)
+    const uniqueItemsMap = new Map<string, StoredConversation>();
+    for (const item of items) {
+      const existing = uniqueItemsMap.get(item.conversationId);
+      if (!existing || item.updatedAt > existing.updatedAt) {
+        uniqueItemsMap.set(item.conversationId, item);
+      }
+    }
+    const deduplicatedItems = Array.from(uniqueItemsMap.values());
+
+    const filtered = deduplicatedItems.filter((item) => {
       if (item.deletedAt) {
         return false;
       }
@@ -961,6 +972,32 @@ export class ConversationsService {
       nextAttachmentUrl === message.attachmentUrl
     ) {
       return this.serializeMessage(actor.id, message);
+    }
+
+    // Security check for non-senders/non-admins
+    if (
+      actor.id !== message.senderId &&
+      !this.authorizationService.isAdmin(actor)
+    ) {
+      // For non-senders, we only allow changes that keep the core content identical
+      // We parse the content JSON to compare the 'text' or original content
+      const getCoreContent = (c: string) => {
+        try {
+          const parsed = JSON.parse(c);
+          return parsed.text || parsed.content || c;
+        } catch {
+          return c;
+        }
+      };
+
+      if (
+        getCoreContent(nextContent) !== getCoreContent(message.content) ||
+        nextAttachmentUrl !== message.attachmentUrl
+      ) {
+        throw new ForbiddenException(
+          'You can only pin or react to this message, not edit its content.',
+        );
+      }
     }
 
     const nextMessage: StoredMessage = {
@@ -1948,14 +1985,24 @@ export class ConversationsService {
     message: StoredMessage,
     action: 'edit' | 'delete',
   ): void {
-    if (
-      actor.id === message.senderId ||
-      this.authorizationService.isAdmin(actor)
-    ) {
+    // If Admin, they can do anything
+    if (this.authorizationService.isAdmin(actor)) {
       return;
     }
 
-    throw new ForbiddenException(`You cannot ${action} this message.`);
+    // If Sender, they can edit or delete
+    if (actor.id === message.senderId) {
+      return;
+    }
+
+    // For non-senders, 'delete' is strictly forbidden
+    if (action === 'delete') {
+      throw new ForbiddenException(`You cannot delete this message.`);
+    }
+
+    // For 'edit', we allow the call to proceed so that updateMessage 
+    // can check if only metadata (like pin/reactions) is being changed.
+    // The resolveConversationAccess already checked if they are in the chat.
   }
 
   private async ensureCanMutateConversationMessage(

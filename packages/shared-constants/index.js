@@ -91,6 +91,13 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
   TYPING_STATE: "typing.state",
   PRESENCE_SNAPSHOT: "presence.snapshot",
   PRESENCE_UPDATED: "presence.updated",
+  CALL_INIT: "call.init",
+  CALL_ACCEPT: "call.accept",
+  CALL_REJECT: "call.reject",
+  CALL_END: "call.end",
+  WEBRTC_OFFER: "webrtc.offer",
+  WEBRTC_ANSWER: "webrtc.answer",
+  WEBRTC_ICE_CANDIDATE: "webrtc.ice-candidate",
 });
 
 const PHONE_PATTERN = /^0\d{9,10}$/;

@@ -431,6 +431,90 @@ export class ConversationsGateway
     }, 'CHAT_TYPING_STATE_FAILED');
   }
 
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_INIT)
+  async handleCallInit(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: any): Promise<ChatSocketAck<any>> {
+    return this.forwardSignal(client, CHAT_SOCKET_EVENTS.CALL_INIT, payload, 'CHAT_CALL_INIT_FAILED');
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_ACCEPT)
+  async handleCallAccept(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: any): Promise<ChatSocketAck<any>> {
+    return this.forwardSignal(client, CHAT_SOCKET_EVENTS.CALL_ACCEPT, payload, 'CHAT_CALL_ACCEPT_FAILED');
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_REJECT)
+  async handleCallReject(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: any): Promise<ChatSocketAck<any>> {
+    return this.forwardSignal(client, CHAT_SOCKET_EVENTS.CALL_REJECT, payload, 'CHAT_CALL_REJECT_FAILED');
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_END)
+  async handleCallEnd(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: any): Promise<ChatSocketAck<any>> {
+    return this.forwardSignal(client, CHAT_SOCKET_EVENTS.CALL_END, payload, 'CHAT_CALL_END_FAILED');
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.WEBRTC_OFFER)
+  async handleWebRTCOffer(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: any): Promise<ChatSocketAck<any>> {
+    return this.forwardSignal(client, CHAT_SOCKET_EVENTS.WEBRTC_OFFER, payload, 'CHAT_WEBRTC_OFFER_FAILED');
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER)
+  async handleWebRTCAnswer(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: any): Promise<ChatSocketAck<any>> {
+    return this.forwardSignal(client, CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, payload, 'CHAT_WEBRTC_ANSWER_FAILED');
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE)
+  async handleWebRTCIceCandidate(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: any): Promise<ChatSocketAck<any>> {
+    return this.forwardSignal(client, CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, payload, 'CHAT_WEBRTC_ICE_CANDIDATE_FAILED');
+  }
+
+  private async forwardSignal(client: AuthenticatedSocket, event: string, payload: any, errorCode: string): Promise<ChatSocketAck<any>> {
+    return this.withAck(async () => {
+      const user = await this.getSocketUser(client);
+      const conversationId = this.extractConversationId(payload);
+      
+      let access: any;
+      try {
+        access = await this.conversationsService.resolveConversationAccess(user, conversationId, true);
+      } catch (error: any) {
+        if ((error.getStatus && (error.getStatus() === 403 || error.getStatus() === 404)) && conversationId.startsWith('dm:')) {
+          const targetId = conversationId.replace('dm:', '').trim();
+          if (targetId && targetId !== user.id) {
+            // Auto-create room by sending an initial system message about the call
+            let contentText = '📞 Cuộc gọi thoại';
+            if (event === CHAT_SOCKET_EVENTS.CALL_INIT && payload.isVideo) contentText = '🎥 Cuộc gọi Video';
+            if (event === CHAT_SOCKET_EVENTS.CALL_REJECT) contentText = '❌ Cuộc gọi nhỡ';
+            if (event === CHAT_SOCKET_EVENTS.CALL_END) contentText = '🛑 Cuộc gọi kết thúc';
+            
+            await this.conversationsService.sendDirectMessage(user, {
+              targetUserId: targetId,
+              content: contentText,
+              type: 'SYSTEM',
+            });
+            // Retry access resolution
+            access = await this.conversationsService.resolveConversationAccess(user, conversationId, true);
+          } else {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
+      
+      this.chatRealtimeService.emitToConversation(access.conversationKey, event, payload, client.id);
+      
+      // If the call ends or is rejected, and it already existed, we still want to log it
+      if (event === CHAT_SOCKET_EVENTS.CALL_REJECT || event === CHAT_SOCKET_EVENTS.CALL_END) {
+        try {
+          await this.conversationsService.sendMessage(user, access.conversationKey, {
+            content: event === CHAT_SOCKET_EVENTS.CALL_REJECT ? '❌ Cuộc gọi nhỡ' : '🛑 Cuộc gọi kết thúc',
+            type: 'SYSTEM'
+          });
+        } catch (e) {}
+      }
+
+      return { success: true };
+    }, errorCode);
+  }
+
   private async emitPresenceSnapshot(
     client: AuthenticatedSocket,
     conversationKey: string,

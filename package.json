@@ -7,8 +7,15 @@
     "dev:admin": "pnpm --filter admin-web dev",
     "dev:api": "pnpm --filter api start:dev",
     "dev:mobile": "pnpm --filter mobile-app start",
+    "dev:web": "pnpm --filter web-app dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test"
-  }
+  },
+  "dependencies": {
+    "expo": "^55.0.8",
+    "react": "19.2.0",
+    "react-native": "0.83.2"
+  },
+  "version": "1.0.0"
 }
