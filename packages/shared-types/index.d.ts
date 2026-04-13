@@ -135,6 +135,7 @@ export interface UserDirectoryItem {
   relationState: "FRIEND" | "INCOMING_REQUEST" | "OUTGOING_REQUEST" | "NONE";
   canMessage: boolean;
   canSendFriendRequest: boolean;
+  canSendMessageRequest: boolean;
 }
 
 export interface GroupMetadata {
@@ -192,6 +193,11 @@ export interface ConversationSummary {
   isPinned?: boolean;
   archivedAt?: string | null;
   mutedUntil?: string | null;
+  requestStatus?: "PENDING" | "IGNORED" | "REJECTED" | "BLOCKED" | null;
+  requestDirection?: "INCOMING" | "OUTGOING" | null;
+  requestRequestedAt?: string | null;
+  requestRespondedAt?: string | null;
+  requestRespondedByUserId?: string | null;
   deletedAt: string | null;
   updatedAt: string;
 }
@@ -432,7 +438,8 @@ export interface ChatConversationUpdatedEvent {
     | "message.updated"
     | "message.deleted"
     | "conversation.read"
-    | "conversation.preferences.updated";
+    | "conversation.preferences.updated"
+    | "conversation.request.updated";
   occurredAt: string;
 }
 

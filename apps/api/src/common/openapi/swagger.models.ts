@@ -31,6 +31,16 @@ const GROUP_MEMBER_ACTIONS = ['add', 'update', 'remove'] as const;
 const BOOLEAN_QUERY_VALUES = ['true', 'false'] as const;
 const FRIEND_REQUEST_DIRECTION_VALUES = ['INCOMING', 'OUTGOING'] as const;
 const FRIEND_ACTION_VALUES = ['REJECTED', 'CANCELED'] as const;
+const DIRECT_MESSAGE_REQUEST_STATUS_VALUES = [
+  'PENDING',
+  'IGNORED',
+  'REJECTED',
+  'BLOCKED',
+] as const;
+const DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES = [
+  'INCOMING',
+  'OUTGOING',
+] as const;
 const USER_DISCOVERY_MODE_VALUES = ['all', 'chat', 'friend'] as const;
 const INTEGER_QUERY_PATTERN = /^\d+$/;
 
@@ -347,6 +357,9 @@ export class UserDirectoryItemDto {
 
   @ApiProperty({ example: false })
   canSendFriendRequest!: boolean;
+
+  @ApiProperty({ example: false })
+  canSendMessageRequest!: boolean;
 }
 
 export class PushDeviceDto {
@@ -650,6 +663,31 @@ export class ConversationSummaryDto {
 
   @ApiPropertyOptional({ example: null, nullable: true })
   mutedUntil!: string | null;
+
+  @ApiPropertyOptional({
+    enum: DIRECT_MESSAGE_REQUEST_STATUS_VALUES,
+    example: 'PENDING',
+    nullable: true,
+  })
+  requestStatus?: (typeof DIRECT_MESSAGE_REQUEST_STATUS_VALUES)[number] | null;
+
+  @ApiPropertyOptional({
+    enum: DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES,
+    example: 'INCOMING',
+    nullable: true,
+  })
+  requestDirection?:
+    | (typeof DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES)[number]
+    | null;
+
+  @ApiPropertyOptional({ example: '2026-03-17T08:25:00.000Z', nullable: true })
+  requestRequestedAt?: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  requestRespondedAt?: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  requestRespondedByUserId?: string | null;
 
   @ApiPropertyOptional({ example: null, nullable: true })
   deletedAt!: string | null;
@@ -1282,6 +1320,65 @@ export class SendDirectMessageRequestDto {
   @IsString()
   @MaxLength(50)
   replyTo?: string;
+}
+
+export class CreateDirectMessageRequestDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(50)
+  targetUserId!: string;
+
+  @ApiPropertyOptional({
+    example: 'mobile-1742205600-0001',
+    description:
+      'Client-generated id used for retry-safe direct message request creation.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  clientMessageId?: string;
+
+  @ApiProperty({
+    example:
+      '{"text":"Xin chao, toi muon trao doi ve van de trong khu pho.","mention":[]}',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  content!: string;
+}
+
+export class ListDirectRequestsQueryDto {
+  @ApiPropertyOptional({
+    enum: DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES,
+    example: 'INCOMING',
+  })
+  @IsOptional()
+  @IsIn(DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES)
+  direction?: (typeof DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES)[number];
+
+  @ApiPropertyOptional({
+    enum: DIRECT_MESSAGE_REQUEST_STATUS_VALUES,
+    example: 'PENDING',
+  })
+  @IsOptional()
+  @IsIn(DIRECT_MESSAGE_REQUEST_STATUS_VALUES)
+  status?: (typeof DIRECT_MESSAGE_REQUEST_STATUS_VALUES)[number];
+
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6ImRtOjAxLi4uIn0',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+
+  @ApiPropertyOptional({ example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
 }
 
 export class SendMessageRequestDto {

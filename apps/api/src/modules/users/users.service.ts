@@ -19,6 +19,7 @@ import type {
 } from '@urban/shared-types';
 import {
   createUlid,
+  makeDmConversationId,
   makeUserPk,
   makeUserProfileSk,
   nowIso,
@@ -36,6 +37,7 @@ import {
 import type {
   StoredUserFriendEdge,
   StoredUserFriendRequest,
+  StoredDirectMessageRequest,
   StoredUser,
   StoredUserIdentityClaim,
 } from '../../common/storage-records';
@@ -907,14 +909,43 @@ export class UsersService {
         .filter((request) => request.direction === 'OUTGOING')
         .map((request) => request.targetUserId),
     );
+    const citizenCandidateIds = allUsers
+      .filter((user) => user.entityType === 'USER_PROFILE')
+      .filter((user) => !user.deletedAt && user.status === 'ACTIVE')
+      .filter((user) => user.userId !== actor.id)
+      .filter((user) => user.role === 'CITIZEN')
+      .map((user) => user.userId);
+    const directMessageRequests =
+      await this.repository.batchGet<StoredDirectMessageRequest>(
+        this.config.dynamodbConversationsTableName,
+        citizenCandidateIds.map((userId) => ({
+          PK: `DMREQ#${makeDmConversationId(actor.id, userId)}`,
+          SK: 'STATE',
+        })),
+      );
+    const directMessageRequestByUserId = new Map<
+      string,
+      StoredDirectMessageRequest
+    >();
+
+    for (const request of directMessageRequests) {
+      if (request.entityType !== 'DIRECT_MESSAGE_REQUEST') {
+        continue;
+      }
+
+      const otherUserId =
+        request.requesterUserId === actor.id
+          ? request.targetUserId
+          : request.requesterUserId;
+
+      directMessageRequestByUserId.set(otherUserId, request);
+    }
 
     const candidates = allUsers
       .filter((user) => user.entityType === 'USER_PROFILE')
       .filter((user) => !user.deletedAt && user.status === 'ACTIVE')
       .filter((user) => user.userId !== actor.id)
-      .filter((user) =>
-        this.authorizationService.canAccessDirectConversation(actor, user),
-      )
+      .filter((user) => this.canDiscoverUser(actor, user))
       .filter((user) => {
         if (!keyword) {
           return true;
@@ -932,14 +963,26 @@ export class UsersService {
           incomingRequestUserIds,
           outgoingRequestUserIds,
         );
+        const canAccessDirectConversation =
+          this.authorizationService.canAccessDirectConversation(actor, user);
+        const directMessageRequest = directMessageRequestByUserId.get(
+          user.userId,
+        );
         const canMessage =
           user.role === 'CITIZEN' && actor.role === 'CITIZEN'
-            ? friendUserIds.has(user.userId)
-            : true;
+            ? friendUserIds.has(user.userId) ||
+              directMessageRequest?.status === 'ACCEPTED'
+            : canAccessDirectConversation;
         const canSendFriendRequest =
           actor.role === 'CITIZEN' &&
           user.role === 'CITIZEN' &&
           relationState === 'NONE';
+        const canSendMessageRequest =
+          actor.role === 'CITIZEN' &&
+          user.role === 'CITIZEN' &&
+          relationState === 'NONE' &&
+          canAccessDirectConversation &&
+          directMessageRequest === undefined;
 
         return {
           userId: user.userId,
@@ -952,6 +995,7 @@ export class UsersService {
           relationState,
           canMessage,
           canSendFriendRequest,
+          canSendMessageRequest,
           updatedAt: user.updatedAt,
         };
       })
@@ -990,6 +1034,7 @@ export class UsersService {
             relationState: item.relationState,
             canMessage: item.canMessage,
             canSendFriendRequest: item.canSendFriendRequest,
+            canSendMessageRequest: item.canSendMessageRequest,
           }),
         ),
       ),
@@ -1008,12 +1053,6 @@ export class UsersService {
     if (requester.userId === target.userId) {
       throw new BadRequestException(
         'Cannot send a friend request to yourself.',
-      );
-    }
-
-    if (!this.authorizationService.canAccessDirectConversation(actor, target)) {
-      throw new ForbiddenException(
-        'You cannot send a friend request to this user.',
       );
     }
 
@@ -1480,6 +1519,17 @@ export class UsersService {
     }
 
     return 'NONE';
+  }
+
+  private canDiscoverUser(
+    actor: AuthenticatedUser,
+    target: StoredUser,
+  ): boolean {
+    if (actor.role === 'CITIZEN' && target.role === 'CITIZEN') {
+      return true;
+    }
+
+    return this.authorizationService.canAccessDirectConversation(actor, target);
   }
 
   private async getUsersByIds(userIds: string[]): Promise<StoredUser[]> {

@@ -38,6 +38,7 @@ import type {
   StoredChatOutboxEvent,
   StoredConversation,
   StoredConversationAuditEvent,
+  StoredDirectMessageRequest,
   StoredMessage,
   StoredMessageDedup,
   StoredMessageRef,
@@ -85,6 +86,25 @@ export interface DeletedConversationResult {
   removedAt: string;
 }
 
+type DirectMessageRequestStatus =
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'IGNORED'
+  | 'REJECTED'
+  | 'BLOCKED';
+
+type DirectMessageRequestDirection = 'INCOMING' | 'OUTGOING';
+
+const DIRECT_MESSAGE_REQUEST_STATUS_VALUES: DirectMessageRequestStatus[] = [
+  'PENDING',
+  'ACCEPTED',
+  'IGNORED',
+  'REJECTED',
+  'BLOCKED',
+];
+const DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES: DirectMessageRequestDirection[] =
+  ['INCOMING', 'OUTGOING'];
+
 @Injectable()
 export class ConversationsService {
   private readonly logger = new Logger(ConversationsService.name);
@@ -129,6 +149,10 @@ export class ConversationsService {
         return false;
       }
 
+      if (item.requestStatus) {
+        return false;
+      }
+
       if (isGroup !== undefined && item.isGroup !== isGroup) {
         return false;
       }
@@ -155,6 +179,60 @@ export class ConversationsService {
       limit,
       query.cursor,
       (item) => `${item.isPinned ? '1' : '0'}|${item.updatedAt}`,
+      (item) => item.conversationId,
+    );
+
+    return buildPaginatedResponse(
+      page.items.map((item) =>
+        this.serializeConversationSummary(actor.id, item),
+      ),
+      page.nextCursor,
+    );
+  }
+
+  async listDirectRequests(
+    actor: AuthenticatedUser,
+    query: Record<string, unknown>,
+  ): Promise<ApiSuccessResponse<ConversationSummary[], ApiResponseMeta>> {
+    const directionRaw = optionalQueryString(query.direction, 'direction');
+    const statusRaw = optionalQueryString(
+      query.status,
+      'status',
+    )?.toUpperCase();
+    const direction = directionRaw
+      ? this.parseDirectMessageRequestDirection(directionRaw)
+      : undefined;
+    const status = statusRaw
+      ? this.parseDirectMessageRequestStatus(statusRaw)
+      : 'PENDING';
+    const limit = parseLimit(query.limit);
+    const items = await this.repository.queryByPk<StoredConversation>(
+      this.config.dynamodbConversationsTableName,
+      makeInboxPk(actor.id),
+      {
+        beginsWith: 'CONV#',
+      },
+    );
+    const filtered = items.filter((item) => {
+      if (item.deletedAt || !item.requestStatus) {
+        return false;
+      }
+
+      if (item.requestStatus !== status) {
+        return false;
+      }
+
+      if (direction && item.requestDirection !== direction) {
+        return false;
+      }
+
+      return true;
+    });
+    const page = paginateSortedItems(
+      filtered,
+      limit,
+      query.cursor,
+      (item) => item.updatedAt,
       (item) => item.conversationId,
     );
 
@@ -413,13 +491,13 @@ export class ConversationsService {
       throw new ForbiddenException('You cannot access this conversation.');
     }
 
-    if (!(await this.usersService.canStartCitizenDm(actor, targetUser))) {
-      throw new ForbiddenException(
-        'Citizens can only send direct messages to friends.',
-      );
-    }
-
     const conversationId = makeDmConversationId(actor.id, targetUser.userId);
+    await this.ensureCanSendCitizenDirectMessage(
+      actor,
+      targetUser,
+      conversationId,
+    );
+
     return this.createMessage(
       actor,
       conversationId,
@@ -427,6 +505,231 @@ export class ConversationsService {
       [actor.id, targetUser.userId],
       body,
     );
+  }
+
+  async createDirectMessageRequest(
+    actor: AuthenticatedUser,
+    payload: unknown,
+  ): Promise<ConversationSummary> {
+    const body = ensureObject(payload);
+    const targetUserId = requiredString(body, 'targetUserId', {
+      minLength: 5,
+      maxLength: 50,
+    });
+    const targetUser =
+      await this.usersService.getActiveByIdOrThrow(targetUserId);
+
+    if (targetUser.userId === actor.id) {
+      throw new BadRequestException('Cannot create DM with yourself.');
+    }
+
+    this.ensureDirectMessageRequestPair(actor, targetUser);
+
+    const conversationId = makeDmConversationId(actor.id, targetUser.userId);
+    await this.ensureCanCreateDirectMessageRequest(
+      actor,
+      targetUser,
+      conversationId,
+    );
+
+    const clientMessageId = optionalString(body, 'clientMessageId', {
+      maxLength: 100,
+    });
+    const rawContent =
+      optionalString(body, 'content', { allowEmpty: false, maxLength: 4000 }) ??
+      '';
+
+    if (clientMessageId) {
+      const existingMessage = await this.findMessageByClientMessageId(
+        conversationId,
+        actor.id,
+        clientMessageId,
+      );
+
+      if (existingMessage) {
+        const existingSummary =
+          await this.conversationSummaryService.getConversationSummary(
+            actor.id,
+            conversationId,
+          );
+
+        if (existingSummary) {
+          return this.serializeConversationSummary(actor.id, existingSummary);
+        }
+      }
+    }
+
+    this.chatRateLimitService.consumeMessageSend(actor.id);
+
+    const content = this.normalizeStoredContent('TEXT', rawContent);
+    const sentAt = nowIso();
+    const messageId = createUlid();
+    const message: StoredMessage = {
+      PK: makeConversationPk(conversationId),
+      SK: makeMessageSk(sentAt, messageId),
+      entityType: 'MESSAGE',
+      messageId,
+      conversationId,
+      senderId: actor.id,
+      senderName: actor.fullName,
+      senderAvatarAsset: actor.avatarAsset,
+      senderAvatarUrl: actor.avatarUrl,
+      type: 'TEXT',
+      content,
+      attachmentAsset: undefined,
+      attachmentUrl: undefined,
+      replyTo: undefined,
+      deletedAt: null,
+      sentAt,
+      updatedAt: sentAt,
+    };
+    const messageRefRecord = this.buildMessageReferenceRecord(
+      conversationId,
+      message,
+    );
+    const dedupRecord = clientMessageId
+      ? this.buildMessageDedupRecord(
+          conversationId,
+          actor.id,
+          clientMessageId,
+          message,
+        )
+      : undefined;
+    const requestRecord = this.buildDirectMessageRequestRecord({
+      conversationId,
+      requesterUserId: actor.id,
+      targetUserId: targetUser.userId,
+      status: 'PENDING',
+      occurredAt: sentAt,
+    });
+    const transactionItems: Array<{
+      tableName: string;
+      item:
+        | StoredMessage
+        | StoredMessageRef
+        | StoredMessageDedup
+        | StoredDirectMessageRequest;
+      conditionExpression: string;
+    }> = [
+      {
+        tableName: this.config.dynamodbMessagesTableName,
+        item: message,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbMessagesTableName,
+        item: messageRefRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        tableName: this.config.dynamodbConversationsTableName,
+        item: requestRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+    ];
+
+    if (dedupRecord) {
+      transactionItems.push({
+        tableName: this.config.dynamodbMessagesTableName,
+        item: dedupRecord,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      });
+    }
+
+    try {
+      await this.repository.transactPut(transactionItems);
+    } catch (error) {
+      if (clientMessageId && this.isDuplicateClientMessageError(error)) {
+        const existingSummary =
+          await this.conversationSummaryService.getConversationSummary(
+            actor.id,
+            conversationId,
+          );
+
+        if (existingSummary) {
+          return this.serializeConversationSummary(actor.id, existingSummary);
+        }
+      }
+
+      throw error;
+    }
+
+    const summariesByUser = await this.upsertDirectRequestSummaries(
+      conversationId,
+      [actor.id, targetUser.userId],
+      message,
+      {
+        [actor.id]: {
+          requestStatus: 'PENDING',
+          requestDirection: 'OUTGOING',
+          requestRequestedAt: sentAt,
+          requestRespondedAt: null,
+          requestRespondedByUserId: null,
+        },
+        [targetUser.userId]: {
+          requestStatus: 'PENDING',
+          requestDirection: 'INCOMING',
+          requestRequestedAt: sentAt,
+          requestRespondedAt: null,
+          requestRespondedByUserId: null,
+        },
+      },
+    );
+    this.emitRequestSummaryUpdates(
+      conversationId,
+      summariesByUser,
+      sentAt,
+      'conversation.request.updated',
+    );
+
+    return this.serializeConversationSummary(
+      actor.id,
+      summariesByUser.get(actor.id) ??
+        (await this.conversationSummaryService.getConversationSummary(
+          actor.id,
+          conversationId,
+        ))!,
+    );
+  }
+
+  async acceptDirectMessageRequest(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationSummary> {
+    return this.respondToDirectMessageRequest(
+      actor,
+      conversationId,
+      'ACCEPTED',
+    );
+  }
+
+  async ignoreDirectMessageRequest(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationSummary> {
+    return this.respondToDirectMessageRequest(actor, conversationId, 'IGNORED');
+  }
+
+  async rejectDirectMessageRequest(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationSummary> {
+    return this.respondToDirectMessageRequest(
+      actor,
+      conversationId,
+      'REJECTED',
+    );
+  }
+
+  async blockDirectMessageRequest(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationSummary> {
+    return this.respondToDirectMessageRequest(actor, conversationId, 'BLOCKED');
   }
 
   async markAsRead(
@@ -582,6 +885,11 @@ export class ConversationsService {
     payload: unknown,
   ): Promise<MessageItem> {
     const access = await this.resolveConversationAccess(actor, conversationId);
+    await this.ensureCanMutateConversationMessage(
+      actor,
+      access.conversationKey,
+      'edit',
+    );
     const message = await this.getMessageOrThrow(
       access.conversationKey,
       messageId,
@@ -755,6 +1063,11 @@ export class ConversationsService {
     messageId: string,
   ): Promise<MessageItem> {
     const access = await this.resolveConversationAccess(actor, conversationId);
+    await this.ensureCanMutateConversationMessage(
+      actor,
+      access.conversationKey,
+      'delete',
+    );
     const message = await this.getMessageOrThrow(
       access.conversationKey,
       messageId,
@@ -1078,6 +1391,413 @@ export class ConversationsService {
     }
   }
 
+  private async respondToDirectMessageRequest(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    status: Exclude<DirectMessageRequestStatus, 'PENDING'>,
+  ): Promise<ConversationSummary> {
+    const conversationKey = await this.normalizeConversationId(
+      actor,
+      conversationId,
+    );
+
+    if (!isDmConversationId(conversationKey)) {
+      throw new BadRequestException(
+        'Direct message request actions are only supported for DM conversations.',
+      );
+    }
+
+    const request = await this.getDirectMessageRequestOrThrow(conversationKey);
+
+    if (request.targetUserId !== actor.id) {
+      throw new ForbiddenException(
+        'Only the request recipient can perform this action.',
+      );
+    }
+
+    if (request.status !== 'PENDING') {
+      throw new ConflictException(
+        'This direct message request is no longer pending.',
+      );
+    }
+
+    const activeMessages =
+      await this.conversationSummaryService.listActiveMessages(conversationKey);
+    const latestMessage = activeMessages[0];
+
+    if (!latestMessage) {
+      throw new NotFoundException('Direct message request not found.');
+    }
+
+    const occurredAt = nowIso();
+    const nextRequest: StoredDirectMessageRequest = {
+      ...request,
+      status,
+      updatedAt: occurredAt,
+      respondedAt: occurredAt,
+      respondedByUserId: actor.id,
+    };
+
+    await this.repository.put(
+      this.config.dynamodbConversationsTableName,
+      nextRequest,
+    );
+
+    const summaryStates =
+      status === 'ACCEPTED'
+        ? {
+            [request.requesterUserId]: {
+              requestStatus: null,
+              requestDirection: null,
+              requestRequestedAt: null,
+              requestRespondedAt: null,
+              requestRespondedByUserId: null,
+            },
+            [request.targetUserId]: {
+              requestStatus: null,
+              requestDirection: null,
+              requestRequestedAt: null,
+              requestRespondedAt: null,
+              requestRespondedByUserId: null,
+            },
+          }
+        : {
+            [request.requesterUserId]: {
+              requestStatus: status,
+              requestDirection: 'OUTGOING' as const,
+              requestRequestedAt: request.createdAt,
+              requestRespondedAt: occurredAt,
+              requestRespondedByUserId: actor.id,
+            },
+            [request.targetUserId]: {
+              requestStatus: status,
+              requestDirection: 'INCOMING' as const,
+              requestRequestedAt: request.createdAt,
+              requestRespondedAt: occurredAt,
+              requestRespondedByUserId: actor.id,
+            },
+          };
+    const summariesByUser = await this.upsertDirectRequestSummaries(
+      conversationKey,
+      [request.requesterUserId, request.targetUserId],
+      latestMessage,
+      summaryStates,
+      occurredAt,
+    );
+
+    this.emitRequestSummaryUpdates(
+      conversationKey,
+      summariesByUser,
+      occurredAt,
+      'conversation.request.updated',
+    );
+
+    return this.serializeConversationSummary(
+      actor.id,
+      summariesByUser.get(actor.id) ??
+        (await this.conversationSummaryService.getConversationSummary(
+          actor.id,
+          conversationKey,
+        ))!,
+    );
+  }
+
+  private async ensureCanCreateDirectMessageRequest(
+    actor: AuthenticatedUser,
+    targetUser: Awaited<ReturnType<UsersService['getActiveByIdOrThrow']>>,
+    conversationId: string,
+  ): Promise<void> {
+    if (
+      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
+    ) {
+      throw new ForbiddenException(
+        'Only same-scope citizens can send direct message requests.',
+      );
+    }
+
+    if (await this.usersService.canStartCitizenDm(actor, targetUser)) {
+      throw new BadRequestException('Users can already message directly.');
+    }
+
+    const existingRequest = await this.getDirectMessageRequest(conversationId);
+
+    if (!existingRequest) {
+      return;
+    }
+
+    switch (existingRequest.status) {
+      case 'PENDING':
+        throw new ConflictException(
+          'A direct message request is already pending.',
+        );
+      case 'ACCEPTED':
+        throw new BadRequestException('Users can already message directly.');
+      case 'BLOCKED':
+        throw new ForbiddenException(
+          'Direct message requests are blocked for this conversation.',
+        );
+      case 'IGNORED':
+      case 'REJECTED':
+      default:
+        throw new ConflictException(
+          'A previous direct message request was already closed.',
+        );
+    }
+  }
+
+  private async ensureCanSendCitizenDirectMessage(
+    actor: AuthenticatedUser,
+    targetUser: Awaited<ReturnType<UsersService['getByIdOrThrow']>>,
+    conversationId: string,
+  ): Promise<void> {
+    if (actor.role !== 'CITIZEN' || targetUser.role !== 'CITIZEN') {
+      return;
+    }
+
+    if (await this.usersService.canStartCitizenDm(actor, targetUser)) {
+      return;
+    }
+
+    const directRequest = await this.getDirectMessageRequest(conversationId);
+
+    if (directRequest?.status === 'ACCEPTED') {
+      return;
+    }
+
+    if (directRequest?.status === 'PENDING') {
+      throw new ForbiddenException(
+        'This direct message request has not been accepted yet.',
+      );
+    }
+
+    if (directRequest?.status === 'BLOCKED') {
+      throw new ForbiddenException(
+        'Direct messaging is blocked for this conversation.',
+      );
+    }
+
+    throw new ForbiddenException(
+      'Citizens can only send direct messages to friends or accepted direct message requests.',
+    );
+  }
+
+  private ensureDirectMessageRequestPair(
+    actor: AuthenticatedUser,
+    targetUser: Awaited<ReturnType<UsersService['getActiveByIdOrThrow']>>,
+  ): void {
+    if (actor.role !== 'CITIZEN' || targetUser.role !== 'CITIZEN') {
+      throw new BadRequestException(
+        'Direct message requests are only supported between citizen accounts.',
+      );
+    }
+  }
+
+  private async upsertDirectRequestSummaries(
+    conversationId: string,
+    participants: string[],
+    latestMessage: StoredMessage,
+    summaryStates: Record<
+      string,
+      {
+        requestStatus: ConversationSummary['requestStatus'];
+        requestDirection: ConversationSummary['requestDirection'];
+        requestRequestedAt: ConversationSummary['requestRequestedAt'];
+        requestRespondedAt: ConversationSummary['requestRespondedAt'];
+        requestRespondedByUserId: ConversationSummary['requestRespondedByUserId'];
+      }
+    >,
+    updatedAtOverride?: string,
+  ): Promise<Map<string, StoredConversation>> {
+    const activeMessages =
+      await this.conversationSummaryService.listActiveMessages(conversationId);
+    const effectiveMessages =
+      activeMessages.length > 0 ? activeMessages : [latestMessage];
+    const effectiveLatestMessage = effectiveMessages[0] ?? latestMessage;
+    const labelMap =
+      await this.conversationSummaryService.getConversationLabelMap(
+        conversationId,
+        participants,
+      );
+    const summariesByUser = new Map<string, StoredConversation>();
+
+    for (const participantId of participants) {
+      const existingConversation =
+        await this.conversationSummaryService.getConversationSummary(
+          participantId,
+          conversationId,
+        );
+      const state = summaryStates[participantId];
+      const lastReadAt =
+        existingConversation?.lastReadAt !== undefined
+          ? existingConversation.lastReadAt
+          : participantId === effectiveLatestMessage.senderId
+            ? effectiveLatestMessage.sentAt
+            : null;
+      const nextConversation: StoredConversation = {
+        PK: makeInboxPk(participantId),
+        SK: makeConversationSummarySk(
+          conversationId,
+          effectiveLatestMessage.sentAt,
+        ),
+        entityType: 'CONVERSATION',
+        GSI1PK: makeInboxStatsKey(participantId, 'DM'),
+        userId: participantId,
+        conversationId,
+        groupName:
+          labelMap.get(participantId) ??
+          existingConversation?.groupName ??
+          participantId,
+        lastMessagePreview: this.buildPreview(effectiveLatestMessage),
+        lastSenderName: effectiveLatestMessage.senderName,
+        unreadCount: this.computeUnreadCount(
+          participantId,
+          effectiveMessages,
+          lastReadAt,
+        ),
+        isGroup: false,
+        isPinned: existingConversation?.isPinned ?? false,
+        archivedAt: existingConversation?.archivedAt ?? null,
+        mutedUntil: existingConversation?.mutedUntil ?? null,
+        requestStatus: state.requestStatus,
+        requestDirection: state.requestDirection,
+        requestRequestedAt: state.requestRequestedAt,
+        requestRespondedAt: state.requestRespondedAt,
+        requestRespondedByUserId: state.requestRespondedByUserId,
+        deletedAt: null,
+        updatedAt: updatedAtOverride ?? effectiveLatestMessage.sentAt,
+        lastReadAt,
+      };
+
+      if (
+        existingConversation &&
+        existingConversation.SK !== nextConversation.SK
+      ) {
+        await this.repository.delete(
+          this.config.dynamodbConversationsTableName,
+          existingConversation.PK,
+          existingConversation.SK,
+        );
+      }
+
+      await this.repository.put(
+        this.config.dynamodbConversationsTableName,
+        nextConversation,
+      );
+      summariesByUser.set(participantId, nextConversation);
+    }
+
+    return summariesByUser;
+  }
+
+  private emitRequestSummaryUpdates(
+    conversationId: string,
+    summariesByUser: Map<string, StoredConversation>,
+    occurredAt: string,
+    reason: 'conversation.request.updated',
+  ): void {
+    const eventId = createUlid();
+
+    for (const [participantId, summary] of summariesByUser.entries()) {
+      this.conversationDispatchService.emitConversationSummaryUpdated(
+        eventId,
+        participantId,
+        conversationId,
+        summary,
+        reason,
+        occurredAt,
+      );
+    }
+  }
+
+  private buildDirectMessageRequestRecord(input: {
+    conversationId: string;
+    requesterUserId: string;
+    targetUserId: string;
+    status: DirectMessageRequestStatus;
+    occurredAt: string;
+    respondedAt?: string | null;
+    respondedByUserId?: string | null;
+  }): StoredDirectMessageRequest {
+    return {
+      PK: this.makeDirectMessageRequestPk(input.conversationId),
+      SK: this.makeDirectMessageRequestSk(),
+      entityType: 'DIRECT_MESSAGE_REQUEST',
+      conversationId: input.conversationId,
+      requesterUserId: input.requesterUserId,
+      targetUserId: input.targetUserId,
+      status: input.status,
+      createdAt: input.occurredAt,
+      updatedAt: input.occurredAt,
+      respondedAt: input.respondedAt ?? null,
+      respondedByUserId: input.respondedByUserId ?? null,
+    };
+  }
+
+  private async getDirectMessageRequest(
+    conversationId: string,
+  ): Promise<StoredDirectMessageRequest | undefined> {
+    const request = await this.repository.get<StoredDirectMessageRequest>(
+      this.config.dynamodbConversationsTableName,
+      this.makeDirectMessageRequestPk(conversationId),
+      this.makeDirectMessageRequestSk(),
+    );
+
+    if (!request || request.entityType !== 'DIRECT_MESSAGE_REQUEST') {
+      return undefined;
+    }
+
+    return request;
+  }
+
+  private async getDirectMessageRequestOrThrow(
+    conversationId: string,
+  ): Promise<StoredDirectMessageRequest> {
+    const request = await this.getDirectMessageRequest(conversationId);
+
+    if (!request) {
+      throw new NotFoundException('Direct message request not found.');
+    }
+
+    return request;
+  }
+
+  private makeDirectMessageRequestPk(conversationId: string): string {
+    return `DMREQ#${conversationId}`;
+  }
+
+  private makeDirectMessageRequestSk(): string {
+    return 'STATE';
+  }
+
+  private parseDirectMessageRequestStatus(
+    value: string,
+  ): Exclude<DirectMessageRequestStatus, 'ACCEPTED'> {
+    if (
+      DIRECT_MESSAGE_REQUEST_STATUS_VALUES.includes(
+        value as DirectMessageRequestStatus,
+      ) &&
+      value !== 'ACCEPTED'
+    ) {
+      return value as Exclude<DirectMessageRequestStatus, 'ACCEPTED'>;
+    }
+
+    throw new BadRequestException('status is invalid.');
+  }
+
+  private parseDirectMessageRequestDirection(
+    value: string,
+  ): DirectMessageRequestDirection {
+    if (
+      DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES.includes(
+        value as DirectMessageRequestDirection,
+      )
+    ) {
+      return value as DirectMessageRequestDirection;
+    }
+
+    throw new BadRequestException('direction is invalid.');
+  }
+
   private async ensureReplyTargetAvailable(
     conversationId: string,
     replyTo?: string,
@@ -1236,6 +1956,33 @@ export class ConversationsService {
     }
 
     throw new ForbiddenException(`You cannot ${action} this message.`);
+  }
+
+  private async ensureCanMutateConversationMessage(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    action: 'edit' | 'delete',
+  ): Promise<void> {
+    if (
+      this.authorizationService.isAdmin(actor) ||
+      !isGroupConversationId(conversationId)
+    ) {
+      return;
+    }
+
+    const groupId = conversationId.slice('GRP#'.length);
+    const membership = await this.groupsService.getMembership(
+      groupId,
+      actor.id,
+    );
+
+    if (membership && !membership.deletedAt) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      `Only active members can ${action} messages in this group.`,
+    );
   }
 
   private computeUnreadCount(
@@ -1842,12 +2589,11 @@ export class ConversationsService {
       throw new ForbiddenException('You cannot access this conversation.');
     }
 
-    if (
-      requireSendAccess &&
-      !(await this.usersService.canStartCitizenDm(actor, targetUser))
-    ) {
-      throw new ForbiddenException(
-        'Citizens can only send direct messages to friends.',
+    if (requireSendAccess) {
+      await this.ensureCanSendCitizenDirectMessage(
+        actor,
+        targetUser,
+        conversationId,
       );
     }
 

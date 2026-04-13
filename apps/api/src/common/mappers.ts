@@ -198,6 +198,11 @@ export function toConversationSummary(
     isPinned: conversation.isPinned ?? false,
     archivedAt: conversation.archivedAt ?? null,
     mutedUntil: conversation.mutedUntil ?? null,
+    requestStatus: conversation.requestStatus ?? null,
+    requestDirection: conversation.requestDirection ?? null,
+    requestRequestedAt: conversation.requestRequestedAt ?? null,
+    requestRespondedAt: conversation.requestRespondedAt ?? null,
+    requestRespondedByUserId: conversation.requestRespondedByUserId ?? null,
     deletedAt: conversation.deletedAt,
     updatedAt: conversation.updatedAt,
   };
