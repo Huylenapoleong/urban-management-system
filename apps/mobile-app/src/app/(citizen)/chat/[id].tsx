@@ -313,6 +313,24 @@ export default function ChatDetailPage() {
     }
   };
 
+  const handleSendLike = async () => {
+    if (!conversationId) {
+      return;
+    }
+
+    const sent = await sendMessage("👍", {
+      type: "EMOJI",
+      replyTo: replyToMessage?.id,
+    });
+
+    if (sent) {
+      setReplyToMessage(null);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  };
+
   const sendUploadedMedia = async (params: {
     uri: string;
     fileName?: string;
@@ -880,11 +898,7 @@ export default function ChatDetailPage() {
                       onPress={() => setFullscreenMedia({ uri: correctedAttachmentUrl, type: "image" })}
                       onLongPress={() => handleLongPressMessage(item)}
                     >
-                      <RNImage
-                        source={{ uri: correctedAttachmentUrl }}
-                        style={styles.chatImageDirect}
-                        resizeMode="contain"
-                      />
+                      <RNImage source={{ uri: correctedAttachmentUrl }} style={styles.chatImageDirect} resizeMode="contain" />
                     </Pressable>
                   ) : isVideoMessage && correctedAttachmentUrl ? (
                     <Pressable
@@ -899,48 +913,33 @@ export default function ChatDetailPage() {
                     <Pressable
                       onLongPress={() => handleLongPressMessage(item)}
                       style={[
-                        styles.bubble,
+                        item.type === "EMOJI" ? styles.emojiBubble : styles.bubble,
                         isOwn ? styles.bubbleOwn : styles.bubbleOther,
                         isHighlighted ? styles.bubbleHighlighted : null,
+                        item.type === "EMOJI" && { backgroundColor: "transparent", shadowOpacity: 0, elevation: 0, borderWidth: 0 },
                       ]}
-                    >
-                      {rendered.typeLabel ? (
+                    >{rendered.typeLabel && (
                         <View style={[styles.typePill, isOwn ? styles.typePillOwn : styles.typePillOther]}>
-                          <Text style={[styles.typePillText, isOwn ? styles.typePillTextOwn : null]}>
-                            {rendered.typeLabel}
-                          </Text>
+                          <Text style={[styles.typePillText, isOwn ? styles.typePillTextOwn : null]}>{rendered.typeLabel}</Text>
                         </View>
-                      ) : null}
-                      {rendered.primaryText && (
-                        <Text style={[styles.messageText, isOwn ? styles.messageTextOwn : null]}>
+                      )}{rendered.primaryText && (
+                        <Text style={[styles.messageText, isOwn ? styles.messageTextOwn : null, item.type === "EMOJI" ? styles.bigEmojiText : null]}>
                           {rendered.primaryText}
                         </Text>
-                      )}
-                      {correctedAttachmentUrl && (
+                      )}{correctedAttachmentUrl && (
                         <Pressable style={styles.chatAttachmentLink}>
                           <Ionicons name="document-attach" size={14} color={isOwn ? "white" : colors.text} />
-                          <Text style={[styles.chatAttachmentText, isOwn && styles.chatAttachmentTextOwn]}>
-                            {rendered.secondaryText || "Tệp đính kèm"}
-                          </Text>
+                          <Text style={[styles.chatAttachmentText, isOwn && styles.chatAttachmentTextOwn]}>{rendered.secondaryText || "Tệp đính kèm"}</Text>
                         </Pressable>
-                      )}
-                      <Text style={[styles.messageTime, isOwn ? styles.messageTimeOwn : null]}>
-                        {new Date(item.sentAt).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                      )}<Text style={[styles.messageTime, isOwn ? styles.messageTimeOwn : null]}>
+                        {new Date(item.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </Text>
                     </Pressable>
-                  )}
-                  {!isImageMessage && (
+                  )}{!isImageMessage && (
                     <Text style={[styles.messageTime, isOwn ? styles.messageTimeOwn : null]}>
-                      {new Date(item.sentAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {new Date(item.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </Text>
-                  )}
-                  {reactionEntries.length > 0 ? (
+                  )}{reactionEntries.length > 0 && (
                     <View style={[styles.reactionRow, isOwn ? styles.reactionRowOwn : styles.reactionRowOther]}>
                       {reactionEntries.map(([emoji, users]) => (
                         <View key={`${item.id}-${emoji}`} style={styles.reactionPill}>
@@ -948,7 +947,7 @@ export default function ChatDetailPage() {
                         </View>
                       ))}
                     </View>
-                  ) : null}
+                  )}
                 </View>
               </View>
             );
@@ -1021,17 +1020,31 @@ export default function ChatDetailPage() {
             multiline
             editable={!sending && !sendingImage}
           />
-          <Pressable
-            style={({ pressed }) => [
-              styles.sendButton,
-              (!text.trim() || !conversationId || sending) && styles.sendButtonDisabled,
-              pressed && text.trim() && !sending ? styles.sendButtonPressed : null,
-            ]}
-            onPress={handleSend}
-            disabled={!text.trim() || !conversationId || sending}
-          >
-            <Ionicons name="send" size={18} color="white" />
-          </Pressable>
+          {!text.trim() && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.likeButton,
+                (sending || !conversationId) && styles.imagePickerButtonDisabled,
+                pressed && !sending && conversationId ? styles.imagePickerButtonPressed : null,
+              ]}
+              onPress={() => void handleSendLike()}
+              disabled={sending || !conversationId}
+            >
+              <Ionicons name="thumbs-up" size={26} color="#0084ff" />
+            </Pressable>
+          )}{text.trim() && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.sendButton,
+                (!text.trim() || !conversationId || sending) && styles.sendButtonDisabled,
+                pressed && text.trim() && !sending ? styles.sendButtonPressed : null,
+              ]}
+              onPress={handleSend}
+              disabled={!text.trim() || !conversationId || sending}
+            >
+              <Ionicons name="send" size={18} color="white" />
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -2031,5 +2044,22 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "700",
+  },
+  emojiBubble: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bigEmojiText: {
+    fontSize: 48,
+    lineHeight: 56,
+  },
+  likeButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

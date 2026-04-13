@@ -12,11 +12,19 @@ export interface Envelope<T = any> {
   };
 }
 
+const rawBaseURL = 
+  process.env.EXPO_PUBLIC_API_URL ||
+  process.env.API_BASE_URL ||
+  "http://localhost:3001";
+
+// Ensure no trailing slash and has /api prefix
+const normalizedBaseURL = rawBaseURL.endsWith('/') ? rawBaseURL.slice(0, -1) : rawBaseURL;
+const finalBaseURL = normalizedBaseURL.endsWith('/api') ? normalizedBaseURL : `${normalizedBaseURL}/api`;
+
+console.log('[AxiosClient] Base URL configured as:', finalBaseURL);
+
 const client = axios.create({
-  baseURL:
-    process.env.EXPO_PUBLIC_API_URL ||
-    process.env.API_BASE_URL ||
-    "http://localhost:3001",
+  baseURL: finalBaseURL,
   timeout: 10000,
 });
 

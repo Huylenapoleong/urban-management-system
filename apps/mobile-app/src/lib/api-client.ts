@@ -3,23 +3,39 @@ import { Platform } from 'react-native';
 import { readWebToken } from './web-token-storage';
 import { ENV_CONFIG } from '@/constants/env';
 
-const API_BASE_URL = ENV_CONFIG.API_BASE_URL;
+const rawUrl = ENV_CONFIG.API_BASE_URL;
+// Ensure no trailing slash and has /api prefix
+const API_BASE_URL = rawUrl.endsWith('/') ? rawUrl.slice(0, -1) : rawUrl;
+const FINAL_API_URL = API_BASE_URL.endsWith('/api') ? API_BASE_URL : `${API_BASE_URL}/api`;
+
+console.log('[ApiClient] Base URL configured as:', FINAL_API_URL);
 
 function extractErrorMessage(payload: any): string {
   if (!payload) {
     return 'API request failed';
   }
 
-  const directMessage =
-    typeof payload.message === 'string' ? payload.message : undefined;
-  const nestedMessage =
-    typeof payload.error?.message === 'string'
-      ? payload.error.message
-      : Array.isArray(payload.error?.message)
-        ? payload.error.message.join(', ')
-        : undefined;
+  // Handle NestJS validation errors where message is often an array
+  if (Array.isArray(payload.message)) {
+    return payload.message.join('\n');
+  }
 
-  return nestedMessage || directMessage || 'API request failed';
+  if (typeof payload.message === 'string') {
+    return payload.message;
+  }
+
+  // Handle nested error objects
+  const nested = payload.error;
+  if (nested) {
+    if (Array.isArray(nested.message)) {
+      return nested.message.join('\n');
+    }
+    if (typeof nested.message === 'string') {
+      return nested.message;
+    }
+  }
+
+  return 'API request failed';
 }
 
 export class ApiClient {
@@ -52,7 +68,10 @@ export class ApiClient {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const fullUrl = `${FINAL_API_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    console.log(`[ApiClient] Fetching: ${options.method || 'GET'} ${fullUrl}`);
+
+    const response = await fetch(fullUrl, {
       ...options,
       headers,
     });

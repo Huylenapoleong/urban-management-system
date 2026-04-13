@@ -9,8 +9,7 @@ type AvatarProps = {
 
 export default function Avatar({ uri, name, size = 48 }: AvatarProps) {
   const initials =
-    name?.
-      split(" ")
+    name?.split(" ")
       .map((word) => word[0]?.toUpperCase())
       .slice(0, 2)
       .join("") || "U";

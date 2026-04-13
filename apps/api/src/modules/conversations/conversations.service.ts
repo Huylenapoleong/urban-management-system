@@ -496,9 +496,7 @@ export class ConversationsService {
       throw new BadRequestException('Cannot create DM with yourself.');
     }
 
-    if (
-      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
-    ) {
+    if (!(await this.canAccessDirectConversation(actor, targetUser))) {
       throw new ForbiddenException('You cannot access this conversation.');
     }
 
@@ -1597,10 +1595,6 @@ export class ConversationsService {
 
     const directRequest = await this.getDirectMessageRequest(conversationId);
 
-    if (directRequest?.status === 'ACCEPTED') {
-      return;
-    }
-
     if (directRequest?.status === 'PENDING') {
       throw new ForbiddenException(
         'This direct message request has not been accepted yet.',
@@ -2359,12 +2353,12 @@ export class ConversationsService {
       );
     }
 
-    const groupMatch = rawConversationId.match(/^(?:group|grp)[:/](.+)$/i);
+    const groupMatch = rawConversationId.match(/^(?:group|grp)[:/-](.+)$/i);
     if (groupMatch) {
       return this.normalizeGroupConversationId(actor, groupMatch[1]?.trim());
     }
 
-    const dmMatch = rawConversationId.match(/^(?:dm|user)[:/](.+)$/i);
+    const dmMatch = rawConversationId.match(/^(?:dm|user)[:/-](.+)$/i);
     if (dmMatch) {
       return this.normalizeDmConversationId(actor, dmMatch[1]?.trim());
     }
@@ -2415,7 +2409,7 @@ export class ConversationsService {
     const targetUser = await this.usersService.getByIdOrThrow(targetUserId);
 
     if (
-      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
+      !(await this.canAccessDirectConversation(actor, targetUser))
     ) {
       throw new ForbiddenException('You cannot access this conversation.');
     }
@@ -2630,9 +2624,7 @@ export class ConversationsService {
       ? await this.usersService.getActiveByIdOrThrow(otherParticipantId)
       : await this.usersService.getByIdOrThrow(otherParticipantId);
 
-    if (
-      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
-    ) {
+    if (!(await this.canAccessDirectConversation(actor, targetUser))) {
       throw new ForbiddenException('You cannot access this conversation.');
     }
 
@@ -2645,5 +2637,20 @@ export class ConversationsService {
     }
 
     return participantIds;
+  }
+
+  private async canAccessDirectConversation(
+    actor: AuthenticatedUser,
+    targetUser: Awaited<ReturnType<UsersService['getByIdOrThrow']>>,
+  ): Promise<boolean> {
+    if (await this.usersService.areFriends(actor.id, targetUser.userId)) {
+      return true;
+    }
+
+    if (this.authorizationService.canAccessDirectConversation(actor, targetUser)) {
+      return true;
+    }
+
+    return false;
   }
 }

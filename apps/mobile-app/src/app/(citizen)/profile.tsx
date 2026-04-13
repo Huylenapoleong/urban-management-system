@@ -13,11 +13,24 @@ import {
   Text,
   TextInput,
 } from 'react-native-paper';
+import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useProfile, useUpdateProfile, useUploadAvatar } from '@/hooks/shared/useProfile';
+import { OtpVerificationModal } from '@/components/auth/OtpVerificationModal';
 
 export default function ProfilePage() {
-  const { logout } = useAuth();
+  const { 
+    logout, 
+    listSessions, 
+    revokeSession, 
+    requestChangePasswordOtp, 
+    changePassword,
+    requestDeactivateAccountOtp,
+    deactivateAccount,
+    requestDeleteAccountOtp,
+    deleteAccount
+  } = useAuth();
+  const router = useRouter();
   const { data: profile, isLoading } = useProfile();
   const { mutate: updateProfile, isPending: isUpdating } = useUpdateProfile();
   const { mutateAsync: uploadAvatar, isPending: isUploading } = useUploadAvatar();
@@ -28,6 +41,44 @@ export default function ProfilePage() {
     phone: '',
     email: '',
   });
+
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  
+  const [otpModal, setOtpModal] = useState<{
+    visible: boolean;
+    type: 'PASSWORD' | 'DEACTIVATE' | 'DELETE' | null;
+    title: string;
+    subtitle: string;
+  }>({
+    visible: false,
+    type: null,
+    title: '',
+    subtitle: '',
+  });
+
+  const [passwordForm, setPasswordForm] = useState({
+    passwordVisible: false,
+    currentPassword: '',
+    newPassword: '',
+    verifiedOtp: '', // Store the OTP after verification
+  });
+
+  const fetchSessions = async () => {
+    try {
+      setLoadingSessions(true);
+      const data = await listSessions();
+      setSessions(data);
+    } catch (err) {
+      console.error('Failed to fetch sessions', err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchSessions();
+  }, []);
 
   const handleOpenEdit = () => {
     if (!profile) {
@@ -176,6 +227,19 @@ export default function ProfilePage() {
               )}
             />
             <List.Item
+              title="Ban be"
+              description="Quan ly danh sach ban be va loi moi"
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDesc}
+              onPress={() => router.push('/(citizen)/friends' as any)}
+              left={(props) => (
+                <View style={styles.iconCircle}>
+                  <List.Icon {...props} icon="account-group" color="#1976D2" />
+                </View>
+              )}
+              right={(props) => <List.Icon {...props} icon="chevron-right" />}
+            />
+            <List.Item
               title="Trang thai"
               description={profile.status || 'Chua cap nhat'}
               titleStyle={styles.listTitle}
@@ -185,6 +249,111 @@ export default function ProfilePage() {
                   <List.Icon {...props} icon="shield-account" color="#1976D2" />
                 </View>
               )}
+            />
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.infoCard} elevation={2}>
+          <Card.Content style={styles.cardContent}>
+            <View style={styles.infoHeader}>
+              <Text variant="titleMedium" style={styles.infoTitle}>Thiet bi dang dang nhap</Text>
+              <Button mode="text" onPress={fetchSessions} loading={loadingSessions} compact>
+                Lam moi
+              </Button>
+            </View>
+            
+            {sessions.map((session) => (
+              <List.Item
+                key={session.sessionId}
+                title={session.userAgent || 'Thiet bi khong xac dinh'}
+                description={`Lần cuối: ${new Date(session.lastUsedAt).toLocaleString('vi-VN')}${session.isCurrent ? ' (Hien tai)' : ''}`}
+                titleStyle={[styles.listTitle, session.isCurrent && { color: '#1976D2' }]}
+                descriptionStyle={styles.listDesc}
+                left={(props) => <List.Icon {...props} icon="cellphone" />}
+                right={(props) => !session.isCurrent ? (
+                  <IconButton 
+                    {...props} 
+                    icon="logout-variant" 
+                    onPress={() => {
+                      Alert.alert('Xac nhan', 'Ban muon dang xuat thiet bi nay?', [
+                        { text: 'Huy', style: 'cancel' },
+                        { 
+                          text: 'Dang xuat', 
+                          onPress: async () => {
+                            await revokeSession(session.sessionId);
+                            fetchSessions();
+                          }
+                        }
+                      ]);
+                    }}
+                  />
+                ) : null}
+              />
+            ))}
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.infoCard} elevation={2}>
+          <Card.Content style={styles.cardContent}>
+            <Text variant="titleMedium" style={[styles.infoTitle, { paddingHorizontal: 12, marginBottom: 8 }]}>
+              An toan tai khoan
+            </Text>
+            
+            <List.Item
+              title="Doi mat khau"
+              onPress={async () => {
+                try {
+                  await requestChangePasswordOtp();
+                  setOtpModal({
+                    visible: true,
+                    type: 'PASSWORD',
+                    title: 'Doi mat khau',
+                    subtitle: 'Vui long nhap ma OTP de tiep tuc doi mat khau.',
+                  });
+                } catch (err: any) {
+                  Alert.alert('Loi', err.message);
+                }
+              }}
+              left={(props) => <List.Icon {...props} icon="lock-reset" />}
+              right={(props) => <List.Icon {...props} icon="chevron-right" />}
+            />
+
+            <List.Item
+              title="Tam khoa tai khoan"
+              titleStyle={{ color: '#ff9800' }}
+              onPress={async () => {
+                try {
+                  await requestDeactivateAccountOtp();
+                  setOtpModal({
+                    visible: true,
+                    type: 'DEACTIVATE',
+                    title: 'Tam khoa tai khoan',
+                    subtitle: 'Vui long nhap ma OTP de tam khoa tai khoan.',
+                  });
+                } catch (err: any) {
+                  Alert.alert('Loi', err.message);
+                }
+              }}
+              left={(props) => <List.Icon {...props} icon="account-off-outline" color="#ff9800" />}
+            />
+
+            <List.Item
+              title="Xoa tai khoan vinh vien"
+              titleStyle={{ color: '#D32F2F' }}
+              onPress={async () => {
+                try {
+                  await requestDeleteAccountOtp();
+                  setOtpModal({
+                    visible: true,
+                    type: 'DELETE',
+                    title: 'Xoa tai khoan',
+                    subtitle: 'CANH BAO: Hanh dong nay khong the hoan tac. Nhap mã OTP de xac nhan xoa.',
+                  });
+                } catch (err: any) {
+                  Alert.alert('Loi', err.message);
+                }
+              }}
+              left={(props) => <List.Icon {...props} icon="account-remove-outline" color="#D32F2F" />}
             />
           </Card.Content>
         </Card>
@@ -240,6 +409,67 @@ export default function ProfilePage() {
             </Button>
           </Dialog.Actions>
         </Dialog>
+
+        <Dialog visible={passwordForm.passwordVisible} onDismiss={() => setPasswordForm(p => ({ ...p, passwordVisible: false }))}>
+          <Dialog.Title>Nhap mat khau moi</Dialog.Title>
+          <Dialog.Content>
+            <TextInput
+              label="Mat khau hien tai"
+              secureTextEntry
+              value={passwordForm.currentPassword}
+              onChangeText={val => setPasswordForm(p => ({ ...p, currentPassword: val }))}
+              style={styles.input}
+            />
+            <TextInput
+              label="Mat khau moi"
+              secureTextEntry
+              value={passwordForm.newPassword}
+              onChangeText={val => setPasswordForm(p => ({ ...p, newPassword: val }))}
+              style={styles.input}
+            />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setPasswordForm(p => ({ ...p, passwordVisible: false }))}>Huy</Button>
+            <Button mode="contained" onPress={async () => {
+              if (passwordForm.newPassword.length < 10) {
+                Alert.alert('Loi', 'Mat khau moi phai co it nhat 10 ky tu.');
+                return;
+              }
+              try {
+                await changePassword({ 
+                  currentPassword: passwordForm.currentPassword, 
+                  newPassword: passwordForm.newPassword,
+                  otpCode: passwordForm.verifiedOtp
+                });
+                Alert.alert('Thanh cong', 'Mat khau da duoc thay doi.');
+                setPasswordForm({ passwordVisible: false, currentPassword: '', newPassword: '', verifiedOtp: '' });
+              } catch (err: any) {
+                Alert.alert('Loi', err.message);
+              }
+            }}>Cap nhat</Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        <OtpVerificationModal
+          visible={otpModal.visible}
+          onDismiss={() => setOtpModal(p => ({ ...p, visible: false }))}
+          title={otpModal.title}
+          subtitle={otpModal.subtitle}
+          onVerify={async (otpCode) => {
+            if (otpModal.type === 'PASSWORD') {
+              setPasswordForm(p => ({ ...p, verifiedOtp: otpCode, passwordVisible: true }));
+              setOtpModal(p => ({ ...p, visible: false }));
+            } else if (otpModal.type === 'DEACTIVATE') {
+              await deactivateAccount(otpCode);
+              setOtpModal(p => ({ ...p, visible: false }));
+              logout();
+            } else if (otpModal.type === 'DELETE') {
+              await deleteAccount(otpCode);
+              setOtpModal(p => ({ ...p, visible: false }));
+              logout();
+            }
+          }}
+        />
       </Portal>
     </View>
   );

@@ -974,10 +974,11 @@ export class UsersService {
           return true;
         }
 
-        return [user.fullName, user.phone ?? '', user.email ?? '']
+        const haystacks = [user.fullName, user.phone ?? '', user.email ?? '']
           .join(' ')
-          .toLowerCase()
-          .includes(keyword);
+          .toLowerCase();
+
+        return haystacks.includes(keyword);
       })
       .map((user) => {
         const relationState = this.resolveFriendRelationState(
@@ -992,14 +993,8 @@ export class UsersService {
           user.userId,
         );
         const canMessage =
-          user.role === 'CITIZEN' && actor.role === 'CITIZEN'
-            ? friendUserIds.has(user.userId) ||
-              directMessageRequest?.status === 'ACCEPTED'
-            : canAccessDirectConversation;
-        const canSendFriendRequest =
-          actor.role === 'CITIZEN' &&
-          user.role === 'CITIZEN' &&
-          relationState === 'NONE';
+          friendUserIds.has(user.userId) || canAccessDirectConversation;
+        const canSendFriendRequest = relationState === 'NONE';
         const canSendMessageRequest =
           actor.role === 'CITIZEN' &&
           user.role === 'CITIZEN' &&
@@ -1441,10 +1436,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     target: StoredUser,
   ): Promise<boolean> {
-    if (actor.role !== 'CITIZEN' || target.role !== 'CITIZEN') {
-      return true;
-    }
-
     return this.areFriends(actor.id, target.userId);
   }
 
@@ -1548,11 +1539,11 @@ export class UsersService {
     actor: AuthenticatedUser,
     target: StoredUser,
   ): boolean {
-    if (actor.role === 'CITIZEN' && target.role === 'CITIZEN') {
-      return true;
+    if (actor.id === target.userId) {
+      return false;
     }
 
-    return this.authorizationService.canAccessDirectConversation(actor, target);
+    return true;
   }
 
   private async getUsersByIds(userIds: string[]): Promise<StoredUser[]> {
@@ -1579,10 +1570,12 @@ export class UsersService {
     leftUser: StoredUser,
     rightUser: StoredUser,
   ): void {
-    if (leftUser.role !== 'CITIZEN' || rightUser.role !== 'CITIZEN') {
-      throw new BadRequestException(
-        'Friend requests are only supported between citizen accounts.',
-      );
+    if (leftUser.deletedAt || rightUser.deletedAt) {
+      throw new BadRequestException('User account is unavailable.');
+    }
+
+    if (leftUser.status !== 'ACTIVE' || rightUser.status !== 'ACTIVE') {
+      throw new BadRequestException('Only active accounts can use friendship.');
     }
   }
 

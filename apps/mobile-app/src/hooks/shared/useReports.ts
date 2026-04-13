@@ -78,6 +78,27 @@ export const useUpdateReportStatus = () => {
   });
 };
 
+export const useAssignOfficer = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ reportId, officerId }: { reportId: string, officerId: string }) => {
+      return ApiClient.post(`/reports/${reportId}/assign`, { officerId });
+    },
+    onSuccess: (_, { reportId }) => {
+      queryClient.invalidateQueries({ queryKey: ['reports', reportId] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+};
+
+export const useReportAudit = (reportId: string) => {
+  return useQuery<any[]>({
+    queryKey: ['reports', reportId, 'audit'],
+    queryFn: () => ApiClient.get(`/reports/${reportId}/audit`),
+    enabled: !!reportId,
+  });
+};
+
 export const useLinkedConversations = (reportId: string) => {
   return useQuery<{ conversationId: string; conversationKey: string }[]>({
     queryKey: ['reports', reportId, 'conversations'],

@@ -181,6 +181,17 @@ export class AuthController {
   }
 
   @Public()
+  @Post('password/forgot/verify')
+  @ApiOperation({ summary: 'Verify forgot password OTP without consuming it' })
+  @ApiBody({ type: LoginOtpVerifyRequestDto })
+  @ApiOkEnvelopeResponse(GenericAcceptedResultDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  verifyForgotPasswordOtp(@Body() body: LoginOtpVerifyRequestDto) {
+    return this.authService.verifyForgotPasswordOtp(body);
+  }
+
+  @Public()
   @Post('password/forgot/confirm')
   @ApiOperation({ summary: 'Verify OTP and reset password' })
   @ApiBody({ type: ForgotPasswordConfirmRequestDto })

@@ -333,16 +333,61 @@ export class AuthService {
     });
     const user = await this.resolveUserByLogin(login);
 
-    if (user && !user.deletedAt && user.status === 'ACTIVE' && user.email) {
-      await this.authOtpService.requestOtp({
-        purpose: 'FORGOT_PASSWORD',
-        email: user.email,
-        userId: user.userId,
-      });
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('Tài khoản không tồn tại.');
     }
+
+    if (user.status !== 'ACTIVE') {
+      throw new BadRequestException(
+        'Tài khoản đang bị khóa hoặc chưa kích hoạt.',
+      );
+    }
+
+    if (!user.email) {
+      throw new BadRequestException(
+        'Tài khoản chưa có email xác thực để nhận mã OTP.',
+      );
+    }
+
+    await this.authOtpService.requestOtp({
+      purpose: 'FORGOT_PASSWORD',
+      email: user.email,
+      userId: user.userId,
+    });
 
     return {
       requested: true,
+    };
+  }
+
+  async verifyForgotPasswordOtp(payload: unknown) {
+    const body = ensureObject(payload);
+    const login = requiredString(body, 'login', {
+      minLength: 3,
+      maxLength: 150,
+    });
+    const otpCode = requiredString(body, 'otpCode', {
+      minLength: 4,
+      maxLength: 12,
+    });
+    const user = await this.resolveUserByLogin(login);
+
+    if (!user || user.deletedAt || user.status !== 'ACTIVE' || !user.email) {
+      throw new UnauthorizedException('Thông tin không hợp lệ.');
+    }
+
+    await this.authOtpService.verifyOtp(
+      {
+        purpose: 'FORGOT_PASSWORD',
+        email: user.email,
+        otpCode,
+        userId: user.userId,
+      },
+      { consumeOnSuccess: false },
+    );
+
+    return {
+      verified: true,
     };
   }
 

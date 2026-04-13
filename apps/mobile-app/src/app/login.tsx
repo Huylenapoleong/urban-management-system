@@ -104,6 +104,20 @@ export default function LoginScreen() {
             ĐĂNG NHẬP
           </Button>
 
+          <View style={styles.forgotPasswordContainer}>
+            <Button 
+              mode="text" 
+              onPress={() => {
+                console.log('[Login] Navigating to forgot-password');
+                router.push('/forgot-password');
+              }}
+              labelStyle={styles.forgotPasswordLink}
+              compact
+            >
+              Quên mật khẩu?
+            </Button>
+          </View>
+
           <View style={styles.footer}>
             <Text style={styles.footerText}>Bạn chưa có tài khoản? </Text>
             <Pressable onPress={() => router.push('/register')}>
@@ -146,6 +160,17 @@ const styles = StyleSheet.create({
   loginButton: { marginTop: 8, borderRadius: 12 },
   buttonContent: { height: 50 },
   buttonLabel: { fontSize: 15, fontWeight: '700', letterSpacing: 1 },
+  
+  forgotPasswordContainer: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  forgotPasswordLink: {
+    color: '#757575',
+    fontSize: 14,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
   
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
   footerText: { color: '#757575', fontSize: 14 },
