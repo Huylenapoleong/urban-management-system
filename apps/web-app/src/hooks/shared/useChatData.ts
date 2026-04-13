@@ -5,12 +5,13 @@ import {
   listMessages,
   markConversationAsRead,
   sendMessage,
+  type SendMessageInput,
 } from "@/services/conversation.api";
 import { socketClient } from "@/lib/socket-client";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type { MessageItem } from "@urban/shared-types";
 
-export function useConversations() {
+export function useConversations(searchTerm?: string) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -33,8 +34,8 @@ export function useConversations() {
   }, [queryClient]);
 
   return useQuery({
-    queryKey: ["conversations"],
-    queryFn: listConversations,
+    queryKey: ["conversations", searchTerm?.trim() ?? ""],
+    queryFn: () => listConversations(searchTerm),
   });
 }
 
@@ -88,14 +89,16 @@ export function useMessages(conversationId?: string) {
   }, [conversationId, queryClient]);
 
   const sendMutation = useMutation({
-    mutationFn: (text: string) => sendMessage(conversationId!, text),
-    onSuccess: (data) => {
-      queryClient.setQueryData<MessageItem[]>(["messages", conversationId], (oldData) => {
-        if (!oldData) return [data];
-        if (oldData.some(msg => msg.id === data.id)) return oldData;
-        return [data, ...oldData];
-      });
+    mutationFn: (payload: SendMessageInput) => sendMessage(conversationId!, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (error) => {
+      console.error("Failed to send message", {
+        conversationId,
+        error,
+      });
     },
   });
 
@@ -109,6 +112,7 @@ export function useMessages(conversationId?: string) {
   return {
     ...query,
     sendMessage: sendMutation.mutate,
+    sendMessageAsync: sendMutation.mutateAsync,
     isSending: sendMutation.isPending,
     markAsRead: readMutation.mutate,
   };

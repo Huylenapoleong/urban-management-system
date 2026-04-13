@@ -12,7 +12,7 @@ export default function HomePage() {
 
   const { data: groups, isLoading: isLoadingGroups } = useQuery({
     queryKey: ["groups"],
-    queryFn: getGroups,
+    queryFn: () => getGroups(),
   });
 
   return (

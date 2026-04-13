@@ -46,6 +46,7 @@ export function SettingsPage() {
     mutationFn: updateProfile,
     onSuccess: (updatedContext) => {
       queryClient.setQueryData(["profile"], updatedContext);
+      queryClient.setQueryData(["profile", "me"], updatedContext);
       setProfileMessage({ text: "Cập nhật hồ sơ thành công", type: "success" });
     },
     onError: (err: { message?: string }) => {
@@ -73,6 +74,7 @@ export function SettingsPage() {
     },
     onSuccess: (updatedContext) => {
       queryClient.setQueryData(["profile"], updatedContext);
+      queryClient.setQueryData(["profile", "me"], updatedContext);
       setAvatarUploading(false);
     },
     onError: (err: { message?: string }) => {
