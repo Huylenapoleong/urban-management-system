@@ -1,23 +1,24 @@
 import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiProduces,
   ApiServiceUnavailableResponse,
   ApiTags,
-  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-response-envelope.decorator';
 import {
-  ErrorResponseDto,
   LiveHealthStatusDto,
   ReadinessStatusDto,
 } from '../../common/openapi/swagger.models';
+import {
+  ApiForbiddenExamples,
+  ApiUnauthorizedExamples,
+} from '../../common/openapi/swagger-errors';
 import { ObservabilityService } from '../observability/observability.service';
 import { SystemHealthService } from './system-health.service';
 
@@ -65,8 +66,22 @@ export class SystemController {
       'Operational metrics for HTTP status codes, session revocations, outbox backlog, and circuit breakers',
   })
   @ApiBearerAuth('bearer')
-  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiUnauthorizedExamples('The bearer token is missing or invalid.', [
+    {
+      name: 'metricsUnauthorized',
+      summary: 'Missing bearer token',
+      message: 'Missing bearer token.',
+      path: '/api/health/metrics',
+    },
+  ])
+  @ApiForbiddenExamples('Only administrators can access this endpoint.', [
+    {
+      name: 'metricsAdminOnly',
+      summary: 'Admin role required',
+      message: 'Insufficient role.',
+      path: '/api/health/metrics',
+    },
+  ])
   @ApiOkResponse({
     schema: {
       type: 'object',
@@ -104,8 +119,22 @@ export class SystemController {
   })
   @ApiProduces('text/plain')
   @ApiBearerAuth('bearer')
-  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiUnauthorizedExamples('The bearer token is missing or invalid.', [
+    {
+      name: 'prometheusUnauthorized',
+      summary: 'Missing bearer token',
+      message: 'Missing bearer token.',
+      path: '/api/health/metrics/prometheus',
+    },
+  ])
+  @ApiForbiddenExamples('Only administrators can access this endpoint.', [
+    {
+      name: 'prometheusAdminOnly',
+      summary: 'Admin role required',
+      message: 'Insufficient role.',
+      path: '/api/health/metrics/prometheus',
+    },
+  ])
   @ApiOkResponse({
     schema: {
       type: 'string',
