@@ -2,6 +2,7 @@ import type {
   GroupMemberRole,
   GroupType,
   MessageDeliveryState,
+  MessageRecallScope,
   MessageType,
   PushDeviceProvider,
   ReportCategory,
@@ -161,6 +162,19 @@ export interface GroupMembership {
   updatedAt: string;
 }
 
+export interface MessageReplyReference {
+  id: string;
+  senderId: string;
+  senderName: string;
+  type: MessageType;
+  content: string;
+  attachmentAsset?: MediaAsset;
+  attachmentUrl?: string;
+  deletedAt: string | null;
+  recalledAt?: string | null;
+  sentAt: string;
+}
+
 export interface MessageItem {
   conversationId: string;
   id: string;
@@ -173,6 +187,14 @@ export interface MessageItem {
   attachmentAsset?: MediaAsset;
   attachmentUrl?: string;
   replyTo?: string;
+  replyMessage?: MessageReplyReference;
+  recalledAt?: string | null;
+  recalledByUserId?: string | null;
+  deletedForSenderAt?: string | null;
+  forwardedFromMessageId?: string;
+  forwardedFromConversationId?: string;
+  forwardedFromSenderId?: string;
+  forwardedFromSenderName?: string;
   deletedAt: string | null;
   sentAt: string;
   updatedAt: string;
@@ -375,6 +397,11 @@ export interface ChatMessageDeletePayload extends ChatConversationCommandPayload
   messageId: string;
 }
 
+export interface ChatMessageRecallPayload extends ChatConversationCommandPayload {
+  messageId: string;
+  scope: MessageRecallScope;
+}
+
 export interface ChatConversationSubscription {
   conversationId: string;
   conversationKey: string;
@@ -414,6 +441,13 @@ export interface ChatMessageDeletedAccepted {
   conversationKey: string;
   messageId: string;
   deletedAt: string;
+}
+
+export interface RecallMessageResult {
+  conversationId: string;
+  messageId: string;
+  scope: MessageRecallScope;
+  recalledAt: string;
 }
 
 export interface ChatReadAccepted {
