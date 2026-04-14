@@ -29,7 +29,8 @@ NestJS backend for SmartCity OTT using six DynamoDB tables on AWS.
 
 These are intentional product/backend policies, not accidental restrictions:
 
-- Direct messages are not globally open. Citizen-to-citizen DM is blocked; DM access is constrained by role and scope.
+- Direct messages are not globally open. Citizen-to-citizen DM is allowed only when users are friends or a same-scope direct message request was accepted; staff/service DM remains constrained by role and scope.
+- Public groups expose metadata/discovery by scope, but the actual group conversation stream is member-only.
 - Group management is membership-based. `ADMIN` can manage any group, while non-admin staff must be an `OWNER` or `OFFICER` member to manage a group.
 - Report status transitions follow a backend state machine. FE should only show actions valid for the current status.
 
@@ -472,7 +473,9 @@ Notes:
 - Message sending and read receipts emitted through REST endpoints are also pushed over the same socket events.
 - Message sends are rate-limited per authenticated user; when exceeded, the API returns HTTP `429` or socket ack error `CHAT_MESSAGE_SEND_FAILED`.
 - `PATCH /api/conversations/:conversationId/messages/:messageId` edits a message and syncs inbox preview when the latest visible message changes.
-- `DELETE /api/conversations/:conversationId/messages/:messageId` soft-deletes a message and removes the conversation from inbox when the last visible message is deleted.
+- `POST /api/conversations/:conversationId/messages/:messageId/recall` is the user-facing chat action. `scope=EVERYONE` keeps a recalled placeholder in the thread, while `scope=SELF` hides the message only from the sender view.
+- `POST /api/conversations/:conversationId/messages/:messageId/forward` creates forwarded copies in one or more target conversations when the actor can read the source and send into every target.
+- `DELETE /api/conversations/:conversationId/messages/:messageId` is now admin-only for permanent moderation cleanup. FE chat UI should use `recall`, not `delete`.
 - `DELETE /api/conversations/:conversationId` removes the conversation from the current user inbox only; shared messages remain intact for other participants and the inbox is recreated automatically on a new incoming message.
 - `replyTo` must reference a message in the same conversation.
 - Typing events are only broadcast to sockets that explicitly joined the conversation room via `conversation.join`.

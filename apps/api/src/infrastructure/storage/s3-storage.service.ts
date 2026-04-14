@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
@@ -96,6 +97,42 @@ export class S3StorageService implements OnApplicationShutdown {
         },
         error,
         operation: 'Delete',
+        publicMessage: 'Temporary file storage failure. Please retry.',
+        serviceLabel: 'S3',
+      });
+    }
+  }
+
+  async copyObject(input: {
+    sourceBucket: string;
+    sourceKey: string;
+    destinationBucket: string;
+    destinationKey: string;
+  }): Promise<void> {
+    if (!input.sourceBucket || !input.destinationBucket) {
+      throw new InternalServerErrorException('S3 bucket is not configured.');
+    }
+
+    try {
+      await this.circuitBreakerService.execute('s3', 'S3', () =>
+        this.client.send(
+          new CopyObjectCommand({
+            Bucket: input.destinationBucket,
+            Key: input.destinationKey,
+            CopySource: `${input.sourceBucket}/${this.encodeKey(input.sourceKey)}`,
+          }),
+        ),
+      );
+    } catch (error) {
+      throw createInfrastructureOperationError({
+        context: {
+          destinationBucket: input.destinationBucket,
+          destinationKey: input.destinationKey,
+          sourceBucket: input.sourceBucket,
+          sourceKey: input.sourceKey,
+        },
+        error,
+        operation: 'Copy',
         publicMessage: 'Temporary file storage failure. Please retry.',
         serviceLabel: 'S3',
       });

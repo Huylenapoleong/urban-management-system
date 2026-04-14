@@ -6,7 +6,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { MESSAGE_TYPES } from '@urban/shared-constants';
+import {
+  CHAT_SOCKET_EVENTS,
+  MESSAGE_RECALL_SCOPES,
+  MESSAGE_TYPES,
+} from '@urban/shared-constants';
 import type {
   ApiResponseMeta,
   ApiSuccessResponse,
@@ -15,6 +19,8 @@ import type {
   ConversationSummary,
   MediaAsset,
   MessageItem,
+  MessageReplyReference,
+  RecallMessageResult,
 } from '@urban/shared-types';
 import {
   createUlid,
@@ -66,6 +72,7 @@ import { AppConfigService } from '../../infrastructure/config/app-config.service
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
 import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
+import { S3StorageService } from '../../infrastructure/storage/s3-storage.service';
 import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ConversationDispatchService } from './conversation-dispatch.service';
 import { ChatOutboxService } from './chat-outbox.service';
@@ -123,6 +130,7 @@ export class ConversationsService {
     private readonly auditTrailService: AuditTrailService,
     private readonly pushNotificationService: PushNotificationService,
     private readonly mediaAssetService: MediaAssetService,
+    private readonly s3StorageService: S3StorageService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -404,7 +412,9 @@ export class ConversationsService {
       },
     );
     const filtered = items.filter((item) => {
-      if (item.deletedAt) {
+      if (
+        !this.conversationStateService.isMessageVisibleToUser(item, actor.id)
+      ) {
         return false;
       }
 
@@ -496,13 +506,13 @@ export class ConversationsService {
       throw new BadRequestException('Cannot create DM with yourself.');
     }
 
+    const conversationId = makeDmConversationId(actor.id, targetUser.userId);
+
     if (
-      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
+      !(await this.canAccessDmConversation(actor, targetUser, conversationId))
     ) {
       throw new ForbiddenException('You cannot access this conversation.');
     }
-
-    const conversationId = makeDmConversationId(actor.id, targetUser.userId);
     await this.ensureCanSendCitizenDirectMessage(
       actor,
       targetUser,
@@ -757,11 +767,12 @@ export class ConversationsService {
     let nextConversation = existingConversation;
 
     if (!nextConversation) {
-      const activeMessages =
-        await this.conversationSummaryService.listActiveMessages(
+      const visibleMessages =
+        await this.conversationSummaryService.listVisibleMessagesForUser(
           access.conversationKey,
+          actor.id,
         );
-      const latestMessage = activeMessages[0];
+      const latestMessage = visibleMessages[0];
 
       if (!latestMessage) {
         throw new NotFoundException('Conversation not found.');
@@ -973,33 +984,6 @@ export class ConversationsService {
     ) {
       return this.serializeMessage(actor.id, message);
     }
-
-    // Security check for non-senders/non-admins
-    if (
-      actor.id !== message.senderId &&
-      !this.authorizationService.isAdmin(actor)
-    ) {
-      // For non-senders, we only allow changes that keep the core content identical
-      // We parse the content JSON to compare the 'text' or original content
-      const getCoreContent = (c: string) => {
-        try {
-          const parsed = JSON.parse(c);
-          return parsed.text || parsed.content || c;
-        } catch {
-          return c;
-        }
-      };
-
-      if (
-        getCoreContent(nextContent) !== getCoreContent(message.content) ||
-        nextAttachmentUrl !== message.attachmentUrl
-      ) {
-        throw new ForbiddenException(
-          'You can only pin or react to this message, not edit its content.',
-        );
-      }
-    }
-
     const nextMessage: StoredMessage = {
       ...message,
       content: nextContent,
@@ -1099,17 +1083,17 @@ export class ConversationsService {
     conversationId: string,
     messageId: string,
   ): Promise<MessageItem> {
+    if (!this.authorizationService.isAdmin(actor)) {
+      throw new ForbiddenException(
+        'Only administrators can permanently delete messages.',
+      );
+    }
+
     const access = await this.resolveConversationAccess(actor, conversationId);
-    await this.ensureCanMutateConversationMessage(
-      actor,
-      access.conversationKey,
-      'delete',
-    );
     const message = await this.getMessageOrThrow(
       access.conversationKey,
       messageId,
     );
-    this.ensureCanMutateMessage(actor, message, 'delete');
 
     if (message.deletedAt) {
       return this.serializeMessage(actor.id, message);
@@ -1134,7 +1118,7 @@ export class ConversationsService {
       conversationId: access.conversationKey,
       messageId,
       occurredAt: deletedAt,
-      summary: `${actor.fullName} deleted a message.`,
+      summary: `${actor.fullName} permanently deleted a message.`,
       metadata: { type: nextMessage.type },
     });
 
@@ -1208,12 +1192,160 @@ export class ConversationsService {
       });
     }
   }
+
+  async recallMessage(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    messageId: string,
+    payload: unknown,
+  ): Promise<RecallMessageResult> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const body = ensureObject(payload);
+    const scope =
+      optionalEnum(body, 'scope', MESSAGE_RECALL_SCOPES) ?? 'EVERYONE';
+    const message = await this.getMessageOrThrow(
+      access.conversationKey,
+      messageId,
+    );
+
+    await this.ensureCanMutateConversationMessage(
+      actor,
+      access.conversationKey,
+      'recall',
+    );
+    this.ensureCanMutateMessage(actor, message, 'delete');
+
+    if (message.deletedAt) {
+      throw new BadRequestException('Message has already been deleted.');
+    }
+
+    if (scope === 'SELF') {
+      return this.recallMessageForSender(actor, access, message);
+    }
+
+    return this.recallMessageForEveryone(actor, access, message);
+  }
+
+  async forwardMessage(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    messageId: string,
+    payload: unknown,
+  ): Promise<MessageItem[]> {
+    const body = ensureObject(payload);
+    const rawConversationIds = body.conversationIds;
+
+    if (!Array.isArray(rawConversationIds) || rawConversationIds.length === 0) {
+      throw new BadRequestException('conversationIds is required.');
+    }
+
+    if (
+      rawConversationIds.some(
+        (value) => typeof value !== 'string' || value.trim().length === 0,
+      )
+    ) {
+      throw new BadRequestException(
+        'conversationIds must contain only non-empty strings.',
+      );
+    }
+    const typedConversationIds = rawConversationIds as string[];
+
+    const targetConversationIds = Array.from(
+      new Set(typedConversationIds.map((value) => value.trim())),
+    );
+
+    if (targetConversationIds.length === 0) {
+      throw new BadRequestException('conversationIds is required.');
+    }
+
+    if (targetConversationIds.length > 20) {
+      throw new BadRequestException(
+        'Forwarding supports up to 20 target conversations per request.',
+      );
+    }
+
+    const sourceAccess = await this.resolveConversationAccess(
+      actor,
+      conversationId,
+    );
+    const sourceMessage = await this.getMessageOrThrow(
+      sourceAccess.conversationKey,
+      messageId,
+    );
+
+    if (sourceMessage.deletedAt) {
+      throw new NotFoundException('Message not found.');
+    }
+
+    if (
+      !this.conversationStateService.isMessageVisibleToUser(
+        sourceMessage,
+        actor.id,
+      )
+    ) {
+      throw new NotFoundException('Message not found.');
+    }
+
+    if (sourceMessage.recalledAt) {
+      throw new BadRequestException('Recalled messages cannot be forwarded.');
+    }
+
+    if (sourceMessage.type === 'SYSTEM') {
+      throw new BadRequestException('System messages cannot be forwarded.');
+    }
+
+    const forwardedMessages: MessageItem[] = [];
+
+    for (const targetConversationId of targetConversationIds) {
+      const targetAccess = await this.resolveConversationAccess(
+        actor,
+        targetConversationId,
+        true,
+      );
+      const forwardedAttachment = await this.prepareForwardedAttachment(
+        actor,
+        targetAccess.conversationId,
+        sourceMessage,
+      );
+      const forwardedPayload: Record<string, unknown> = {
+        type: sourceMessage.type,
+        content: sourceMessage.content,
+      };
+
+      if (forwardedAttachment.attachmentKey) {
+        forwardedPayload.attachmentKey = forwardedAttachment.attachmentKey;
+      }
+
+      if (forwardedAttachment.attachmentUrl) {
+        forwardedPayload.attachmentUrl = forwardedAttachment.attachmentUrl;
+      }
+
+      const forwardedMessage = await this.createMessage(
+        actor,
+        targetAccess.conversationKey,
+        targetAccess.conversationId,
+        targetAccess.participants,
+        forwardedPayload,
+        {
+          forwardedFrom: sourceMessage,
+        },
+      );
+
+      forwardedMessages.push(forwardedMessage);
+    }
+
+    return forwardedMessages;
+  }
+
   private async createMessage(
     actor: AuthenticatedUser,
     conversationId: string,
     publicConversationId: string,
     participants: string[],
     payload: unknown,
+    options: {
+      forwardedFrom?: StoredMessage;
+    } = {},
   ): Promise<MessageItem> {
     const body = ensureObject(payload);
     const type: SupportedMessageType =
@@ -1251,6 +1383,13 @@ export class ConversationsService {
 
     await this.ensureReplyTargetAvailable(conversationId, replyTo);
     this.chatRateLimitService.consumeMessageSend(actor.id);
+    const replyMessage = await this.buildReplyMessageReference(
+      conversationId,
+      replyTo,
+    );
+    const forwardedFrom =
+      options.forwardedFrom &&
+      this.buildForwardedMessageMetadata(options.forwardedFrom);
 
     const content = this.normalizeStoredContent(type, rawContent);
     const sentAt = nowIso();
@@ -1270,6 +1409,11 @@ export class ConversationsService {
       attachmentAsset: attachment.asset,
       attachmentUrl: attachment.url,
       replyTo,
+      replyMessage,
+      forwardedFromMessageId: forwardedFrom?.messageId,
+      forwardedFromConversationId: forwardedFrom?.conversationId,
+      forwardedFromSenderId: forwardedFrom?.senderId,
+      forwardedFromSenderName: forwardedFrom?.senderName,
       deletedAt: null,
       sentAt,
       updatedAt: sentAt,
@@ -1301,7 +1445,11 @@ export class ConversationsService {
       messageId,
       occurredAt: sentAt,
       summary: `${actor.fullName} sent a ${type.toLowerCase()} message.`,
-      metadata: { replyTo: replyTo ?? '', type },
+      metadata: {
+        replyTo: replyTo ?? '',
+        type,
+        forwardedFromMessageId: forwardedFrom?.messageId ?? '',
+      },
     });
     const pushRecord = this.buildChatPushOutboxEvent(
       actor,
@@ -1865,6 +2013,54 @@ export class ConversationsService {
     }
   }
 
+  private async buildReplyMessageReference(
+    conversationId: string,
+    replyTo?: string,
+  ): Promise<MessageReplyReference | undefined> {
+    if (!replyTo) {
+      return undefined;
+    }
+
+    const replyTarget = await this.findMessageById(conversationId, replyTo);
+
+    if (!replyTarget || replyTarget.deletedAt) {
+      return undefined;
+    }
+
+    return {
+      id: replyTarget.messageId,
+      senderId: replyTarget.senderId,
+      senderName: replyTarget.senderName,
+      type: replyTarget.type,
+      content: replyTarget.recalledAt
+        ? this.getRecalledStructuredContent()
+        : replyTarget.content,
+      attachmentAsset: replyTarget.recalledAt
+        ? undefined
+        : replyTarget.attachmentAsset,
+      attachmentUrl: replyTarget.recalledAt
+        ? undefined
+        : replyTarget.attachmentUrl,
+      deletedAt: replyTarget.deletedAt,
+      recalledAt: replyTarget.recalledAt ?? null,
+      sentAt: replyTarget.sentAt,
+    };
+  }
+
+  private buildForwardedMessageMetadata(sourceMessage: StoredMessage): {
+    messageId: string;
+    conversationId: string;
+    senderId: string;
+    senderName: string;
+  } {
+    return {
+      messageId: sourceMessage.messageId,
+      conversationId: sourceMessage.conversationId,
+      senderId: sourceMessage.senderId,
+      senderName: sourceMessage.senderName,
+    };
+  }
+
   private buildMessageReferenceRecord(
     conversationId: string,
     message: StoredMessage,
@@ -1980,35 +2176,293 @@ export class ConversationsService {
     return message;
   }
 
+  private async recallMessageForSender(
+    actor: AuthenticatedUser,
+    access: ResolvedConversationAccess,
+    message: StoredMessage,
+  ): Promise<RecallMessageResult> {
+    if (actor.id !== message.senderId) {
+      throw new ForbiddenException(
+        'Only the sender can recall a message for themselves.',
+      );
+    }
+
+    if (message.deletedForSenderAt) {
+      return {
+        conversationId: access.conversationId,
+        messageId: message.messageId,
+        scope: 'SELF',
+        recalledAt: message.deletedForSenderAt,
+      };
+    }
+
+    const recalledAt = nowIso();
+    const nextMessage: StoredMessage = {
+      ...message,
+      deletedForSenderAt: recalledAt,
+      updatedAt: recalledAt,
+    };
+
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbMessagesTableName,
+          item: nextMessage,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt AND attribute_not_exists(deletedForSenderAt)',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': message.updatedAt,
+            ':expectedDeletedAt': message.deletedAt,
+          },
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Message changed. Please retry.');
+      }
+
+      throw error;
+    }
+
+    const syncResult =
+      await this.conversationSummaryService.syncConversationSummaryForUser(
+        {
+          conversationKey: access.conversationKey,
+          participants: access.participants,
+        },
+        actor.id,
+      );
+
+    this.chatRealtimeService.emitToUser(
+      actor.id,
+      CHAT_SOCKET_EVENTS.MESSAGE_DELETED,
+      {
+        eventId: createUlid(),
+        conversationId: access.conversationId,
+        conversationKey: access.conversationKey,
+        messageId: message.messageId,
+        deletedByUserId: actor.id,
+        occurredAt: recalledAt,
+      },
+    );
+
+    if (syncResult.removed) {
+      this.conversationDispatchService.emitConversationRemoved(
+        createUlid(),
+        actor.id,
+        access.conversationKey,
+        recalledAt,
+        'message.deleted',
+      );
+    } else if (syncResult.changed && syncResult.summary) {
+      this.conversationDispatchService.emitConversationSummaryUpdated(
+        createUlid(),
+        actor.id,
+        access.conversationKey,
+        syncResult.summary,
+        'message.updated',
+        recalledAt,
+      );
+    }
+
+    return {
+      conversationId: access.conversationId,
+      messageId: message.messageId,
+      scope: 'SELF',
+      recalledAt,
+    };
+  }
+
+  private async recallMessageForEveryone(
+    actor: AuthenticatedUser,
+    access: ResolvedConversationAccess,
+    message: StoredMessage,
+  ): Promise<RecallMessageResult> {
+    if (message.recalledAt) {
+      return {
+        conversationId: access.conversationId,
+        messageId: message.messageId,
+        scope: 'EVERYONE',
+        recalledAt: message.recalledAt,
+      };
+    }
+
+    const recalledAt = nowIso();
+    const nextMessage: StoredMessage = {
+      ...message,
+      recalledAt,
+      recalledByUserId: actor.id,
+      updatedAt: recalledAt,
+    };
+    const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      eventName: 'message.updated',
+      messageId: message.messageId,
+      occurredAt: recalledAt,
+    });
+    const auditRecord = this.auditTrailService.buildConversationEvent({
+      action: 'MESSAGE_RECALLED',
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      messageId: message.messageId,
+      occurredAt: recalledAt,
+      summary: `${actor.fullName} recalled a message.`,
+      metadata: {
+        scope: 'EVERYONE',
+        type: nextMessage.type,
+      },
+    });
+
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbMessagesTableName,
+          item: nextMessage,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': message.updatedAt,
+            ':expectedDeletedAt': message.deletedAt,
+          },
+        },
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: outboxRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Message changed. Please retry.');
+      }
+
+      throw error;
+    }
+
+    try {
+      const syncResult =
+        await this.conversationSummaryService.syncConversationSummariesAfterMessageMutation(
+          access,
+        );
+      await this.conversationDispatchService.emitMessageUpdated(
+        outboxRecord.eventId,
+        actor.id,
+        nextMessage,
+        access.conversationKey,
+        syncResult,
+      );
+      await this.chatOutboxService
+        .deleteChatOutboxEvent(outboxRecord)
+        .catch((error: unknown) => {
+          const messageText =
+            error instanceof Error ? error.message : 'Unknown error.';
+          this.logger.warn(
+            `Failed to delete chat outbox event ${outboxRecord.eventId}: ${messageText}`,
+          );
+        });
+    } catch (error) {
+      this.logDeferredChatOutboxEvent(
+        outboxRecord.eventId,
+        outboxRecord.eventName,
+        error,
+      );
+    }
+
+    return {
+      conversationId: access.conversationId,
+      messageId: message.messageId,
+      scope: 'EVERYONE',
+      recalledAt,
+    };
+  }
+
+  private async prepareForwardedAttachment(
+    actor: AuthenticatedUser,
+    targetConversationId: string,
+    sourceMessage: StoredMessage,
+  ): Promise<{
+    attachmentKey?: string;
+    attachmentUrl?: string;
+  }> {
+    if (sourceMessage.attachmentAsset?.key) {
+      const sourceBucket =
+        sourceMessage.attachmentAsset.bucket || this.config.s3BucketName;
+
+      if (!sourceBucket || !this.config.s3BucketName) {
+        throw new BadRequestException(
+          'Forwarding this attachment is not available because S3 is not configured.',
+        );
+      }
+
+      const normalizedTarget =
+        this.mediaAssetService.normalizeSegment('message');
+      const actorSegment = this.mediaAssetService.normalizeSegment(actor.id);
+      const entitySegment =
+        this.mediaAssetService.normalizeSegment(targetConversationId);
+      const fileName =
+        sourceMessage.attachmentAsset.fileName ??
+        sourceMessage.attachmentAsset.originalFileName ??
+        sourceMessage.attachmentAsset.key.split('/').pop() ??
+        'file.bin';
+      const nextKey = `${this.mediaAssetService.normalizeSegment(
+        this.config.uploadKeyPrefix,
+      )}/${normalizedTarget}/${actorSegment}/${entitySegment}/${createUlid()}-${fileName}`;
+
+      await this.s3StorageService.copyObject({
+        sourceBucket,
+        sourceKey: sourceMessage.attachmentAsset.key,
+        destinationBucket: this.config.s3BucketName,
+        destinationKey: nextKey,
+      });
+
+      return {
+        attachmentKey: nextKey,
+      };
+    }
+
+    if (sourceMessage.attachmentUrl) {
+      return {
+        attachmentUrl: sourceMessage.attachmentUrl,
+      };
+    }
+
+    return {};
+  }
+
+  private getRecalledStructuredContent(): string {
+    return JSON.stringify({
+      text: 'Message was recalled.',
+      mention: [],
+    });
+  }
+
   private ensureCanMutateMessage(
     actor: AuthenticatedUser,
     message: StoredMessage,
     action: 'edit' | 'delete',
   ): void {
-    // If Admin, they can do anything
-    if (this.authorizationService.isAdmin(actor)) {
+    if (
+      actor.id === message.senderId ||
+      this.authorizationService.isAdmin(actor)
+    ) {
       return;
     }
 
-    // If Sender, they can edit or delete
-    if (actor.id === message.senderId) {
-      return;
-    }
-
-    // For non-senders, 'delete' is strictly forbidden
-    if (action === 'delete') {
-      throw new ForbiddenException(`You cannot delete this message.`);
-    }
-
-    // For 'edit', we allow the call to proceed so that updateMessage 
-    // can check if only metadata (like pin/reactions) is being changed.
-    // The resolveConversationAccess already checked if they are in the chat.
+    throw new ForbiddenException(`You cannot ${action} this message.`);
   }
 
   private async ensureCanMutateConversationMessage(
     actor: AuthenticatedUser,
     conversationId: string,
-    action: 'edit' | 'delete',
+    action: 'edit' | 'delete' | 'recall',
   ): Promise<void> {
     if (
       this.authorizationService.isAdmin(actor) ||
@@ -2414,8 +2868,10 @@ export class ConversationsService {
 
     const targetUser = await this.usersService.getByIdOrThrow(targetUserId);
 
+    const conversationId = makeDmConversationId(actor.id, targetUser.userId);
+
     if (
-      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
+      !(await this.canAccessDmConversation(actor, targetUser, conversationId))
     ) {
       throw new ForbiddenException('You cannot access this conversation.');
     }
@@ -2424,7 +2880,7 @@ export class ConversationsService {
       throw new BadRequestException('Cannot create DM with yourself.');
     }
 
-    return makeDmConversationId(actor.id, targetUser.userId);
+    return conversationId;
   }
 
   private async buildMessageDeliveryContext(
@@ -2488,21 +2944,26 @@ export class ConversationsService {
       message,
       deliveryContext,
     );
+    const isRecalled = Boolean(item.recalledAt);
     const senderAvatar = await this.mediaAssetService.resolveAssetWithLegacyUrl(
       item.senderAvatarAsset,
       item.senderAvatarUrl,
     );
-    const attachment = await this.mediaAssetService.resolveAssetWithLegacyUrl(
-      item.attachmentAsset,
-      item.attachmentUrl,
-    );
+    const attachment = isRecalled
+      ? { asset: undefined, url: undefined }
+      : await this.mediaAssetService.resolveAssetWithLegacyUrl(
+          item.attachmentAsset,
+          item.attachmentUrl,
+        );
 
     return {
       ...item,
+      content: isRecalled ? this.getRecalledStructuredContent() : item.content,
       senderAvatarAsset: senderAvatar.asset,
       senderAvatarUrl: senderAvatar.url,
       attachmentAsset: attachment.asset,
       attachmentUrl: attachment.url,
+      replyMessage: isRecalled ? undefined : item.replyMessage,
     };
   }
 
@@ -2595,14 +3056,14 @@ export class ConversationsService {
         actor.id,
       );
 
-      if (
-        requireSendAccess &&
-        (!actorMembership || actorMembership.deletedAt) &&
-        actor.role !== 'ADMIN'
-      ) {
-        throw new ForbiddenException(
-          'Only active members can send messages to this group.',
-        );
+      if (!actorMembership || actorMembership.deletedAt) {
+        if (actor.role !== 'ADMIN') {
+          throw new ForbiddenException(
+            requireSendAccess
+              ? 'Only active members can send messages to this group.'
+              : 'Only active members can access this group conversation.',
+          );
+        }
       }
 
       const members = await this.groupsService.listMembers(actor, groupId);
@@ -2631,7 +3092,7 @@ export class ConversationsService {
       : await this.usersService.getByIdOrThrow(otherParticipantId);
 
     if (
-      !this.authorizationService.canAccessDirectConversation(actor, targetUser)
+      !(await this.canAccessDmConversation(actor, targetUser, conversationId))
     ) {
       throw new ForbiddenException('You cannot access this conversation.');
     }
@@ -2645,5 +3106,28 @@ export class ConversationsService {
     }
 
     return participantIds;
+  }
+
+  private async canAccessDmConversation(
+    actor: AuthenticatedUser,
+    targetUser: Awaited<ReturnType<UsersService['getByIdOrThrow']>>,
+    conversationId: string,
+  ): Promise<boolean> {
+    if (
+      this.authorizationService.canAccessDirectConversation(actor, targetUser)
+    ) {
+      return true;
+    }
+
+    if (actor.role !== 'CITIZEN' || targetUser.role !== 'CITIZEN') {
+      return false;
+    }
+
+    if (await this.usersService.canStartCitizenDm(actor, targetUser)) {
+      return true;
+    }
+
+    const directRequest = await this.getDirectMessageRequest(conversationId);
+    return directRequest?.status === 'ACCEPTED';
   }
 }

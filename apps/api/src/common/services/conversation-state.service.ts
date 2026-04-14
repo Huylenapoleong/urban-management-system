@@ -30,6 +30,8 @@ export interface MessageDeliveryContext {
 
 @Injectable()
 export class ConversationStateService {
+  private readonly recalledPlaceholder = 'Message was recalled.';
+
   groupActiveMessagesByConversation(
     messages: StoredMessage[],
   ): Map<string, StoredMessage[]> {
@@ -255,6 +257,10 @@ export class ConversationStateService {
   }
 
   buildPreview(message: StoredMessage): string {
+    if (message.recalledAt) {
+      return this.recalledPlaceholder;
+    }
+
     if (
       message.type !== 'TEXT' &&
       message.type !== 'EMOJI' &&
@@ -291,6 +297,27 @@ export class ConversationStateService {
     }
 
     return content.trim().length > 0;
+  }
+
+  isMessageVisibleToUser(message: StoredMessage, userId: string): boolean {
+    if (message.deletedAt) {
+      return false;
+    }
+
+    if (message.senderId === userId && message.deletedForSenderAt) {
+      return false;
+    }
+
+    return true;
+  }
+
+  filterVisibleMessagesForUser(
+    messages: StoredMessage[],
+    userId: string,
+  ): StoredMessage[] {
+    return messages.filter((message) =>
+      this.isMessageVisibleToUser(message, userId),
+    );
   }
   getMessageDeliveryState(
     message: StoredMessage,

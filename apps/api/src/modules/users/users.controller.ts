@@ -9,11 +9,9 @@ import {
   Query,
 } from '@nestjs/common';
 import {
-  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
   ApiForbiddenResponse,
-  ApiNotFoundResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -28,6 +26,12 @@ import {
   ApiCreatedEnvelopeResponse,
   ApiOkEnvelopeResponse,
 } from '../../common/openapi/swagger-envelope';
+import {
+  ApiBadRequestExamples,
+  ApiConflictExamples,
+  ApiForbiddenExamples,
+  ApiNotFoundExamples,
+} from '../../common/openapi/swagger-errors';
 import {
   FriendActionResultDto,
   FriendRequestItemDto,
@@ -79,11 +83,32 @@ export class UsersController {
   }
 
   @Get('me/friends')
-  @ApiOperation({ summary: 'List my friends' })
+  @ApiOperation({
+    summary: 'List my friends',
+    description:
+      'Returns the current user friendship list. Use cursor pagination to build infinite scrolling or segmented friend tabs on FE.',
+  })
   @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiOkEnvelopeResponse(FriendUserItemDto, { isArray: true })
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiOkEnvelopeResponse(FriendUserItemDto, {
+    isArray: true,
+    description:
+      'Friend list for the authenticated user. Each item already contains display-ready avatar and profile data.',
+  })
+  @ApiBadRequestExamples('The friend list query is invalid.', [
+    {
+      name: 'friendsInvalidLimit',
+      summary: 'Invalid pagination limit',
+      message: 'limit must be a positive integer.',
+      path: '/api/users/me/friends?limit=0',
+    },
+    {
+      name: 'friendsInvalidCursor',
+      summary: 'Invalid pagination cursor',
+      message: 'cursor is invalid.',
+      path: '/api/users/me/friends?cursor=not-base64',
+    },
+  ])
   listMyFriends(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ListFriendsQueryDto,
@@ -95,7 +120,11 @@ export class UsersController {
   }
 
   @Get('me/friend-requests')
-  @ApiOperation({ summary: 'List my incoming/outgoing friend requests' })
+  @ApiOperation({
+    summary: 'List my incoming/outgoing friend requests',
+    description:
+      'Lists friendship requests visible to the current user. `direction=INCOMING` is typically used for the "Requests received" tab, while `OUTGOING` is used for "Pending sent requests".',
+  })
   @ApiQuery({
     name: 'direction',
     required: false,
@@ -103,8 +132,24 @@ export class UsersController {
   })
   @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiOkEnvelopeResponse(FriendRequestItemDto, { isArray: true })
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiOkEnvelopeResponse(FriendRequestItemDto, {
+    isArray: true,
+    description: 'Paginated friendship requests for the authenticated user.',
+  })
+  @ApiBadRequestExamples('The friend-request query is invalid.', [
+    {
+      name: 'friendRequestsInvalidDirection',
+      summary: 'Unsupported direction filter',
+      message: 'direction is invalid.',
+      path: '/api/users/me/friend-requests?direction=SIDEWAYS',
+    },
+    {
+      name: 'friendRequestsInvalidLimit',
+      summary: 'Invalid pagination limit',
+      message: 'limit must be a positive integer.',
+      path: '/api/users/me/friend-requests?limit=0',
+    },
+  ])
   listMyFriendRequests(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: FriendRequestQueryDto,
@@ -116,11 +161,63 @@ export class UsersController {
   }
 
   @Post('me/friends/:userId/request')
-  @ApiOperation({ summary: 'Send a friend request' })
-  @ApiParam({ name: 'userId', type: String })
-  @ApiCreatedEnvelopeResponse(FriendRequestItemDto)
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiOperation({
+    summary: 'Send a friend request',
+    description:
+      'Creates a citizen-to-citizen friendship request. Location/scope no longer blocks friendship discovery; direct messaging is still controlled separately by chat policy.',
+  })
+  @ApiParam({
+    name: 'userId',
+    type: String,
+    description: 'Target citizen user id.',
+  })
+  @ApiCreatedEnvelopeResponse(FriendRequestItemDto, {
+    description:
+      'Returns the outgoing friendship request item. If the same outgoing request already exists, the existing request is returned instead of creating a duplicate.',
+  })
+  @ApiBadRequestExamples(
+    'The friend request cannot be created because the pair or input is invalid.',
+    [
+      {
+        name: 'selfFriendRequest',
+        summary: 'Cannot friend yourself',
+        message: 'Cannot send a friend request to yourself.',
+        path: '/api/users/me/friends/01JPCY0000CITIZENA00000000/request',
+      },
+      {
+        name: 'alreadyFriends',
+        summary: 'Users are already friends',
+        message: 'Users are already friends.',
+        path: '/api/users/me/friends/01JPCY0000CITIZENB00000000/request',
+      },
+      {
+        name: 'citizenOnly',
+        summary: 'Friend flow only supports citizens',
+        message: 'Friend requests are only supported between citizen accounts.',
+        path: '/api/users/me/friends/01JPCY0000WARDOFFICER00000/request',
+      },
+    ],
+  )
+  @ApiConflictExamples(
+    'The target relationship already requires another action instead of sending a new request.',
+    [
+      {
+        name: 'incomingAlreadyExists',
+        summary: 'Target user already sent a request',
+        message:
+          'This user already sent you a friend request. Accept it instead.',
+        path: '/api/users/me/friends/01JPCY0000CITIZENB00000000/request',
+      },
+    ],
+  )
+  @ApiNotFoundExamples('The target user does not exist.', [
+    {
+      name: 'friendTargetMissing',
+      summary: 'Target user not found',
+      message: 'User not found.',
+      path: '/api/users/me/friends/01JPCY0000UNKNOWNUSER000000/request',
+    },
+  ])
   sendFriendRequest(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -129,10 +226,42 @@ export class UsersController {
   }
 
   @Post('me/friend-requests/:userId/accept')
-  @ApiOperation({ summary: 'Accept incoming friend request' })
-  @ApiParam({ name: 'userId', type: String })
-  @ApiOkEnvelopeResponse(FriendUserItemDto)
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiOperation({
+    summary: 'Accept incoming friend request',
+    description:
+      'Accepts an incoming request and creates friendship edges for both users.',
+  })
+  @ApiParam({
+    name: 'userId',
+    type: String,
+    description: 'Requester user id from the incoming friend request.',
+  })
+  @ApiOkEnvelopeResponse(FriendUserItemDto, {
+    description:
+      'Returns the new friend item after both friendship edges are created.',
+  })
+  @ApiBadRequestExamples(
+    'The accept action is not valid for the provided user id.',
+    [
+      {
+        name: 'acceptSelf',
+        summary: 'Cannot accept your own request',
+        message: 'Cannot accept your own friend request.',
+        path: '/api/users/me/friend-requests/01JPCY0000CITIZENA00000000/accept',
+      },
+    ],
+  )
+  @ApiNotFoundExamples(
+    'No incoming friend request exists for this requester.',
+    [
+      {
+        name: 'acceptMissingRequest',
+        summary: 'Friend request not found',
+        message: 'Friend request not found.',
+        path: '/api/users/me/friend-requests/01JPCY0000CITIZENB00000000/accept',
+      },
+    ],
+  )
   acceptFriendRequest(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -141,10 +270,26 @@ export class UsersController {
   }
 
   @Post('me/friend-requests/:userId/reject')
-  @ApiOperation({ summary: 'Reject incoming friend request' })
+  @ApiOperation({
+    summary: 'Reject incoming friend request',
+    description:
+      'Deletes both the incoming and mirrored outgoing friend-request records.',
+  })
   @ApiParam({ name: 'userId', type: String })
-  @ApiOkEnvelopeResponse(FriendActionResultDto)
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiOkEnvelopeResponse(FriendActionResultDto, {
+    description: 'Returns the rejected requester id and rejection timestamp.',
+  })
+  @ApiNotFoundExamples(
+    'No incoming friend request exists for this requester.',
+    [
+      {
+        name: 'rejectMissingRequest',
+        summary: 'Friend request not found',
+        message: 'Friend request not found.',
+        path: '/api/users/me/friend-requests/01JPCY0000CITIZENB00000000/reject',
+      },
+    ],
+  )
   rejectFriendRequest(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -153,10 +298,24 @@ export class UsersController {
   }
 
   @Post('me/friend-requests/:userId/cancel')
-  @ApiOperation({ summary: 'Cancel outgoing friend request' })
+  @ApiOperation({
+    summary: 'Cancel outgoing friend request',
+    description:
+      'Cancels a previously sent outgoing friend request and removes its mirrored incoming record for the target user.',
+  })
   @ApiParam({ name: 'userId', type: String })
-  @ApiOkEnvelopeResponse(FriendActionResultDto)
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiOkEnvelopeResponse(FriendActionResultDto, {
+    description:
+      'Returns the canceled target user id and cancellation timestamp.',
+  })
+  @ApiNotFoundExamples('No outgoing friend request exists for this target.', [
+    {
+      name: 'cancelMissingRequest',
+      summary: 'Friend request not found',
+      message: 'Friend request not found.',
+      path: '/api/users/me/friend-requests/01JPCY0000CITIZENB00000000/cancel',
+    },
+  ])
   cancelFriendRequest(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -165,10 +324,31 @@ export class UsersController {
   }
 
   @Delete('me/friends/:userId')
-  @ApiOperation({ summary: 'Remove a friend' })
+  @ApiOperation({
+    summary: 'Remove a friend',
+    description:
+      'Deletes both friendship edges and clears any stray friend-request records between the two users.',
+  })
   @ApiParam({ name: 'userId', type: String })
-  @ApiOkEnvelopeResponse(FriendActionResultDto)
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiOkEnvelopeResponse(FriendActionResultDto, {
+    description: 'Returns the removed friend id and removal timestamp.',
+  })
+  @ApiBadRequestExamples('The remove-friend request is invalid.', [
+    {
+      name: 'removeSelf',
+      summary: 'Cannot remove yourself',
+      message: 'Cannot remove yourself from friends.',
+      path: '/api/users/me/friends/01JPCY0000CITIZENA00000000',
+    },
+  ])
+  @ApiNotFoundExamples('The requested friendship does not exist.', [
+    {
+      name: 'friendMissing',
+      summary: 'Friend edge not found',
+      message: 'Friend not found.',
+      path: '/api/users/me/friends/01JPCY0000CITIZENB00000000',
+    },
+  ])
   removeFriend(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -177,13 +357,34 @@ export class UsersController {
   }
 
   @Get('discover')
-  @ApiOperation({ summary: 'Search users for chat/friend actions' })
+  @ApiOperation({
+    summary: 'Search users for chat/friend actions',
+    description:
+      'Discovery endpoint for FE user pickers. `mode=all` returns discoverable users, `mode=chat` returns only users that can be messaged now, and `mode=friend` returns users relevant to friendship flows.',
+  })
   @ApiQuery({ name: 'q', required: false, type: String })
   @ApiQuery({ name: 'mode', required: false, enum: ['all', 'chat', 'friend'] })
   @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiOkEnvelopeResponse(UserDirectoryItemDto, { isArray: true })
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiOkEnvelopeResponse(UserDirectoryItemDto, {
+    isArray: true,
+    description:
+      'Discovery results already include FE-ready capability flags: `canMessage`, `canSendFriendRequest`, and `canSendMessageRequest`.',
+  })
+  @ApiBadRequestExamples('The discovery query contains unsupported values.', [
+    {
+      name: 'discoverInvalidMode',
+      summary: 'Unsupported discovery mode',
+      message: 'mode is invalid.',
+      path: '/api/users/discover?mode=invalid',
+    },
+    {
+      name: 'discoverInvalidLimit',
+      summary: 'Invalid pagination limit',
+      message: 'limit must be a positive integer.',
+      path: '/api/users/discover?limit=0',
+    },
+  ])
   discoverUsers(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: SearchUsersForChatQueryDto,
@@ -198,7 +399,20 @@ export class UsersController {
   @ApiOperation({ summary: 'Register or update my push device token' })
   @ApiBody({ type: RegisterPushDeviceRequestDto })
   @ApiCreatedEnvelopeResponse(PushDeviceDto)
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiBadRequestExamples('The push-device registration payload is invalid.', [
+    {
+      name: 'pushDeviceIdRequired',
+      summary: 'Missing device id',
+      message: 'deviceId is required.',
+      path: '/api/users/me/push-devices',
+    },
+    {
+      name: 'pushProviderInvalid',
+      summary: 'Unsupported push provider',
+      message: 'provider is invalid.',
+      path: '/api/users/me/push-devices',
+    },
+  ])
   registerMyPushDevice(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: RegisterPushDeviceRequestDto,
@@ -210,7 +424,14 @@ export class UsersController {
   @ApiOperation({ summary: 'Delete one of my registered push devices' })
   @ApiParam({ name: 'deviceId', type: String })
   @ApiOkEnvelopeResponse(PushDeviceRemovalResultDto)
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiNotFoundExamples('The target push device does not exist.', [
+    {
+      name: 'pushDeviceMissing',
+      summary: 'Push device not found',
+      message: 'Push device not found.',
+      path: '/api/users/me/push-devices/device-unknown',
+    },
+  ])
   deleteMyPushDevice(
     @CurrentUser() user: AuthenticatedUser,
     @Param('deviceId') deviceId: string,
@@ -219,10 +440,46 @@ export class UsersController {
   }
 
   @Patch('me')
-  @ApiOperation({ summary: 'Update my profile' })
+  @ApiOperation({
+    summary: 'Update my profile',
+    description:
+      'Updates the authenticated user profile. Citizens cannot change their own `locationCode`. Use `avatarKey` for the private-media flow; `avatarUrl` remains for backward compatibility.',
+  })
   @ApiBody({ type: UpdateProfileRequestDto })
-  @ApiOkEnvelopeResponse(UserProfileDto)
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiOkEnvelopeResponse(UserProfileDto, {
+    description: 'Updated user profile after validation and persistence.',
+  })
+  @ApiBadRequestExamples('The profile update payload is invalid.', [
+    {
+      name: 'avatarKeyAndUrl',
+      summary: 'avatarKey and avatarUrl both provided',
+      message: 'Provide either avatarKey or avatarUrl, not both.',
+      path: '/api/users/me',
+    },
+    {
+      name: 'emailExists',
+      summary: 'Duplicate email',
+      message: 'email already exists.',
+      path: '/api/users/me',
+    },
+  ])
+  @ApiForbiddenExamples(
+    'The current user is not allowed to change the requested profile fields.',
+    [
+      {
+        name: 'citizenLocationForbidden',
+        summary: 'Citizen tried to change location',
+        message: 'Citizens cannot change locationCode.',
+        path: '/api/users/me',
+      },
+      {
+        name: 'locationOutsideScope',
+        summary: 'Officer tried to move user outside scope',
+        message: 'locationCode is outside of your scope.',
+        path: '/api/users/me',
+      },
+    ],
+  )
   updateMe(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: UpdateProfileRequestDto,
@@ -240,7 +497,20 @@ export class UsersController {
   @ApiQuery({ name: 'cursor', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiOkEnvelopeResponse(UserProfileDto, { isArray: true })
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiBadRequestExamples('One or more user-list filters are invalid.', [
+    {
+      name: 'listUsersInvalidLocation',
+      summary: 'Invalid location code filter',
+      message: 'locationCode is invalid.',
+      path: '/api/users?locationCode=BAD-CODE',
+    },
+    {
+      name: 'listUsersInvalidLimit',
+      summary: 'Invalid pagination limit',
+      message: 'limit must be a positive integer.',
+      path: '/api/users?limit=0',
+    },
+  ])
   listUsers(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ListUsersQueryDto,
@@ -253,7 +523,28 @@ export class UsersController {
   @ApiOperation({ summary: 'Create officer or admin user' })
   @ApiBody({ type: CreateUserRequestDto })
   @ApiCreatedEnvelopeResponse(UserProfileDto)
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiBadRequestExamples('The create-user payload is invalid.', [
+    {
+      name: 'createUserMissingRole',
+      summary: 'Missing role field',
+      message: 'role is required.',
+      path: '/api/users',
+    },
+    {
+      name: 'createUserEmailExists',
+      summary: 'Duplicate email',
+      message: 'email already exists.',
+      path: '/api/users',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot create the requested user role.', [
+    {
+      name: 'createUserRoleForbidden',
+      summary: 'Role creation denied by scope',
+      message: 'You cannot create this user role.',
+      path: '/api/users',
+    },
+  ])
   createUser(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: CreateUserRequestDto,
@@ -262,11 +553,35 @@ export class UsersController {
   }
 
   @Get('search')
-  @ApiOperation({ summary: 'Search user by exact phone or email' })
-  @ApiQuery({ name: 'q', type: String, description: 'Phone number or email address' })
-  @ApiOkEnvelopeResponse(UserProfileDto)
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiOperation({
+    summary: 'Search user by exact phone or email',
+    description:
+      'Exact-match lookup by phone or email for the authenticated user scope. This is intended for precise search, not fuzzy discovery.',
+  })
+  @ApiQuery({
+    name: 'q',
+    type: String,
+    description: 'Phone number or email address',
+  })
+  @ApiOkEnvelopeResponse(UserProfileDto, {
+    description: 'Exact user match for the provided phone or email.',
+  })
+  @ApiBadRequestExamples('The exact-search query is missing.', [
+    {
+      name: 'exactSearchRequired',
+      summary: 'Missing q parameter',
+      message: 'Search query is required.',
+      path: '/api/users/search',
+    },
+  ])
+  @ApiNotFoundExamples('No active user matched the exact phone/email input.', [
+    {
+      name: 'exactSearchNotFound',
+      summary: 'No user matched the query',
+      message: 'No user matched the provided phone or email.',
+      path: '/api/users/search?q=ghost%40example.com',
+    },
+  ])
   searchExact(
     @CurrentUser() user: AuthenticatedUser,
     @Query('q') query: string,
@@ -278,7 +593,22 @@ export class UsersController {
   @ApiOperation({ summary: 'Get active presence state for a user' })
   @ApiParam({ name: 'userId', type: String })
   @ApiOkEnvelopeResponse(PresenceStateDto)
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiForbiddenExamples('The actor cannot access this user presence.', [
+    {
+      name: 'presenceForbidden',
+      summary: 'Profile access denied',
+      message: 'You cannot access this profile.',
+      path: '/api/users/01JPCY0000CITIZENB00000000/presence',
+    },
+  ])
+  @ApiNotFoundExamples('The target user does not exist.', [
+    {
+      name: 'presenceUserMissing',
+      summary: 'User not found',
+      message: 'User not found.',
+      path: '/api/users/01JPCY0000UNKNOWNUSER000000/presence',
+    },
+  ])
   getUserPresence(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -290,7 +620,22 @@ export class UsersController {
   @ApiOperation({ summary: 'Get user by id' })
   @ApiParam({ name: 'userId', type: String })
   @ApiOkEnvelopeResponse(UserProfileDto)
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiForbiddenExamples('The actor cannot access this profile.', [
+    {
+      name: 'profileForbidden',
+      summary: 'Profile access denied',
+      message: 'You cannot access this profile.',
+      path: '/api/users/01JPCY0000CITIZENB00000000',
+    },
+  ])
+  @ApiNotFoundExamples('The target user does not exist.', [
+    {
+      name: 'profileUserMissing',
+      summary: 'User not found',
+      message: 'User not found.',
+      path: '/api/users/01JPCY0000UNKNOWNUSER000000',
+    },
+  ])
   getUser(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -304,8 +649,44 @@ export class UsersController {
   @ApiParam({ name: 'userId', type: String })
   @ApiBody({ type: UpdateUserStatusRequestDto })
   @ApiOkEnvelopeResponse(UserProfileDto)
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiBadRequestExamples('The update-status payload is invalid.', [
+    {
+      name: 'statusRequired',
+      summary: 'Missing status field',
+      message: 'status is required.',
+      path: '/api/users/01JPCY0000CITIZENB00000000/status',
+    },
+    {
+      name: 'statusInvalid',
+      summary: 'Unsupported status value',
+      message: 'status is invalid.',
+      path: '/api/users/01JPCY0000CITIZENB00000000/status',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot change this user status.', [
+    {
+      name: 'statusForbidden',
+      summary: 'Status update denied',
+      message: 'You cannot change this user status.',
+      path: '/api/users/01JPCY0000CITIZENB00000000/status',
+    },
+  ])
+  @ApiConflictExamples('The user changed while status update was processed.', [
+    {
+      name: 'statusConflict',
+      summary: 'Optimistic concurrency conflict',
+      message: 'User changed. Please retry.',
+      path: '/api/users/01JPCY0000CITIZENB00000000/status',
+    },
+  ])
+  @ApiNotFoundExamples('The target user does not exist.', [
+    {
+      name: 'statusUserMissing',
+      summary: 'User not found',
+      message: 'User not found.',
+      path: '/api/users/01JPCY0000UNKNOWNUSER000000/status',
+    },
+  ])
   updateStatus(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,

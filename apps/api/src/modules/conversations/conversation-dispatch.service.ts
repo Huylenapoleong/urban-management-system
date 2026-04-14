@@ -302,21 +302,31 @@ export class ConversationDispatchService {
       message,
       deliveryContext,
     );
+    const isRecalled = Boolean(item.recalledAt);
     const senderAvatar = await this.mediaAssetService.resolveAssetWithLegacyUrl(
       item.senderAvatarAsset,
       item.senderAvatarUrl,
     );
-    const attachment = await this.mediaAssetService.resolveAssetWithLegacyUrl(
-      item.attachmentAsset,
-      item.attachmentUrl,
-    );
+    const attachment = isRecalled
+      ? { asset: undefined, url: undefined }
+      : await this.mediaAssetService.resolveAssetWithLegacyUrl(
+          item.attachmentAsset,
+          item.attachmentUrl,
+        );
 
     return {
       ...item,
+      content: isRecalled
+        ? JSON.stringify({
+            text: 'Message was recalled.',
+            mention: [],
+          })
+        : item.content,
       senderAvatarAsset: senderAvatar.asset,
       senderAvatarUrl: senderAvatar.url,
       attachmentAsset: attachment.asset,
       attachmentUrl: attachment.url,
+      replyMessage: isRecalled ? undefined : item.replyMessage,
     };
   }
 

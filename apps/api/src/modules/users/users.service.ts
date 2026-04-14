@@ -597,7 +597,9 @@ export class UsersService {
     }
 
     if (!user || user.deletedAt || user.status === 'DELETED') {
-      throw new NotFoundException('Không tìm thấy người dùng với thông tin này.');
+      throw new NotFoundException(
+        'No user matched the provided phone or email.',
+      );
     }
 
     return toUserProfile(user);

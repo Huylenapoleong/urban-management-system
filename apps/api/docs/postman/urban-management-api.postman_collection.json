@@ -64,6 +64,14 @@
       "value": ""
     },
     {
+      "key": "recallScope",
+      "value": "EVERYONE"
+    },
+    {
+      "key": "forwardConversationIdsJson",
+      "value": "[\"{{conversationId}}\"]"
+    },
+    {
       "key": "deviceId",
       "value": "device-postman-local-01"
     },
@@ -2950,11 +2958,21 @@
           ]
         },
         {
-          "name": "Delete Message",
+          "name": "Recall Message",
           "request": {
-            "method": "DELETE",
+            "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}"
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}/recall",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"{{recallScope}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Primary end-user chat action for removing a message.\nUse `EVERYONE` to keep a recalled placeholder in the thread for all participants.\nUse `SELF` to hide the message only from the sender view."
           },
           "event": [
             {
@@ -2963,6 +2981,60 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forward Message",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}/forward",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationIds\": {{forwardConversationIdsJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Forward the selected message into one or more target conversations.\nSet `forwardConversationIdsJson` to a JSON array of route-safe ids such as `[\"group:{{groupId}}\"]` or `[\"dm:{{userId}}\"]`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.conversationId) { pm.environment.set('conversationId', json.data[0].conversationId); }",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.id) { pm.environment.set('messageId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Message (Admin Only)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}",
+            "description": "Permanent delete for moderation/admin tooling only.\nNormal chat UX should use `Recall Message` instead.\nA non-admin token should receive `403` here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('admin delete succeeded or non-admin was correctly rejected', function () {",
+                  "  pm.expect(pm.response.code < 400 || pm.response.code === 403).to.equal(true);",
+                  "});"
                 ]
               }
             }

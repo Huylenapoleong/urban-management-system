@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { AuthenticatedUser } from '@urban/shared-types';
 import { ConversationsGateway } from './conversations.gateway';
 
@@ -10,6 +10,7 @@ describe('ConversationsGateway', () => {
   };
   const chatRealtimeService = {
     bindServer: jest.fn(),
+    joinConversation: jest.fn(),
   };
   const chatPresenceService = {
     attachSocket: jest.fn(),
@@ -19,6 +20,7 @@ describe('ConversationsGateway', () => {
   };
   const conversationsService = {
     deleteConversation: jest.fn(),
+    resolveConversationAccess: jest.fn(),
   };
 
   const actor: AuthenticatedUser = {
@@ -103,6 +105,37 @@ describe('ConversationsGateway', () => {
         statusCode: 400,
       },
     });
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('returns a forbidden ack when a non-member tries to join a group conversation', async () => {
+    const { client, disconnect } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {} as never,
+    });
+    conversationsService.resolveConversationAccess.mockRejectedValue(
+      new ForbiddenException(
+        'Only active members can access this group conversation.',
+      ),
+    );
+
+    const result = await gateway.joinConversation(client, {
+      conversationId: 'group:group-1',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: {
+        code: 'CHAT_CONVERSATION_JOIN_FAILED',
+        message: 'Only active members can access this group conversation.',
+        statusCode: 403,
+      },
+    });
+    expect(chatRealtimeService.joinConversation).not.toHaveBeenCalled();
     expect(disconnect).not.toHaveBeenCalled();
   });
 });

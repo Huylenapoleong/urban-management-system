@@ -28,6 +28,7 @@ const MESSAGE_TYPES = Object.freeze([
 ]);
 
 const MESSAGE_DELIVERY_STATES = Object.freeze(["SENT", "DELIVERED", "READ"]);
+const MESSAGE_RECALL_SCOPES = Object.freeze(["SELF", "EVERYONE"]);
 
 const PUSH_DEVICE_PROVIDERS = Object.freeze(["FCM", "APNS", "WEB", "WEBHOOK"]);
 const SESSION_SCOPES = Object.freeze([
@@ -80,6 +81,7 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
   MESSAGE_SEND: "message.send",
   MESSAGE_UPDATE: "message.update",
   MESSAGE_DELETE: "message.delete",
+  MESSAGE_RECALL: "message.recall",
   MESSAGE_CREATED: "message.created",
   MESSAGE_UPDATED: "message.updated",
   MESSAGE_DELETED: "message.deleted",
@@ -118,6 +120,7 @@ module.exports = {
   LOCATION_CODE_PATTERN,
   MAX_PAGE_SIZE,
   MESSAGE_DELIVERY_STATES,
+  MESSAGE_RECALL_SCOPES,
   MESSAGE_TYPES,
   PUSH_DEVICE_PROVIDERS,
   PHONE_PATTERN,
