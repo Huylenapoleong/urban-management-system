@@ -2,9 +2,11 @@ import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listConversations,
+  deleteMessage,
   listMessages,
   markConversationAsRead,
   sendMessage,
+  updateMessage,
   type SendMessageInput,
 } from "@/services/conversation.api";
 import { socketClient } from "@/lib/socket-client";
@@ -148,11 +150,32 @@ export function useMessages(conversationId?: string) {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ messageId, text }: { messageId: string; text: string }) =>
+      updateMessage(conversationId!, messageId, text),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (messageId: string) => deleteMessage(conversationId!, messageId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
   return {
     ...query,
     sendMessage: sendMutation.mutate,
     sendMessageAsync: sendMutation.mutateAsync,
     isSending: sendMutation.isPending,
     markAsRead: readMutation.mutate,
+    updateMessageAsync: updateMutation.mutateAsync,
+    deleteMessageAsync: deleteMutation.mutateAsync,
+    isUpdatingMessage: updateMutation.isPending,
+    isDeletingMessage: deleteMutation.isPending,
   };
 }

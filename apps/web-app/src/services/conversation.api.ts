@@ -77,6 +77,20 @@ function buildConversationIdCandidates(conversationId: string): string[] {
   return [...new Set(candidates.filter(Boolean))];
 }
 
+function shouldRetryOnConversationId400(error: any): boolean {
+  if (error?.status !== 400) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("conversation id") ||
+    message.includes("unsupported conversation") ||
+    message.includes("invalid dm conversation") ||
+    message.includes("incomplete")
+  );
+}
+
 export async function listConversations(searchTerm?: string): Promise<ConversationSummary[]> {
   try {
     const q = searchTerm?.trim();
@@ -197,4 +211,68 @@ export async function sendMessage(
     CHAT_SOCKET_EVENTS.MESSAGE_SEND,
     payload,
   );
+}
+
+export async function updateMessage(
+  conversationId: string,
+  messageId: string,
+  text: string,
+) : Promise<void> {
+  let lastError: unknown;
+  const normalizedText = text.trim();
+  const normalizedConversationId = toRouteSafeConversationId(conversationId);
+  const canonicalContent = JSON.stringify({ text: normalizedText, mention: [] });
+
+  // Prefer websocket update path to match realtime contract and avoid REST-specific validation mismatches.
+  try {
+    await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.MESSAGE_UPDATE, {
+      conversationId: normalizedConversationId,
+      messageId,
+      content: canonicalContent,
+    });
+    return;
+  } catch (error) {
+    lastError = error;
+  }
+
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      await ApiClient.patch(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`,
+        {
+          content: canonicalContent,
+        },
+      );
+      return;
+    } catch (error: any) {
+      lastError = error;
+      if (!shouldRetryOnConversationId400(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function deleteMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<MessageItem> {
+  let lastError: unknown;
+
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      return await ApiClient.delete(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`,
+      );
+    } catch (error: any) {
+      lastError = error;
+      if (error?.status !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
 }

@@ -68,7 +68,12 @@ export function LoginPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Mật khẩu</label>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-gray-700">Mật khẩu</label>
+              <Link to="/forgot-password" className="text-xs font-medium text-blue-600 hover:underline">
+                Quên mật khẩu?
+              </Link>
+            </div>
             <Input
               type="password"
               placeholder="Nhập mật khẩu"

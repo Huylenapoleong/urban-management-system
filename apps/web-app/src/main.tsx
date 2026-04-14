@@ -13,6 +13,7 @@ import NewReportPage from './pages/NewReportPage'
 import OfficialDashboard from './pages/OfficialDashboard'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AuthProvider } from './providers/AuthProvider'
 import { ProtectedRoute } from './components/ProtectedRoute'
@@ -34,6 +35,7 @@ createRoot(document.getElementById('root')!).render(
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<MainLayout />}>

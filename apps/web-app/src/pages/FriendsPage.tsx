@@ -46,17 +46,17 @@ function UserRow({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3">
+    <div className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
       <div className="flex min-w-0 items-center gap-3">
-        <Avatar className="h-10 w-10 border border-gray-100">
+        <Avatar className="h-10 w-10 border border-gray-100 dark:border-slate-700">
           {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
-          <AvatarFallback className="bg-slate-100 text-slate-700 text-xs font-semibold">
+          <AvatarFallback className="bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-100 text-xs font-semibold">
             {initials(name)}
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0">
-          <p className="truncate font-medium text-slate-900">{name}</p>
-          {subtitle ? <p className="truncate text-xs text-slate-500">{subtitle}</p> : null}
+          <p className="truncate font-medium text-slate-900 dark:text-slate-100">{name}</p>
+          {subtitle ? <p className="truncate text-xs text-slate-500 dark:text-slate-400">{subtitle}</p> : null}
         </div>
       </div>
       {actions ? <div className="ml-4 flex items-center gap-2">{actions}</div> : null}
@@ -67,7 +67,7 @@ function UserRow({
 function tabClass(active: boolean): string {
   return active
     ? "rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
-    : "rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200";
+    : "rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700";
 }
 
 function containsFriendKeyword(
@@ -207,20 +207,20 @@ export default function FriendsPage() {
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-slate-50">
+    <div className="h-full w-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
       <div className="mx-auto max-w-5xl p-4 md:p-6 space-y-6">
         <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Bạn bè</h1>
-            <p className="mt-1 text-sm text-slate-500">Quản lý lời mời kết bạn và danh sách bạn bè của bạn.</p>
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Bạn bè</h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Quản lý lời mời kết bạn và danh sách bạn bè của bạn.</p>
           </div>
           <div className="relative w-full md:w-80">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
             <Input
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Tìm bạn..."
-              className="pl-9"
+              className="pl-9 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400"
             />
           </div>
         </header>
@@ -233,7 +233,7 @@ export default function FriendsPage() {
         </div>
 
         {listLoading ? (
-          <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white">
+          <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
             <Loader2 className="h-7 w-7 animate-spin text-blue-600" />
           </div>
         ) : null}
@@ -298,7 +298,7 @@ export default function FriendsPage() {
               );
             })}
             {discoverItems.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+              <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
                 Không tìm thấy người phù hợp...
               </div>
             ) : null}
@@ -341,7 +341,7 @@ export default function FriendsPage() {
                             onSuccess: () => setTab("discover"),
                           })
                         }
-                        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                       >
                         {isRejecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRoundX className="h-4 w-4" />}
                         Tu choi
@@ -352,7 +352,7 @@ export default function FriendsPage() {
               );
             })}
             {filteredIncoming.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+              <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
                 Bạn không có lời mời kết bạn nào.
               </div>
             ) : null}
@@ -362,7 +362,7 @@ export default function FriendsPage() {
                   type="button"
                   onClick={() => fetchNextIncoming()}
                   disabled={loadingMoreIncoming}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                  className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                 >
                   {loadingMoreIncoming ? "Dang tai..." : "Tai them"}
                 </button>
@@ -392,7 +392,7 @@ export default function FriendsPage() {
                           onSuccess: () => setTab("discover"),
                         })
                       }
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                     >
                       {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRoundX className="h-4 w-4" />}
                       Huy yeu cau
@@ -402,7 +402,7 @@ export default function FriendsPage() {
               );
             })}
             {filteredOutgoing.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+              <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
                 Bạn chưa gửi lời mời kết bạn nào.
               </div>
             ) : null}
@@ -412,7 +412,7 @@ export default function FriendsPage() {
                   type="button"
                   onClick={() => fetchNextOutgoing()}
                   disabled={loadingMoreOutgoing}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                  className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                 >
                   {loadingMoreOutgoing ? "Dang tai..." : "Tai them"}
                 </button>
@@ -462,7 +462,7 @@ export default function FriendsPage() {
               );
             })}
             {filteredFriends.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+              <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
                 Ban chưa có bạn bè nào.
               </div>
             ) : null}
@@ -472,7 +472,7 @@ export default function FriendsPage() {
                   type="button"
                   onClick={() => fetchNextFriends()}
                   disabled={loadingMoreFriends}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                  className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                 >
                   {loadingMoreFriends ? "Dang tai..." : "Tai them"}
                 </button>

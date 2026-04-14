@@ -18,9 +18,9 @@ export function ReportsPage() {
   }
 
   return (
-    <div className="container mx-auto p-4 max-w-5xl space-y-6">
+    <div className="container mx-auto p-4 max-w-5xl space-y-6 text-slate-900 dark:text-slate-100">
        <div className="flex justify-between items-center mb-8">
-        <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
           <FileText className="w-6 h-6 text-blue-600" />
           Quản lý Báo Cáo
         </h1>
@@ -33,10 +33,10 @@ export function ReportsPage() {
         </Link>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
-            <thead className="text-xs text-gray-500 uppercase bg-gray-100 border-b border-gray-200">
+            <thead className="text-xs text-gray-500 dark:text-slate-300 uppercase bg-gray-100 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700">
               <tr>
                 <th scope="col" className="px-6 py-4">Chủ đề</th>
                 <th scope="col" className="px-6 py-4">Mô tả</th>
@@ -46,9 +46,9 @@ export function ReportsPage() {
             </thead>
             <tbody>
               {reports?.map((report: any) => (
-                <tr key={report.id} className="bg-white border-b hover:bg-gray-50 last:border-0 transition">
-                  <td className="px-6 py-4 font-medium text-gray-900">{report.title}</td>
-                  <td className="px-6 py-4 text-gray-500 max-w-[200px] truncate">{report.description}</td>
+                <tr key={report.id} className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 last:border-0 transition">
+                  <td className="px-6 py-4 font-medium text-gray-900 dark:text-slate-100">{report.title}</td>
+                  <td className="px-6 py-4 text-gray-500 dark:text-slate-300 max-w-[200px] truncate">{report.description}</td>
                   <td className="px-6 py-4">
                     <span 
                       className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
@@ -62,14 +62,14 @@ export function ReportsPage() {
                       {report.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-500">
+                  <td className="px-6 py-4 text-gray-500 dark:text-slate-300">
                      {new Date(report.createdAt).toLocaleDateString("vi-VN")}
                   </td>
                 </tr>
               ))}
               {reports?.length === 0 && (
                 <tr>
-                   <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                   <td colSpan={5} className="px-6 py-8 text-center text-gray-500 dark:text-slate-300">
                       Chưa có báo cáo nào
                    </td>
                 </tr>
