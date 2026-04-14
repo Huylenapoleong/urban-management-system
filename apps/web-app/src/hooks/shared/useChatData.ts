@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listConversations,
@@ -13,6 +13,7 @@ import type { MessageItem } from "@urban/shared-types";
 
 export function useConversations(searchTerm?: string) {
   const queryClient = useQueryClient();
+  const joinedConversationIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const handleNewMessage = () => {
@@ -20,23 +21,61 @@ export function useConversations(searchTerm?: string) {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
-    socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
-    
-    // Auto refresh conversations when we connect to ensure freshness
-    socketClient.socket?.on('connect', () => {
+    const handleSocketConnect = () => {
+      joinedConversationIdsRef.current.clear();
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    });
+    };
+
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
+    socketClient.socket?.on("connect", handleSocketConnect);
 
     return () => {
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
-      socketClient.socket?.off('connect');
+      socketClient.socket?.off("connect", handleSocketConnect);
     };
   }, [queryClient]);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ["conversations", searchTerm?.trim() ?? ""],
     queryFn: () => listConversations(searchTerm),
   });
+
+  useEffect(() => {
+    const conversationIds = (query.data ?? [])
+      .map((item) => item.conversationId)
+      .filter(Boolean);
+
+    if (conversationIds.length === 0) {
+      return;
+    }
+
+    const joinKnownConversations = async () => {
+      try {
+        await socketClient.connect();
+      } catch {
+        return;
+      }
+
+      for (const conversationId of conversationIds) {
+        if (joinedConversationIdsRef.current.has(conversationId)) {
+          continue;
+        }
+
+        try {
+          await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN, {
+            conversationId,
+          });
+          joinedConversationIdsRef.current.add(conversationId);
+        } catch {
+          // Keep silent here; room join will be retried on reconnect or next refresh.
+        }
+      }
+    };
+
+    void joinKnownConversations();
+  }, [query.data]);
+
+  return query;
 }
 
 export function useMessages(conversationId?: string) {

@@ -4,7 +4,6 @@ import type {
   UserDirectoryItem,
   UserFriendItem,
   UserFriendRequestItem,
-  UserProfile,
 } from "@urban/shared-types";
 
 export type DiscoverFriendItem = UserDirectoryItem & {
@@ -21,54 +20,6 @@ export interface CursorPage<T> {
 export interface FriendListParams {
   cursor?: string;
   limit?: number;
-}
-
-function isExactLookupKeyword(input?: string): boolean {
-  const value = input?.trim() ?? "";
-  if (!value) {
-    return false;
-  }
-
-  const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  const digitsOnly = value.replace(/\D/g, "");
-  const looksLikePhone = digitsOnly.length >= 10;
-  return looksLikeEmail || looksLikePhone;
-}
-
-function toDirectoryItemFromProfile(profile: UserProfile): DiscoverFriendItem {
-  return {
-    userId: profile.id,
-    fullName: profile.fullName,
-    role: profile.role,
-    locationCode: profile.locationCode,
-    avatarAsset: profile.avatarAsset,
-    avatarUrl: profile.avatarUrl,
-    status: profile.status,
-    relationState: "NONE",
-    canMessage: false,
-    canSendFriendRequest: true,
-    email: profile.email,
-    phone: profile.phone,
-    exactMatch: true,
-  };
-}
-
-async function searchExactUserByPhoneOrEmail(keyword: string): Promise<DiscoverFriendItem | null> {
-  try {
-    const profile = await ApiClient.get(`/users/search?q=${encodeURIComponent(keyword)}`, {
-      headers: {
-        "Cache-Control": "no-cache, no-store, max-age=0",
-        Pragma: "no-cache",
-        Expires: "0",
-      },
-    }) as UserProfile;
-    if (!profile?.id) {
-      return null;
-    }
-    return toDirectoryItemFromProfile(profile);
-  } catch {
-    return null;
-  }
 }
 
 function buildQuery(params?: Record<string, string | number | undefined>): string {
@@ -122,35 +73,19 @@ export async function discoverFriendCandidates(params?: {
   cursor?: string;
   limit?: number;
 }): Promise<DiscoverFriendItem[]> {
-  const keyword = params?.q?.trim();
   const query = buildQuery({
     mode: "friend",
-    q: keyword,
+    q: params?.q?.trim(),
     cursor: params?.cursor,
     limit: params?.limit ?? 20,
   });
-  const discovered = await ApiClient.get(`/users/discover${query}`, {
+  return await ApiClient.get(`/users/discover${query}`, {
     headers: {
       "Cache-Control": "no-cache, no-store, max-age=0",
       Pragma: "no-cache",
       Expires: "0",
     },
   }) as DiscoverFriendItem[];
-
-  if (!keyword || !isExactLookupKeyword(keyword)) {
-    return discovered;
-  }
-
-  const exactUser = await searchExactUserByPhoneOrEmail(keyword);
-  if (!exactUser) {
-    return discovered;
-  }
-
-  if (discovered.some((item) => item.userId === exactUser.userId)) {
-    return discovered;
-  }
-
-  return [exactUser, ...discovered];
 }
 
 export async function listMyFriends(params?: FriendListParams): Promise<UserFriendItem[]> {

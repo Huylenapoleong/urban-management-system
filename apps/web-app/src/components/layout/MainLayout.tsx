@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -17,19 +17,49 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChatbotModal } from "@/components/ChatbotModal";
 import { getProfile } from "@/services/user.api";
 import { useAuth } from "@/providers/AuthProvider";
+import { useConversations } from "@/hooks/shared/useChatData";
+import { useIncomingFriendRequests } from "@/hooks/useFriendsData";
+import { readAccessToken } from "@/lib/api-client";
+
+type NavItem = {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  badgeCount?: number;
+};
+
+function formatBadgeCount(value: number): string {
+  if (value > 99) {
+    return "99+";
+  }
+  return String(value);
+}
 
 export function Sidebar({ onOpenChatbot }: { onOpenChatbot: () => void }) {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading: loadingAuth } = useAuth();
+  const { data: conversations = [] } = useConversations();
+  const { data: incomingRequestsData } = useIncomingFriendRequests(50);
+  const hasToken = Boolean(readAccessToken());
   const { data: profile } = useQuery({
     queryKey: ["profile"],
     queryFn: getProfile,
-    enabled: Boolean(user?.sub),
+    enabled: hasToken && !loadingAuth,
     staleTime: 5 * 60 * 1000,
-    retry: false,
+    retry: 1,
+    refetchOnMount: "always",
+    refetchOnReconnect: true,
   });
   
   const isOfficial = user?.role === 'OFFICIAL' || user?.role === 'ADMIN';
+  const unreadMessageCount = useMemo(
+    () => conversations.reduce((sum, item) => sum + (item.unreadCount ?? 0), 0),
+    [conversations],
+  );
+  const incomingFriendRequestCount = useMemo(
+    () => incomingRequestsData?.pages.flatMap((page) => page.items).length ?? 0,
+    [incomingRequestsData],
+  );
   const avatarSrc =
     profile?.avatarAsset?.resolvedUrl ||
     profile?.avatarUrl;
@@ -44,11 +74,11 @@ export function Sidebar({ onOpenChatbot }: { onOpenChatbot: () => void }) {
   const navItems = [
     { to: "/", icon: Home, label: "Trang chủ" },
     isOfficial ? { to: "/official-dashboard", icon: LayoutDashboard, label: "Dashboard Quản Lý" } : null,
-    { to: "/chat", icon: MessageCircle, label: "Tin nhắn" },
-    { to: "/friends", icon: UserPlus2, label: "Bạn bè" },
+    { to: "/chat", icon: MessageCircle, label: "Tin nhắn", badgeCount: unreadMessageCount },
+    { to: "/friends", icon: UserPlus2, label: "Bạn bè", badgeCount: incomingFriendRequestCount },
     { to: "/groups", icon: Users, label: "Nhóm" },
     { to: "/reports", icon: ClipboardList, label: "Báo cáo duyệt" },
-  ].filter(Boolean) as Array<{ to: string; icon: LucideIcon; label: string }>;
+  ].filter(Boolean) as NavItem[];
 
   const handleLogout = () => {
     logout();
@@ -80,7 +110,14 @@ export function Sidebar({ onOpenChatbot }: { onOpenChatbot: () => void }) {
             title={item.label}
           >
             {({ isActive }) => (
-              <item.icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+              <div className="relative">
+                <item.icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+                {item.badgeCount && item.badgeCount > 0 ? (
+                  <span className="absolute -right-2 -top-2 min-w-[18px] rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-[18px] text-white">
+                    {formatBadgeCount(item.badgeCount)}
+                  </span>
+                ) : null}
+              </div>
             )}
           </NavLink>
         ))}

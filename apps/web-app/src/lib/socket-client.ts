@@ -22,6 +22,25 @@ class SocketClient {
           return;
         }
 
+        if (this.socket && this.authToken === token) {
+          const onConnect = () => {
+            this.socket?.off('connect_error', onConnectError);
+            this.connectPromise = null;
+            resolve();
+          };
+
+          const onConnectError = (error: unknown) => {
+            this.socket?.off('connect', onConnect);
+            this.connectPromise = null;
+            reject(error);
+          };
+
+          this.socket.once('connect', onConnect);
+          this.socket.once('connect_error', onConnectError);
+          this.socket.connect();
+          return;
+        }
+
         if (this.socket && this.authToken !== token) {
           this.socket.removeAllListeners();
           this.socket.disconnect();

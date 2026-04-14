@@ -9,12 +9,15 @@ import { useConversations, useMessages } from "@/hooks/shared/useChatData";
 import { format } from "date-fns";
 import { useLocation } from "react-router-dom";
 import { uploadMedia } from "@/services/upload.api";
+import { useQueryClient } from "@tanstack/react-query";
+import type { UserProfile } from "@urban/shared-types";
 
 type ChatMessageType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
 
 type ChatNavigationState = {
   conversationId?: string;
   displayName?: string;
+  avatarUrl?: string;
 };
 
 type QueuedAttachment = {
@@ -33,9 +36,11 @@ export function ChatPage() {
   const [queuedAttachments, setQueuedAttachments] = useState<QueuedAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rtc = useWebRTC();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   
   // Data fetching
   const { data: conversations = [], isLoading: loadingConversations } = useConversations(conversationSearch);
@@ -44,6 +49,7 @@ export function ChatPage() {
     isLoading: loadingMessages,
     sendMessageAsync,
     isSending,
+    markAsRead,
   } = useMessages(activeChat || undefined);
 
   const syntheticConversation =
@@ -55,6 +61,7 @@ export function ChatPage() {
           unreadCount: 0,
           lastMessagePreview: "",
           lastSenderName: "",
+          isGroup: false,
         }
       : null;
 
@@ -82,12 +89,37 @@ export function ChatPage() {
     : mergedConversations;
 
   const activeContact = renderedConversations.find((c) => c.conversationId === activeChat);
+  const cachedProfile = queryClient.getQueryData<UserProfile>(["profile"]);
+  const activeContactAvatarUrl =
+    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarAsset?.resolvedUrl ||
+    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarUrl ||
+    chatState.avatarUrl;
+  const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
+  const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto scroll to bottom when messages load or new messages appear
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (!activeChat) {
+      return;
+    }
+
+    if ((activeContact?.unreadCount ?? 0) <= 0) {
+      return;
+    }
+
+    markAsRead();
+  }, [activeChat, activeContact?.unreadCount, markAsRead]);
+
+  useEffect(() => {
+    if (!activeChat) {
+      setIsInfoOpen(false);
+    }
+  }, [activeChat]);
 
   const handleStartCall = (isVideo: boolean) => {
     if (!activeContact) return;
@@ -96,7 +128,10 @@ export function ChatPage() {
       isVideo,
       // Target User ID temporarily set to conversationId for group-based room joining
       targetUserId: activeContact.conversationId,
-      callerName: activeContact.groupName || activeContact.conversationId,
+      callerName: callerDisplayName,
+      callerAvatarUrl,
+      peerName: activeContact.groupName || activeContact.conversationId,
+      peerAvatarUrl: activeContactAvatarUrl,
       conversationId: activeContact.conversationId,
     });
   };
@@ -324,6 +359,9 @@ export function ChatPage() {
              </div>
           )}
           {renderedConversations.map((chat) => (
+            (() => {
+              const effectiveUnreadCount = chat.conversationId === activeChat ? 0 : (chat.unreadCount ?? 0);
+              return (
             <div 
               key={chat.conversationId} 
               onClick={() => setActiveChat(chat.conversationId)}
@@ -344,17 +382,19 @@ export function ChatPage() {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className={"text-sm truncate " + (chat.unreadCount > 0 ? "font-semibold text-slate-800" : "text-gray-500")}>
+                  <span className={"text-sm truncate " + (effectiveUnreadCount > 0 ? "font-semibold text-slate-800" : "text-gray-500")}>
                     {chat.lastMessagePreview || "Chưa có tin nhắn"}
                   </span>
-                  {chat.unreadCount > 0 && (
+                  {effectiveUnreadCount > 0 && (
                     <span className="bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
-                      {chat.unreadCount}
+                      {effectiveUnreadCount}
                     </span>
                   )}
                 </div>
               </div>
             </div>
+              );
+            })()
           ))}
         </div>
       </div>
@@ -399,9 +439,51 @@ export function ChatPage() {
                   <Video size={20} />
                 </button>
                 <div className="w-px h-6 bg-gray-200 mx-2"></div>
-                <button className="p-2 hover:bg-gray-100 rounded-full transition" title="Thông tin chi tiết"><Info size={20} /></button>
+                <button
+                  className={`p-2 rounded-full transition ${isInfoOpen ? "bg-blue-50 text-blue-600" : "hover:bg-gray-100"}`}
+                  title="Thông tin chi tiết"
+                  onClick={() => setIsInfoOpen((prev) => !prev)}
+                >
+                  <Info size={20} />
+                </button>
               </div>
             </div>
+
+            <aside
+              className={`absolute right-0 top-16 z-20 h-[calc(100%-4rem)] w-[320px] max-w-[85%] border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 ${isInfoOpen ? "translate-x-0" : "translate-x-full"}`}
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-gray-800">Thông tin cuộc trò chuyện</h3>
+                <button
+                  onClick={() => setIsInfoOpen(false)}
+                  className="rounded-md px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                >
+                  Đóng
+                </button>
+              </div>
+              <div className="space-y-4 p-4 text-sm text-gray-700">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Tên hiển thị</p>
+                  <p className="mt-1 font-medium text-gray-900">{activeContact?.groupName || "Không rõ tên"}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Loại cuộc trò chuyện</p>
+                  <p className="mt-1">{activeContact?.isGroup ? "Nhóm" : "Trực tiếp"}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Mã hội thoại</p>
+                  <p className="mt-1 break-all text-xs text-gray-600">{activeContact?.conversationId || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Tin nhắn mới</p>
+                  <p className="mt-1">{activeContact?.unreadCount ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Cập nhật gần nhất</p>
+                  <p className="mt-1">{activeContact?.updatedAt ? format(new Date(activeContact.updatedAt), "HH:mm dd/MM/yyyy") : "-"}</p>
+                </div>
+              </div>
+            </aside>
 
             {/* Nội dung tin nhắn */}
             <div className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 relative">

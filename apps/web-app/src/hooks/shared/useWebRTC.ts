@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { socketClient } from '../../lib/socket-client';
 import { CHAT_SOCKET_EVENTS } from '@urban/shared-constants';
+import { useAuth } from '@/providers/AuthProvider';
 
 export type CallState = 'IDLE' | 'CALLING' | 'INCOMING' | 'CONNECTED';
 
@@ -9,10 +10,14 @@ export interface CallConfig {
   targetUserId?: string;
   callerId?: string;
   callerName?: string;
+  callerAvatarUrl?: string;
+  peerName?: string;
+  peerAvatarUrl?: string;
   conversationId?: string;
 }
 
 export function useWebRTC() {
+  const { user } = useAuth();
   const [callState, setCallState] = useState<CallState>('IDLE');
   const [activeConfig, setActiveConfig] = useState<CallConfig | null>(null);
   
@@ -26,6 +31,8 @@ export function useWebRTC() {
   
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const activeConfigRef = useRef<CallConfig | null>(null);
+  const callStateRef = useRef<CallState>('IDLE');
 
   // Configure WebRTC with public STUN/TURN servers
   const getIceServers = () => {
@@ -57,6 +64,14 @@ export function useWebRTC() {
     setCallError(null);
   }, [localStream, remoteStream]);
 
+  useEffect(() => {
+    activeConfigRef.current = activeConfig;
+  }, [activeConfig]);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
   // Handle emitting signal via Web Socket
   // Here we fix the buggy silent fail approach from mobile app
   const emitSignal = useCallback(async (event: string, payload: any) => {
@@ -66,9 +81,24 @@ export function useWebRTC() {
       console.error(`[WebRTC] Góp báo vòng cảnh kết nối gửi tín hiệu ở ${event}`, error);
       setCallError(error.message || 'Lỗi gửi tín hiệu qua máy chủ.');
       // Cleanup to prevent ghost calls if signal can't be established
-      cleanup(); 
+      cleanup();
     }
   }, [cleanup]);
+
+  const flushPendingIceCandidates = useCallback(async () => {
+    if (!peerConnection.current || !peerConnection.current.remoteDescription) {
+      return;
+    }
+
+    for (const candidate of pendingIceCandidatesRef.current) {
+      try {
+        await peerConnection.current.addIceCandidate(new window.RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error('[WebRTC] Failed to apply queued ICE candidate', error);
+      }
+    }
+    pendingIceCandidatesRef.current = [];
+  }, []);
 
   const setupPeerConnection = useCallback(async (isCaller: boolean, config: CallConfig) => {
     // 1. Kiểm tra kĩ trạng thái kết nối máy chủ trước khi gọi media
@@ -120,6 +150,15 @@ export function useWebRTC() {
         pc.addTrack(track, stream);
       });
 
+      if (isCaller) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
+          conversationId: config.conversationId,
+          offer,
+        });
+      }
+
     } catch (error) {
       console.error('[WebRTC] Thiết bị hạn chế quyền hoặc lỗi cam/mic', error);
       setCallError('Cần cấp quyền Microphone và Camera để gọi.');
@@ -130,34 +169,61 @@ export function useWebRTC() {
   }, [emitSignal]);
 
   const startCall = useCallback(async (config: CallConfig) => {
+    if (callStateRef.current !== 'IDLE') return;
+
     setActiveConfig(config);
     setCallState('CALLING');
     setCallError(null);
 
     try {
-      const pc = await setupPeerConnection(true, config);
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
+      await emitSignal(CHAT_SOCKET_EVENTS.CALL_INIT, {
         conversationId: config.conversationId,
-        targetUserId: config.targetUserId,
-        offer,
+        callerId: user?.sub,
+        callerName: config.callerName || 'Người gọi',
+        callerAvatarUrl: config.callerAvatarUrl,
         isVideo: config.isVideo,
       });
-      
     } catch (error) {
       cleanup();
     }
-  }, [emitSignal, setupPeerConnection, cleanup]);
+  }, [emitSignal, cleanup, user?.sub]);
+
+  const acceptCall = useCallback(async () => {
+    if (callStateRef.current !== 'INCOMING' || !activeConfigRef.current) return;
+
+    const config = activeConfigRef.current;
+    setCallState('CONNECTED');
+
+    const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
+
+    await emitSignal(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
+      conversationId: targetConvId,
+      calleeId: user?.sub,
+    });
+    await setupPeerConnection(false, config);
+  }, [emitSignal, setupPeerConnection, user?.sub]);
+
+  const rejectCall = useCallback(async () => {
+    const config = activeConfigRef.current;
+    if (config?.conversationId) {
+      const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
+      await emitSignal(CHAT_SOCKET_EVENTS.CALL_REJECT, {
+        conversationId: targetConvId,
+        calleeId: user?.sub,
+      });
+    }
+    cleanup();
+  }, [emitSignal, cleanup, user?.sub]);
 
   // Các event hàm khác (accept, reject...) tương tự
   const endCall = useCallback(() => {
-    if (activeConfig?.conversationId) {
-         emitSignal(CHAT_SOCKET_EVENTS.CALL_END as any, { conversationId: activeConfig.conversationId });
+    const config = activeConfigRef.current;
+    if (config?.conversationId) {
+      const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
+      emitSignal(CHAT_SOCKET_EVENTS.CALL_END as any, { conversationId: targetConvId, userId: user?.sub });
     }
     cleanup();
-  }, [activeConfig, emitSignal, cleanup]);
+  }, [emitSignal, cleanup, user?.sub]);
 
   const toggleMute = useCallback(() => {
     if (localStream) {
@@ -177,6 +243,135 @@ export function useWebRTC() {
     }
   }, [localStream, isVideoOn]);
 
+  useEffect(() => {
+    let mounted = true;
+    let boundSocket: typeof socketClient.socket | null = null;
+
+    const bindSocketEvents = async () => {
+      try {
+        await socketClient.connect();
+      } catch (error) {
+        console.error('[WebRTC] Could not bind socket listeners', error);
+        return;
+      }
+
+      if (!mounted || !socketClient.socket) {
+        return;
+      }
+
+      boundSocket = socketClient.socket;
+
+      const onCallInit = (data: any) => {
+        if (data.callerId === user?.sub) {
+          return;
+        }
+        setCallState('INCOMING');
+        setActiveConfig({
+          isVideo: Boolean(data.isVideo),
+          callerId: data.callerId,
+          callerName: data.callerName,
+          peerName: data.callerName,
+          peerAvatarUrl: data.callerAvatarUrl,
+          conversationId: data.conversationId,
+        });
+      };
+
+      const onCallAccept = async (data: any) => {
+        const config = activeConfigRef.current;
+        if (!config || callStateRef.current !== 'CALLING') {
+          return;
+        }
+
+        const targetMatches = config.targetUserId === data.calleeId || config.targetUserId === `dm:${data.calleeId}`;
+        const isMatch = config.conversationId === data.conversationId || targetMatches;
+        if (!isMatch) {
+          return;
+        }
+
+        setCallState('CONNECTED');
+        await setupPeerConnection(true, config);
+      };
+
+      const onCallReject = () => cleanup();
+      const onCallEnd = () => cleanup();
+
+      const onOffer = async (data: any) => {
+        if (!peerConnection.current) {
+          return;
+        }
+
+        await peerConnection.current.setRemoteDescription(new window.RTCSessionDescription(data.offer));
+        await flushPendingIceCandidates();
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
+
+        const currentConfig = activeConfigRef.current;
+        const targetConvId = currentConfig?.callerId ? `dm:${currentConfig.callerId}` : data.conversationId;
+        await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, {
+          conversationId: targetConvId,
+          answer,
+        });
+      };
+
+      const onAnswer = async (data: any) => {
+        if (!peerConnection.current) {
+          return;
+        }
+        await peerConnection.current.setRemoteDescription(new window.RTCSessionDescription(data.answer));
+        await flushPendingIceCandidates();
+      };
+
+      const onIceCandidate = async (data: any) => {
+        if (!peerConnection.current || !data.candidate) {
+          return;
+        }
+
+        if (!peerConnection.current.remoteDescription) {
+          pendingIceCandidatesRef.current.push(data.candidate);
+          return;
+        }
+
+        try {
+          await peerConnection.current.addIceCandidate(new window.RTCIceCandidate(data.candidate));
+        } catch (error) {
+          console.error('[WebRTC] Failed to add ICE candidate', error);
+        }
+      };
+
+      boundSocket.on(CHAT_SOCKET_EVENTS.CALL_INIT, onCallInit);
+      boundSocket.on(CHAT_SOCKET_EVENTS.CALL_ACCEPT, onCallAccept);
+      boundSocket.on(CHAT_SOCKET_EVENTS.CALL_REJECT, onCallReject);
+      boundSocket.on(CHAT_SOCKET_EVENTS.CALL_END, onCallEnd);
+      boundSocket.on(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, onOffer);
+      boundSocket.on(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, onAnswer);
+      boundSocket.on(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIceCandidate);
+
+      const cleanupListeners = () => {
+        boundSocket?.off(CHAT_SOCKET_EVENTS.CALL_INIT, onCallInit);
+        boundSocket?.off(CHAT_SOCKET_EVENTS.CALL_ACCEPT, onCallAccept);
+        boundSocket?.off(CHAT_SOCKET_EVENTS.CALL_REJECT, onCallReject);
+        boundSocket?.off(CHAT_SOCKET_EVENTS.CALL_END, onCallEnd);
+        boundSocket?.off(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, onOffer);
+        boundSocket?.off(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, onAnswer);
+        boundSocket?.off(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIceCandidate);
+      };
+
+      return cleanupListeners;
+    };
+
+    let removeListeners: (() => void) | undefined;
+    bindSocketEvents().then((cleanupFn) => {
+      removeListeners = cleanupFn;
+    });
+
+    return () => {
+      mounted = false;
+      if (removeListeners) {
+        removeListeners();
+      }
+    };
+  }, [cleanup, emitSignal, flushPendingIceCandidates, setupPeerConnection, user?.sub]);
+
   return {
     callState,
     activeConfig,
@@ -187,6 +382,8 @@ export function useWebRTC() {
     callError,
     setCallError,
     startCall,
+    acceptCall,
+    rejectCall,
     endCall,
     toggleMute,
     toggleVideo,

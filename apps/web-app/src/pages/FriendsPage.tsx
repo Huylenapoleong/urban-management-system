@@ -19,6 +19,7 @@ import {
   useMyFriends,
   useOutgoingFriendRequests,
 } from "@/hooks/useFriendsData";
+import { useAuth } from "@/providers/AuthProvider";
 
 type FriendsTab = "discover" | "incoming" | "outgoing" | "friends";
 
@@ -101,6 +102,7 @@ function containsFriendKeyword(
 
 export default function FriendsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [tab, setTab] = useState<FriendsTab>("discover");
   const [searchText, setSearchText] = useState("");
   const pageSize = 20;
@@ -150,8 +152,25 @@ export default function FriendsPage() {
     (tab === "friends" && loadingFriends);
 
   const discoverItems = useMemo(() => {
-    return discover.filter((item) => containsFriendKeyword(item, searchText));
-  }, [discover, searchText]);
+    const filtered = discover.filter((item) => containsFriendKeyword(item, searchText));
+    const userLocation = user?.locationCode?.trim().toUpperCase();
+    if (!userLocation) {
+      return filtered;
+    }
+
+    const sameRegion = filtered.filter(
+      (item) => (item.locationCode ?? "").trim().toUpperCase() === userLocation,
+    );
+    const otherRegions = filtered.filter(
+      (item) => (item.locationCode ?? "").trim().toUpperCase() !== userLocation,
+    );
+
+    if (!searchText.trim()) {
+      return sameRegion.length > 0 ? sameRegion : filtered;
+    }
+
+    return [...sameRegion, ...otherRegions];
+  }, [discover, searchText, user?.locationCode]);
 
   const filteredIncoming = useMemo(
     () => incoming.filter((item) => containsFriendKeyword(item, searchText)),
@@ -165,6 +184,27 @@ export default function FriendsPage() {
     () => friends.filter((item) => containsFriendKeyword(item, searchText)),
     [friends, searchText],
   );
+
+  const navigateToChat = (userId: string, fullName: string, avatarUrl?: string) => {
+    navigate("/chat", {
+      state: {
+        conversationId: `dm:${userId}`,
+        displayName: fullName,
+        avatarUrl,
+      },
+    });
+  };
+
+  const isCitizenWardPair = (targetRole?: string): boolean => {
+    const myRole = user?.role;
+    if (!myRole || !targetRole) {
+      return false;
+    }
+    return (
+      (myRole === "CITIZEN" && targetRole === "WARD_OFFICER") ||
+      (myRole === "WARD_OFFICER" && targetRole === "CITIZEN")
+    );
+  };
 
   return (
     <div className="h-full w-full overflow-y-auto bg-slate-50">
@@ -203,6 +243,9 @@ export default function FriendsPage() {
             {discoverItems.map((item) => {
               const avatarUrl = item.avatarAsset?.resolvedUrl || item.avatarUrl;
               const busy = sendRequest.isPending && sendRequest.variables === item.userId;
+              const isCitizenWard = isCitizenWardPair(item.role);
+              const canSendFriendRequest = Boolean(item.canSendFriendRequest) && !isCitizenWard;
+              const canMessage = Boolean(item.canMessage) || isCitizenWard;
 
               return (
                 <UserRow
@@ -211,31 +254,45 @@ export default function FriendsPage() {
                   subtitle={`${item.role} • ${item.locationCode}`}
                   avatarUrl={avatarUrl}
                   actions={
-                    item.canSendFriendRequest ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          sendRequest.mutate(item.userId, {
-                            onSuccess: () => setTab("outgoing"),
-                          })
-                        }
-                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                      >
-                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus2 className="h-4 w-4" />}
-                        Kết bạn
-                      </button>
-                    ) : item.relationState === "OUTGOING_REQUEST" ? (
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">
-                        <Clock3 className="h-3 w-3" />
-                        Dang cho chap nhan
-                      </span>
-                    ) : item.relationState === "INCOMING_REQUEST" ? (
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800">
-                        <UserCheck2 className="h-3 w-3" />
-                        Co yeu cau den
-                      </span>
-                    ) : null
+                    <>
+                      {canMessage ? (
+                        <button
+                          type="button"
+                          onClick={() => navigateToChat(item.userId, item.fullName, avatarUrl)}
+                          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                          Nhắn tin
+                        </button>
+                      ) : null}
+                      {canSendFriendRequest ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            sendRequest.mutate(item.userId, {
+                              onSuccess: () => setTab("outgoing"),
+                            })
+                          }
+                          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                        >
+                          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus2 className="h-4 w-4" />}
+                          Kết bạn
+                        </button>
+                      ) : null}
+                      {!canMessage && !canSendFriendRequest && item.relationState === "OUTGOING_REQUEST" ? (
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">
+                          <Clock3 className="h-3 w-3" />
+                          Dang cho chap nhan
+                        </span>
+                      ) : null}
+                      {!canMessage && !canSendFriendRequest && item.relationState === "INCOMING_REQUEST" ? (
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800">
+                          <UserCheck2 className="h-3 w-3" />
+                          Co yeu cau den
+                        </span>
+                      ) : null}
+                    </>
                   }
                 />
               );
@@ -380,15 +437,7 @@ export default function FriendsPage() {
                     <>
                       <button
                         type="button"
-                        onClick={() =>
-                          navigate("/chat", {
-                            state: {
-                              conversationId: `dm:${item.userId}`,
-                              displayName: item.fullName,
-                              avatarUrl,
-                            },
-                          })
-                        }
+                        onClick={() => navigateToChat(item.userId, item.fullName, avatarUrl)}
                         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                       >
                         <MessageCircle className="h-4 w-4" />
