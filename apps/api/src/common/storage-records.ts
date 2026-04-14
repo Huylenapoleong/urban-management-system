@@ -32,6 +32,7 @@ export type StorageEntityType =
   | 'MESSAGE_REF'
   | 'MESSAGE_DEDUP'
   | 'CONVERSATION'
+  | 'DIRECT_MESSAGE_REQUEST'
   | 'CHAT_OUTBOX_EVENT'
   | 'CONVERSATION_AUDIT_EVENT'
   | 'REPORT'
@@ -256,6 +257,18 @@ export interface StoredConversation
   userId: string;
   conversationId: string;
   lastReadAt?: string | null;
+}
+
+export interface StoredDirectMessageRequest extends TableItemBase {
+  entityType: 'DIRECT_MESSAGE_REQUEST';
+  conversationId: string;
+  requesterUserId: string;
+  targetUserId: string;
+  status: 'PENDING' | 'ACCEPTED' | 'IGNORED' | 'REJECTED' | 'BLOCKED';
+  createdAt: string;
+  updatedAt: string;
+  respondedAt?: string | null;
+  respondedByUserId?: string | null;
 }
 
 export interface StoredChatOutboxEvent extends TableItemBase {

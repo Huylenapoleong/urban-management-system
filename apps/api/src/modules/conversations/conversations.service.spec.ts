@@ -42,6 +42,7 @@ describe('ConversationsService', () => {
   const conversationDispatchService = {
     emitConversationRead: jest.fn(),
     emitConversationRemoved: jest.fn(),
+    emitConversationSummaryUpdated: jest.fn(),
     emitMessageCreated: jest.fn(),
     emitMessageDeleted: jest.fn(),
     emitMessageUpdated: jest.fn(),
@@ -125,6 +126,13 @@ describe('ConversationsService', () => {
     role: actor.role,
     unit: undefined,
   };
+  const sameScopeCitizen: StoredUser = {
+    ...actorUser,
+    PK: 'USER#user-3',
+    userId: 'user-3',
+    email: 'citizen.two@example.com',
+    fullName: 'Citizen Three',
+  };
   const conversationKey = makeDmConversationId(actor.id, otherUser.userId);
   const actorSummary: StoredConversation = {
     PK: 'USER#user-1',
@@ -204,6 +212,10 @@ describe('ConversationsService', () => {
         return otherUser;
       }
 
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
+      }
+
       if (userId === actor.id) {
         return actorUser;
       }
@@ -217,6 +229,10 @@ describe('ConversationsService', () => {
 
       if (userId === otherUser.userId) {
         return otherUser;
+      }
+
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
       }
 
       throw new Error(`Unexpected user lookup: ${userId}`);
@@ -475,6 +491,59 @@ describe('ConversationsService', () => {
     });
   });
 
+  it('blocks editing a public-group message after the actor left the group', async () => {
+    groupsService.getGroup.mockResolvedValue({
+      groupId: 'group-1',
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      deletedAt: '2026-03-18T10:06:00.000Z',
+    });
+    groupsService.listMembers.mockResolvedValue([
+      {
+        userId: otherUser.userId,
+      },
+    ]);
+
+    await expect(
+      service.updateMessage(
+        actor,
+        'group:group-1',
+        '01MESSAGE0000000000000001',
+        {
+          content: '{"text":"Noi dung moi","mention":[]}',
+        },
+      ),
+    ).rejects.toThrow('Only active members can edit messages in this group.');
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('blocks deleting a public-group message after the actor left the group', async () => {
+    groupsService.getGroup.mockResolvedValue({
+      groupId: 'group-1',
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      deletedAt: '2026-03-18T10:06:00.000Z',
+    });
+    groupsService.listMembers.mockResolvedValue([
+      {
+        userId: otherUser.userId,
+      },
+    ]);
+
+    await expect(
+      service.deleteMessage(
+        actor,
+        'group:group-1',
+        '01MESSAGE0000000000000001',
+      ),
+    ).rejects.toThrow('Only active members can delete messages in this group.');
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
   it('filters and paginates messages within a conversation', async () => {
     const matchingMessage: StoredMessage = {
       ...latestMessage,
@@ -559,12 +628,108 @@ describe('ConversationsService', () => {
 
     await expect(
       service.sendDirectMessage(actor, {
-        targetUserId: otherUser.userId,
+        targetUserId: sameScopeCitizen.userId,
         content: '{"text":"Xin chao","mention":[]}',
         type: 'TEXT',
       }),
-    ).rejects.toThrow('Citizens can only send direct messages to friends.');
+    ).rejects.toThrow(
+      'Citizens can only send direct messages to friends or accepted direct message requests.',
+    );
     expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('creates a pending direct message request for a same-scope stranger citizen', async () => {
+    usersService.canStartCitizenDm.mockResolvedValueOnce(false);
+
+    const result = await service.createDirectMessageRequest(actor, {
+      targetUserId: sameScopeCitizen.userId,
+      content: '{"text":"Xin chao, cho toi trao doi nhe.","mention":[]}',
+      clientMessageId: 'client-request-1',
+    });
+
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            entityType: 'MESSAGE',
+            conversationId: makeDmConversationId(
+              actor.id,
+              sameScopeCitizen.userId,
+            ),
+            senderId: actor.id,
+          }),
+        }),
+        expect.objectContaining({
+          tableName: 'Conversations',
+          item: expect.objectContaining({
+            entityType: 'DIRECT_MESSAGE_REQUEST',
+            conversationId: makeDmConversationId(
+              actor.id,
+              sameScopeCitizen.userId,
+            ),
+            requesterUserId: actor.id,
+            targetUserId: sameScopeCitizen.userId,
+            status: 'PENDING',
+          }),
+        }),
+      ]),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${sameScopeCitizen.userId}`,
+        requestStatus: 'PENDING',
+        requestDirection: 'OUTGOING',
+      }),
+    );
+  });
+
+  it('allows sending direct messages after a same-scope stranger request is accepted', async () => {
+    usersService.canStartCitizenDm.mockResolvedValueOnce(false);
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Conversations' &&
+          pk ===
+            `DMREQ#${makeDmConversationId(actor.id, sameScopeCitizen.userId)}` &&
+          sk === 'STATE'
+        ) {
+          return {
+            PK: pk,
+            SK: sk,
+            entityType: 'DIRECT_MESSAGE_REQUEST',
+            conversationId: makeDmConversationId(
+              actor.id,
+              sameScopeCitizen.userId,
+            ),
+            requesterUserId: actor.id,
+            targetUserId: sameScopeCitizen.userId,
+            status: 'ACCEPTED',
+            createdAt: '2026-03-18T10:06:00.000Z',
+            updatedAt: '2026-03-18T10:07:00.000Z',
+            respondedAt: '2026-03-18T10:07:00.000Z',
+            respondedByUserId: sameScopeCitizen.userId,
+          };
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.sendDirectMessage(actor, {
+      targetUserId: sameScopeCitizen.userId,
+      content: '{"text":"Cam on da chap nhan.","mention":[]}',
+      type: 'TEXT',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${sameScopeCitizen.userId}`,
+        senderId: actor.id,
+        type: 'TEXT',
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalled();
   });
 
   it('rejects direct messages to inactive targets before writing a message', async () => {
