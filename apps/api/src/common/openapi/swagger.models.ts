@@ -1248,7 +1248,7 @@ export class UpdateProfileRequestDto {
     example:
       'uploads/avatar/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-avatar-a-new.jpg',
     description:
-      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+      'Preferred private-media input. Use the S3 key returned by upload/presign or reuse a previous key from `GET /uploads/media?target=AVATAR`. If both `avatarKey` and legacy `avatarUrl` are sent, the API will prefer `avatarKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1257,6 +1257,8 @@ export class UpdateProfileRequestDto {
 
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/avatar-a-new.jpg',
+    description:
+      'Legacy fallback input. Ignored when `avatarKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1309,7 +1311,7 @@ export class CreateUserRequestDto {
     example:
       'uploads/avatar/01JPCY0000WARDOFFICER00000/01JPCYUPLOAD000000000000000-officer.jpg',
     description:
-      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+      'Preferred private-media input. Use the S3 key returned by upload/presign or reuse a previous key from `GET /uploads/media?target=AVATAR`. If both `avatarKey` and legacy `avatarUrl` are sent, the API will prefer `avatarKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1318,6 +1320,8 @@ export class CreateUserRequestDto {
 
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/officer.jpg',
+    description:
+      'Legacy fallback input. Ignored when `avatarKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1562,7 +1566,7 @@ export class SendMessageRequestDto {
     example:
       'uploads/message/01JPCY0000CITIZENA00000000/group-01jpcy1000areagroup0000000/01JPCYUPLOAD000000000000000-file.jpg',
     description:
-      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+      'Preferred private-media input. Use the S3 key returned by upload/presign. If both `attachmentKey` and legacy `attachmentUrl` are sent, the API will prefer `attachmentKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1571,6 +1575,8 @@ export class SendMessageRequestDto {
 
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/file.jpg',
+    description:
+      'Legacy fallback input. Ignored when `attachmentKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1605,7 +1611,7 @@ export class UpdateMessageRequestDto {
     example:
       'uploads/message/01JPCY0000CITIZENA00000000/group-01jpcy1000areagroup0000000/01JPCYUPLOAD000000000000000-file-updated.jpg',
     description:
-      'Preferred private-media input. Send an empty string to clear the current attachment.',
+      'Preferred private-media input. Send an empty string to clear the current attachment. If both `attachmentKey` and legacy `attachmentUrl` are sent, the API will prefer `attachmentKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1615,7 +1621,7 @@ export class UpdateMessageRequestDto {
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/file-updated.jpg',
     description:
-      'Legacy URL input. Send an empty string to clear the current attachment.',
+      'Legacy URL input. Send an empty string to clear the current attachment. Ignored when `attachmentKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1685,7 +1691,7 @@ export class CreateReportRequestDto {
       'uploads/report/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-report-1.jpg',
     ],
     description:
-      'Preferred private-media input. Use S3 keys returned by upload/presign.',
+      'Preferred private-media input. Use S3 keys returned by upload/presign. If both `mediaKeys` and legacy `mediaUrls` are sent, the API will prefer `mediaKeys`.',
   })
   @IsOptional()
   @IsArray()
@@ -1698,6 +1704,8 @@ export class CreateReportRequestDto {
   @ApiPropertyOptional({
     type: [String],
     example: ['https://cdn.example.com/report-1.jpg'],
+    description:
+      'Legacy fallback input. Ignored when `mediaKeys` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1751,7 +1759,7 @@ export class UpdateReportRequestDto {
       'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-report-1-update.jpg',
     ],
     description:
-      'Preferred private-media input. Use S3 keys returned by upload/presign.',
+      'Preferred private-media input. Use S3 keys returned by upload/presign. If both `mediaKeys` and legacy `mediaUrls` are sent, the API will prefer `mediaKeys`.',
   })
   @IsOptional()
   @IsArray()
@@ -1764,6 +1772,8 @@ export class UpdateReportRequestDto {
   @ApiPropertyOptional({
     type: [String],
     example: ['https://cdn.example.com/report-1-update.jpg'],
+    description:
+      'Legacy fallback input. Ignored when `mediaKeys` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -2165,12 +2175,95 @@ export class UploadLimitsDto {
   imageOnlyTargets!: (typeof UPLOAD_TARGETS)[number][];
 }
 
+export class UploadListItemDto {
+  @ApiProperty({
+    example:
+      'uploads/avatar/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-avatar-a-new.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: 'smartcity-assets' })
+  bucket!: string;
+
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'AVATAR' })
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENA00000000' })
+  entityId?: string;
+
+  @ApiProperty({ example: '01jpcyupload000000000000000-avatar-a-new.jpg' })
+  fileName!: string;
+
+  @ApiPropertyOptional({ example: 153245 })
+  size?: number;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  uploadedBy!: string;
+
+  @ApiPropertyOptional({ example: '2026-04-15T09:30:00.000Z' })
+  uploadedAt?: string;
+
+  @ApiProperty({
+    example:
+      'https://smartcity-assets.s3.ap-southeast-1.amazonaws.com/uploads/avatar/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-avatar-a-new.jpg',
+  })
+  url!: string;
+
+  @ApiPropertyOptional({ example: '2026-04-15T09:35:00.000Z' })
+  expiresAt?: string;
+
+  @ApiProperty({
+    example: true,
+    description:
+      'True when this file is currently referenced by the active avatar/report/message for the requested target scope.',
+  })
+  isInUse!: boolean;
+}
+
+export class ListUploadsQueryDto {
+  @ApiProperty({
+    enum: UPLOAD_TARGETS,
+    example: 'AVATAR',
+    description:
+      'Required. Use `AVATAR` to list avatar history. `REPORT` and `MESSAGE` require `entityId`.',
+  })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({
+    example: '01JPCY2000REPORTNEW00000000',
+    description:
+      'Required for `REPORT` and `MESSAGE`. Optional for `AVATAR` and `GENERAL`.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJpZCI6IjAxSlBDWS4uLiIsInNvcnRWYWx1ZSI6IjIwMjYtMDQtMTVUMDk6MzA6MDAuMDAwWiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @ApiPropertyOptional({ example: '20' })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
 export class DeleteUploadRequestDto {
   @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
   @IsIn(UPLOAD_TARGETS)
   target!: (typeof UPLOAD_TARGETS)[number];
 
-  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @ApiPropertyOptional({
+    example: '01JPCY2000REPORTNEW00000000',
+    description:
+      'Optional when the uploaded key already encodes the entity id. Still recommended for explicit FE payloads.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -2262,7 +2355,11 @@ export class PresignDownloadRequestDto {
   @IsIn(UPLOAD_TARGETS)
   target!: (typeof UPLOAD_TARGETS)[number];
 
-  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @ApiPropertyOptional({
+    example: '01JPCY2000REPORTNEW00000000',
+    description:
+      'Optional when the uploaded key already encodes the entity id. Still recommended when FE already knows the bound entity.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)

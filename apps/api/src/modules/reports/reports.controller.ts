@@ -59,7 +59,7 @@ export class ReportsController {
   @ApiOperation({
     summary: 'Create report',
     description:
-      'Creates a new report in the actor scope. FE should prefer `mediaKeys` from upload/presign flows over legacy `mediaUrls`.',
+      'Creates a new report in the actor scope. FE should prefer `mediaKeys` from upload/presign flows over legacy `mediaUrls`. If both are sent during migration, the API will prefer `mediaKeys`.',
   })
   @ApiBody({ type: CreateReportRequestDto })
   @ApiCreatedEnvelopeResponse(ReportItemDto, {
@@ -68,9 +68,9 @@ export class ReportsController {
   })
   @ApiBadRequestExamples('The create-report payload is invalid.', [
     {
-      name: 'reportMediaKeyAndUrl',
-      summary: 'mediaKeys and mediaUrls both provided',
-      message: 'Provide either mediaKeys or mediaUrls, not both.',
+      name: 'reportMediaTargetMismatch',
+      summary: 'A provided media key does not belong to the report target',
+      message: 'key does not match target.',
       path: '/api/reports',
     },
     {
@@ -337,9 +337,9 @@ export class ReportsController {
   })
   @ApiBadRequestExamples('The report update payload is invalid.', [
     {
-      name: 'reportMediaMutualExclusive',
-      summary: 'mediaKeys and mediaUrls both provided',
-      message: 'Provide either mediaKeys or mediaUrls, not both.',
+      name: 'reportMediaEntityMismatch',
+      summary: 'A provided media key belongs to a different report',
+      message: 'key does not match entityId.',
       path: '/api/reports/01JPCY2000REPORTNEW00000000',
     },
   ])
