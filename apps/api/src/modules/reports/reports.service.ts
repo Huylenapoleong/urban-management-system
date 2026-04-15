@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -822,12 +821,6 @@ export class ReportsService {
     const mediaUrls = optionalStringArray(body, 'mediaUrls', 10, 500);
     const hasMediaKeys = mediaKeys !== undefined;
     const hasMediaUrls = mediaUrls !== undefined;
-
-    if (hasMediaKeys && hasMediaUrls) {
-      throw new BadRequestException(
-        'Provide either mediaKeys or mediaUrls, not both.',
-      );
-    }
 
     if (hasMediaKeys) {
       return {

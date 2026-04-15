@@ -34,6 +34,8 @@ export type MessageType = (typeof MESSAGE_TYPES)[number];
 
 export const MESSAGE_DELIVERY_STATES: readonly ["SENT", "DELIVERED", "READ"];
 export type MessageDeliveryState = (typeof MESSAGE_DELIVERY_STATES)[number];
+export const MESSAGE_RECALL_SCOPES: readonly ["SELF", "EVERYONE"];
+export type MessageRecallScope = (typeof MESSAGE_RECALL_SCOPES)[number];
 
 export const PUSH_DEVICE_PROVIDERS: readonly ["FCM", "APNS", "WEB", "WEBHOOK"];
 export type PushDeviceProvider = (typeof PUSH_DEVICE_PROVIDERS)[number];
@@ -98,6 +100,7 @@ export const CHAT_SOCKET_EVENTS: {
   readonly MESSAGE_SEND: "message.send";
   readonly MESSAGE_UPDATE: "message.update";
   readonly MESSAGE_DELETE: "message.delete";
+  readonly MESSAGE_RECALL: "message.recall";
   readonly MESSAGE_CREATED: "message.created";
   readonly MESSAGE_UPDATED: "message.updated";
   readonly MESSAGE_DELETED: "message.deleted";

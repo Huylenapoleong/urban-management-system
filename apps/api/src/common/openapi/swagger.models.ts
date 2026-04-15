@@ -3,6 +3,7 @@ import {
   GROUP_MEMBER_ROLES,
   GROUP_TYPES,
   MESSAGE_DELIVERY_STATES,
+  MESSAGE_RECALL_SCOPES,
   MESSAGE_TYPES,
   OTP_PURPOSES,
   PUSH_DEVICE_PROVIDERS,
@@ -349,16 +350,29 @@ export class UserDirectoryItemDto {
   @ApiProperty({
     enum: ['FRIEND', 'INCOMING_REQUEST', 'OUTGOING_REQUEST', 'NONE'],
     example: 'NONE',
+    description:
+      'Relationship state between the current user and this user in the friendship flow.',
   })
   relationState!: 'FRIEND' | 'INCOMING_REQUEST' | 'OUTGOING_REQUEST' | 'NONE';
 
-  @ApiProperty({ example: true })
+  @ApiProperty({
+    example: true,
+    description: 'When true, FE can show the direct "Chat" action immediately.',
+  })
   canMessage!: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({
+    example: false,
+    description:
+      'When true, FE can show "Send friend request". Only meaningful for citizen-citizen discovery.',
+  })
   canSendFriendRequest!: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({
+    example: false,
+    description:
+      'When true, FE can create a same-scope stranger direct message request instead of a direct DM.',
+  })
   canSendMessageRequest!: boolean;
 }
 
@@ -575,6 +589,38 @@ export class GroupMembershipDto {
   updatedAt!: string;
 }
 
+export class MessageReplyReferenceDto {
+  @ApiProperty({ example: '01JPCY3000GROUPMSG00000001' })
+  id!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  senderId!: string;
+
+  @ApiProperty({ example: 'Le Thi Citizen A' })
+  senderName!: string;
+
+  @ApiProperty({ enum: MESSAGE_TYPES, example: 'TEXT' })
+  type!: (typeof MESSAGE_TYPES)[number];
+
+  @ApiProperty({ example: '{"text":"O ga truoc so 123 Le Loi","mention":[]}' })
+  content!: string;
+
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  attachmentAsset?: MediaAssetDto;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/file.jpg' })
+  attachmentUrl?: string;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedAt!: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  recalledAt?: string | null;
+
+  @ApiProperty({ example: '2026-03-17T08:00:00.000Z' })
+  sentAt!: string;
+}
+
 export class MessageItemDto {
   @ApiProperty({ example: 'group:01JPCY1000AREAGROUP0000000' })
   conversationId!: string;
@@ -609,6 +655,30 @@ export class MessageItemDto {
   @ApiPropertyOptional({ example: '01JPCY3000GROUPMSG00000001' })
   replyTo?: string;
 
+  @ApiPropertyOptional({ type: () => MessageReplyReferenceDto })
+  replyMessage?: MessageReplyReferenceDto;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  recalledAt?: string | null;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENA00000000' })
+  recalledByUserId?: string;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  deletedForSenderAt?: string | null;
+
+  @ApiPropertyOptional({ example: '01JPCY3000GROUPMSG00000001' })
+  forwardedFromMessageId?: string;
+
+  @ApiPropertyOptional({ example: 'group:01JPCY1000AREAGROUP0000000' })
+  forwardedFromConversationId?: string;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENA00000000' })
+  forwardedFromSenderId?: string;
+
+  @ApiPropertyOptional({ example: 'Le Thi Citizen A' })
+  forwardedFromSenderName?: string;
+
   @ApiPropertyOptional({ example: null, nullable: true })
   deletedAt!: string | null;
 
@@ -637,6 +707,8 @@ export class MessageItemDto {
 export class ConversationSummaryDto {
   @ApiProperty({
     example: 'dm:01JPCY0000WARDOFFICER00000',
+    description:
+      'Public route-safe conversation id. Use this value in API paths and socket payloads.',
   })
   conversationId!: string;
 
@@ -668,6 +740,8 @@ export class ConversationSummaryDto {
     enum: DIRECT_MESSAGE_REQUEST_STATUS_VALUES,
     example: 'PENDING',
     nullable: true,
+    description:
+      'Direct message request state for stranger citizen-citizen conversations. Null for normal inbox conversations.',
   })
   requestStatus?: (typeof DIRECT_MESSAGE_REQUEST_STATUS_VALUES)[number] | null;
 
@@ -675,18 +749,33 @@ export class ConversationSummaryDto {
     enum: DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES,
     example: 'INCOMING',
     nullable: true,
+    description:
+      'Whether the current user received or initiated the request. Null for normal inbox conversations.',
   })
   requestDirection?:
     | (typeof DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES)[number]
     | null;
 
-  @ApiPropertyOptional({ example: '2026-03-17T08:25:00.000Z', nullable: true })
+  @ApiPropertyOptional({
+    example: '2026-03-17T08:25:00.000Z',
+    nullable: true,
+    description: 'When the direct message request was first created.',
+  })
   requestRequestedAt?: string | null;
 
-  @ApiPropertyOptional({ example: null, nullable: true })
+  @ApiPropertyOptional({
+    example: null,
+    nullable: true,
+    description:
+      'When the direct message request was accepted/ignored/rejected/blocked.',
+  })
   requestRespondedAt?: string | null;
 
-  @ApiPropertyOptional({ example: null, nullable: true })
+  @ApiPropertyOptional({
+    example: null,
+    nullable: true,
+    description: 'User id that responded to the direct message request.',
+  })
   requestRespondedByUserId?: string | null;
 
   @ApiPropertyOptional({ example: null, nullable: true })
@@ -702,6 +791,25 @@ export class ConversationDeletedResultDto {
 
   @ApiProperty({ example: '2026-03-18T09:15:00.000Z' })
   removedAt!: string;
+}
+
+export class RecallMessageResultDto {
+  @ApiProperty({ example: 'group:01JPCY1000AREAGROUP0000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '01JPCY3000GROUPMSG00000001' })
+  messageId!: string;
+
+  @ApiProperty({
+    enum: MESSAGE_RECALL_SCOPES,
+    example: 'EVERYONE',
+    description:
+      '"EVERYONE" keeps a recalled placeholder for all participants. "SELF" hides the message only from the current actor inbox/view.',
+  })
+  scope!: (typeof MESSAGE_RECALL_SCOPES)[number];
+
+  @ApiProperty({ example: '2026-03-18T09:15:00.000Z' })
+  recalledAt!: string;
 }
 
 export class ReportItemDto {
@@ -742,12 +850,16 @@ export class ReportItemDto {
         resolvedUrl: 'https://cdn.example.com/report-1.jpg',
       },
     ],
+    description:
+      'Preferred private-media representation. FE should prefer this field for private S3 flows.',
   })
   mediaAssets!: MediaAssetDto[];
 
   @ApiProperty({
     type: [String],
     example: ['https://cdn.example.com/report-1.jpg'],
+    description:
+      'Legacy resolved URLs kept for backward compatibility during FE migration.',
   })
   mediaUrls!: string[];
 
@@ -765,19 +877,31 @@ export class ReportItemDto {
 }
 
 export class RegisterRequestDto {
-  @ApiPropertyOptional({ example: '+84901234567' })
+  @ApiPropertyOptional({
+    example: '+84901234567',
+    description:
+      'Provide at least one of phone or email. Phone must be E.164-like after normalization.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(20)
   phone?: string;
 
-  @ApiPropertyOptional({ example: 'citizen.c@smartcity.local' })
+  @ApiPropertyOptional({
+    example: 'citizen.c@smartcity.local',
+    description:
+      'Provide at least one of email or phone. OTP-based registration requires email.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(150)
   email?: string;
 
-  @ApiProperty({ example: 'Ums@2026Secure1' })
+  @ApiProperty({
+    example: 'Ums@2026Secure1',
+    description:
+      'Standard password policy applies. Example failures: "password must include at least 3 of: uppercase, lowercase, number, special character." or "password must not contain your personal account information."',
+  })
   @IsString()
   @MinLength(10)
   @MaxLength(100)
@@ -818,7 +942,10 @@ export class RegisterOtpVerifyRequestDto {
 }
 
 export class LoginRequestDto {
-  @ApiProperty({ example: 'citizen.a@smartcity.local' })
+  @ApiProperty({
+    example: 'citizen.a@smartcity.local',
+    description: 'Email address or phone number.',
+  })
   @IsString()
   @MinLength(3)
   @MaxLength(150)
@@ -891,7 +1018,11 @@ export class AuthOtpChallengeResultDto {
   @ApiProperty({ example: '2026-03-19T10:05:00.000Z' })
   expiresAt!: string;
 
-  @ApiProperty({ example: '2026-03-19T10:01:00.000Z' })
+  @ApiProperty({
+    example: '2026-03-19T10:01:00.000Z',
+    description:
+      'Do not request a new OTP before this time. The OTP service may also throttle repeated requests.',
+  })
   resendAvailableAt!: string;
 }
 
@@ -1052,17 +1183,29 @@ export class RegisterPushDeviceRequestDto {
 }
 
 export class UpdateConversationPreferencesRequestDto {
-  @ApiPropertyOptional({ example: true })
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'Archive or unarchive the conversation for the current user only.',
+  })
   @IsOptional()
   @IsBoolean()
   archived?: boolean;
 
-  @ApiPropertyOptional({ example: true })
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Pin or unpin the conversation for the current user only.',
+  })
   @IsOptional()
   @IsBoolean()
   isPinned?: boolean;
 
-  @ApiPropertyOptional({ example: '2026-03-20T00:00:00.000Z', nullable: true })
+  @ApiPropertyOptional({
+    example: '2026-03-20T00:00:00.000Z',
+    nullable: true,
+    description:
+      'Mute notifications until a specific ISO datetime. Send null to clear the mute.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -1105,7 +1248,7 @@ export class UpdateProfileRequestDto {
     example:
       'uploads/avatar/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-avatar-a-new.jpg',
     description:
-      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+      'Preferred private-media input. Use the S3 key returned by upload/presign or reuse a previous key from `GET /uploads/media?target=AVATAR`. If both `avatarKey` and legacy `avatarUrl` are sent, the API will prefer `avatarKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1114,6 +1257,8 @@ export class UpdateProfileRequestDto {
 
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/avatar-a-new.jpg',
+    description:
+      'Legacy fallback input. Ignored when `avatarKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1166,7 +1311,7 @@ export class CreateUserRequestDto {
     example:
       'uploads/avatar/01JPCY0000WARDOFFICER00000/01JPCYUPLOAD000000000000000-officer.jpg',
     description:
-      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+      'Preferred private-media input. Use the S3 key returned by upload/presign or reuse a previous key from `GET /uploads/media?target=AVATAR`. If both `avatarKey` and legacy `avatarUrl` are sent, the API will prefer `avatarKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1175,6 +1320,8 @@ export class CreateUserRequestDto {
 
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/officer.jpg',
+    description:
+      'Legacy fallback input. Ignored when `avatarKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1262,7 +1409,11 @@ export class ManageGroupMemberRequestDto {
 }
 
 export class SendDirectMessageRequestDto {
-  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  @ApiProperty({
+    example: '01JPCY0000WARDOFFICER00000',
+    description:
+      'Officer/staff/admin target in scope, or a citizen that can already be messaged directly.',
+  })
   @IsString()
   @MinLength(5)
   @MaxLength(50)
@@ -1323,7 +1474,11 @@ export class SendDirectMessageRequestDto {
 }
 
 export class CreateDirectMessageRequestDto {
-  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  @ApiProperty({
+    example: '01JPCY0000CITIZENB00000000',
+    description:
+      'Target citizen user id. Direct message requests are only supported between same-scope stranger citizens.',
+  })
   @IsString()
   @MinLength(5)
   @MaxLength(50)
@@ -1353,6 +1508,7 @@ export class ListDirectRequestsQueryDto {
   @ApiPropertyOptional({
     enum: DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES,
     example: 'INCOMING',
+    description: 'Filter requests the current user received or sent.',
   })
   @IsOptional()
   @IsIn(DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES)
@@ -1361,6 +1517,7 @@ export class ListDirectRequestsQueryDto {
   @ApiPropertyOptional({
     enum: DIRECT_MESSAGE_REQUEST_STATUS_VALUES,
     example: 'PENDING',
+    description: 'Filter direct message requests by lifecycle state.',
   })
   @IsOptional()
   @IsIn(DIRECT_MESSAGE_REQUEST_STATUS_VALUES)
@@ -1409,7 +1566,7 @@ export class SendMessageRequestDto {
     example:
       'uploads/message/01JPCY0000CITIZENA00000000/group-01jpcy1000areagroup0000000/01JPCYUPLOAD000000000000000-file.jpg',
     description:
-      'Preferred private-media input. Use the S3 key returned by upload/presign.',
+      'Preferred private-media input. Use the S3 key returned by upload/presign. If both `attachmentKey` and legacy `attachmentUrl` are sent, the API will prefer `attachmentKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1418,6 +1575,8 @@ export class SendMessageRequestDto {
 
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/file.jpg',
+    description:
+      'Legacy fallback input. Ignored when `attachmentKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1452,7 +1611,7 @@ export class UpdateMessageRequestDto {
     example:
       'uploads/message/01JPCY0000CITIZENA00000000/group-01jpcy1000areagroup0000000/01JPCYUPLOAD000000000000000-file-updated.jpg',
     description:
-      'Preferred private-media input. Send an empty string to clear the current attachment.',
+      'Preferred private-media input. Send an empty string to clear the current attachment. If both `attachmentKey` and legacy `attachmentUrl` are sent, the API will prefer `attachmentKey`.',
   })
   @IsOptional()
   @IsString()
@@ -1462,13 +1621,42 @@ export class UpdateMessageRequestDto {
   @ApiPropertyOptional({
     example: 'https://cdn.example.com/file-updated.jpg',
     description:
-      'Legacy URL input. Send an empty string to clear the current attachment.',
+      'Legacy URL input. Send an empty string to clear the current attachment. Ignored when `attachmentKey` is also provided.',
     deprecated: true,
   })
   @IsOptional()
   @IsString()
   @MaxLength(500)
   attachmentUrl?: string;
+}
+
+export class RecallMessageRequestDto {
+  @ApiProperty({
+    enum: MESSAGE_RECALL_SCOPES,
+    example: 'EVERYONE',
+    description:
+      '"EVERYONE" keeps a recalled placeholder for all participants. "SELF" hides the message only from the current actor inbox/view.',
+  })
+  @IsIn(MESSAGE_RECALL_SCOPES)
+  scope!: (typeof MESSAGE_RECALL_SCOPES)[number];
+}
+
+export class ForwardMessageRequestDto {
+  @ApiProperty({
+    type: [String],
+    example: [
+      'group:01JPCY1000AREAGROUP0000000',
+      'dm:01JPCY0000CITIZENB00000000',
+    ],
+    description:
+      'Target conversations to receive the forwarded copy. Supports route-safe ids like group:<groupId> and dm:<userId>.',
+  })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(200, { each: true })
+  conversationIds!: string[];
 }
 
 export class CreateReportRequestDto {
@@ -1503,7 +1691,7 @@ export class CreateReportRequestDto {
       'uploads/report/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-report-1.jpg',
     ],
     description:
-      'Preferred private-media input. Use S3 keys returned by upload/presign.',
+      'Preferred private-media input. Use S3 keys returned by upload/presign. If both `mediaKeys` and legacy `mediaUrls` are sent, the API will prefer `mediaKeys`.',
   })
   @IsOptional()
   @IsArray()
@@ -1516,6 +1704,8 @@ export class CreateReportRequestDto {
   @ApiPropertyOptional({
     type: [String],
     example: ['https://cdn.example.com/report-1.jpg'],
+    description:
+      'Legacy fallback input. Ignored when `mediaKeys` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1569,7 +1759,7 @@ export class UpdateReportRequestDto {
       'uploads/report/01JPCY0000CITIZENA00000000/01JPCY2000REPORTNEW00000000/01JPCYUPLOAD000000000000000-report-1-update.jpg',
     ],
     description:
-      'Preferred private-media input. Use S3 keys returned by upload/presign.',
+      'Preferred private-media input. Use S3 keys returned by upload/presign. If both `mediaKeys` and legacy `mediaUrls` are sent, the API will prefer `mediaKeys`.',
   })
   @IsOptional()
   @IsArray()
@@ -1582,6 +1772,8 @@ export class UpdateReportRequestDto {
   @ApiPropertyOptional({
     type: [String],
     example: ['https://cdn.example.com/report-1-update.jpg'],
+    description:
+      'Legacy fallback input. Ignored when `mediaKeys` is also provided.',
     deprecated: true,
   })
   @IsOptional()
@@ -1693,7 +1885,7 @@ export class SearchUsersForChatQueryDto extends ListFriendsQueryDto {
     enum: USER_DISCOVERY_MODE_VALUES,
     example: 'all',
     description:
-      '"chat" returns only users that can be messaged now. "friend" returns friendship-focused results.',
+      '"all" returns discoverable users. "chat" returns only users that can be messaged now. "friend" returns friendship-focused results.',
   })
   @IsOptional()
   @IsIn(USER_DISCOVERY_MODE_VALUES)
@@ -1983,12 +2175,95 @@ export class UploadLimitsDto {
   imageOnlyTargets!: (typeof UPLOAD_TARGETS)[number][];
 }
 
+export class UploadListItemDto {
+  @ApiProperty({
+    example:
+      'uploads/avatar/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-avatar-a-new.jpg',
+  })
+  key!: string;
+
+  @ApiProperty({ example: 'smartcity-assets' })
+  bucket!: string;
+
+  @ApiProperty({ enum: UPLOAD_TARGETS, example: 'AVATAR' })
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENA00000000' })
+  entityId?: string;
+
+  @ApiProperty({ example: '01jpcyupload000000000000000-avatar-a-new.jpg' })
+  fileName!: string;
+
+  @ApiPropertyOptional({ example: 153245 })
+  size?: number;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  uploadedBy!: string;
+
+  @ApiPropertyOptional({ example: '2026-04-15T09:30:00.000Z' })
+  uploadedAt?: string;
+
+  @ApiProperty({
+    example:
+      'https://smartcity-assets.s3.ap-southeast-1.amazonaws.com/uploads/avatar/01JPCY0000CITIZENA00000000/01JPCYUPLOAD000000000000000-avatar-a-new.jpg',
+  })
+  url!: string;
+
+  @ApiPropertyOptional({ example: '2026-04-15T09:35:00.000Z' })
+  expiresAt?: string;
+
+  @ApiProperty({
+    example: true,
+    description:
+      'True when this file is currently referenced by the active avatar/report/message for the requested target scope.',
+  })
+  isInUse!: boolean;
+}
+
+export class ListUploadsQueryDto {
+  @ApiProperty({
+    enum: UPLOAD_TARGETS,
+    example: 'AVATAR',
+    description:
+      'Required. Use `AVATAR` to list avatar history. `REPORT` and `MESSAGE` require `entityId`.',
+  })
+  @IsIn(UPLOAD_TARGETS)
+  target!: (typeof UPLOAD_TARGETS)[number];
+
+  @ApiPropertyOptional({
+    example: '01JPCY2000REPORTNEW00000000',
+    description:
+      'Required for `REPORT` and `MESSAGE`. Optional for `AVATAR` and `GENERAL`.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  entityId?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJpZCI6IjAxSlBDWS4uLiIsInNvcnRWYWx1ZSI6IjIwMjYtMDQtMTVUMDk6MzA6MDAuMDAwWiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @ApiPropertyOptional({ example: '20' })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+}
+
 export class DeleteUploadRequestDto {
   @ApiProperty({ enum: UPLOAD_TARGETS, example: 'REPORT' })
   @IsIn(UPLOAD_TARGETS)
   target!: (typeof UPLOAD_TARGETS)[number];
 
-  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @ApiPropertyOptional({
+    example: '01JPCY2000REPORTNEW00000000',
+    description:
+      'Optional when the uploaded key already encodes the entity id. Still recommended for explicit FE payloads.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -2080,7 +2355,11 @@ export class PresignDownloadRequestDto {
   @IsIn(UPLOAD_TARGETS)
   target!: (typeof UPLOAD_TARGETS)[number];
 
-  @ApiPropertyOptional({ example: '01JPCY2000REPORTNEW00000000' })
+  @ApiPropertyOptional({
+    example: '01JPCY2000REPORTNEW00000000',
+    description:
+      'Optional when the uploaded key already encodes the entity id. Still recommended when FE already knows the bound entity.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)

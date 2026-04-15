@@ -79,6 +79,9 @@ describe('ConversationsService', () => {
       }),
     ),
   };
+  const s3StorageService = {
+    copyObject: jest.fn(),
+  };
   const config = {
     chatOutboxBatchSize: 10,
     chatOutboxPollIntervalMs: 1000,
@@ -87,6 +90,8 @@ describe('ConversationsService', () => {
     dynamodbMessagesTableName: 'Messages',
     dynamodbMembershipsTableName: 'Memberships',
     redisKeyPrefix: 'urban',
+    s3BucketName: 'smartcity-assets',
+    uploadKeyPrefix: 'uploads',
   };
 
   const actor = {
@@ -97,6 +102,11 @@ describe('ConversationsService', () => {
     status: 'ACTIVE' as const,
     createdAt: '2026-03-18T10:00:00.000Z',
     updatedAt: '2026-03-18T10:00:00.000Z',
+  };
+  const adminActor = {
+    ...actor,
+    role: 'ADMIN' as const,
+    fullName: 'Admin One',
   };
   const otherUser: StoredUser = {
     PK: 'USER#user-2',
@@ -203,6 +213,7 @@ describe('ConversationsService', () => {
       auditTrailService as never,
       pushNotificationService as never,
       mediaAssetService as never,
+      s3StorageService as never,
       config as never,
     );
     authorizationService.canAccessDirectConversation.mockReturnValue(true);
@@ -239,6 +250,7 @@ describe('ConversationsService', () => {
     });
     usersService.canStartCitizenDm.mockResolvedValue(true);
     repository.delete.mockResolvedValue(undefined);
+    repository.scanAll.mockResolvedValue([]);
     repository.put.mockResolvedValue(undefined);
     repository.transactPut.mockResolvedValue(undefined);
     chatOutboxService.buildChatOutboxEvent.mockImplementation(
@@ -283,6 +295,7 @@ describe('ConversationsService', () => {
       meta: { count: 0 },
     });
     pushNotificationService.buildPushOutboxEvent.mockReturnValue(undefined);
+    s3StorageService.copyObject.mockResolvedValue(undefined);
   });
 
   it('deletes only the actor inbox summary and leaves shared messages untouched', async () => {
@@ -442,6 +455,50 @@ describe('ConversationsService', () => {
     );
   });
 
+  it('blocks public-group audit access for users who are not active members', async () => {
+    groupsService.getGroup.mockResolvedValue({
+      groupId: 'group-1',
+      groupType: 'AREA',
+      locationCode: actor.locationCode,
+      deletedAt: null,
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      deletedAt: '2026-03-18T10:08:00.000Z',
+    });
+    groupsService.listMembers.mockResolvedValue([
+      { userId: actor.id },
+      { userId: otherUser.userId },
+    ]);
+
+    await expect(
+      service.listAuditEvents(actor, 'group:group-1', {}),
+    ).rejects.toThrow(
+      'Only active members can access this group conversation.',
+    );
+  });
+
+  it('blocks public-group message history for users who are not active members', async () => {
+    groupsService.getGroup.mockResolvedValue({
+      groupId: 'group-1',
+      groupType: 'AREA',
+      locationCode: actor.locationCode,
+      deletedAt: null,
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      deletedAt: '2026-03-18T10:08:00.000Z',
+    });
+
+    await expect(
+      service.listMessages(actor, 'group:group-1', {}),
+    ).rejects.toThrow(
+      'Only active members can access this group conversation.',
+    );
+  });
+
   it('filters and paginates inbox conversations by keyword and unread state', async () => {
     const matchingGroupSummary: StoredConversation = {
       ...actorSummary,
@@ -515,11 +572,13 @@ describe('ConversationsService', () => {
           content: '{"text":"Noi dung moi","mention":[]}',
         },
       ),
-    ).rejects.toThrow('Only active members can edit messages in this group.');
+    ).rejects.toThrow(
+      'Only active members can access this group conversation.',
+    );
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
-  it('blocks deleting a public-group message after the actor left the group', async () => {
+  it('blocks permanent delete for non-admin users', async () => {
     groupsService.getGroup.mockResolvedValue({
       groupId: 'group-1',
     });
@@ -540,7 +599,7 @@ describe('ConversationsService', () => {
         'group:group-1',
         '01MESSAGE0000000000000001',
       ),
-    ).rejects.toThrow('Only active members can delete messages in this group.');
+    ).rejects.toThrow('Only administrators can permanently delete messages.');
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
@@ -610,6 +669,41 @@ describe('ConversationsService', () => {
       },
     });
   });
+
+  it('hides messages recalled with SELF for the current actor', async () => {
+    const hiddenForActorMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:04:00.000Z#01MESSAGE0000000000000002',
+      messageId: '01MESSAGE0000000000000002',
+      deletedForUserAt: {
+        [actor.id]: '2026-03-18T10:10:00.000Z',
+      },
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [hiddenForActorMessage, latestMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {});
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        id: latestMessage.messageId,
+      }),
+    );
+  });
+
   it('rejects direct messages when policy denies access to the target user', async () => {
     authorizationService.canAccessDirectConversation.mockReturnValueOnce(false);
 
@@ -730,6 +824,611 @@ describe('ConversationsService', () => {
       }),
     );
     expect(repository.transactPut).toHaveBeenCalled();
+  });
+
+  it('allows direct messages to an accepted friend even when scope access is denied', async () => {
+    const remoteFriend: StoredUser = {
+      ...sameScopeCitizen,
+      userId: 'user-4',
+      PK: 'USER#user-4',
+      email: 'citizen.remote@example.com',
+      fullName: 'Citizen Remote',
+      locationCode: 'VN-01-001-00001',
+    };
+
+    usersService.getActiveByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === remoteFriend.userId) {
+        return remoteFriend;
+      }
+
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
+      }
+
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      throw new Error(`Unexpected active user lookup: ${userId}`);
+    });
+    usersService.getByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
+      }
+
+      if (userId === remoteFriend.userId) {
+        return remoteFriend;
+      }
+
+      throw new Error(`Unexpected user lookup: ${userId}`);
+    });
+    authorizationService.canAccessDirectConversation.mockReturnValue(false);
+    usersService.canStartCitizenDm.mockResolvedValueOnce(true);
+
+    const result = await service.sendDirectMessage(actor, {
+      targetUserId: remoteFriend.userId,
+      content: '{"text":"Ban o xa van chat duoc.","mention":[]}',
+      type: 'TEXT',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${remoteFriend.userId}`,
+        senderId: actor.id,
+        type: 'TEXT',
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalled();
+  });
+
+  it('allows sending to an existing friend DM conversation even when scope access is denied', async () => {
+    const remoteFriend: StoredUser = {
+      ...sameScopeCitizen,
+      userId: 'user-4',
+      PK: 'USER#user-4',
+      email: 'citizen.remote@example.com',
+      fullName: 'Citizen Remote',
+      locationCode: 'VN-01-001-00001',
+    };
+
+    usersService.getActiveByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === remoteFriend.userId) {
+        return remoteFriend;
+      }
+
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
+      }
+
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      throw new Error(`Unexpected active user lookup: ${userId}`);
+    });
+    usersService.getByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
+      }
+
+      if (userId === remoteFriend.userId) {
+        return remoteFriend;
+      }
+
+      throw new Error(`Unexpected user lookup: ${userId}`);
+    });
+    authorizationService.canAccessDirectConversation.mockReturnValue(false);
+    usersService.canStartCitizenDm.mockResolvedValue(true);
+
+    const result = await service.sendMessage(
+      actor,
+      `dm:${remoteFriend.userId}`,
+      {
+        content: '{"text":"Van gui qua route conversation duoc.","mention":[]}',
+        type: 'TEXT',
+      },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${remoteFriend.userId}`,
+        senderId: actor.id,
+        type: 'TEXT',
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalled();
+  });
+
+  it('prevents non-senders from editing another user message', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === `MSGREF#${latestMessage.messageId}`
+        ) {
+          return {
+            PK: latestMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: latestMessage.messageId,
+            messageSk: latestMessage.SK,
+            senderId: latestMessage.senderId,
+            sentAt: latestMessage.sentAt,
+            updatedAt: latestMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === latestMessage.SK
+        ) {
+          return latestMessage;
+        }
+
+        return undefined;
+      },
+    );
+
+    await expect(
+      service.updateMessage(
+        actor,
+        `dm:${otherUser.userId}`,
+        latestMessage.messageId,
+        {
+          content: '{"text":"Sua trai phep","mention":[]}',
+        },
+      ),
+    ).rejects.toThrow('You cannot edit this message.');
+  });
+
+  it('stores reply preview metadata when sending a reply', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === `MSGREF#${latestMessage.messageId}`
+        ) {
+          return {
+            PK: latestMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: latestMessage.messageId,
+            messageSk: latestMessage.SK,
+            senderId: latestMessage.senderId,
+            sentAt: latestMessage.sentAt,
+            updatedAt: latestMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === latestMessage.SK
+        ) {
+          return latestMessage;
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.sendDirectMessage(actor, {
+      targetUserId: otherUser.userId,
+      content: '{"text":"Da tiep nhan.","mention":[]}',
+      replyTo: latestMessage.messageId,
+      type: 'TEXT',
+    });
+
+    expect(result.replyMessage).toEqual(
+      expect.objectContaining({
+        id: latestMessage.messageId,
+        senderId: latestMessage.senderId,
+        senderName: latestMessage.senderName,
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            replyTo: latestMessage.messageId,
+            replyMessage: expect.objectContaining({
+              id: latestMessage.messageId,
+              senderId: latestMessage.senderId,
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('prefers attachmentKey over legacy attachmentUrl when sending a message', async () => {
+    const result = await service.sendDirectMessage(actor, {
+      targetUserId: otherUser.userId,
+      content: '{"text":"Gui file moi.","mention":[]}',
+      type: 'TEXT',
+      attachmentKey: 'uploads/message/user-1/dm-user-1-user-2/file.jpg',
+      attachmentUrl: 'https://cdn.example.com/legacy-file.jpg',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        attachmentAsset: expect.objectContaining({
+          key: 'uploads/message/user-1/dm-user-1-user-2/file.jpg',
+        }),
+        attachmentUrl: undefined,
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            attachmentAsset: expect.objectContaining({
+              key: 'uploads/message/user-1/dm-user-1-user-2/file.jpg',
+            }),
+            attachmentUrl: undefined,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('recalls a message for everyone by updating the stored message state', async () => {
+    const actorMessage: StoredMessage = {
+      ...latestMessage,
+      senderId: actor.id,
+      senderName: actor.fullName,
+    };
+
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          sk === `MSGREF#${actorMessage.messageId}`
+        ) {
+          return {
+            PK: actorMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: actorMessage.messageId,
+            messageSk: actorMessage.SK,
+            senderId: actorMessage.senderId,
+            sentAt: actorMessage.sentAt,
+            updatedAt: actorMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          sk === actorMessage.SK
+        ) {
+          return actorMessage;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [
+            {
+              ...actorMessage,
+              recalledAt: '2026-03-18T10:06:00.000Z',
+              recalledByUserId: actor.id,
+            },
+          ];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          (pk === actorSummary.PK || pk === otherSummary.PK) &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return pk === actorSummary.PK ? [actorSummary] : [otherSummary];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.recallMessage(
+      actor,
+      `dm:${otherUser.userId}`,
+      actorMessage.messageId,
+      { scope: 'EVERYONE' },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        messageId: actorMessage.messageId,
+        scope: 'EVERYONE',
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            recalledByUserId: actor.id,
+            messageId: actorMessage.messageId,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('recalls a message for SELF even when the message was sent by another participant', async () => {
+    const actorMessage: StoredMessage = {
+      ...latestMessage,
+    };
+
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          sk === `MSGREF#${actorMessage.messageId}`
+        ) {
+          return {
+            PK: actorMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: actorMessage.messageId,
+            messageSk: actorMessage.SK,
+            senderId: actorMessage.senderId,
+            sentAt: actorMessage.sentAt,
+            updatedAt: actorMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          sk === actorMessage.SK
+        ) {
+          return actorMessage;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.recallMessage(
+      actor,
+      `dm:${otherUser.userId}`,
+      actorMessage.messageId,
+      { scope: 'SELF' },
+    );
+
+    expect(result.scope).toBe('SELF');
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            messageId: actorMessage.messageId,
+            deletedForUserAt: expect.objectContaining({
+              [actor.id]: expect.any(String),
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
+      actor.id,
+      'message.deleted',
+      expect.objectContaining({
+        messageId: actorMessage.messageId,
+      }),
+    );
+  });
+
+  it('allows administrators to permanently delete a message', async () => {
+    const actorMessage: StoredMessage = {
+      ...latestMessage,
+      senderId: actor.id,
+      senderName: actor.fullName,
+    };
+
+    authorizationService.isAdmin.mockReturnValue(true);
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          sk === `MSGREF#${actorMessage.messageId}`
+        ) {
+          return {
+            PK: actorMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: actorMessage.messageId,
+            messageSk: actorMessage.SK,
+            senderId: actorMessage.senderId,
+            sentAt: actorMessage.sentAt,
+            updatedAt: actorMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          sk === actorMessage.SK
+        ) {
+          return actorMessage;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Messages' &&
+          pk === actorMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          (pk === actorSummary.PK || pk === otherSummary.PK) &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return pk === actorSummary.PK ? [actorSummary] : [otherSummary];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.deleteMessage(
+      adminActor,
+      `dm:${otherUser.userId}`,
+      actorMessage.messageId,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: actorMessage.messageId,
+        deletedAt: expect.any(String),
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            messageId: actorMessage.messageId,
+            deletedAt: expect.any(String),
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('forwards a message copy into another conversation', async () => {
+    const groupMembers = [{ userId: actor.id }, { userId: otherUser.userId }];
+
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === `MSGREF#${latestMessage.messageId}`
+        ) {
+          return {
+            PK: latestMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: latestMessage.messageId,
+            messageSk: latestMessage.SK,
+            senderId: latestMessage.senderId,
+            sentAt: latestMessage.sentAt,
+            updatedAt: latestMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === latestMessage.SK
+        ) {
+          return latestMessage;
+        }
+
+        return undefined;
+      },
+    );
+    groupsService.getGroup.mockResolvedValue({
+      groupId: 'group-1',
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      deletedAt: null,
+    });
+    groupsService.listMembers.mockResolvedValue(groupMembers);
+
+    const result = await service.forwardMessage(
+      actor,
+      `dm:${otherUser.userId}`,
+      latestMessage.messageId,
+      { conversationIds: ['group:group-1'] },
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        forwardedFromMessageId: latestMessage.messageId,
+        forwardedFromConversationId: latestMessage.conversationId,
+      }),
+    );
   });
 
   it('rejects direct messages to inactive targets before writing a message', async () => {

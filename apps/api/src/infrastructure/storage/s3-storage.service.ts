@@ -1,6 +1,8 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -100,6 +102,100 @@ export class S3StorageService implements OnApplicationShutdown {
         serviceLabel: 'S3',
       });
     }
+  }
+
+  async copyObject(input: {
+    sourceBucket: string;
+    sourceKey: string;
+    destinationBucket: string;
+    destinationKey: string;
+  }): Promise<void> {
+    if (!input.sourceBucket || !input.destinationBucket) {
+      throw new InternalServerErrorException('S3 bucket is not configured.');
+    }
+
+    try {
+      await this.circuitBreakerService.execute('s3', 'S3', () =>
+        this.client.send(
+          new CopyObjectCommand({
+            Bucket: input.destinationBucket,
+            Key: input.destinationKey,
+            CopySource: `${input.sourceBucket}/${this.encodeKey(input.sourceKey)}`,
+          }),
+        ),
+      );
+    } catch (error) {
+      throw createInfrastructureOperationError({
+        context: {
+          destinationBucket: input.destinationBucket,
+          destinationKey: input.destinationKey,
+          sourceBucket: input.sourceBucket,
+          sourceKey: input.sourceKey,
+        },
+        error,
+        operation: 'Copy',
+        publicMessage: 'Temporary file storage failure. Please retry.',
+        serviceLabel: 'S3',
+      });
+    }
+  }
+
+  async listObjects(input: {
+    bucket: string;
+    prefix: string;
+  }): Promise<Array<{ key: string; size?: number; lastModified?: string }>> {
+    if (!input.bucket) {
+      throw new InternalServerErrorException('S3 bucket is not configured.');
+    }
+
+    const items: Array<{ key: string; size?: number; lastModified?: string }> =
+      [];
+    let continuationToken: string | undefined;
+
+    try {
+      do {
+        const response = await this.circuitBreakerService.execute(
+          's3',
+          'S3',
+          () =>
+            this.client.send(
+              new ListObjectsV2Command({
+                Bucket: input.bucket,
+                Prefix: input.prefix,
+                ContinuationToken: continuationToken,
+              }),
+            ),
+        );
+
+        for (const item of response.Contents ?? []) {
+          if (!item.Key) {
+            continue;
+          }
+
+          items.push({
+            key: item.Key,
+            size: item.Size,
+            lastModified: item.LastModified?.toISOString(),
+          });
+        }
+        continuationToken = response.IsTruncated
+          ? response.NextContinuationToken
+          : undefined;
+      } while (continuationToken);
+    } catch (error) {
+      throw createInfrastructureOperationError({
+        context: {
+          bucket: input.bucket,
+          prefix: input.prefix,
+        },
+        error,
+        operation: 'List',
+        publicMessage: 'Temporary file storage failure. Please retry.',
+        serviceLabel: 'S3',
+      });
+    }
+
+    return items;
   }
 
   async createPresignedUploadUrl(input: {

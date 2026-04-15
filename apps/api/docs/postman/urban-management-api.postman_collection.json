@@ -64,6 +64,14 @@
       "value": ""
     },
     {
+      "key": "recallScope",
+      "value": "EVERYONE"
+    },
+    {
+      "key": "forwardConversationIdsJson",
+      "value": "[\"{{conversationId}}\"]"
+    },
+    {
       "key": "deviceId",
       "value": "device-postman-local-01"
     },
@@ -1649,7 +1657,9 @@
                   "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
                   "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
-                  "if (json?.success && json?.data?.avatarAsset?.key) { pm.environment.set('avatarKey', json.data.avatarAsset.key); }"
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
                 ]
               }
             }
@@ -1680,7 +1690,9 @@
                   "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
                   "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
-                  "if (json?.success && json?.data?.avatarAsset?.key) { pm.environment.set('avatarKey', json.data.avatarAsset.key); }"
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
                 ]
               }
             }
@@ -1712,7 +1724,67 @@
                   "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
                   "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
-                  "if (json?.success && json?.data?.avatarAsset?.key) { pm.environment.set('avatarKey', json.data.avatarAsset.key); }"
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Current Avatar From Library",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/users/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avatarKey\": \"{{avatarLibraryKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use an older uploaded avatar from the avatar library as the current profile avatar.\nRun `Uploads > List Avatar Uploads` first so Postman can populate `avatarLibraryKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove My Avatar",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/avatar",
+            "description": "Removes only the current avatar reference from the user profile. Uploaded avatar files remain in the avatar library and can be reused later."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);"
                 ]
               }
             }
@@ -2950,11 +3022,21 @@
           ]
         },
         {
-          "name": "Delete Message",
+          "name": "Recall Message",
           "request": {
-            "method": "DELETE",
+            "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}"
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}/recall",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"{{recallScope}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Primary end-user chat action for removing a message.\nUse `EVERYONE` to keep a recalled placeholder in the thread for all participants.\nUse `SELF` to hide the message only from the current actor view."
           },
           "event": [
             {
@@ -2963,6 +3045,60 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forward Message",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}/forward",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationIds\": {{forwardConversationIdsJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Forward the selected message into one or more target conversations.\nSet `forwardConversationIdsJson` to a JSON array of route-safe ids such as `[\"group:{{groupId}}\"]` or `[\"dm:{{userId}}\"]`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.conversationId) { pm.environment.set('conversationId', json.data[0].conversationId); }",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.id) { pm.environment.set('messageId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Message (Admin Only)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}",
+            "description": "Permanent delete for moderation/admin tooling only.\nNormal chat UX should use `Recall Message` instead.\nA non-admin token should receive `403` here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('admin delete succeeded or non-admin was correctly rejected', function () {",
+                  "  pm.expect(pm.response.code < 400 || pm.response.code === 403).to.equal(true);",
+                  "});"
                 ]
               }
             }
@@ -3163,6 +3299,71 @@
           ]
         },
         {
+          "name": "List Avatar Uploads",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/media?target=AVATAR&limit=20&cursor={{uploadListCursor}}",
+            "description": "Lists avatar files uploaded by the current user.\nThe test script stores `currentAvatarKey` from the `isInUse` item and stores a reusable `avatarLibraryKey` from the first non-in-use item when available."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "const items = json?.success && Array.isArray(json.data) ? json.data : [];",
+                  "const currentItem = items.find((item) => item?.isInUse && item?.key);",
+                  "const reusableItem = items.find((item) => !item?.isInUse && item?.key) || currentItem;",
+                  "pm.environment.set('currentAvatarKey', currentItem?.key || '');",
+                  "pm.environment.set('avatarLibraryKey', reusableItem?.key || '');",
+                  "pm.environment.set('uploadListCursor', json?.success && json?.meta?.nextCursor ? json.meta.nextCursor : '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Avatar Upload From Library",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/media",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"AVATAR\",\n  \"key\": \"{{avatarLibraryKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Deletes an avatar file from the upload library.\nThis succeeds only when the selected file is not the current avatar in use."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && pm.environment.get('avatarLibraryKey') === pm.environment.get('avatarKey')) { pm.environment.set('avatarKey', ''); }",
+                  "pm.environment.set('avatarLibraryKey', '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Presign Upload",
           "request": {
             "method": "POST",
@@ -3200,7 +3401,7 @@
                   "}",
                   "let key = String(pm.environment.get('uploadKey') || '').trim();",
                   "if (!key) {",
-                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
                   "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
                   "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
                   "}",
@@ -3221,7 +3422,7 @@
                   "  const key = json.data.key;",
                   "  const target = String(json.data.target || pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
                   "  pm.environment.set('uploadKey', key);",
-                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); }",
+                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); pm.environment.set('avatarLibraryKey', key); }",
                   "  if (target === 'MESSAGE') { pm.environment.set('messageAttachmentKey', key); }",
                   "  if (target === 'REPORT') {",
                   "    pm.environment.set('reportMediaKey', key);",
@@ -3272,7 +3473,7 @@
                   "}",
                   "let key = String(pm.environment.get('uploadKey') || '').trim();",
                   "if (!key) {",
-                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
                   "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
                   "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
                   "}",
@@ -3338,7 +3539,7 @@
                   "}",
                   "let key = String(pm.environment.get('uploadKey') || '').trim();",
                   "if (!key) {",
-                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
                   "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
                   "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
                   "}",
@@ -3359,7 +3560,7 @@
                   "  const key = json.data.key;",
                   "  const target = String(json.data.target || pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
                   "  pm.environment.set('uploadKey', key);",
-                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); }",
+                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); pm.environment.set('avatarLibraryKey', key); }",
                   "  if (target === 'MESSAGE') { pm.environment.set('messageAttachmentKey', key); }",
                   "  if (target === 'REPORT') {",
                   "    pm.environment.set('reportMediaKey', key);",
@@ -3410,7 +3611,7 @@
                   "}",
                   "let key = String(pm.environment.get('uploadKey') || '').trim();",
                   "if (!key) {",
-                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || '').trim(); }",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
                   "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
                   "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
                   "}",
@@ -3432,6 +3633,7 @@
                   "  const key = String(pm.variables.get('resolvedUploadKey') || '').trim();",
                   "  if (pm.environment.get('uploadKey') === key) { pm.environment.set('uploadKey', ''); }",
                   "  if (target === 'AVATAR' && pm.environment.get('avatarKey') === key) { pm.environment.set('avatarKey', ''); }",
+                  "  if (target === 'AVATAR' && pm.environment.get('avatarLibraryKey') === key) { pm.environment.set('avatarLibraryKey', ''); }",
                   "  if (target === 'MESSAGE' && pm.environment.get('messageAttachmentKey') === key) { pm.environment.set('messageAttachmentKey', ''); }",
                   "  if (target === 'REPORT' && pm.environment.get('reportMediaKey') === key) {",
                   "    pm.environment.set('reportMediaKey', '');",

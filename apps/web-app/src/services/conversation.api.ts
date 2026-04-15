@@ -1,11 +1,124 @@
 import ApiClient from "@/lib/api-client";
+import { socketClient } from "@/lib/socket-client";
+import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type { ConversationSummary, MessageItem } from "@urban/shared-types";
 
-export async function listConversations(): Promise<ConversationSummary[]> {
+type ChatMessageType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
+
+export interface SendMessageInput {
+  text?: string;
+  attachmentKey?: string;
+  type?: ChatMessageType;
+  replyTo?: string;
+}
+
+export type RecallScope = "SELF" | "EVERYONE";
+
+function createClientMessageId(): string {
+  // Use a deterministic prefix so backend logs can quickly identify web-app send attempts.
+  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function toRouteSafeConversationId(conversationId: string): string {
+  const raw = conversationId.trim();
+  if (!raw) return conversationId;
+
+  if (/^grp#/i.test(raw)) {
+    return `group:${raw.replace(/^grp#/i, "").trim()}`;
+  }
+
+  if (/^group#/i.test(raw)) {
+    return `group:${raw.replace(/^group#/i, "").trim()}`;
+  }
+
+  return raw;
+}
+
+function buildConversationIdCandidates(conversationId: string): string[] {
+  const raw = conversationId.trim();
+  if (!raw) {
+    return [conversationId];
+  }
+
+  const candidates: string[] = [raw];
+
+  if (/^group:/i.test(raw)) {
+    const id = raw.replace(/^group:/i, "").trim();
+    if (id) {
+      candidates.push(id, `GRP#${id}`);
+    }
+  } else if (/^grp:/i.test(raw)) {
+    const id = raw.replace(/^grp:/i, "").trim();
+    if (id) {
+      candidates.push(`group:${id}`, id, `GRP#${id}`);
+    }
+  } else if (/^grp#/i.test(raw)) {
+    const id = raw.replace(/^grp#/i, "").trim();
+    if (id) {
+      candidates.push(`group:${id}`, id);
+    }
+  } else if (/^group#/i.test(raw)) {
+    const id = raw.replace(/^group#/i, "").trim();
+    if (id) {
+      candidates.push(`group:${id}`, id, `GRP#${id}`);
+    }
+  } else if (/^dm:/i.test(raw)) {
+    const id = raw.replace(/^dm:/i, "").trim();
+    if (id) {
+      candidates.push(id, `DM#${id}`);
+    }
+  } else if (/^dm#/i.test(raw)) {
+    const id = raw.replace(/^dm#/i, "").trim();
+    if (id) {
+      candidates.push(`dm:${id}`, id);
+    }
+  } else {
+    // Legacy/bare ids: prefer trying group form first (common for this codebase), then raw.
+    candidates.push(`group:${raw}`);
+  }
+
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+function shouldRetryOnConversationId400(error: any): boolean {
+  if (error?.status !== 400) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("conversation id") ||
+    message.includes("unsupported conversation") ||
+    message.includes("invalid dm conversation") ||
+    message.includes("incomplete")
+  );
+}
+
+export async function listConversations(searchTerm?: string): Promise<ConversationSummary[]> {
   try {
+    const q = searchTerm?.trim();
+    const conversationsPath = q
+      ? `/conversations?q=${encodeURIComponent(q)}`
+      : "/conversations";
+    const groupsPath = q
+      ? `/groups?mine=true&q=${encodeURIComponent(q)}`
+      : "/groups?mine=true";
+
     const [conversations, joinedGroups] = await Promise.all([
-      ApiClient.get("/conversations").catch(() => []) as Promise<ConversationSummary[]>,
-      ApiClient.get("/groups?mine=true").catch(() => []) as Promise<any[]>,
+      ApiClient.get(conversationsPath, {
+        headers: {
+          "Cache-Control": "no-cache, no-store, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      }).catch(() => []) as Promise<ConversationSummary[]>,
+      ApiClient.get(groupsPath, {
+        headers: {
+          "Cache-Control": "no-cache, no-store, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      }).catch(() => []) as Promise<any[]>,
     ]);
 
     const result = [...conversations];
@@ -37,17 +150,170 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 }
 
 export async function listMessages(conversationId: string): Promise<MessageItem[]> {
-  return await ApiClient.get(`/conversations/${encodeURIComponent(conversationId)}/messages?limit=100`);
+  let lastError: unknown;
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      return await ApiClient.get(`/conversations/${encodeURIComponent(id)}/messages?limit=100`);
+    } catch (error: any) {
+      lastError = error;
+      if (error?.status !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 export async function markConversationAsRead(conversationId: string): Promise<void> {
-  await ApiClient.post(`/conversations/${encodeURIComponent(conversationId)}/read`);
+  let lastError: unknown;
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      await ApiClient.post(`/conversations/${encodeURIComponent(id)}/read`);
+      return;
+    } catch (error: any) {
+      lastError = error;
+      if (error?.status !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
 }
 
-export async function sendMessage(conversationId: string, text: string): Promise<MessageItem> {
-  const body = { 
-    type: "TEXT", 
-    content: JSON.stringify({ text, mention: [] }) 
+export async function sendMessage(
+  conversationId: string,
+  input: SendMessageInput,
+): Promise<void> {
+  const trimmedText = input.text?.trim() ?? "";
+  const attachmentKey = input.attachmentKey?.trim();
+
+  if (!trimmedText && !attachmentKey) {
+    throw {
+      message: "Message must contain text or an attachment.",
+      status: 400,
+    };
+  }
+
+  const payload: Record<string, unknown> = {
+    conversationId: toRouteSafeConversationId(conversationId),
+    clientMessageId: createClientMessageId(),
+    type: input.type || (attachmentKey ? "DOC" : "TEXT"),
   };
-  return await ApiClient.post(`/conversations/${encodeURIComponent(conversationId)}/messages`, body);
+
+  if (trimmedText) {
+    payload.content = JSON.stringify({ text: trimmedText, mention: [] });
+  }
+
+  if (attachmentKey) {
+    payload.attachmentKey = attachmentKey;
+  }
+
+  if (input.replyTo?.trim()) {
+    payload.replyTo = input.replyTo.trim();
+  }
+
+  await socketClient.safeEmitValidated(
+    CHAT_SOCKET_EVENTS.MESSAGE_SEND,
+    payload,
+  );
+}
+
+export async function updateMessage(
+  conversationId: string,
+  messageId: string,
+  text: string,
+) : Promise<void> {
+  let lastError: unknown;
+  const normalizedText = text.trim();
+  const normalizedConversationId = toRouteSafeConversationId(conversationId);
+  const canonicalContent = JSON.stringify({ text: normalizedText, mention: [] });
+
+  // Prefer websocket update path to match realtime contract and avoid REST-specific validation mismatches.
+  try {
+    await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.MESSAGE_UPDATE, {
+      conversationId: normalizedConversationId,
+      messageId,
+      content: canonicalContent,
+    });
+    return;
+  } catch (error) {
+    lastError = error;
+  }
+
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      await ApiClient.patch(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`,
+        {
+          content: canonicalContent,
+        },
+      );
+      return;
+    } catch (error: any) {
+      lastError = error;
+      if (!shouldRetryOnConversationId400(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function deleteMessage(
+  conversationId: string,
+  messageId: string,
+  scope: RecallScope = "SELF",
+): Promise<{ conversationId: string; messageId: string; scope: RecallScope; recalledAt: string }> {
+  let lastError: unknown;
+
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      return await ApiClient.post(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/recall`,
+        { scope },
+      );
+    } catch (error: any) {
+      lastError = error;
+      if (error?.status !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function forwardMessage(
+  conversationId: string,
+  messageId: string,
+  targetConversationIds: string[],
+): Promise<MessageItem[]> {
+  const conversationIds = [...new Set(targetConversationIds.map((id) => id.trim()).filter(Boolean))];
+  if (conversationIds.length === 0) {
+    throw {
+      message: "conversationIds is required.",
+      status: 400,
+    };
+  }
+
+  let lastError: unknown;
+
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      return await ApiClient.post(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/forward`,
+        { conversationIds },
+      );
+    } catch (error: any) {
+      lastError = error;
+      if (error?.status !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
 }

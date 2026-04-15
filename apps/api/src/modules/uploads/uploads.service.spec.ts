@@ -1,15 +1,17 @@
 import {
-  BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import type { StoredReport } from '../../common/storage-records';
+import type { StoredReport, StoredUser } from '../../common/storage-records';
 import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { UploadsService } from './uploads.service';
 
 describe('UploadsService', () => {
   const config = {
+    dynamodbMessagesTableName: 'Messages',
     dynamodbReportsTableName: 'Reports',
+    dynamodbUsersTableName: 'Users',
     s3BucketName: 'test-bucket',
     uploadAllowedMimeTypes: ['image/jpeg', 'image/png'],
     uploadKeyPrefix: 'uploads',
@@ -21,9 +23,13 @@ describe('UploadsService', () => {
     deleteObject: jest.fn(),
     createPresignedUploadUrl: jest.fn(),
     createPresignedDownloadUrl: jest.fn(),
+    getObjectUrl: jest.fn(),
+    listObjects: jest.fn(),
+    resolveObjectUrl: jest.fn(),
   };
   const repository = {
     get: jest.fn(),
+    queryByPk: jest.fn(),
   };
   const authorizationService = {
     canReadReport: jest.fn(),
@@ -69,6 +75,31 @@ describe('UploadsService', () => {
     createdAt: '2026-04-09T00:00:00.000Z',
     updatedAt: '2026-04-09T00:00:00.000Z',
   };
+  const currentUser: StoredUser = {
+    PK: 'USER#user-1',
+    SK: 'PROFILE',
+    entityType: 'USER_PROFILE',
+    GSI1SK: 'USER',
+    userId: actor.id,
+    phone: '+84901111111',
+    email: 'citizen.one@example.com',
+    passwordHash: 'hashed-password',
+    fullName: actor.fullName,
+    role: actor.role,
+    locationCode: actor.locationCode,
+    unit: undefined,
+    avatarAsset: {
+      key: 'uploads/avatar/user-1/avatar-current.jpg',
+      target: 'AVATAR',
+      uploadedBy: actor.id,
+    },
+    avatarUrl:
+      'https://cdn.example.com/test-bucket/uploads/avatar/user-1/avatar-current.jpg',
+    status: 'ACTIVE',
+    deletedAt: null,
+    createdAt: '2026-04-09T00:00:00.000Z',
+    updatedAt: '2026-04-09T00:00:00.000Z',
+  };
 
   let service: UploadsService;
   let mediaAssetService: MediaAssetService;
@@ -101,6 +132,19 @@ describe('UploadsService', () => {
       url: 'https://cdn.example.com/presign-download',
       expiresAt: '2026-04-09T00:10:00.000Z',
     });
+    s3StorageService.getObjectUrl.mockImplementation(
+      ({ bucket, key }: { bucket: string; key: string }) =>
+        `https://cdn.example.com/${bucket}/${key}`,
+    );
+    s3StorageService.listObjects.mockResolvedValue([]);
+    s3StorageService.resolveObjectUrl.mockImplementation(
+      ({ key }: { key: string }) =>
+        Promise.resolve({
+          url: `https://cdn.example.com/test-bucket/${key}`,
+          expiresAt: '2026-04-09T00:10:00.000Z',
+        }),
+    );
+    repository.get.mockResolvedValue(report);
     authorizationService.canReadReport.mockReturnValue(true);
     conversationsService.resolveConversationAccess.mockResolvedValue({
       conversationId: 'group:group-1',
@@ -108,6 +152,7 @@ describe('UploadsService', () => {
       participants: [actor.id, 'user-2'],
       isGroup: true,
     });
+    repository.queryByPk.mockResolvedValue([]);
   });
 
   it('blocks avatar uploads for another user id', async () => {
@@ -176,6 +221,12 @@ describe('UploadsService', () => {
   });
 
   it('deletes upload when key matches actor and entity', async () => {
+    repository.get.mockResolvedValue({
+      ...report,
+      mediaAssets: [],
+      mediaUrls: [],
+    });
+
     await service.deleteMedia(actor, {
       target: 'REPORT',
       entityId: 'report-1',
@@ -198,15 +249,73 @@ describe('UploadsService', () => {
     ).rejects.toThrow(new ForbiddenException('You cannot delete this upload.'));
   });
 
-  it('requires entityId when key contains an entity segment', async () => {
+  it('infers entityId from the key when deleting an upload', async () => {
+    repository.get.mockResolvedValue({
+      ...report,
+      mediaAssets: [],
+      mediaUrls: [],
+    });
+
+    await service.deleteMedia(actor, {
+      target: 'REPORT',
+      key: 'uploads/report/user-1/report-1/file.jpg',
+    });
+
+    expect(s3StorageService.deleteObject).toHaveBeenCalledWith({
+      bucket: 'test-bucket',
+      key: 'uploads/report/user-1/report-1/file.jpg',
+    });
+  });
+
+  it('blocks deleting the avatar currently in use', async () => {
+    repository.get.mockResolvedValue(currentUser);
+
     await expect(
       service.deleteMedia(actor, {
-        target: 'REPORT',
-        key: 'uploads/report/user-1/report-1/file.jpg',
+        target: 'AVATAR',
+        key: 'uploads/avatar/user-1/avatar-current.jpg',
       }),
     ).rejects.toThrow(
-      new BadRequestException('entityId is required to delete this upload.'),
+      new ConflictException(
+        'Cannot delete the avatar currently in use. Update your profile avatar first.',
+      ),
     );
+  });
+
+  it('lists avatar uploads and marks the active avatar', async () => {
+    repository.get.mockResolvedValue(currentUser);
+    s3StorageService.listObjects.mockResolvedValue([
+      {
+        key: 'uploads/avatar/user-1/avatar-old.jpg',
+        size: 111,
+        lastModified: '2026-04-09T00:00:00.000Z',
+      },
+      {
+        key: 'uploads/avatar/user-1/avatar-current.jpg',
+        size: 222,
+        lastModified: '2026-04-10T00:00:00.000Z',
+      },
+    ]);
+
+    const result = await service.listMedia(actor, {
+      target: 'AVATAR',
+      limit: '20',
+    });
+
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        key: 'uploads/avatar/user-1/avatar-current.jpg',
+        isInUse: true,
+      }),
+      expect.objectContaining({
+        key: 'uploads/avatar/user-1/avatar-old.jpg',
+        isInUse: false,
+      }),
+    ]);
+    expect(result.meta).toEqual({
+      count: 2,
+      nextCursor: undefined,
+    });
   });
 
   it('presigns upload and returns key', async () => {

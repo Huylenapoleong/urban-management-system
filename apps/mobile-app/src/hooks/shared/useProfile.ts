@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiClient } from '../../lib/api-client';
 import { uploadMedia } from '@/services/api/upload.api';
+import type { UploadedAsset } from '@urban/shared-types';
 
 export interface UserProfile {
   id: string;
@@ -32,13 +33,11 @@ export const useUpdateProfile = () => {
 
 export const useUploadAvatar = () => {
   return useMutation({
-    mutationFn: async (uri: string) => {
-      const uploadedAsset = await uploadMedia({
+    mutationFn: async (uri: string): Promise<UploadedAsset> => {
+      return await uploadMedia({
         uri,
         target: 'AVATAR',
       });
-
-      return uploadedAsset.url;
     },
   });
 };

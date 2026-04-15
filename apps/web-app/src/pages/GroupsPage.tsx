@@ -10,7 +10,7 @@ export default function GroupsPage() {
 
   const { data: groups, isLoading } = useQuery({
     queryKey: ["groups"],
-    queryFn: getGroups,
+    queryFn: () => getGroups(),
   });
 
   const joinGroupMutation = useMutation({

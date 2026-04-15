@@ -31,6 +31,13 @@ export interface ConversationSyncResult {
   summariesByUser: Map<string, StoredConversation>;
 }
 
+export interface SingleConversationSyncResult {
+  latestMessage?: StoredMessage;
+  removed: boolean;
+  changed: boolean;
+  summary?: StoredConversation;
+}
+
 @Injectable()
 export class ConversationSummaryService {
   constructor(
@@ -271,6 +278,134 @@ export class ConversationSummaryService {
     );
 
     return items.filter((item) => !item.deletedAt);
+  }
+
+  async listVisibleMessagesForUser(
+    conversationId: string,
+    userId: string,
+  ): Promise<StoredMessage[]> {
+    const activeMessages = await this.listActiveMessages(conversationId);
+
+    return this.conversationStateService.filterVisibleMessagesForUser(
+      activeMessages,
+      userId,
+    );
+  }
+
+  async syncConversationSummaryForUser(
+    access: ConversationSummaryAccess,
+    participantId: string,
+  ): Promise<SingleConversationSyncResult> {
+    const existingConversation = await this.getConversationSummary(
+      participantId,
+      access.conversationKey,
+    );
+    const visibleMessages = await this.listVisibleMessagesForUser(
+      access.conversationKey,
+      participantId,
+    );
+
+    if (visibleMessages.length === 0) {
+      if (existingConversation) {
+        await this.repository.delete(
+          this.config.dynamodbConversationsTableName,
+          existingConversation.PK,
+          existingConversation.SK,
+        );
+
+        return {
+          removed: true,
+          changed: true,
+        };
+      }
+
+      return {
+        removed: false,
+        changed: false,
+      };
+    }
+
+    const latestMessage = visibleMessages[0];
+    const kind = getConversationKind(access.conversationKey);
+    const labelMap = await this.buildConversationLabelMap(
+      access.conversationKey,
+      access.participants,
+    );
+    const baseConversation: StoredConversation =
+      existingConversation ??
+      ({
+        PK: makeInboxPk(participantId),
+        SK: makeConversationSummarySk(
+          access.conversationKey,
+          latestMessage.sentAt,
+        ),
+        entityType: 'CONVERSATION',
+        GSI1PK: makeInboxStatsKey(participantId, kind),
+        userId: participantId,
+        conversationId: access.conversationKey,
+        groupName: labelMap.get(participantId) ?? participantId,
+        lastMessagePreview:
+          this.conversationStateService.buildPreview(latestMessage),
+        lastSenderName: latestMessage.senderName,
+        unreadCount: 0,
+        isGroup: kind === 'GRP',
+        isPinned: false,
+        archivedAt: null,
+        mutedUntil: null,
+        deletedAt: null,
+        updatedAt: latestMessage.sentAt,
+        lastReadAt: latestMessage.sentAt,
+      } satisfies StoredConversation);
+    const nextConversation = existingConversation
+      ? this.conversationStateService.buildExpectedSummary(
+          {
+            ...existingConversation,
+            groupName:
+              existingConversation.groupName ??
+              labelMap.get(participantId) ??
+              participantId,
+          },
+          visibleMessages,
+        )
+      : baseConversation;
+
+    if (
+      existingConversation &&
+      !this.conversationStateService.hasConversationSummaryChanged(
+        existingConversation,
+        nextConversation,
+      )
+    ) {
+      return {
+        latestMessage,
+        removed: false,
+        changed: false,
+        summary: existingConversation,
+      };
+    }
+
+    if (
+      existingConversation &&
+      existingConversation.SK !== nextConversation.SK
+    ) {
+      await this.repository.delete(
+        this.config.dynamodbConversationsTableName,
+        existingConversation.PK,
+        existingConversation.SK,
+      );
+    }
+
+    await this.repository.put(
+      this.config.dynamodbConversationsTableName,
+      nextConversation,
+    );
+
+    return {
+      latestMessage,
+      removed: false,
+      changed: true,
+      summary: nextConversation,
+    };
   }
 
   private async resolveConversationSummaryParticipants(

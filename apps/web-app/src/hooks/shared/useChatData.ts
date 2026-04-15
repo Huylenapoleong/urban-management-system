@@ -1,17 +1,23 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listConversations,
+  deleteMessage,
+  forwardMessage,
   listMessages,
   markConversationAsRead,
   sendMessage,
+  updateMessage,
+  type RecallScope,
+  type SendMessageInput,
 } from "@/services/conversation.api";
 import { socketClient } from "@/lib/socket-client";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type { MessageItem } from "@urban/shared-types";
 
-export function useConversations() {
+export function useConversations(searchTerm?: string) {
   const queryClient = useQueryClient();
+  const joinedConversationIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const handleNewMessage = () => {
@@ -19,23 +25,61 @@ export function useConversations() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
-    socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
-    
-    // Auto refresh conversations when we connect to ensure freshness
-    socketClient.socket?.on('connect', () => {
+    const handleSocketConnect = () => {
+      joinedConversationIdsRef.current.clear();
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    });
+    };
+
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
+    socketClient.socket?.on("connect", handleSocketConnect);
 
     return () => {
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
-      socketClient.socket?.off('connect');
+      socketClient.socket?.off("connect", handleSocketConnect);
     };
   }, [queryClient]);
 
-  return useQuery({
-    queryKey: ["conversations"],
-    queryFn: listConversations,
+  const query = useQuery({
+    queryKey: ["conversations", searchTerm?.trim() ?? ""],
+    queryFn: () => listConversations(searchTerm),
   });
+
+  useEffect(() => {
+    const conversationIds = (query.data ?? [])
+      .map((item) => item.conversationId)
+      .filter(Boolean);
+
+    if (conversationIds.length === 0) {
+      return;
+    }
+
+    const joinKnownConversations = async () => {
+      try {
+        await socketClient.connect();
+      } catch {
+        return;
+      }
+
+      for (const conversationId of conversationIds) {
+        if (joinedConversationIdsRef.current.has(conversationId)) {
+          continue;
+        }
+
+        try {
+          await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN, {
+            conversationId,
+          });
+          joinedConversationIdsRef.current.add(conversationId);
+        } catch {
+          // Keep silent here; room join will be retried on reconnect or next refresh.
+        }
+      }
+    };
+
+    void joinKnownConversations();
+  }, [query.data]);
+
+  return query;
 }
 
 export function useMessages(conversationId?: string) {
@@ -88,14 +132,16 @@ export function useMessages(conversationId?: string) {
   }, [conversationId, queryClient]);
 
   const sendMutation = useMutation({
-    mutationFn: (text: string) => sendMessage(conversationId!, text),
-    onSuccess: (data) => {
-      queryClient.setQueryData<MessageItem[]>(["messages", conversationId], (oldData) => {
-        if (!oldData) return [data];
-        if (oldData.some(msg => msg.id === data.id)) return oldData;
-        return [data, ...oldData];
-      });
+    mutationFn: (payload: SendMessageInput) => sendMessage(conversationId!, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (error) => {
+      console.error("Failed to send message", {
+        conversationId,
+        error,
+      });
     },
   });
 
@@ -106,10 +152,44 @@ export function useMessages(conversationId?: string) {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ messageId, text }: { messageId: string; text: string }) =>
+      updateMessage(conversationId!, messageId, text),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ messageId, scope }: { messageId: string; scope?: RecallScope }) =>
+      deleteMessage(conversationId!, messageId, scope),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
+  const forwardMutation = useMutation({
+    mutationFn: ({ messageId, conversationIds }: { messageId: string; conversationIds: string[] }) =>
+      forwardMessage(conversationId!, messageId, conversationIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
   return {
     ...query,
     sendMessage: sendMutation.mutate,
+    sendMessageAsync: sendMutation.mutateAsync,
     isSending: sendMutation.isPending,
     markAsRead: readMutation.mutate,
+    updateMessageAsync: updateMutation.mutateAsync,
+    deleteMessageAsync: deleteMutation.mutateAsync,
+    forwardMessageAsync: forwardMutation.mutateAsync,
+    isUpdatingMessage: updateMutation.isPending,
+    isDeletingMessage: deleteMutation.isPending,
+    isForwardingMessage: forwardMutation.isPending,
   };
 }

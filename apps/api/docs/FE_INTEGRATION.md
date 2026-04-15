@@ -128,9 +128,12 @@ Backend may still accept legacy keys, but FE should not rely on them.
 The backend currently enforces these product rules and FE should align UI/UX with them:
 
 - Direct messages are not globally open:
-  - citizen cannot DM citizen
+  - citizen can DM citizen only when they are friends or a same-scope direct message request was accepted
   - citizen can DM in-scope staff/admin according to backend authorization
   - staff-to-staff DM is allowed only when scope rules overlap
+- Public groups are public only at metadata/discovery level:
+  - same-scope users can see the group exists
+  - only active members or admin can read messages, join realtime rooms, or access audit
 - Group management is membership-based:
   - `ADMIN` can manage any group
   - `OWNER` and `OFFICER` members can manage their group
@@ -147,6 +150,9 @@ For sending messages:
 - always send a unique `clientMessageId`
 - reuse the same `clientMessageId` only when retrying the same logical message
 - `replyTo` must be the API message `id`, not `conversationId` or `groupId`
+- use `POST /conversations/:conversationId/messages/:messageId/recall` for end-user message removal UX
+- use `DELETE /conversations/:conversationId/messages/:messageId` only for admin/moderation tooling
+- use `POST /conversations/:conversationId/messages/:messageId/forward` to forward an existing message into other conversations
 - `content` for `TEXT/EMOJI/SYSTEM` should be canonical JSON string, for example:
 
 ```json
@@ -158,6 +164,13 @@ For deleting a conversation:
 - `DELETE /conversations/:conversationId` means delete from current user inbox only
 - shared messages stay intact for other participants
 - the inbox is recreated automatically when a new message arrives
+
+For recall vs delete:
+
+- `recall scope=EVERYONE` keeps a placeholder in the thread for all participants
+- `recall scope=SELF` hides the message only from the current actor's own view/inbox (the actor can hide messages sent by any participant)
+- `delete message` is permanent and admin-only
+- FE chat UI should not show a permanent delete action for normal users
 
 ## Socket.IO Contract
 
@@ -177,6 +190,7 @@ Client command events:
 - `message.send`
 - `message.update`
 - `message.delete`
+- `message.recall`
 - `typing.start`
 - `typing.stop`
 
@@ -214,8 +228,40 @@ Fields:
 Recommended FE flow:
 
 1. upload file first
-2. take `data.url` or `data.key` from response
-3. include that URL in report/message payloads
+2. keep `data.key` as the canonical value for later business requests
+3. send:
+   - `avatarKey` for profile/avatar updates
+   - `attachmentKey` for message send/update
+   - `mediaKeys` for report create/update
+4. treat `avatarUrl`, `attachmentUrl`, and `mediaUrls` as legacy fallback only
+
+Important compatibility rule:
+
+- if FE sends both canonical key fields and legacy URL fields during migration, backend now prefers the key field and ignores the legacy URL field
+
+Upload history endpoints:
+
+- `GET /uploads/media?target=AVATAR`
+- `GET /uploads/media?target=REPORT&entityId=<reportId>`
+- `GET /uploads/media?target=MESSAGE&entityId=<conversationId>`
+- `DELETE /uploads/media`
+
+Avatar-specific rules:
+
+- `PATCH /users/me` with `avatarKey` sets the selected uploaded avatar as the current profile avatar
+- the `avatarKey` can come from a fresh upload or from an older item returned by `GET /uploads/media?target=AVATAR`
+- `DELETE /users/me/avatar` removes only the current avatar from the user profile
+- `DELETE /users/me/avatar` does not remove the uploaded file from avatar history
+- after clearing the current avatar, that same file can still be selected again later via `avatarKey`
+
+Delete rules:
+
+- a file can be deleted only by its uploader
+- backend blocks deletion when the file is still actively referenced by:
+  - current avatar
+  - current report media
+  - an active message attachment
+- FE should use `isInUse` from `GET /uploads/media` to disable destructive delete actions
 
 ## Common Errors
 
@@ -241,5 +287,6 @@ Retry guidance:
 3. report detail + audit + linked conversations
 4. conversations list + messages list
 5. send/update/delete/read message over REST
-6. realtime socket join/send/read/typing
-7. uploads
+6. add recall/forward flows for chat moderation UX
+7. realtime socket join/send/read/typing
+8. uploads

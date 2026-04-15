@@ -28,11 +28,44 @@ export function clearAccessToken(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
+function normalizeConversationRoute(url?: string): string | undefined {
+  if (!url) {
+    return url;
+  }
+
+  const match = url.match(/(\/conversations\/)([^/?#]+)(.*)/i);
+  if (!match) {
+    return url;
+  }
+
+  const [, prefix, encodedId, suffix] = match;
+  let rawId = encodedId;
+
+  try {
+    rawId = decodeURIComponent(encodedId);
+  } catch {
+    rawId = encodedId;
+  }
+
+  if (!/^grp#/i.test(rawId)) {
+    return url;
+  }
+
+  const groupId = rawId.replace(/^grp#/i, "").trim();
+  if (!groupId) {
+    return url;
+  }
+
+  const normalizedId = `group:${groupId}`;
+  return `${prefix}${encodeURIComponent(normalizedId)}${suffix}`;
+}
+
 client.interceptors.request.use((config) => {
   const token = readAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  config.url = normalizeConversationRoute(config.url);
   return config;
 });
 

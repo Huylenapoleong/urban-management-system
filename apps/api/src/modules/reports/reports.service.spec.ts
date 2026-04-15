@@ -232,6 +232,46 @@ describe('ReportsService', () => {
       },
     });
   });
+
+  it('prefers mediaKeys over legacy mediaUrls during report update', async () => {
+    authorizationService.canManageReport.mockReturnValue(true);
+    authorizationService.canCreateReport.mockReturnValue(true);
+
+    await service.updateReport(
+      {
+        ...actor,
+        role: 'WARD_OFFICER',
+      },
+      report.reportId,
+      {
+        mediaKeys: ['uploads/report/user-1/report-1/new-photo.jpg'],
+        mediaUrls: ['https://cdn.example.com/legacy-report.jpg'],
+      },
+    );
+
+    expect(mediaAssetService.createOwnedAssetReference).toHaveBeenCalledWith({
+      key: 'uploads/report/user-1/report-1/new-photo.jpg',
+      target: 'REPORT',
+      ownerUserId: actor.id,
+      entityId: report.reportId,
+    });
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Reports',
+          item: expect.objectContaining({
+            mediaAssets: [
+              expect.objectContaining({
+                key: 'uploads/report/user-1/report-1/new-photo.jpg',
+              }),
+            ],
+            mediaUrls: [],
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('rejects assigning a report to an inactive officer', async () => {
     usersService.getActiveByIdOrThrow.mockRejectedValue(
       new BadRequestException('User account is not active.'),

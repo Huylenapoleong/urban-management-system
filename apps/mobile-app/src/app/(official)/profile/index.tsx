@@ -51,8 +51,8 @@ export default function ProfileScreen() {
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       try {
-        const uploadedUrl = await uploadAvatar(result.assets[0].uri);
-        updateProfile({ avatarUrl: uploadedUrl }, {
+        const uploadedAsset = await uploadAvatar(result.assets[0].uri);
+        updateProfile({ avatarKey: uploadedAsset.key }, {
           onError: (err: any) => Alert.alert('Lỗi', 'Không thể lưu avatar mới: ' + err.message)
         });
       } catch (err: any) {

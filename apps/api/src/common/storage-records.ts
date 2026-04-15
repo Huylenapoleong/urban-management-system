@@ -4,6 +4,7 @@ import type {
   GroupMembership,
   GroupMetadata,
   MessageItem,
+  MessageReplyReference,
   PushDevice,
   ReportConversationLinkItem,
   ReportItem,
@@ -219,6 +220,7 @@ export interface StoredMessage
       MessageItem,
       | 'id'
       | 'conversationId'
+      | 'replyMessage'
       | 'deliveryState'
       | 'recipientCount'
       | 'deliveredCount'
@@ -228,6 +230,8 @@ export interface StoredMessage
   entityType: 'MESSAGE';
   messageId: string;
   conversationId: string;
+  replyMessage?: MessageReplyReference;
+  deletedForUserAt?: Record<string, string>;
 }
 
 export interface StoredMessageRef extends TableItemBase {
