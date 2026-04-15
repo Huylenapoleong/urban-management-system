@@ -51,6 +51,7 @@ export function ChatPage() {
   const [forwardSearch, setForwardSearch] = useState("");
   const [forwardActionError, setForwardActionError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLInputElement>(null);
   const rtc = useWebRTC();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -377,6 +378,12 @@ export function ChatPage() {
     setForwardActionError("");
   };
 
+  const focusComposer = () => {
+    window.requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+    });
+  };
+
   const handleToggleForwardTarget = (conversationId: string) => {
     setSelectedForwardConversationIds((prev) =>
       prev.includes(conversationId)
@@ -554,6 +561,7 @@ export function ChatPage() {
       if (sentAny) {
         setInputText(pendingText);
         setReplyingMessage(null);
+        focusComposer();
       }
 
       if (fileInputRef.current) {
@@ -1118,6 +1126,7 @@ export function ChatPage() {
                 type="text" 
                 placeholder="Nhập tin nhắn..." 
                 className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
+                ref={composerInputRef}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 disabled={isSending || isUploading}
