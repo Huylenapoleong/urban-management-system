@@ -103,8 +103,8 @@ export function SettingsPage() {
     mutationFn: async (file: File) => {
       setAvatarUploading(true);
       const res = await uploadMedia({ file, target: "AVATAR" });
-      if (!res.url) throw new Error("Không nhận được URL sau khi upload");
-      return updateProfile({ avatarUrl: res.url });
+      if (!res.key) throw new Error("Không nhận được khóa avatar sau khi upload");
+      return updateProfile({ avatarKey: res.key });
     },
     onSuccess: (updatedContext) => {
       queryClient.setQueryData(["profile"], updatedContext);

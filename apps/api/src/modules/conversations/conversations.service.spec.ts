@@ -669,6 +669,41 @@ describe('ConversationsService', () => {
       },
     });
   });
+
+  it('hides messages recalled with SELF for the current actor', async () => {
+    const hiddenForActorMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:04:00.000Z#01MESSAGE0000000000000002',
+      messageId: '01MESSAGE0000000000000002',
+      deletedForUserAt: {
+        [actor.id]: '2026-03-18T10:10:00.000Z',
+      },
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [hiddenForActorMessage, latestMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {});
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        id: latestMessage.messageId,
+      }),
+    );
+  });
+
   it('rejects direct messages when policy denies access to the target user', async () => {
     authorizationService.canAccessDirectConversation.mockReturnValueOnce(false);
 
@@ -1129,11 +1164,9 @@ describe('ConversationsService', () => {
     );
   });
 
-  it('recalls a message only for the sender and emits a local delete event', async () => {
+  it('recalls a message for SELF even when the message was sent by another participant', async () => {
     const actorMessage: StoredMessage = {
       ...latestMessage,
-      senderId: actor.id,
-      senderName: actor.fullName,
     };
 
     repository.get.mockImplementation(
@@ -1197,6 +1230,19 @@ describe('ConversationsService', () => {
     );
 
     expect(result.scope).toBe('SELF');
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            messageId: actorMessage.messageId,
+            deletedForUserAt: expect.objectContaining({
+              [actor.id]: expect.any(String),
+            }),
+          }),
+        }),
+      ]),
+    );
     expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
       actor.id,
       'message.deleted',

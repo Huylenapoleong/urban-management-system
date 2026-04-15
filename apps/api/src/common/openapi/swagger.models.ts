@@ -804,7 +804,7 @@ export class RecallMessageResultDto {
     enum: MESSAGE_RECALL_SCOPES,
     example: 'EVERYONE',
     description:
-      '"EVERYONE" keeps a recalled placeholder for all participants. "SELF" hides the message only from the sender inbox/view.',
+      '"EVERYONE" keeps a recalled placeholder for all participants. "SELF" hides the message only from the current actor inbox/view.',
   })
   scope!: (typeof MESSAGE_RECALL_SCOPES)[number];
 
@@ -1629,7 +1629,7 @@ export class RecallMessageRequestDto {
     enum: MESSAGE_RECALL_SCOPES,
     example: 'EVERYONE',
     description:
-      '"EVERYONE" keeps a recalled placeholder for all participants. "SELF" hides the message only from the sender inbox/view.',
+      '"EVERYONE" keeps a recalled placeholder for all participants. "SELF" hides the message only from the current actor inbox/view.',
   })
   @IsIn(MESSAGE_RECALL_SCOPES)
   scope!: (typeof MESSAGE_RECALL_SCOPES)[number];

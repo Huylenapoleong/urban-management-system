@@ -21,6 +21,7 @@ export function CallModal({ rtc }: CallModalProps) {
 
   const peerName = activeConfig?.peerName || activeConfig?.callerName || "Người dùng";
   const peerAvatarUrl = activeConfig?.peerAvatarUrl;
+  const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
   const title = callState === "CALLING"
     ? "Đang gọi"
     : callState === "INCOMING"
@@ -238,6 +239,11 @@ export function CallModal({ rtc }: CallModalProps) {
               muted // Cực kỳ quan trọng để ko bị feedback loop giọng mình
               className="h-full w-full scale-x-[-1] object-cover"
             />
+          </div>
+        )}
+        {activeConfig?.isVideo && !hasLocalVideoTrack && (
+          <div className="absolute bottom-3 left-3 rounded-lg border border-amber-500/30 bg-amber-500/15 px-3 py-2 text-xs text-amber-100 shadow-sm">
+            Camera chưa sẵn sàng, đang phát âm thanh trước.
           </div>
         )}
       </div>

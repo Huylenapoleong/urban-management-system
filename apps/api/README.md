@@ -473,7 +473,7 @@ Notes:
 - Message sending and read receipts emitted through REST endpoints are also pushed over the same socket events.
 - Message sends are rate-limited per authenticated user; when exceeded, the API returns HTTP `429` or socket ack error `CHAT_MESSAGE_SEND_FAILED`.
 - `PATCH /api/conversations/:conversationId/messages/:messageId` edits a message and syncs inbox preview when the latest visible message changes.
-- `POST /api/conversations/:conversationId/messages/:messageId/recall` is the user-facing chat action. `scope=EVERYONE` keeps a recalled placeholder in the thread, while `scope=SELF` hides the message only from the sender view.
+- `POST /api/conversations/:conversationId/messages/:messageId/recall` is the user-facing chat action. `scope=EVERYONE` keeps a recalled placeholder in the thread, while `scope=SELF` hides the message only from the current actor view.
 - `POST /api/conversations/:conversationId/messages/:messageId/forward` creates forwarded copies in one or more target conversations when the actor can read the source and send into every target.
 - `DELETE /api/conversations/:conversationId/messages/:messageId` is now admin-only for permanent moderation cleanup. FE chat UI should use `recall`, not `delete`.
 - `DELETE /api/conversations/:conversationId` removes the conversation from the current user inbox only; shared messages remain intact for other participants and the inbox is recreated automatically on a new incoming message.

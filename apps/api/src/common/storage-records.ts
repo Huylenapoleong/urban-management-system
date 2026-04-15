@@ -231,6 +231,7 @@ export interface StoredMessage
   messageId: string;
   conversationId: string;
   replyMessage?: MessageReplyReference;
+  deletedForUserAt?: Record<string, string>;
 }
 
 export interface StoredMessageRef extends TableItemBase {

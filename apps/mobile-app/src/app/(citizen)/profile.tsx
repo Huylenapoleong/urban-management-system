@@ -66,9 +66,9 @@ export default function ProfilePage() {
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       try {
-        const uploadedUrl = await uploadAvatar(result.assets[0].uri);
+        const uploadedAsset = await uploadAvatar(result.assets[0].uri);
         updateProfile(
-          { avatarUrl: uploadedUrl },
+          { avatarKey: uploadedAsset.key },
           {
             onError: (err: any) => Alert.alert('Loi', `Khong the luu avatar moi: ${err.message}`),
           },

@@ -10,7 +10,7 @@ import { format } from "date-fns";
 import { useLocation } from "react-router-dom";
 import { uploadMedia } from "@/services/upload.api";
 import { useQueryClient } from "@tanstack/react-query";
-import type { UserProfile } from "@urban/shared-types";
+import type { MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
 
 type ChatMessageType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
 
@@ -27,6 +27,8 @@ type QueuedAttachment = {
   status: "queued" | "uploading" | "failed";
 };
 
+type RecallScope = "SELF" | "EVERYONE";
+
 export function ChatPage() {
   const location = useLocation();
   const chatState = (location.state ?? {}) as ChatNavigationState;
@@ -38,9 +40,16 @@ export function ChatPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
+  const [messageMenuPlacement, setMessageMenuPlacement] = useState<"up" | "down">("down");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [replyingMessage, setReplyingMessage] = useState<MessageReplyReference | null>(null);
   const [messageActionError, setMessageActionError] = useState("");
+  const [isForwardDialogOpen, setIsForwardDialogOpen] = useState(false);
+  const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null);
+  const [selectedForwardConversationIds, setSelectedForwardConversationIds] = useState<string[]>([]);
+  const [forwardSearch, setForwardSearch] = useState("");
+  const [forwardActionError, setForwardActionError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rtc = useWebRTC();
   const { user } = useAuth();
@@ -56,8 +65,10 @@ export function ChatPage() {
     markAsRead,
     updateMessageAsync,
     deleteMessageAsync,
+    forwardMessageAsync,
     isUpdatingMessage,
     isDeletingMessage,
+    isForwardingMessage,
   } = useMessages(activeChat || undefined);
 
   const syntheticConversation =
@@ -97,6 +108,28 @@ export function ChatPage() {
     : mergedConversations;
 
   const activeContact = renderedConversations.find((c) => c.conversationId === activeChat);
+  const normalizedForwardSearch = forwardSearch.trim().toLowerCase();
+  const forwardDestinationConversations = mergedConversations.filter((conversation) => {
+    if (conversation.conversationId === activeChat) {
+      return false;
+    }
+
+    if (!normalizedForwardSearch) {
+      return true;
+    }
+
+    const haystack = [
+      conversation.groupName,
+      conversation.lastMessagePreview,
+      conversation.lastSenderName,
+      conversation.conversationId,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return haystack.includes(normalizedForwardSearch);
+  });
   const cachedProfile = queryClient.getQueryData<UserProfile>(["profile"]);
   const activeContactAvatarUrl =
     (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarAsset?.resolvedUrl ||
@@ -131,9 +164,16 @@ export function ChatPage() {
 
   useEffect(() => {
     setActiveMessageMenuId(null);
+    setMessageMenuPlacement("down");
     setEditingMessageId(null);
     setEditingText("");
+    setReplyingMessage(null);
     setMessageActionError("");
+    setIsForwardDialogOpen(false);
+    setForwardingMessageId(null);
+    setSelectedForwardConversationIds([]);
+    setForwardSearch("");
+    setForwardActionError("");
   }, [activeChat]);
 
   useEffect(() => {
@@ -215,11 +255,63 @@ export function ChatPage() {
     }
   };
 
+  const getReplyPreviewText = (message: MessageReplyReference): string => {
+    if (message.recalledAt || message.deletedAt) {
+      return "Tin nhắn đã được thu hồi";
+    }
+
+    const text = extractMessageText(message.content).trim();
+    if (text) {
+      return text;
+    }
+
+    if (message.attachmentUrl) {
+      if (message.type === "IMAGE") {
+        return "Ảnh";
+      }
+
+      if (message.type === "VIDEO") {
+        return "Video";
+      }
+
+      if (message.type === "AUDIO") {
+        return "Âm thanh";
+      }
+
+      return "Tệp đính kèm";
+    }
+
+    return "Tin nhắn";
+  };
+
+  const normalizeQuotedMessage = (message: MessageItem): MessageReplyReference => ({
+    id: message.id,
+    senderId: message.senderId,
+    senderName: message.senderName,
+    type: message.type,
+    content: message.content,
+    attachmentAsset: message.attachmentAsset,
+    attachmentUrl: message.attachmentUrl,
+    deletedAt: message.deletedAt,
+    recalledAt: message.recalledAt,
+    sentAt: message.sentAt,
+  });
+
   const handleStartEditMessage = (messageId: string, content: string) => {
     setEditingMessageId(messageId);
     setEditingText(extractMessageText(content));
     setActiveMessageMenuId(null);
     setMessageActionError("");
+  };
+
+  const handleStartReplyMessage = (message: MessageItem) => {
+    setReplyingMessage(normalizeQuotedMessage(message));
+    setActiveMessageMenuId(null);
+    setMessageActionError("");
+  };
+
+  const handleCancelReplyMessage = () => {
+    setReplyingMessage(null);
   };
 
   const handleCancelEditMessage = () => {
@@ -245,18 +337,73 @@ export function ChatPage() {
     }
   };
 
-  const handleDeleteMessage = async (messageId: string) => {
-    const shouldDelete = window.confirm("Bạn có chắc muốn xoá tin nhắn này?");
+  const handleDeleteMessage = async (messageId: string, scope: RecallScope = "SELF") => {
+    const shouldDelete = window.confirm(
+      scope === "EVERYONE"
+        ? "Thu hồi tin nhắn này với mọi người?"
+        : "Xoá tin nhắn này chỉ với bạn?",
+    );
     if (!shouldDelete) {
       return;
     }
 
     try {
-      await deleteMessageAsync(messageId);
+      await deleteMessageAsync({ messageId, scope });
       setActiveMessageMenuId(null);
       setMessageActionError("");
     } catch (err: any) {
-      setMessageActionError(err?.message || "Không thể xoá tin nhắn");
+      setMessageActionError(err?.message || "Không thể xử lý xoá tin nhắn");
+    }
+  };
+
+  const handleOpenForwardDialog = (messageId: string) => {
+    setForwardingMessageId(messageId);
+    setSelectedForwardConversationIds([]);
+    setForwardSearch("");
+    setForwardActionError("");
+    setIsForwardDialogOpen(true);
+    setActiveMessageMenuId(null);
+  };
+
+  const handleCloseForwardDialog = () => {
+    if (isForwardingMessage) {
+      return;
+    }
+
+    setIsForwardDialogOpen(false);
+    setForwardingMessageId(null);
+    setSelectedForwardConversationIds([]);
+    setForwardSearch("");
+    setForwardActionError("");
+  };
+
+  const handleToggleForwardTarget = (conversationId: string) => {
+    setSelectedForwardConversationIds((prev) =>
+      prev.includes(conversationId)
+        ? prev.filter((id) => id !== conversationId)
+        : [...prev, conversationId],
+    );
+  };
+
+  const handleConfirmForwardMessage = async () => {
+    if (!forwardingMessageId) {
+      setForwardActionError("Không xác định được tin nhắn cần chuyển tiếp.");
+      return;
+    }
+
+    if (selectedForwardConversationIds.length === 0) {
+      setForwardActionError("Vui lòng chọn ít nhất một cuộc trò chuyện.");
+      return;
+    }
+
+    try {
+      await forwardMessageAsync({
+        messageId: forwardingMessageId,
+        conversationIds: selectedForwardConversationIds,
+      });
+      handleCloseForwardDialog();
+    } catch (err: any) {
+      setForwardActionError(err?.message || "Không thể chuyển tiếp tin nhắn.");
     }
   };
 
@@ -349,10 +496,11 @@ export function ChatPage() {
     try {
       let pendingText = inputText;
       let sentAny = false;
+      const replyTo = replyingMessage?.id;
       setIsUploading(true);
 
       if (queuedAttachments.length === 0) {
-        await sendMessageAsync({ text: pendingText, type: "TEXT" });
+        await sendMessageAsync({ text: pendingText, type: "TEXT", replyTo });
         pendingText = "";
         sentAny = true;
       } else {
@@ -385,6 +533,7 @@ export function ChatPage() {
               text: pendingText,
               attachmentKey: uploaded.key,
               type: resolveMessageType(item.file),
+              replyTo,
             });
 
             pendingText = "";
@@ -404,6 +553,7 @@ export function ChatPage() {
 
       if (sentAny) {
         setInputText(pendingText);
+        setReplyingMessage(null);
       }
 
       if (fileInputRef.current) {
@@ -589,27 +739,39 @@ export function ChatPage() {
                   const isMe = msg.senderId === user?.sub;
                   const isEditing = editingMessageId === msg.id;
                   const canEditMessage = msg.type === "TEXT" || msg.type === "EMOJI" || msg.type === "SYSTEM";
+                  const canRecallEveryone = isMe;
+                  const replyPreview = msg.replyMessage;
+                  const isForwardedMessage = Boolean(msg.forwardedFromMessageId);
+                  const forwardedLabel = msg.forwardedFromSenderName
+                    ? `${msg.forwardedFromSenderName} đã chuyển tiếp`
+                    : "Đã chuyển tiếp";
                   return (
                     <div key={msg.id} className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col`}>
-                      {isMe && !isEditing ? (
+                      {!isEditing ? (
                         <div
-                          className={`absolute -left-24 bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${
+                          className={`absolute ${isMe ? "-left-24" : "-right-24"} bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${
                             activeMessageMenuId === msg.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                           }`}
                         >
                           <button
                             type="button"
                             className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                            title="Trích dẫn (sẽ có sau)"
-                            onClick={(event) => event.stopPropagation()}
+                            title="Trả lời"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleStartReplyMessage(msg);
+                            }}
                           >
                             <Quote size={14} />
                           </button>
                           <button
                             type="button"
                             className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                            title="Chuyển tiếp (sẽ có sau)"
-                            onClick={(event) => event.stopPropagation()}
+                            title="Chuyển tiếp"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenForwardDialog(msg.id);
+                            }}
                           >
                             <Share2 size={14} />
                           </button>
@@ -619,6 +781,15 @@ export function ChatPage() {
                               type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
+                                const triggerRect = event.currentTarget.getBoundingClientRect();
+                                const estimatedMenuHeight = 220;
+                                const spaceBelow = window.innerHeight - triggerRect.bottom;
+                                const spaceAbove = triggerRect.top;
+                                const shouldOpenUp =
+                                  spaceBelow < estimatedMenuHeight &&
+                                  spaceAbove > spaceBelow;
+
+                                setMessageMenuPlacement(shouldOpenUp ? "up" : "down");
                                 setActiveMessageMenuId((prev) => (prev === msg.id ? null : msg.id));
                               }}
                               className="rounded-full p-1.5 text-white/90 transition hover:bg-white/20 hover:text-white"
@@ -628,8 +799,8 @@ export function ChatPage() {
                             </button>
 
                             {activeMessageMenuId === msg.id ? (
-                              <div className="absolute right-0 top-9 z-30 w-40 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg">
-                                {canEditMessage ? (
+                              <div className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}>
+                                {isMe && canEditMessage ? (
                                   <button
                                     type="button"
                                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
@@ -641,11 +812,29 @@ export function ChatPage() {
                                 ) : null}
                                 <button
                                   type="button"
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                  onClick={() => handleOpenForwardDialog(msg.id)}
+                                >
+                                  <Share2 size={14} />
+                                  Chuyển tiếp
+                                </button>
+                                {canRecallEveryone ? (
+                                  <button
+                                    type="button"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                    onClick={() => void handleDeleteMessage(msg.id, "EVERYONE")}
+                                  >
+                                    <Trash2 size={14} />
+                                    Thu hồi với mọi người
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
                                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                  onClick={() => void handleDeleteMessage(msg.id)}
+                                  onClick={() => void handleDeleteMessage(msg.id, "SELF")}
                                 >
                                   <Trash2 size={14} />
-                                  Xoá tin nhắn
+                                  Ẩn với tôi
                                 </button>
                                 <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">Sẽ thêm tính năng khác sau</div>
                               </div>
@@ -663,6 +852,19 @@ export function ChatPage() {
                         }`}
                       >
                         <div className="relative">
+                          {isForwardedMessage ? (
+                            <div className={`mb-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isMe ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
+                              {forwardedLabel}
+                            </div>
+                          ) : null}
+                          {replyPreview ? (
+                            <div className={`mb-2 rounded-lg border-l-2 px-3 py-2 text-xs ${isMe ? "border-white/50 bg-white/10 text-white/90" : "border-blue-500 bg-blue-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
+                              <p className="font-medium">Trả lời {replyPreview.senderName}</p>
+                              <p className="mt-0.5 line-clamp-2 break-words opacity-90">
+                                {getReplyPreviewText(replyPreview)}
+                              </p>
+                            </div>
+                          ) : null}
                           {isEditing ? (
                             <div className="space-y-2">
                               <Input
@@ -752,8 +954,115 @@ export function ChatPage() {
               </div>
             </div>
 
+            {isForwardDialogOpen ? (
+              <div
+                className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/55 p-4"
+                onClick={handleCloseForwardDialog}
+              >
+                <div
+                  className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 px-4 py-3">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Chuyển tiếp tin nhắn</h3>
+                    <button
+                      type="button"
+                      onClick={handleCloseForwardDialog}
+                      className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      disabled={isForwardingMessage}
+                    >
+                      Đóng
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <Input
+                      value={forwardSearch}
+                      onChange={(event) => setForwardSearch(event.target.value)}
+                      placeholder="Tìm cuộc trò chuyện đích..."
+                      className="bg-slate-50 dark:bg-slate-800 dark:border-slate-700"
+                    />
+
+                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                      {forwardDestinationConversations.length === 0 ? (
+                        <div className="p-3 text-sm text-slate-500 dark:text-slate-400">Không có cuộc trò chuyện phù hợp.</div>
+                      ) : (
+                        <ul className="divide-y divide-slate-200 dark:divide-slate-700">
+                          {forwardDestinationConversations.map((conversation) => {
+                            const checked = selectedForwardConversationIds.includes(conversation.conversationId);
+                            return (
+                              <li key={conversation.conversationId}>
+                                <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => handleToggleForwardTarget(conversation.conversationId)}
+                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                                      {conversation.groupName || "Không rõ tên"}
+                                    </p>
+                                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                                      {conversation.conversationId}
+                                    </p>
+                                  </div>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+
+                    {forwardActionError ? (
+                      <p className="text-xs text-red-500">{forwardActionError}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-700 px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={handleCloseForwardDialog}
+                      className="rounded-md bg-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-300"
+                      disabled={isForwardingMessage}
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleConfirmForwardMessage()}
+                      className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                      disabled={isForwardingMessage}
+                    >
+                      {isForwardingMessage ? "Đang chuyển tiếp..." : "Chuyển tiếp"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {/* Vùng nhập liệu */}
             <form onSubmit={handleSend} className="p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2">
+              {replyingMessage ? (
+                <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">Đang trả lời</p>
+                    <p className="mt-1 font-medium">{replyingMessage.senderName}</p>
+                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                      {getReplyPreviewText(replyingMessage)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCancelReplyMessage}
+                    className="rounded-md p-1 text-slate-500 hover:bg-blue-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                    aria-label="Huỷ trả lời"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ) : null}
               {queuedAttachments.length > 0 ? (
                 <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
                   {queuedAttachments.map((item) => (

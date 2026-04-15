@@ -9,7 +9,10 @@ export interface SendMessageInput {
   text?: string;
   attachmentKey?: string;
   type?: ChatMessageType;
+  replyTo?: string;
 }
+
+export type RecallScope = "SELF" | "EVERYONE";
 
 function createClientMessageId(): string {
   // Use a deterministic prefix so backend logs can quickly identify web-app send attempts.
@@ -207,6 +210,10 @@ export async function sendMessage(
     payload.attachmentKey = attachmentKey;
   }
 
+  if (input.replyTo?.trim()) {
+    payload.replyTo = input.replyTo.trim();
+  }
+
   await socketClient.safeEmitValidated(
     CHAT_SOCKET_EVENTS.MESSAGE_SEND,
     payload,
@@ -258,13 +265,47 @@ export async function updateMessage(
 export async function deleteMessage(
   conversationId: string,
   messageId: string,
-): Promise<MessageItem> {
+  scope: RecallScope = "SELF",
+): Promise<{ conversationId: string; messageId: string; scope: RecallScope; recalledAt: string }> {
   let lastError: unknown;
 
   for (const id of buildConversationIdCandidates(conversationId)) {
     try {
-      return await ApiClient.delete(
-        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`,
+      return await ApiClient.post(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/recall`,
+        { scope },
+      );
+    } catch (error: any) {
+      lastError = error;
+      if (error?.status !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function forwardMessage(
+  conversationId: string,
+  messageId: string,
+  targetConversationIds: string[],
+): Promise<MessageItem[]> {
+  const conversationIds = [...new Set(targetConversationIds.map((id) => id.trim()).filter(Boolean))];
+  if (conversationIds.length === 0) {
+    throw {
+      message: "conversationIds is required.",
+      status: 400,
+    };
+  }
+
+  let lastError: unknown;
+
+  for (const id of buildConversationIdCandidates(conversationId)) {
+    try {
+      return await ApiClient.post(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/forward`,
+        { conversationIds },
       );
     } catch (error: any) {
       lastError = error;

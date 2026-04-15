@@ -168,7 +168,7 @@ For deleting a conversation:
 For recall vs delete:
 
 - `recall scope=EVERYONE` keeps a placeholder in the thread for all participants
-- `recall scope=SELF` hides the message only from the sender's own view/inbox
+- `recall scope=SELF` hides the message only from the current actor's own view/inbox (the actor can hide messages sent by any participant)
 - `delete message` is permanent and admin-only
 - FE chat UI should not show a permanent delete action for normal users
 

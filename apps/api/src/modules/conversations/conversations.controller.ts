@@ -872,9 +872,9 @@ export class ConversationsController {
 
   @Post(':conversationId/messages/:messageId/recall')
   @ApiOperation({
-    summary: 'Recall a message for everyone or only the sender',
+    summary: 'Recall a message for everyone or hide for me only',
     description:
-      'User-facing chat removal endpoint. Use `scope=SELF` to hide a message only from the sender view, or `scope=EVERYONE` to keep a recalled placeholder for all participants.',
+      'User-facing chat removal endpoint. Use `scope=SELF` to hide a message only in the current actor inbox/view, or `scope=EVERYONE` to keep a recalled placeholder for all participants.',
   })
   @ApiParam({
     name: 'conversationId',
@@ -902,12 +902,6 @@ export class ConversationsController {
   @ApiForbiddenExamples(
     'The actor is not allowed to recall this message with the requested scope.',
     [
-      {
-        name: 'recallSelfSenderOnly',
-        summary: 'SELF recall is sender-only',
-        message: 'Only the sender can recall a message for themselves.',
-        path: '/api/conversations/group:01JPCY1000AREAGROUP0000000/messages/01JPCY3000GROUPMSG00000001/recall',
-      },
       {
         name: 'recallGroupMembershipRequired',
         summary: 'Only active members can recall group messages',

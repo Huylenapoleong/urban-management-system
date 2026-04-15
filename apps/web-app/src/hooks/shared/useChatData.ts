@@ -3,10 +3,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listConversations,
   deleteMessage,
+  forwardMessage,
   listMessages,
   markConversationAsRead,
   sendMessage,
   updateMessage,
+  type RecallScope,
   type SendMessageInput,
 } from "@/services/conversation.api";
 import { socketClient } from "@/lib/socket-client";
@@ -160,7 +162,17 @@ export function useMessages(conversationId?: string) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (messageId: string) => deleteMessage(conversationId!, messageId),
+    mutationFn: ({ messageId, scope }: { messageId: string; scope?: RecallScope }) =>
+      deleteMessage(conversationId!, messageId, scope),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
+  const forwardMutation = useMutation({
+    mutationFn: ({ messageId, conversationIds }: { messageId: string; conversationIds: string[] }) =>
+      forwardMessage(conversationId!, messageId, conversationIds),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -175,7 +187,9 @@ export function useMessages(conversationId?: string) {
     markAsRead: readMutation.mutate,
     updateMessageAsync: updateMutation.mutateAsync,
     deleteMessageAsync: deleteMutation.mutateAsync,
+    forwardMessageAsync: forwardMutation.mutateAsync,
     isUpdatingMessage: updateMutation.isPending,
     isDeletingMessage: deleteMutation.isPending,
+    isForwardingMessage: forwardMutation.isPending,
   };
 }

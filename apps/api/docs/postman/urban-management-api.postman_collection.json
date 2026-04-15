@@ -2972,7 +2972,7 @@
                 }
               }
             },
-            "description": "Primary end-user chat action for removing a message.\nUse `EVERYONE` to keep a recalled placeholder in the thread for all participants.\nUse `SELF` to hide the message only from the sender view."
+            "description": "Primary end-user chat action for removing a message.\nUse `EVERYONE` to keep a recalled placeholder in the thread for all participants.\nUse `SELF` to hide the message only from the current actor view."
           },
           "event": [
             {

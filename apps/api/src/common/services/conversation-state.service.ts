@@ -304,6 +304,10 @@ export class ConversationStateService {
       return false;
     }
 
+    if (message.deletedForUserAt?.[userId]) {
+      return false;
+    }
+
     if (message.senderId === userId && message.deletedForSenderAt) {
       return false;
     }

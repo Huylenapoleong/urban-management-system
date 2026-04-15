@@ -100,6 +100,48 @@ export function useWebRTC() {
     pendingIceCandidatesRef.current = [];
   }, []);
 
+  const requestLocalMediaStream = useCallback(async (isVideo: boolean) => {
+    const audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: false,
+    });
+
+    if (!isVideo) {
+      return {
+        stream: audioStream,
+        hasVideo: false,
+      };
+    }
+
+    const videoConstraints = {
+      facingMode: { ideal: 'user' },
+      width: { ideal: 640 },
+      height: { ideal: 480 },
+    };
+
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: videoConstraints,
+      });
+
+      const combinedStream = new MediaStream();
+      audioStream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
+      videoStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
+
+      return {
+        stream: combinedStream,
+        hasVideo: true,
+      };
+    } catch (error) {
+      console.warn('[WebRTC] Camera unavailable, falling back to audio-only call', error);
+      return {
+        stream: audioStream,
+        hasVideo: false,
+      };
+    }
+  }, []);
+
   const setupPeerConnection = useCallback(async (isCaller: boolean, config: CallConfig) => {
     // 1. Kiểm tra kĩ trạng thái kết nối máy chủ trước khi gọi media
     try {
@@ -108,51 +150,51 @@ export function useWebRTC() {
         setCallError('Mất kết nối Internet hoặc lỗi Server. Không thể thực hiện cuộc gọi lúc này.');
         throw err;
     }
+
+    let pc: RTCPeerConnection | null = null;
       
-    const pc = new RTCPeerConnection(getIceServers());
-    peerConnection.current = pc;
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && config.conversationId) {
-        const targetConvId = !isCaller && config.callerId ? `dm:${config.callerId}` : config.conversationId;
-        
-        // Gửi ICE lên server cho peer đối diện
-        emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
-          conversationId: targetConvId,
-          candidate: event.candidate,
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(event.streams[0]);
-      } else {
-        setRemoteStream((prevStream) => {
-          const stream = prevStream || new MediaStream();
-          stream.addTrack(event.track);
-          return stream;
-        });
-      }
-    };
-
     try {
       // 2. Native Browser API (navigator.mediaDevices) thay vì shim
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: config.isVideo ? { facingMode: 'user', width: 640, height: 480 } : false,
-      });
+      const { stream } = await requestLocalMediaStream(config.isVideo);
+
+      pc = new RTCPeerConnection(getIceServers());
+      peerConnection.current = pc;
+      const connection = pc;
+
+      connection.onicecandidate = (event) => {
+        if (event.candidate && config.conversationId) {
+          const targetConvId = !isCaller && config.callerId ? `dm:${config.callerId}` : config.conversationId;
+          
+          // Gửi ICE lên server cho peer đối diện
+          emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
+            conversationId: targetConvId,
+            candidate: event.candidate,
+          });
+        }
+      };
+
+      connection.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          setRemoteStream(event.streams[0]);
+        } else {
+          setRemoteStream((prevStream) => {
+            const nextStream = prevStream || new MediaStream();
+            nextStream.addTrack(event.track);
+            return nextStream;
+          });
+        }
+      };
 
       setLocalStream(stream);
 
       // Thêm các track local vào peerConnection
       stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream);
+        connection.addTrack(track, stream);
       });
 
       if (isCaller) {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+        const offer = await connection.createOffer();
+        await connection.setLocalDescription(offer);
         await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
           conversationId: config.conversationId,
           offer,
@@ -161,11 +203,21 @@ export function useWebRTC() {
 
     } catch (error) {
       console.error('[WebRTC] Thiết bị hạn chế quyền hoặc lỗi cam/mic', error);
-      setCallError('Cần cấp quyền Microphone và Camera để gọi.');
+      cleanup();
+
+      if ((error as { name?: string })?.name === 'NotReadableError') {
+        setCallError('Camera hoặc microphone đang bị ứng dụng khác sử dụng. Hãy đóng tab/app khác rồi thử lại.');
+      } else if ((error as { name?: string })?.name === 'NotAllowedError') {
+        setCallError('Trình duyệt đang chặn quyền Microphone/Camera. Hãy cấp quyền rồi thử lại.');
+      } else if ((error as { name?: string })?.name === 'OverconstrainedError') {
+        setCallError('Thiết bị không đáp ứng được cấu hình camera hiện tại. Hãy thử lại hoặc dùng thiết bị khác.');
+      } else {
+        setCallError('Cần cấp quyền Microphone và Camera để gọi.');
+      }
       throw error;
     }
 
-    return pc;
+    return pc!;
   }, [emitSignal]);
 
   const startCall = useCallback(async (config: CallConfig) => {

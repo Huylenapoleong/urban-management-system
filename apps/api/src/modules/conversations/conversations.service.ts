@@ -1213,7 +1213,9 @@ export class ConversationsService {
       access.conversationKey,
       'recall',
     );
-    this.ensureCanMutateMessage(actor, message, 'delete');
+    if (scope === 'EVERYONE') {
+      this.ensureCanMutateMessage(actor, message, 'delete');
+    }
 
     if (message.deletedAt) {
       throw new BadRequestException('Message has already been deleted.');
@@ -2181,10 +2183,14 @@ export class ConversationsService {
     access: ResolvedConversationAccess,
     message: StoredMessage,
   ): Promise<RecallMessageResult> {
-    if (actor.id !== message.senderId) {
-      throw new ForbiddenException(
-        'Only the sender can recall a message for themselves.',
-      );
+    const recalledAtForActor = message.deletedForUserAt?.[actor.id];
+    if (recalledAtForActor) {
+      return {
+        conversationId: access.conversationId,
+        messageId: message.messageId,
+        scope: 'SELF',
+        recalledAt: recalledAtForActor,
+      };
     }
 
     if (message.deletedForSenderAt) {
@@ -2197,9 +2203,17 @@ export class ConversationsService {
     }
 
     const recalledAt = nowIso();
+    const nextDeletedForUserAt = {
+      ...(message.deletedForUserAt ?? {}),
+      [actor.id]: recalledAt,
+    };
     const nextMessage: StoredMessage = {
       ...message,
-      deletedForSenderAt: recalledAt,
+      deletedForSenderAt:
+        actor.id === message.senderId
+          ? recalledAt
+          : message.deletedForSenderAt,
+      deletedForUserAt: nextDeletedForUserAt,
       updatedAt: recalledAt,
     };
 
@@ -2209,7 +2223,7 @@ export class ConversationsService {
           tableName: this.config.dynamodbMessagesTableName,
           item: nextMessage,
           conditionExpression:
-            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt AND attribute_not_exists(deletedForSenderAt)',
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
           expressionAttributeValues: {
             ':expectedUpdatedAt': message.updatedAt,
             ':expectedDeletedAt': message.deletedAt,
