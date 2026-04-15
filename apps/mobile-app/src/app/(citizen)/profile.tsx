@@ -1,5 +1,5 @@
 import { useAuth } from "@/providers/AuthProvider";
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import {
   ActivityIndicator,
@@ -10,13 +10,17 @@ import {
   IconButton,
   List,
   Portal,
+  Switch,
   Text,
   TextInput,
 } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useProfile, useUpdateProfile, useUploadAvatar } from '@/hooks/shared/useProfile';
 import { OtpVerificationModal } from '@/components/auth/OtpVerificationModal';
+
+const CHAT_BUBBLE_SETTING_KEY = "citizen.chatBubble.enabled";
 
 export default function ProfilePage() {
   const { 
@@ -63,6 +67,22 @@ export default function ProfilePage() {
     newPassword: '',
     verifiedOtp: '', // Store the OTP after verification
   });
+  const [chatBubbleEnabled, setChatBubbleEnabled] = useState(true);
+
+  useEffect(() => {
+    AsyncStorage.getItem(CHAT_BUBBLE_SETTING_KEY)
+      .then((value) => {
+        if (value !== null) {
+          setChatBubbleEnabled(value === "true");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleToggleChatBubble = async (enabled: boolean) => {
+    setChatBubbleEnabled(enabled);
+    await AsyncStorage.setItem(CHAT_BUBBLE_SETTING_KEY, String(enabled));
+  };
 
   const fetchSessions = async () => {
     try {
@@ -248,6 +268,31 @@ export default function ProfilePage() {
                 <View style={styles.iconCircle}>
                   <List.Icon {...props} icon="shield-account" color="#1976D2" />
                 </View>
+              )}
+            />
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.infoCard} elevation={2}>
+          <Card.Content style={styles.cardContent}>
+            <Text variant="titleMedium" style={styles.infoTitle}>
+              Setting
+            </Text>
+            <List.Item
+              title="Hien bong bong chat"
+              description="Bat de hien bong bong noi khi co tin nhan chua doc."
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDesc}
+              left={(props) => (
+                <View style={styles.iconCircle}>
+                  <List.Icon {...props} icon="chat-processing" color="#1976D2" />
+                </View>
+              )}
+              right={() => (
+                <Switch
+                  value={chatBubbleEnabled}
+                  onValueChange={(value) => void handleToggleChatBubble(value)}
+                />
               )}
             />
           </Card.Content>

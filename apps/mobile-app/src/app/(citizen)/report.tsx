@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,15 +17,17 @@ import { Image } from "expo-image";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { REPORT_CATEGORIES, REPORT_PRIORITIES } from "@urban/shared-constants";
 import type { ImagePickerAsset } from "expo-image-picker";
-import type { ReportItem } from "@urban/shared-types";
+import type { MediaAsset, ReportItem, UploadedAsset } from "@urban/shared-types";
 import { parseLocationCode } from "@urban/shared-utils";
 import Header from "@/components/Header";
 import Button from "@/components/Button";
 import CitizenReportCard from "@/components/shared/CitizenReportCard";
+import { ApiClient } from "@/lib/api-client";
+import { ENV_CONFIG } from "@/constants/env";
 import colors from "@/constants/colors";
+import { convertToS3Url } from "@/constants/s3";
 import { useAuth } from "@/providers/AuthProvider";
-import { createReport, listReports } from "@/services/api/report.api";
-import { uploadMedia } from "@/services/api/upload.api";
+import { listReports } from "@/services/api/report.api";
 
 type LocationOption = {
   key: string;
@@ -35,8 +38,21 @@ type LocationOption = {
 type SelectedImage = {
   uri: string;
   fileName: string;
+  fileSize?: number;
   mimeType?: string;
+  webFile?: File;
 };
+
+type CreateReportPayload = {
+  title: string;
+  description: string;
+  category: (typeof REPORT_CATEGORIES)[number];
+  priority: (typeof REPORT_PRIORITIES)[number];
+  locationCode: string;
+  mediaUrls?: string[];
+};
+
+const API_REPORT_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 const hasCitizenS3Config = Boolean(
   process.env.S3_BUCKET_NAME ||
@@ -53,7 +69,118 @@ function toSelectedImage(asset: ImagePickerAsset): SelectedImage {
   return {
     uri: asset.uri,
     fileName: asset.fileName || asset.uri.split("/").pop() || `report-${Date.now()}.jpg`,
+    fileSize: asset.fileSize,
     mimeType: asset.mimeType || undefined,
+    webFile: (asset as ImagePickerAsset & { file?: File }).file,
+  };
+}
+
+function inferReportImageMimeType(image: SelectedImage): string {
+  const rawMimeType = image.mimeType?.split(";")[0]?.trim().toLowerCase();
+
+  if (rawMimeType === "image/jpg") {
+    return "image/jpeg";
+  }
+
+  if (rawMimeType) {
+    return rawMimeType;
+  }
+
+  const lowerName = image.fileName.toLowerCase();
+
+  if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+
+  if (lowerName.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lowerName.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  if (lowerName.endsWith(".gif")) {
+    return "image/gif";
+  }
+
+  return "image/jpeg";
+}
+
+async function appendReportUploadFile(formData: FormData, image: SelectedImage) {
+  const contentType = inferReportImageMimeType(image);
+
+  if (!API_REPORT_IMAGE_MIME_TYPES.has(contentType)) {
+    throw new Error("API chi nhan anh JPEG, PNG, WEBP hoac GIF. Vui long chon anh khac.");
+  }
+
+  if (Platform.OS === "web") {
+    const sourceBlob: Blob = image.webFile
+      ? image.webFile
+      : await fetch(image.uri).then((response) => response.blob());
+
+    if (sourceBlob.size <= 0) {
+      throw new Error("Tep anh dang rong. Vui long chon lai anh khac.");
+    }
+
+    const uploadBlob =
+      sourceBlob.type === contentType
+        ? sourceBlob
+        : new Blob([sourceBlob], { type: contentType });
+    const uploadFile =
+      typeof File !== "undefined" && !(uploadBlob instanceof File)
+        ? new File([uploadBlob], image.fileName, { type: contentType })
+        : uploadBlob;
+
+    formData.append("file", uploadFile, image.fileName);
+    return;
+  }
+
+  formData.append(
+    "file",
+    {
+      uri: image.uri,
+      name: image.fileName,
+      type: contentType,
+    } as any,
+  );
+}
+
+function resolveReportMediaUrl(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const converted = convertToS3Url(trimmed);
+  if (/^https?:\/\//i.test(converted)) {
+    return converted;
+  }
+
+  const normalized = converted.replace(/^\/+/, "");
+  if (normalized.startsWith("uploads/")) {
+    return `${ENV_CONFIG.S3.NEW_BASE_URL}${normalized.replace(/^uploads\/+/, "")}`;
+  }
+
+  return `${ENV_CONFIG.API_BASE_URL.replace(/\/+$/, "")}/${normalized}`;
+}
+
+function normalizeReportMedia(report: ReportItem): ReportItem {
+  const fallbackUrls = (report.mediaAssets ?? [])
+    .map((asset: MediaAsset) => resolveReportMediaUrl(asset.resolvedUrl || asset.key))
+    .filter((value): value is string => Boolean(value));
+
+  const mediaUrls = (report.mediaUrls ?? [])
+    .map((value) => resolveReportMediaUrl(value))
+    .filter((value): value is string => Boolean(value));
+
+  return {
+    ...report,
+    mediaUrls: mediaUrls.length > 0 ? mediaUrls : fallbackUrls,
   };
 }
 
@@ -96,15 +223,28 @@ export default function ReportPage() {
     ];
   }, [locationSegments]);
 
+  const uploadReportMedia = useCallback(
+    async (image: SelectedImage): Promise<UploadedAsset> => {
+      const formData = new FormData();
+      formData.append("target", "REPORT");
+      await appendReportUploadFile(formData, image);
+
+      return await ApiClient.upload<UploadedAsset>("/uploads/media", formData);
+    },
+    [],
+  );
+
   const loadMyReports = useCallback(async () => {
     setLoadingReports(true);
 
     try {
       const data = await listReports({ mine: true, limit: 100 });
       setReports(
-        [...data].sort(
+        [...data]
+          .map((report) => normalizeReportMedia(report))
+          .sort(
           (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-        ),
+          ),
       );
       setError(null);
     } catch (err: unknown) {
@@ -127,7 +267,7 @@ export default function ReportPage() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       quality: 0.8,
       allowsEditing: true,
     });
@@ -146,7 +286,7 @@ export default function ReportPage() {
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       quality: 0.8,
       allowsEditing: true,
     });
@@ -174,24 +314,29 @@ export default function ReportPage() {
       const mediaUrls: string[] = [];
 
       if (selectedImage) {
-        const uploadedAsset = await uploadMedia({
-          uri: selectedImage.uri,
-          fileName: selectedImage.fileName,
-          mimeType: selectedImage.mimeType,
-          target: "REPORT",
-        });
+        const uploadedAsset = await uploadReportMedia(selectedImage);
+        const uploadedUrl = resolveReportMediaUrl(uploadedAsset.url) || resolveReportMediaUrl(uploadedAsset.key);
 
-        mediaUrls.push(uploadedAsset.url);
+        if (!uploadedUrl) {
+          throw new Error("Upload thanh cong nhung khong nhan duoc URL anh.");
+        }
+
+        mediaUrls.push(uploadedUrl);
       }
 
-      const createdReport = await createReport({
+      const payload: CreateReportPayload = {
         title: title.trim(),
         description: description.trim(),
         category,
         priority,
         locationCode: user.locationCode,
-        mediaUrls,
-      });
+      };
+
+      if (mediaUrls.length > 0) {
+        payload.mediaUrls = mediaUrls;
+      }
+
+      const createdReport = normalizeReportMedia(await ApiClient.post<ReportItem>("/reports", payload));
 
       setReports((prev) => [createdReport, ...prev]);
       setTitle("");
@@ -203,7 +348,9 @@ export default function ReportPage() {
       // Invalidate queries để home page auto-refresh
       await queryClient.invalidateQueries({ queryKey: ['reports'] });
     } catch (err: unknown) {
-      setError((err as Error)?.message ?? "Khong the gui phan anh");
+      const message = (err as Error)?.message ?? "Khong the gui phan anh";
+      setError(message);
+      Alert.alert("Loi gui phan anh", message);
     } finally {
       setSubmitting(false);
     }

@@ -1,23 +1,101 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { ConversationSummary, ReportItem } from "@urban/shared-types";
+import type {
+  ConversationSummary,
+  MediaAsset,
+  ReportItem,
+  UserFriendRequestItem,
+} from "@urban/shared-types";
 import { useRouter } from "expo-router";
 import Avatar from "@/components/Avatar";
 import CitizenReportCard from "@/components/shared/CitizenReportCard";
+import { ENV_CONFIG } from "@/constants/env";
 import colors from "@/constants/colors";
+import { convertToS3Url } from "@/constants/s3";
 import { useAuth } from "@/providers/AuthProvider";
 import { listConversations } from "@/services/api/conversation.api";
+import { ApiClient } from "@/lib/api-client";
 import { listReports } from "@/services/api/report.api";
+
+function resolveRemoteUrl(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const converted = convertToS3Url(trimmed);
+  if (/^https?:\/\//i.test(converted)) {
+    return converted;
+  }
+
+  const normalized = converted.replace(/^\/+/, "");
+  if (normalized.startsWith("uploads/")) {
+    return `${ENV_CONFIG.S3.NEW_BASE_URL}${normalized.replace(/^uploads\/+/, "")}`;
+  }
+
+  return `${ENV_CONFIG.API_BASE_URL.replace(/\/+$/, "")}/${normalized}`;
+}
+
+function normalizeReportMedia(report: ReportItem): ReportItem {
+  const mediaUrls = (report.mediaUrls ?? [])
+    .map((value) => resolveRemoteUrl(value))
+    .filter((value): value is string => Boolean(value));
+  const fallbackUrls = (report.mediaAssets ?? [])
+    .map((asset: MediaAsset) => resolveRemoteUrl(asset.resolvedUrl || asset.key))
+    .filter((value): value is string => Boolean(value));
+
+  return {
+    ...report,
+    mediaUrls: mediaUrls.length > 0 ? mediaUrls : fallbackUrls,
+  };
+}
+
+function resolveAvatarUrl(item: {
+  avatarUrl?: string;
+  avatarAsset?: MediaAsset;
+}): string | undefined {
+  return (
+    resolveRemoteUrl(item.avatarUrl) ||
+    resolveRemoteUrl(item.avatarAsset?.resolvedUrl || item.avatarAsset?.key) ||
+    undefined
+  );
+}
 
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [communityReports, setCommunityReports] = useState<ReportItem[]>([]);
   const [recentChats, setRecentChats] = useState<ConversationSummary[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<UserFriendRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const loadFriendData = useCallback(async () => {
+    const incomingData = await ApiClient.get<UserFriendRequestItem[]>("/users/me/friend-requests", {
+      direction: "INCOMING",
+      limit: 20,
+    });
+
+    setIncomingRequests(
+      incomingData.map((item: UserFriendRequestItem) => ({
+        ...item,
+        avatarUrl: resolveAvatarUrl(item),
+      })),
+    );
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -29,22 +107,26 @@ export default function HomeScreen() {
       ]);
 
       setCommunityReports(
-        [...reportsData].sort(
-          (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-        ),
+        [...reportsData]
+          .map((report) => normalizeReportMedia(report))
+          .sort(
+            (left, right) =>
+              new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+          ),
       );
       setRecentChats(
         [...chatsData].sort(
           (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
         ),
       );
+      await loadFriendData();
       setError(null);
     } catch (err: unknown) {
       setError((err as Error)?.message ?? "Khong the tai du lieu trang chu");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadFriendData]);
 
   useEffect(() => {
     void loadData();
@@ -97,6 +179,17 @@ export default function HomeScreen() {
           <Pressable style={styles.quickAction} onPress={() => router.push("/(citizen)/chat")}>
             <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
             <Text style={styles.quickActionText}>Mo chat</Text>
+          </Pressable>
+          <Pressable style={styles.quickAction} onPress={() => router.push("/(citizen)/friends" as any)}>
+            <View style={styles.quickActionIconWrap}>
+              <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+              {incomingRequests.length > 0 ? (
+                <View style={styles.quickActionBadge}>
+                  <Text style={styles.quickActionBadgeText}>{incomingRequests.length}</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.quickActionText}>Ban be</Text>
           </Pressable>
         </View>
       </View>
@@ -254,6 +347,26 @@ const styles = StyleSheet.create({
   },
   quickActionText: {
     color: colors.primary,
+    fontWeight: "800",
+  },
+  quickActionIconWrap: {
+    position: "relative",
+  },
+  quickActionBadge: {
+    position: "absolute",
+    top: -10,
+    right: -12,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+    backgroundColor: "#dc2626",
+  },
+  quickActionBadgeText: {
+    color: "white",
+    fontSize: 10,
     fontWeight: "800",
   },
   statsRow: {

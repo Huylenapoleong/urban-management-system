@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { socketClient } from '../../lib/socket-client';
 import { ApiClient } from '../../lib/api-client';
-import { Platform } from 'react-native';
+import { uploadMedia } from '../../services/api/upload.api';
 import { CHAT_SOCKET_EVENTS } from '@urban/shared-constants';
 import type {
   MessageItem,
@@ -13,13 +13,13 @@ import type {
   ChatMessageDeletedAccepted,
   ChatMessageUpdatedAccepted,
 } from '@urban/shared-types';
-import { MESSAGE_TYPES, UPLOAD_TARGETS } from '@urban/shared-constants';
 
 export const useChatConversation = (conversationId: string, currentUser?: any) => {
   const [messages, setMessages] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Record<string, { fullName: string; isTyping: boolean }>>({});
   const conversationKeyRef = useRef<string | null>(null);
+  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [isReady, setIsReady] = useState(false);
 
   // ── 1. Load message history from REST API ────────────────────────────────
@@ -82,10 +82,35 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
     // Server emits CHAT_SOCKET_EVENTS.TYPING_STATE = "typing.state"
     const onTypingState = (payload: ChatTypingStateEvent) => {
       if (mounted) {
-        setTypingUsers(prev => ({
-          ...prev,
-          [payload.userId]: { fullName: payload.fullName, isTyping: payload.isTyping }
-        }));
+        const currentTimeout = typingTimeoutsRef.current[payload.userId];
+        if (currentTimeout) {
+          clearTimeout(currentTimeout);
+          delete typingTimeoutsRef.current[payload.userId];
+        }
+
+        setTypingUsers(prev => {
+          if (!payload.isTyping) {
+            const next = { ...prev };
+            delete next[payload.userId];
+            return next;
+          }
+
+          return {
+            ...prev,
+            [payload.userId]: { fullName: payload.fullName, isTyping: true }
+          };
+        });
+
+        if (payload.isTyping) {
+          typingTimeoutsRef.current[payload.userId] = setTimeout(() => {
+            setTypingUsers(prev => {
+              const next = { ...prev };
+              delete next[payload.userId];
+              return next;
+            });
+            delete typingTimeoutsRef.current[payload.userId];
+          }, 3000);
+        }
       }
     };
 
@@ -112,6 +137,8 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
 
     return () => {
       mounted = false;
+      Object.values(typingTimeoutsRef.current).forEach(clearTimeout);
+      typingTimeoutsRef.current = {};
       if (conversationKeyRef.current) {
         socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE, { conversationId }).catch(() => {});
         conversationKeyRef.current = null;
@@ -131,6 +158,7 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
     type: string = 'TEXT',
     attachmentUrl?: string,
     replyTo?: string,
+    attachmentKey?: string,
   ) => {
     if (!isReady || !conversationId) return;
 
@@ -144,6 +172,7 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
         type: type,
         content,
         attachmentUrl,
+        attachmentKey,
         replyTo,
         sentAt: new Date().toISOString(),
         deletedAt: null,
@@ -156,12 +185,12 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
     try {
       const ack = await socketClient.emitWithAck<ChatMessageAccepted>(
         CHAT_SOCKET_EVENTS.MESSAGE_SEND,
-        { 
+        {
           conversationId, 
           content, 
           clientMessageId,
           type,
-          attachmentUrl,
+          ...(attachmentKey ? { attachmentKey } : attachmentUrl ? { attachmentUrl } : {}),
           replyTo,
         }
       );
@@ -183,34 +212,23 @@ export const useChatConversation = (conversationId: string, currentUser?: any) =
     if (!isReady || !conversationId) return;
     
     try {
-      const formData = new FormData();
-      
-      // IMPORTANT: Append non-file fields BEFORE the file field for some backends (like Multer)
-      formData.append('target', 'MESSAGE');
-      formData.append('entityId', conversationId);
+      // Use uploadMedia with proper /api prefix routing
+      const uploadResponse = await uploadMedia({
+        uri: fileUri,
+        fileName,
+        mimeType,
+        target: 'MESSAGE',
+        entityId: conversationId,
+      });
 
-      if (Platform.OS === 'web') {
-        const response = await fetch(fileUri);
-        const blob = await response.blob();
-        formData.append('file', blob, fileName);
-      } else {
-        // @ts-ignore
-        formData.append('file', {
-          uri: fileUri,
-          name: fileName,
-          type: mimeType,
-        });
+      if (!uploadResponse?.url && !uploadResponse?.key) {
+        throw new Error('Upload failed: No URL or key returned');
       }
 
-      // 2. Upload to API
-      const uploadResponse = await ApiClient.upload<any>('/uploads/media', formData);
+      const attachmentUrl = uploadResponse.url || uploadResponse.key;
+      const attachmentKey = uploadResponse.key || undefined;
 
-      if (!uploadResponse?.url) {
-        throw new Error('Upload failed: No URL returned');
-      }
-
-      // 3. Send message with attachment
-      await sendMessage(fileName, Date.now().toString(), type, uploadResponse.url, replyTo);
+      await sendMessage(fileName, Date.now().toString(), type, attachmentUrl, replyTo, attachmentKey);
       
     } catch (e) {
       console.error('[useChatConversation] Media send failed:', e);

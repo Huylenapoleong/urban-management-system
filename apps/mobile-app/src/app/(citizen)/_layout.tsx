@@ -1,10 +1,122 @@
-import { useEffect } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Animated,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { ConversationSummary } from "@urban/shared-types";
 import colors from "@/constants/colors";
 import { useAuth } from "@/providers/AuthProvider";
+import { listConversations } from "@/services/api/conversation.api";
+
+const CHAT_BUBBLE_SETTING_KEY = "citizen.chatBubble.enabled";
+
+function ChatBubbleOverlay() {
+  const router = useRouter();
+  const [enabled, setEnabled] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [targetConversation, setTargetConversation] = useState<ConversationSummary | null>(null);
+  const position = useRef(new Animated.ValueXY({ x: 18, y: 150 })).current;
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
+        onPanResponderGrant: () => {
+          position.extractOffset();
+        },
+        onPanResponderMove: Animated.event([null, { dx: position.x, dy: position.y }], {
+          useNativeDriver: false,
+        }),
+        onPanResponderRelease: () => {
+          position.flattenOffset();
+        },
+      }),
+    [position],
+  );
+
+  const loadSetting = useCallback(async () => {
+    const value = await AsyncStorage.getItem(CHAT_BUBBLE_SETTING_KEY).catch(() => null);
+    setEnabled(value === null ? true : value === "true");
+  }, []);
+
+  const refreshUnread = useCallback(async () => {
+    if (!enabled) {
+      setUnreadCount(0);
+      setTargetConversation(null);
+      return;
+    }
+
+    try {
+      const conversations = await listConversations();
+      const unread = conversations.reduce((sum, item) => sum + (item.unreadCount || 0), 0);
+      const target =
+        conversations
+          .filter((item) => (item.unreadCount || 0) > 0)
+          .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0] ??
+        null;
+
+      setUnreadCount(unread);
+      setTargetConversation(target);
+    } catch {
+      setUnreadCount(0);
+      setTargetConversation(null);
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    void loadSetting();
+    const interval = setInterval(() => void loadSetting(), 2000);
+    return () => clearInterval(interval);
+  }, [loadSetting]);
+
+  useEffect(() => {
+    void refreshUnread();
+    const interval = setInterval(() => void refreshUnread(), 8000);
+    return () => clearInterval(interval);
+  }, [refreshUnread]);
+
+  if (!enabled || unreadCount <= 0 || !targetConversation) {
+    return null;
+  }
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[
+        styles.chatBubbleWrap,
+        {
+          transform: position.getTranslateTransform(),
+        },
+      ]}
+      {...panResponder.panHandlers}
+    >
+      <Pressable
+        style={styles.chatBubble}
+        onPress={() =>
+          router.push({
+            pathname: "/(citizen)/chat/[id]",
+            params: { id: targetConversation.conversationId },
+          })
+        }
+      >
+        <Ionicons name="chatbubble-ellipses" size={26} color="white" />
+        <View style={styles.chatBubbleBadge}>
+          <Text style={styles.chatBubbleBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
 
 export default function CitizenLayout() {
   const { user, isLoading } = useAuth();
@@ -35,7 +147,8 @@ export default function CitizenLayout() {
   }
 
   return (
-    <Tabs
+    <View style={styles.shell}>
+      <Tabs
       screenOptions={{
         headerShown: false,
         animation: "shift",
@@ -118,15 +231,62 @@ export default function CitizenLayout() {
       <Tabs.Screen name="create-group" options={{ href: null }} />
       <Tabs.Screen name="join-group" options={{ href: null }} />
       <Tabs.Screen name="report-history" options={{ href: null }} />
-    </Tabs>
+      <Tabs.Screen name="friends/index" options={{ href: null }} />
+      <Tabs.Screen name="friends/requests" options={{ href: null }} />
+      <Tabs.Screen name="friends/search" options={{ href: null }} />
+      </Tabs>
+      <ChatBubbleOverlay />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  shell: {
+    flex: 1,
+  },
   loader: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.background,
+  },
+  chatBubbleWrap: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    zIndex: 1000,
+    elevation: 1000,
+  },
+  chatBubble: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primary,
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  chatBubbleBadge: {
+    position: "absolute",
+    top: -5,
+    right: -5,
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    backgroundColor: "#dc2626",
+    borderWidth: 2,
+    borderColor: "white",
+  },
+  chatBubbleBadgeText: {
+    color: "white",
+    fontSize: 11,
+    fontWeight: "800",
   },
 });

@@ -78,7 +78,7 @@ export async function uploadMedia({
   // Append blob as actual file
   formData.append("file", blob, resolvedFileName);
 
-  const uploadResponse = await fetch(`${API_BASE_URL}/uploads/media`, {
+  const uploadResponse = await fetch(`${API_BASE_URL}/api/uploads/media`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -103,7 +103,7 @@ export async function uploadMedia({
 
 export async function getUploadLimits(): Promise<any> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/uploads/limits`, {
+  const response = await fetch(`${API_BASE_URL}/api/uploads/limits`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -115,7 +115,7 @@ export async function getUploadLimits(): Promise<any> {
 
 export async function deleteMedia(key: string): Promise<void> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/uploads/media`, {
+  const response = await fetch(`${API_BASE_URL}/api/uploads/media`, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -131,7 +131,7 @@ export async function deleteMedia(key: string): Promise<void> {
 
 export async function getPresignedUploadUrl(params: { fileName: string; contentType: string; target: string; entityId?: string }): Promise<any> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/uploads/presign/upload`, {
+  const response = await fetch(`${API_BASE_URL}/api/uploads/presign/upload`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -146,7 +146,7 @@ export async function getPresignedUploadUrl(params: { fileName: string; contentT
 
 export async function getPresignedDownloadUrl(key: string): Promise<any> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/uploads/presign/download`, {
+  const response = await fetch(`${API_BASE_URL}/api/uploads/presign/download`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

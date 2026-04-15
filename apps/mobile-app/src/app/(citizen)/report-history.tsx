@@ -1,10 +1,49 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { ReportItem } from "@urban/shared-types";
+import type { MediaAsset, ReportItem } from "@urban/shared-types";
 import Header from "@/components/Header";
 import CitizenReportCard from "@/components/shared/CitizenReportCard";
+import { ENV_CONFIG } from "@/constants/env";
 import colors from "@/constants/colors";
+import { convertToS3Url } from "@/constants/s3";
 import { listReports } from "@/services/api/report.api";
+
+function resolveReportMediaUrl(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const converted = convertToS3Url(trimmed);
+  if (/^https?:\/\//i.test(converted)) {
+    return converted;
+  }
+
+  const normalized = converted.replace(/^\/+/, "");
+  if (normalized.startsWith("uploads/")) {
+    return `${ENV_CONFIG.S3.NEW_BASE_URL}${normalized.replace(/^uploads\/+/, "")}`;
+  }
+
+  return `${ENV_CONFIG.API_BASE_URL.replace(/\/+$/, "")}/${normalized}`;
+}
+
+function normalizeReportMedia(report: ReportItem): ReportItem {
+  const mediaUrls = (report.mediaUrls ?? [])
+    .map((value) => resolveReportMediaUrl(value))
+    .filter((value): value is string => Boolean(value));
+  const fallbackUrls = (report.mediaAssets ?? [])
+    .map((asset: MediaAsset) => resolveReportMediaUrl(asset.resolvedUrl || asset.key))
+    .filter((value): value is string => Boolean(value));
+
+  return {
+    ...report,
+    mediaUrls: mediaUrls.length > 0 ? mediaUrls : fallbackUrls,
+  };
+}
 
 export default function ReportHistoryPage() {
   const [reports, setReports] = useState<ReportItem[]>([]);
@@ -16,7 +55,7 @@ export default function ReportHistoryPage() {
 
     try {
       const data = await listReports({ mine: true, limit: 100 });
-      setReports(data);
+      setReports(data.map((report) => normalizeReportMedia(report)));
       setError(null);
     } catch (err: unknown) {
       const message = (err as Error)?.message ?? "Khong the tai lich su phan anh";
