@@ -9,7 +9,7 @@ interface CallModalProps {
 }
 
 export function CallModal({ rtc }: CallModalProps) {
-  const { callState, activeConfig, isMicOn, isVideoOn, localStream, remoteStream, toggleMute, toggleVideo, endCall, acceptCall, rejectCall, callError, setCallError } = rtc;
+  const { callState, activeConfig, isMicOn, isVideoOn, localStream, remoteStream, toggleMute, toggleVideo, endCall, acceptCall, rejectCall, callError, setCallError, callDurationSeconds } = rtc;
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
@@ -163,6 +163,13 @@ export function CallModal({ rtc }: CallModalProps) {
     : callState === "INCOMING"
       ? "Đang đổ chuông"
       : "Đã kết nối";
+  const formatCallDuration = (totalSeconds: number): string => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = safeSeconds % 60;
+
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  };
   const waitingLabel = callState === "CONNECTED" && !activeConfig?.isVideo
     ? "Đã kết nối thoại"
     : "Chờ kết nối...";
@@ -196,7 +203,11 @@ export function CallModal({ rtc }: CallModalProps) {
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-slate-100">{title} với {peerName}</p>
-            <p className="text-xs text-slate-300">Kéo thanh này để di chuyển cửa sổ gọi</p>
+            <p className="text-xs text-slate-300">
+              {callState === "CONNECTED"
+                ? `Đang gọi ${formatCallDuration(callDurationSeconds)}`
+                : "Kéo thanh này để di chuyển cửa sổ gọi"}
+            </p>
           </div>
           <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
             {badgeLabel}

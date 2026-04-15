@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useWebRTC } from "@/hooks/shared/useWebRTC";
 import { CallModal } from "@/components/CallModal";
 import { useAuth } from "@/providers/AuthProvider";
@@ -9,8 +9,13 @@ import { useConversations, useMessages } from "@/hooks/shared/useChatData";
 import { format } from "date-fns";
 import { useLocation } from "react-router-dom";
 import { uploadMedia } from "@/services/upload.api";
+import { getUserById, getUserPresence, type PresenceState } from "@/services/user.api";
+import { listMyFriends } from "@/services/friends.api";
 import { useQueryClient } from "@tanstack/react-query";
 import type { MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
+import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
+import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
+import { socketClient } from "@/lib/socket-client";
 
 type ChatMessageType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
 
@@ -28,6 +33,178 @@ type QueuedAttachment = {
 };
 
 type RecallScope = "SELF" | "EVERYONE";
+
+const CALL_SUMMARY_STORAGE_KEY = "urban:web-app:call-summaries:v2";
+
+function loadCallSummaries(): CallEndedSummary[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CALL_SUMMARY_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((item): item is CallEndedSummary => Boolean(item && item.conversationId && item.endedAt));
+  } catch {
+    return [];
+  }
+}
+
+function saveCallSummaries(summaries: CallEndedSummary[]): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(CALL_SUMMARY_STORAGE_KEY, JSON.stringify(summaries));
+}
+
+type ConversationAvatarLike = {
+  conversationId?: string;
+  peerUserId?: string;
+  userId?: string;
+  targetUserId?: string;
+  avatarAsset?: { resolvedUrl?: string };
+  avatarUrl?: string;
+  peerAvatarAsset?: { resolvedUrl?: string };
+  peerAvatarUrl?: string;
+  participantAvatarAsset?: { resolvedUrl?: string };
+  participantAvatarUrl?: string;
+  userAvatarAsset?: { resolvedUrl?: string };
+  userAvatarUrl?: string;
+};
+
+function resolveConversationAvatarUrl(conversation?: ConversationAvatarLike | null): string | undefined {
+  if (!conversation) {
+    return undefined;
+  }
+
+  return (
+    conversation.avatarAsset?.resolvedUrl ||
+    conversation.avatarUrl ||
+    conversation.peerAvatarAsset?.resolvedUrl ||
+    conversation.peerAvatarUrl ||
+    conversation.participantAvatarAsset?.resolvedUrl ||
+    conversation.participantAvatarUrl ||
+    conversation.userAvatarAsset?.resolvedUrl ||
+    conversation.userAvatarUrl
+  );
+}
+
+function extractDirectPeerUserId(
+  conversation?: ConversationAvatarLike | null,
+  currentUserId?: string,
+): string | undefined {
+  if (!conversation) {
+    return undefined;
+  }
+
+  const explicitId =
+    conversation.peerUserId ||
+    conversation.userId ||
+    conversation.targetUserId;
+  if (explicitId && explicitId !== currentUserId) {
+    return explicitId;
+  }
+
+  const conversationId = conversation.conversationId?.trim();
+  if (!conversationId) {
+    return undefined;
+  }
+
+  if (/^dm[:#]/i.test(conversationId)) {
+    const raw = conversationId.replace(/^dm[:#]/i, "").trim();
+    if (!raw) {
+      return undefined;
+    }
+
+    const decoded = (() => {
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    })();
+
+    const parts = decoded
+      .split(/[#:,]/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (parts.length <= 1) {
+      return parts[0] || undefined;
+    }
+
+    const peer = parts.find((part) => part !== currentUserId);
+    return peer || parts[0];
+  }
+
+  return undefined;
+}
+
+function resolveDmAvatarFromFriendMap(
+  conversation?: ConversationAvatarLike | null,
+  friendAvatarByUserId?: Record<string, string>,
+  currentUserId?: string,
+): string | undefined {
+  if (!conversation || !friendAvatarByUserId) {
+    return undefined;
+  }
+
+  const peerUserId = extractDirectPeerUserId(conversation, currentUserId);
+  if (!peerUserId) {
+    return undefined;
+  }
+
+  return friendAvatarByUserId[peerUserId];
+}
+
+function formatPresenceText(presence: PresenceState | null): string {
+  if (!presence) {
+    return "Không hoạt động";
+  }
+
+  if (presence.isActive) {
+    return "Đang hoạt động";
+  }
+
+  if (presence.lastSeenAt) {
+    return `Hoạt động lúc ${format(new Date(presence.lastSeenAt), "HH:mm dd/MM")}`;
+  }
+
+  return "Không hoạt động";
+}
+
+function formatLastSeenShort(presence?: PresenceState | null): string | null {
+  if (!presence || presence.isActive || !presence.lastSeenAt) {
+    return null;
+  }
+
+  const lastSeenMs = new Date(presence.lastSeenAt).getTime();
+  if (Number.isNaN(lastSeenMs)) {
+    return null;
+  }
+
+  const diffMinutes = Math.max(1, Math.floor((Date.now() - lastSeenMs) / 60000));
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h`;
+  }
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d`;
+}
 
 export function ChatPage() {
   const location = useLocation();
@@ -52,7 +229,19 @@ export function ChatPage() {
   const [forwardActionError, setForwardActionError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLInputElement>(null);
+  const typingStopTimerRef = useRef<number | null>(null);
+  const isTypingRef = useRef(false);
+  const requestedDmAvatarIdsRef = useRef<Set<string>>(new Set());
+  const [friendAvatarByUserId, setFriendAvatarByUserId] = useState<Record<string, string>>({});
+  const [dmAvatarMap, setDmAvatarMap] = useState<Record<string, string>>({});
+  const [activeDmPresence, setActiveDmPresence] = useState<PresenceState | null>(null);
+  const [dmPresenceByUserId, setDmPresenceByUserId] = useState<Record<string, PresenceState>>({});
+  const [callSummaries, setCallSummaries] = useState<CallEndedSummary[]>(() => loadCallSummaries());
   const rtc = useWebRTC();
+  const {
+    startCall,
+    lastEndedCall,
+  } = rtc;
   const { user } = useAuth();
   const queryClient = useQueryClient();
   
@@ -70,6 +259,8 @@ export function ChatPage() {
     isUpdatingMessage,
     isDeletingMessage,
     isForwardingMessage,
+    typingUsers,
+    sendTyping,
   } = useMessages(activeChat || undefined);
 
   const syntheticConversation =
@@ -77,6 +268,7 @@ export function ChatPage() {
       ? {
           conversationId: chatState.conversationId,
           groupName: chatState.displayName,
+          avatarUrl: chatState.avatarUrl,
           updatedAt: new Date().toISOString(),
           unreadCount: 0,
           lastMessagePreview: "",
@@ -109,6 +301,30 @@ export function ChatPage() {
     : mergedConversations;
 
   const activeContact = renderedConversations.find((c) => c.conversationId === activeChat);
+  const activeTypingParticipants = Object.values(typingUsers).filter(
+    (participant) => participant.isTyping && participant.userId !== user?.sub,
+  );
+  const typingIndicatorText = (() => {
+    if (activeTypingParticipants.length === 0) {
+      return "";
+    }
+
+    const uniqueNames = Array.from(
+      new Set(
+        activeTypingParticipants.map((participant) => participant.fullName?.trim() || participant.userId),
+      ),
+    );
+
+    if (uniqueNames.length === 1) {
+      return `${uniqueNames[0]} đang soạn tin...`;
+    }
+
+    if (uniqueNames.length === 2) {
+      return `${uniqueNames[0]} và ${uniqueNames[1]} đang soạn tin...`;
+    }
+
+    return `${uniqueNames[0]}, ${uniqueNames[1]} và ${uniqueNames.length - 2} người khác đang soạn tin...`;
+  })();
   const normalizedForwardSearch = forwardSearch.trim().toLowerCase();
   const forwardDestinationConversations = mergedConversations.filter((conversation) => {
     if (conversation.conversationId === activeChat) {
@@ -133,12 +349,282 @@ export function ChatPage() {
   });
   const cachedProfile = queryClient.getQueryData<UserProfile>(["profile"]);
   const activeContactAvatarUrl =
-    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarAsset?.resolvedUrl ||
-    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarUrl ||
+    resolveConversationAvatarUrl(activeContact as ConversationAvatarLike | undefined) ||
+    resolveDmAvatarFromFriendMap(activeContact as ConversationAvatarLike | undefined, friendAvatarByUserId, user?.sub) ||
+    (activeChat ? dmAvatarMap[activeChat] : undefined) ||
     chatState.avatarUrl;
+  const activeDmUserId = extractDirectPeerUserId(activeContact as ConversationAvatarLike | undefined, user?.sub);
+  const activePresence = activeDmUserId ? dmPresenceByUserId[activeDmUserId] || activeDmPresence : null;
+  const activeStatusText = (() => {
+    if (!activeContact) {
+      return "";
+    }
+
+    if (activeContact.isGroup) {
+      return "Nhóm trò chuyện";
+    }
+
+    return formatPresenceText(activePresence);
+  })();
+  const activeStatusToneClass = activePresence?.isActive ? "text-green-600" : "text-gray-500 dark:text-slate-400";
+  const activeLastSeenBadge = formatLastSeenShort(activePresence);
   const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
   const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!lastEndedCall) {
+      return;
+    }
+
+    setCallSummaries((prev) => {
+      const next = [...prev];
+      const nextKey = [
+        lastEndedCall.conversationId,
+        lastEndedCall.endedAt,
+        lastEndedCall.peerUserId || "",
+        lastEndedCall.direction,
+        String(lastEndedCall.durationSeconds),
+      ].join("|");
+
+      const hasDuplicate = next.some((item) => [
+        item.conversationId,
+        item.endedAt,
+        item.peerUserId || "",
+        item.direction,
+        String(item.durationSeconds),
+      ].join("|") === nextKey);
+
+      if (!hasDuplicate) {
+        next.push(lastEndedCall);
+      }
+
+      saveCallSummaries(next);
+      return next;
+    });
+  }, [lastEndedCall]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateFriendAvatars = async () => {
+      try {
+        const friends = await listMyFriends({ limit: 200 });
+        if (cancelled || !Array.isArray(friends) || friends.length === 0) {
+          return;
+        }
+
+        const nextMap: Record<string, string> = {};
+        friends.forEach((friend) => {
+          const avatarUrl = friend.avatarAsset?.resolvedUrl || friend.avatarUrl;
+          if (avatarUrl) {
+            nextMap[friend.userId] = avatarUrl;
+          }
+        });
+
+        if (!cancelled) {
+          setFriendAvatarByUserId(nextMap);
+        }
+      } catch {
+        // Keep silent; other avatar sources still apply.
+      }
+    };
+
+    void hydrateFriendAvatars();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const dmTargets = mergedConversations
+      .map((conversation) => {
+        const conv = conversation as ConversationAvatarLike;
+        const existingAvatar = resolveConversationAvatarUrl(conv);
+        if (existingAvatar) {
+          return null;
+        }
+
+        const peerUserId = extractDirectPeerUserId(conv, user?.sub);
+        if (!peerUserId) {
+          return null;
+        }
+
+        if (requestedDmAvatarIdsRef.current.has(peerUserId)) {
+          return null;
+        }
+
+        return {
+          conversationId: conversation.conversationId,
+          peerUserId,
+        };
+      })
+      .filter((item): item is { conversationId: string; peerUserId: string } => Boolean(item));
+
+    if (dmTargets.length === 0) {
+      return;
+    }
+
+    dmTargets.forEach(({ peerUserId }) => {
+      requestedDmAvatarIdsRef.current.add(peerUserId);
+    });
+
+    void Promise.all(
+      dmTargets.map(async ({ conversationId, peerUserId }) => {
+        try {
+          const profile = await getUserById(peerUserId);
+          const avatarUrl = profile.avatarAsset?.resolvedUrl || profile.avatarUrl;
+          if (!avatarUrl) {
+            return;
+          }
+
+          setDmAvatarMap((prev) => {
+            if (prev[conversationId] === avatarUrl) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              [conversationId]: avatarUrl,
+            };
+          });
+        } catch {
+          // Keep silent for missing/forbidden profiles; fallback avatar will still render.
+        }
+      }),
+    );
+  }, [mergedConversations, user?.sub]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const dmUserIds = Array.from(
+      new Set(
+        mergedConversations
+          .filter((conversation) => !conversation.isGroup)
+          .map((conversation) => extractDirectPeerUserId(conversation as ConversationAvatarLike, user?.sub))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    if (dmUserIds.length === 0) {
+      return;
+    }
+
+    const loadDmPresence = async () => {
+      const results = await Promise.all(
+        dmUserIds.map(async (userId) => {
+          try {
+            const presence = await getUserPresence(userId);
+            return [userId, presence] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setDmPresenceByUserId((prev) => {
+        const next = { ...prev };
+        results.forEach((entry) => {
+          if (!entry) {
+            return;
+          }
+
+          const [userId, presence] = entry;
+          next[userId] = presence;
+        });
+        return next;
+      });
+    };
+
+    void loadDmPresence();
+    const intervalId = window.setInterval(() => {
+      void loadDmPresence();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [mergedConversations, user?.sub]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!activeDmUserId) {
+      setActiveDmPresence(null);
+      return;
+    }
+
+    const loadPresence = async () => {
+      try {
+        const presence = await getUserPresence(activeDmUserId);
+        if (!cancelled) {
+          setActiveDmPresence(presence);
+          setDmPresenceByUserId((prev) => ({
+            ...prev,
+            [activeDmUserId]: presence,
+          }));
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveDmPresence(null);
+        }
+      }
+    };
+
+    void loadPresence();
+    const intervalId = window.setInterval(() => {
+      void loadPresence();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeDmUserId]);
+
+  useEffect(() => {
+    const socket = socketClient.socket;
+    if (!socket || !activeDmUserId) {
+      return;
+    }
+
+    const handlePresenceSnapshot = (payload: { participants?: PresenceState[] }) => {
+      const participant = payload?.participants?.find((entry) => entry.userId === activeDmUserId);
+      if (participant) {
+        setActiveDmPresence(participant);
+        setDmPresenceByUserId((prev) => ({
+          ...prev,
+          [participant.userId]: participant,
+        }));
+      }
+    };
+
+    const handlePresenceUpdated = (payload: { presence?: PresenceState }) => {
+      const updatedPresence = payload?.presence;
+      if (updatedPresence?.userId === activeDmUserId) {
+        setActiveDmPresence(updatedPresence);
+        setDmPresenceByUserId((prev) => ({
+          ...prev,
+          [updatedPresence.userId]: updatedPresence,
+        }));
+      }
+    };
+
+    socket.on(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
+    socket.on(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
+
+    return () => {
+      socket.off(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
+      socket.off(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
+    };
+  }, [activeDmUserId]);
 
   // Auto scroll to bottom when messages load or new messages appear
   useEffect(() => {
@@ -195,10 +681,11 @@ export function ChatPage() {
   const handleStartCall = (isVideo: boolean) => {
     if (!activeContact) return;
     
-    rtc.startCall({
+    startCall({
       isVideo,
       // Target User ID temporarily set to conversationId for group-based room joining
       targetUserId: activeContact.conversationId,
+      callerId: user?.sub,
       callerName: callerDisplayName,
       callerAvatarUrl,
       peerName: activeContact.groupName || activeContact.conversationId,
@@ -254,6 +741,47 @@ export function ChatPage() {
     } catch {
       return content;
     }
+  };
+
+  const formatCallDuration = (totalSeconds: number): string => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = safeSeconds % 60;
+
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  const resolveCallSummary = (
+    msg: MessageItem,
+    expectedDirection: CallEndedSummary["direction"],
+    expectedIsVideo: boolean,
+  ): CallEndedSummary | null => {
+    const candidates = callSummaries.filter((item) => item.conversationId === msg.conversationId);
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const byDirectionAndType = candidates.filter(
+      (item) => item.direction === expectedDirection && item.isVideo === expectedIsVideo,
+    );
+    const byDirection = candidates.filter((item) => item.direction === expectedDirection);
+    const scopedCandidates = byDirectionAndType.length > 0
+      ? byDirectionAndType
+      : (byDirection.length > 0 ? byDirection : candidates);
+
+    const messageTime = new Date(msg.sentAt).getTime();
+    const nearest = scopedCandidates
+      .map((item) => ({
+        item,
+        diff: Math.abs(new Date(item.endedAt).getTime() - messageTime),
+      }))
+      .sort((left, right) => left.diff - right.diff)[0];
+
+    if (!nearest || nearest.diff > 10 * 60 * 1000) {
+      return null;
+    }
+
+    return nearest.item;
   };
 
   const getReplyPreviewText = (message: MessageReplyReference): string => {
@@ -384,6 +912,38 @@ export function ChatPage() {
     });
   };
 
+  const clearTypingTimer = () => {
+    if (typingStopTimerRef.current !== null) {
+      window.clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
+  };
+
+  const stopTyping = () => {
+    clearTypingTimer();
+
+    if (!isTypingRef.current) {
+      return;
+    }
+
+    isTypingRef.current = false;
+    void sendTyping(false);
+  };
+
+  const scheduleTypingStop = () => {
+    clearTypingTimer();
+
+    typingStopTimerRef.current = window.setTimeout(() => {
+      typingStopTimerRef.current = null;
+      if (!isTypingRef.current) {
+        return;
+      }
+
+      isTypingRef.current = false;
+      void sendTyping(false);
+    }, 1200);
+  };
+
   const handleToggleForwardTarget = (conversationId: string) => {
     setSelectedForwardConversationIds((prev) =>
       prev.includes(conversationId)
@@ -463,6 +1023,12 @@ export function ChatPage() {
     e.preventDefault();
     enqueueAttachments(pastedFiles);
   };
+
+  useEffect(() => {
+    return () => {
+      stopTyping();
+    };
+  }, [activeChat, sendTyping]);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     if (!activeChat) {
@@ -561,6 +1127,7 @@ export function ChatPage() {
       if (sentAny) {
         setInputText(pendingText);
         setReplyingMessage(null);
+        stopTyping();
         focusComposer();
       }
 
@@ -613,6 +1180,15 @@ export function ChatPage() {
           {renderedConversations.map((chat) => (
             (() => {
               const effectiveUnreadCount = chat.conversationId === activeChat ? 0 : (chat.unreadCount ?? 0);
+              const chatAvatarUrl =
+                resolveConversationAvatarUrl(chat as ConversationAvatarLike) ||
+                resolveDmAvatarFromFriendMap(chat as ConversationAvatarLike, friendAvatarByUserId, user?.sub) ||
+                dmAvatarMap[chat.conversationId];
+              const chatDmUserId = chat.isGroup
+                ? undefined
+                : extractDirectPeerUserId(chat as ConversationAvatarLike, user?.sub);
+              const chatPresence = chatDmUserId ? dmPresenceByUserId[chatDmUserId] : undefined;
+              const chatLastSeenBadge = formatLastSeenShort(chatPresence);
               return (
             <div 
               key={chat.conversationId} 
@@ -621,11 +1197,22 @@ export function ChatPage() {
                 activeChat === chat.conversationId ? "bg-blue-50 dark:bg-blue-950/40" : "hover:bg-gray-50 dark:hover:bg-slate-800"
               }`}
             >
-              <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
-                <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
-                  {chat.groupName ? chat.groupName.charAt(0).toUpperCase() : "U"}
-                </AvatarFallback>
-              </Avatar>
+              <div className="relative">
+                <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
+                  {chatAvatarUrl ? <AvatarImage src={chatAvatarUrl} alt={chat.groupName || "Avatar"} /> : null}
+                  <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                    {chat.groupName ? chat.groupName.charAt(0).toUpperCase() : "U"}
+                  </AvatarFallback>
+                </Avatar>
+                {!chat.isGroup && chatPresence?.isActive ? (
+                  <span className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
+                ) : null}
+                {!chat.isGroup && !chatPresence?.isActive ? (
+                  <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
+                    {chatLastSeenBadge || "off"}
+                  </span>
+                ) : null}
+              </div>
               <div className="flex-1 min-w-0 pr-1">
                 <div className="flex justify-between items-baseline mb-1">
                   <span className="font-medium text-[15px] truncate">{chat.groupName || "Không rõ tên"}</span>
@@ -663,16 +1250,27 @@ export function ChatPage() {
             {/* Header khung chat */}
             <div className="h-16 border-b border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex flex-shrink-0 items-center justify-between px-4 z-10 shadow-sm relative">
               <div className="flex items-center gap-3">
-                <Avatar className="h-10 w-10">
-                  <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
-                    {activeContact?.groupName?.charAt(0).toUpperCase() || "U"}
-                  </AvatarFallback>
-                </Avatar>
+                <div className="relative">
+                  <Avatar className="h-10 w-10">
+                    {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Avatar"} /> : null}
+                    <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                      {activeContact?.groupName?.charAt(0).toUpperCase() || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                  {!activeContact?.isGroup && activePresence?.isActive ? (
+                    <span className="absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
+                  ) : null}
+                  {!activeContact?.isGroup && !activePresence?.isActive ? (
+                    <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
+                      {activeLastSeenBadge || "off"}
+                    </span>
+                  ) : null}
+                </div>
                 <div>
                   <h2 className="font-semibold text-base leading-none">
                     {activeContact?.groupName || "Không rõ tên"}
                   </h2>
-                  <span className="text-xs text-green-600 font-medium">Vừa mới truy cập</span>
+                  <span className={`text-xs font-medium ${activeStatusToneClass}`}>{activeStatusText}</span>
                 </div>
               </div>
               <div className="flex items-center text-gray-600 dark:text-slate-300">
@@ -753,6 +1351,46 @@ export function ChatPage() {
                   const forwardedLabel = msg.forwardedFromSenderName
                     ? `${msg.forwardedFromSenderName} đã chuyển tiếp`
                     : "Đã chuyển tiếp";
+                  const messageText = extractMessageText(msg.content).trim();
+                  const isCallMessage = msg.type === "SYSTEM" && /cuộc gọi|call/i.test(messageText);
+                  const isVideoCallByMessage = /video/i.test(messageText);
+                  const callDirectionByMessage: CallEndedSummary["direction"] = isMe ? "outgoing" : "incoming";
+                  const callSummary = isCallMessage
+                    ? resolveCallSummary(msg, callDirectionByMessage, isVideoCallByMessage)
+                    : null;
+
+                  if (isCallMessage) {
+                    const summaryIsOutgoing = isMe;
+                    const summaryAlignClass = summaryIsOutgoing ? "self-end" : "self-start";
+                    const summaryBubbleClass = summaryIsOutgoing
+                      ? "border-blue-500/30 bg-blue-600 text-white"
+                      : "border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+                    const summaryIconClass = summaryIsOutgoing
+                      ? "bg-white/10 text-white"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200";
+                    const summaryMetaClass = summaryIsOutgoing ? "text-white/80" : "text-slate-500 dark:text-slate-400";
+                    const isVideoCall = callSummary?.isVideo ?? isVideoCallByMessage;
+                    const callDirectionLabel = summaryIsOutgoing ? "đi" : "đến";
+                    const titleText = `Cuộc gọi ${isVideoCall ? "video" : "thoại"} ${callDirectionLabel}`;
+                    const durationText = formatCallDuration(callSummary?.durationSeconds ?? 0);
+
+                    return (
+                      <div key={msg.id} className={`group relative flex max-w-[70%] ${summaryAlignClass} flex-col py-1`}>
+                        <div className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${summaryBubbleClass}`}>
+                          <div className="flex items-start gap-3">
+                            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${summaryIconClass}`}>
+                              <Phone size={18} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold">{titleText}</p>
+                              <p className={`mt-0.5 text-xs ${summaryMetaClass}`}>{durationText}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={msg.id} className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col`}>
                       {!isEditing ? (
@@ -1071,6 +1709,11 @@ export function ChatPage() {
                   </button>
                 </div>
               ) : null}
+              {typingIndicatorText ? (
+                <p className="px-1 text-xs text-slate-500 dark:text-slate-400 italic">
+                  {typingIndicatorText}
+                </p>
+              ) : null}
               {queuedAttachments.length > 0 ? (
                 <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
                   {queuedAttachments.map((item) => (
@@ -1128,7 +1771,26 @@ export function ChatPage() {
                 className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
                 ref={composerInputRef}
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setInputText(nextValue);
+
+                  if (!activeChat) {
+                    return;
+                  }
+
+                  if (!nextValue.trim()) {
+                    stopTyping();
+                    return;
+                  }
+
+                  if (!isTypingRef.current) {
+                    isTypingRef.current = true;
+                    void sendTyping(true);
+                  }
+
+                  scheduleTypingStop();
+                }}
                 disabled={isSending || isUploading}
                 onPaste={handleComposerPaste}
               />

@@ -1,6 +1,14 @@
 import ApiClient from "@/lib/api-client";
 import type { UserProfile } from "@urban/shared-types";
 
+export interface PresenceState {
+  userId: string;
+  isActive: boolean;
+  activeSocketCount: number;
+  lastSeenAt?: string;
+  occurredAt: string;
+}
+
 export async function getProfile(): Promise<UserProfile> {
   return await ApiClient.get("/users/me");
 }
@@ -42,4 +50,8 @@ export async function changePassword(payload: { currentPassword?: string, newPas
 
 export async function getUserById(userId: string): Promise<UserProfile> {
   return await ApiClient.get(`/users/${encodeURIComponent(userId)}`);
+}
+
+export async function getUserPresence(userId: string): Promise<PresenceState> {
+  return await ApiClient.get(`/users/${encodeURIComponent(userId)}/presence`);
 }

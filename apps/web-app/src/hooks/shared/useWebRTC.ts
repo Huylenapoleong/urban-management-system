@@ -16,6 +16,17 @@ export interface CallConfig {
   conversationId?: string;
 }
 
+export interface CallEndedSummary {
+  conversationId: string;
+  peerUserId?: string;
+  peerName: string;
+  peerAvatarUrl?: string;
+  isVideo: boolean;
+  durationSeconds: number;
+  endedAt: string;
+  direction: "incoming" | "outgoing";
+}
+
 export function useWebRTC() {
   const { user } = useAuth();
   const [callState, setCallState] = useState<CallState>('IDLE');
@@ -25,6 +36,8 @@ export function useWebRTC() {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isVideoOn, setIsVideoOn] = useState(true);
+  const [lastEndedCall, setLastEndedCall] = useState<CallEndedSummary | null>(null);
+  const [callDurationSeconds, setCallDurationSeconds] = useState(0);
   
   // Pop-up/Alert state to show user
   const [callError, setCallError] = useState<string | null>(null);
@@ -33,6 +46,7 @@ export function useWebRTC() {
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const activeConfigRef = useRef<CallConfig | null>(null);
   const callStateRef = useRef<CallState>('IDLE');
+  const callStartedAtRef = useRef<number | null>(null);
 
   // Configure WebRTC with public STUN/TURN servers
   const getIceServers = () => {
@@ -44,8 +58,30 @@ export function useWebRTC() {
     };
   };
 
-  const cleanup = useCallback(() => {
+  const cleanup = useCallback((options?: { remoteDurationSeconds?: number }) => {
     console.log('[WebRTC] Dọn dẹp kết nối');
+    const currentConfig = activeConfigRef.current;
+    const isConnectedCall = callStateRef.current === 'CONNECTED' && Boolean(currentConfig);
+
+    if (isConnectedCall && callStartedAtRef.current) {
+      const endedAt = Date.now();
+      const computedDuration = Math.max(0, Math.round((endedAt - callStartedAtRef.current) / 1000));
+      const durationSeconds = typeof options?.remoteDurationSeconds === 'number'
+        ? Math.max(0, Math.round(options.remoteDurationSeconds))
+        : computedDuration;
+      setLastEndedCall({
+        conversationId: currentConfig!.conversationId || '',
+        peerUserId: currentConfig?.callerId === user?.sub ? currentConfig?.targetUserId : currentConfig?.callerId,
+        peerName: currentConfig?.peerName || currentConfig?.callerName || 'Người dùng',
+        peerAvatarUrl: currentConfig?.peerAvatarUrl || currentConfig?.callerAvatarUrl,
+        isVideo: Boolean(currentConfig?.isVideo),
+        durationSeconds,
+        endedAt: new Date(endedAt).toISOString(),
+        direction: currentConfig?.callerId === user?.sub ? 'outgoing' : 'incoming',
+      });
+    }
+
+    callStartedAtRef.current = null;
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
@@ -62,7 +98,7 @@ export function useWebRTC() {
     setCallState('IDLE');
     setActiveConfig(null);
     setCallError(null);
-  }, [localStream, remoteStream]);
+  }, [localStream, remoteStream, user?.sub]);
 
   useEffect(() => {
     activeConfigRef.current = activeConfig;
@@ -70,6 +106,33 @@ export function useWebRTC() {
 
   useEffect(() => {
     callStateRef.current = callState;
+
+    if (callState === 'CONNECTED' && !callStartedAtRef.current) {
+      callStartedAtRef.current = Date.now();
+    }
+
+    if (callState === 'IDLE') {
+      callStartedAtRef.current = null;
+      setCallDurationSeconds(0);
+    }
+  }, [callState]);
+
+  useEffect(() => {
+    if (callState !== 'CONNECTED' || !callStartedAtRef.current) {
+      setCallDurationSeconds(0);
+      return;
+    }
+
+    const tick = () => {
+      setCallDurationSeconds(Math.max(0, Math.floor((Date.now() - callStartedAtRef.current!) / 1000)));
+    };
+
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [callState]);
 
   // Handle emitting signal via Web Socket
@@ -223,6 +286,7 @@ export function useWebRTC() {
   const startCall = useCallback(async (config: CallConfig) => {
     if (callStateRef.current !== 'IDLE') return;
 
+    setLastEndedCall(null);
     setActiveConfig(config);
     setCallState('CALLING');
     setCallError(null);
@@ -244,6 +308,7 @@ export function useWebRTC() {
     if (callStateRef.current !== 'INCOMING' || !activeConfigRef.current) return;
 
     const config = activeConfigRef.current;
+    setLastEndedCall(null);
     setCallState('CONNECTED');
 
     const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
@@ -270,9 +335,21 @@ export function useWebRTC() {
   // Các event hàm khác (accept, reject...) tương tự
   const endCall = useCallback(() => {
     const config = activeConfigRef.current;
+    const startedAt = callStartedAtRef.current;
+    const durationSeconds = startedAt
+      ? Math.max(0, Math.round((Date.now() - startedAt) / 1000))
+      : 0;
+
     if (config?.conversationId) {
-      const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
-      emitSignal(CHAT_SOCKET_EVENTS.CALL_END as any, { conversationId: targetConvId, userId: user?.sub });
+      const isCurrentUserCaller = config.callerId === user?.sub;
+      const targetConvId = isCurrentUserCaller
+        ? config.conversationId
+        : (config.callerId ? `dm:${config.callerId}` : config.conversationId);
+      emitSignal(CHAT_SOCKET_EVENTS.CALL_END as any, {
+        conversationId: targetConvId,
+        userId: user?.sub,
+        durationSeconds,
+      });
     }
     cleanup();
   }, [emitSignal, cleanup, user?.sub]);
@@ -345,7 +422,7 @@ export function useWebRTC() {
       };
 
       const onCallReject = () => cleanup();
-      const onCallEnd = () => cleanup();
+      const onCallEnd = (data: any) => cleanup({ remoteDurationSeconds: data?.durationSeconds });
 
       const onOffer = async (data: any) => {
         if (!peerConnection.current) {
@@ -440,5 +517,8 @@ export function useWebRTC() {
     toggleMute,
     toggleVideo,
     cleanup,
+    lastEndedCall,
+    callDurationSeconds,
+    clearLastEndedCall: () => setLastEndedCall(null),
   };
 }
