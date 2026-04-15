@@ -240,13 +240,25 @@ export class PresenceStateDto {
   @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
   userId!: string;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({
+    example: true,
+    description:
+      'True when the user currently has an active chat socket or has shown recent authenticated activity within the short presence window.',
+  })
   isActive!: boolean;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({
+    example: 2,
+    description:
+      'Number of active chat sockets currently tracked for the user. `isActive` may still be true when this value is 0 if the user was recently active through authenticated requests.',
+  })
   activeSocketCount!: number;
 
-  @ApiPropertyOptional({ example: '2026-03-18T03:10:00.000Z' })
+  @ApiPropertyOptional({
+    example: '2026-03-18T03:10:00.000Z',
+    description:
+      'Best-effort last seen timestamp. This is omitted while the user is considered active.',
+  })
   lastSeenAt?: string;
 
   @ApiProperty({ example: '2026-03-18T03:11:15.000Z' })
