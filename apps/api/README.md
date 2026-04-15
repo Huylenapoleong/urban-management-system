@@ -384,6 +384,22 @@ Response data returns:
 - `url`: object URL or CDN URL when `S3_PUBLIC_BASE_URL` is set
 - `bucket`, `contentType`, `size`, `uploadedAt`, `uploadedBy`
 
+Canonical write flow:
+
+- use `key` from upload/presign responses as the canonical media value
+- send `avatarKey`, `attachmentKey`, or `mediaKeys` into business endpoints
+- legacy `avatarUrl`, `attachmentUrl`, and `mediaUrls` are still accepted as fallback
+- if both key and legacy URL are sent together, the API prefers the key and ignores the legacy URL
+
+History and cleanup:
+
+- `GET /api/uploads/media?target=AVATAR` lists the current user's avatar history
+- `GET /api/uploads/media?target=REPORT&entityId=<reportId>` lists report uploads
+- `GET /api/uploads/media?target=MESSAGE&entityId=<conversationId>` lists message uploads
+- `DELETE /api/users/me/avatar` clears only the current avatar reference from the user profile and keeps uploaded avatar files in history
+- an older avatar from `GET /api/uploads/media?target=AVATAR` can be reused later by sending its `avatarKey` back to `PATCH /api/users/me`
+- `DELETE /api/uploads/media` removes an uploaded object only when it is not actively referenced by the current avatar, report media, or active message attachment
+
 Notes:
 
 - `AVATAR` only accepts image mime types.

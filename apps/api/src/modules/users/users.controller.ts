@@ -443,7 +443,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Update my profile',
     description:
-      'Updates the authenticated user profile. Citizens cannot change their own `locationCode`. Use `avatarKey` for the private-media flow; `avatarUrl` remains for backward compatibility.',
+      'Updates the authenticated user profile. Citizens cannot change their own `locationCode`. Use `avatarKey` for the private-media flow; `avatarUrl` remains for backward compatibility. If both are sent during migration, the API will prefer `avatarKey`.',
   })
   @ApiBody({ type: UpdateProfileRequestDto })
   @ApiOkEnvelopeResponse(UserProfileDto, {
@@ -451,9 +451,9 @@ export class UsersController {
   })
   @ApiBadRequestExamples('The profile update payload is invalid.', [
     {
-      name: 'avatarKeyAndUrl',
-      summary: 'avatarKey and avatarUrl both provided',
-      message: 'Provide either avatarKey or avatarUrl, not both.',
+      name: 'avatarKeyTargetMismatch',
+      summary: 'avatarKey does not belong to avatar target',
+      message: 'key does not match target.',
       path: '/api/users/me',
     },
     {
@@ -485,6 +485,28 @@ export class UsersController {
     @Body() body: UpdateProfileRequestDto,
   ) {
     return this.usersService.updateProfile(user, body);
+  }
+
+  @Delete('me/avatar')
+  @ApiOperation({
+    summary: 'Remove my current avatar',
+    description:
+      'Clears the avatar currently attached to the authenticated user profile. This does not delete previously uploaded avatar files from the user upload library.',
+  })
+  @ApiOkEnvelopeResponse(UserProfileDto, {
+    description:
+      'Updated user profile after removing the current avatar reference.',
+  })
+  @ApiConflictExamples('The user profile changed during this request.', [
+    {
+      name: 'avatarClearConflict',
+      summary: 'Concurrent profile update conflict',
+      message: 'User profile was changed by another request. Please retry.',
+      path: '/api/users/me/avatar',
+    },
+  ])
+  deleteMyAvatar(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.clearCurrentAvatar(user);
   }
 
   @Roles('WARD_OFFICER', 'PROVINCE_OFFICER', 'ADMIN')

@@ -228,8 +228,40 @@ Fields:
 Recommended FE flow:
 
 1. upload file first
-2. take `data.url` or `data.key` from response
-3. include that URL in report/message payloads
+2. keep `data.key` as the canonical value for later business requests
+3. send:
+   - `avatarKey` for profile/avatar updates
+   - `attachmentKey` for message send/update
+   - `mediaKeys` for report create/update
+4. treat `avatarUrl`, `attachmentUrl`, and `mediaUrls` as legacy fallback only
+
+Important compatibility rule:
+
+- if FE sends both canonical key fields and legacy URL fields during migration, backend now prefers the key field and ignores the legacy URL field
+
+Upload history endpoints:
+
+- `GET /uploads/media?target=AVATAR`
+- `GET /uploads/media?target=REPORT&entityId=<reportId>`
+- `GET /uploads/media?target=MESSAGE&entityId=<conversationId>`
+- `DELETE /uploads/media`
+
+Avatar-specific rules:
+
+- `PATCH /users/me` with `avatarKey` sets the selected uploaded avatar as the current profile avatar
+- the `avatarKey` can come from a fresh upload or from an older item returned by `GET /uploads/media?target=AVATAR`
+- `DELETE /users/me/avatar` removes only the current avatar from the user profile
+- `DELETE /users/me/avatar` does not remove the uploaded file from avatar history
+- after clearing the current avatar, that same file can still be selected again later via `avatarKey`
+
+Delete rules:
+
+- a file can be deleted only by its uploader
+- backend blocks deletion when the file is still actively referenced by:
+  - current avatar
+  - current report media
+  - an active message attachment
+- FE should use `isInUse` from `GET /uploads/media` to disable destructive delete actions
 
 ## Common Errors
 

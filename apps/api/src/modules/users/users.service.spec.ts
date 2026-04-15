@@ -154,6 +154,72 @@ describe('UsersService', () => {
     expect(repository.transactWrite).not.toHaveBeenCalled();
   });
 
+  it('prefers avatarKey over legacy avatarUrl during profile update', async () => {
+    repository.get.mockResolvedValue({
+      ...currentUser,
+      avatarUrl: 'https://cdn.example.com/legacy-avatar.jpg',
+    });
+
+    await service.updateProfile(actor, {
+      avatarKey: 'uploads/avatar/user-1/avatar-next.jpg',
+      avatarUrl: 'https://cdn.example.com/legacy-avatar.jpg',
+    });
+
+    expect(mediaAssetService.createOwnedAssetReference).toHaveBeenCalledWith({
+      key: 'uploads/avatar/user-1/avatar-next.jpg',
+      target: 'AVATAR',
+      ownerUserId: actor.id,
+      entityId: actor.id,
+    });
+    expect(repository.transactWrite).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Users',
+          item: expect.objectContaining({
+            avatarAsset: expect.objectContaining({
+              key: 'uploads/avatar/user-1/avatar-next.jpg',
+            }),
+            avatarUrl: undefined,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('clears the current avatar without touching identity claims', async () => {
+    repository.get.mockResolvedValue({
+      ...currentUser,
+      avatarAsset: {
+        key: 'uploads/avatar/user-1/avatar-current.jpg',
+        target: 'AVATAR',
+        uploadedBy: actor.id,
+      },
+      avatarUrl: 'https://cdn.example.com/avatar-current.jpg',
+    });
+
+    const result = await service.clearCurrentAvatar(actor);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        avatarAsset: undefined,
+        avatarUrl: undefined,
+      }),
+    );
+    expect(repository.transactWrite).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Users',
+          item: expect.objectContaining({
+            avatarAsset: undefined,
+            avatarUrl: undefined,
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('maps identity write conflicts back to duplicate email validation', async () => {
     const otherUser: StoredUser = {
       ...currentUser,

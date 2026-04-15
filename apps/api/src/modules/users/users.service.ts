@@ -650,8 +650,11 @@ export class UsersService {
         avatarInput.asset !== undefined
           ? avatarInput.asset
           : current.avatarAsset,
-      avatarUrl:
-        avatarInput.url !== undefined ? avatarInput.url : current.avatarUrl,
+      avatarUrl: Object.prototype.hasOwnProperty.call(body, 'avatarKey')
+        ? undefined
+        : avatarInput.url !== undefined
+          ? avatarInput.url
+          : current.avatarUrl,
       locationCode: nextLocationCode,
       updatedAt: nowIso(),
     };
@@ -666,6 +669,30 @@ export class UsersService {
       previousUser: current,
       expectedUpdatedAt: current.updatedAt,
     });
+    return this.serializeUserProfile(nextUser);
+  }
+
+  async clearCurrentAvatar(actor: AuthenticatedUser): Promise<UserProfile> {
+    const current = await this.getByIdOrThrow(actor.id);
+
+    if (!current.avatarAsset && !current.avatarUrl) {
+      return this.serializeUserProfile(current);
+    }
+
+    const nextUser: StoredUser = {
+      ...current,
+      GSI1SK: 'USER',
+      avatarAsset: undefined,
+      avatarUrl: undefined,
+      updatedAt: nowIso(),
+    };
+
+    await this.persistUserWithIdentityClaims({
+      nextUser,
+      previousUser: current,
+      expectedUpdatedAt: current.updatedAt,
+    });
+
     return this.serializeUserProfile(nextUser);
   }
 
@@ -1697,22 +1724,8 @@ export class UsersService {
     ownerUserId: string,
     entityId?: string,
   ): { asset?: MediaAsset; url?: string } {
-    const hasAvatarKey = Object.prototype.hasOwnProperty.call(
-      body,
-      'avatarKey',
-    );
-    const hasAvatarUrl = Object.prototype.hasOwnProperty.call(
-      body,
-      'avatarUrl',
-    );
     const avatarKey = optionalString(body, 'avatarKey', { maxLength: 500 });
     const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
-
-    if (hasAvatarKey && hasAvatarUrl) {
-      throw new BadRequestException(
-        'Provide either avatarKey or avatarUrl, not both.',
-      );
-    }
 
     if (avatarKey) {
       return {
