@@ -2546,14 +2546,6 @@ export class ConversationsService {
     entityId?: string,
     options: { allowClear?: boolean } = {},
   ): { asset?: MediaAsset; url?: string } {
-    const hasAttachmentKey = Object.prototype.hasOwnProperty.call(
-      body,
-      'attachmentKey',
-    );
-    const hasAttachmentUrl = Object.prototype.hasOwnProperty.call(
-      body,
-      'attachmentUrl',
-    );
     const attachmentKey = optionalString(body, 'attachmentKey', {
       allowEmpty: options.allowClear,
       maxLength: 500,
@@ -2562,12 +2554,6 @@ export class ConversationsService {
       allowEmpty: options.allowClear,
       maxLength: 500,
     });
-
-    if (hasAttachmentKey && hasAttachmentUrl) {
-      throw new BadRequestException(
-        'Provide either attachmentKey or attachmentUrl, not both.',
-      );
-    }
 
     if (attachmentKey !== undefined) {
       if (!attachmentKey) {

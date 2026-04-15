@@ -36,7 +36,7 @@ export class MediaAssetService {
     }
 
     if (expectedEntity) {
-      if (!parsedKey.entityId || parsedKey.entityId !== expectedEntity) {
+      if (parsedKey.entityId && parsedKey.entityId !== expectedEntity) {
         throw new BadRequestException('key does not match entityId.');
       }
 
@@ -87,7 +87,7 @@ export class MediaAssetService {
     }
 
     if (expectedEntity) {
-      if (!parsedKey.entityId || parsedKey.entityId !== expectedEntity) {
+      if (parsedKey.entityId && parsedKey.entityId !== expectedEntity) {
         throw new ForbiddenException('You cannot delete this upload.');
       }
 
@@ -143,6 +143,17 @@ export class MediaAssetService {
       fileName: parsedKey.fileName,
       uploadedBy: input.ownerUserId,
     };
+  }
+
+  describeKey(key: string): {
+    normalizedKey: string;
+    prefix: string;
+    target: string;
+    ownerUserId: string;
+    entityId?: string;
+    fileName: string;
+  } {
+    return this.parseKey(key);
   }
 
   async resolveAsset(

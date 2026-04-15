@@ -1036,6 +1036,38 @@ describe('ConversationsService', () => {
     );
   });
 
+  it('prefers attachmentKey over legacy attachmentUrl when sending a message', async () => {
+    const result = await service.sendDirectMessage(actor, {
+      targetUserId: otherUser.userId,
+      content: '{"text":"Gui file moi.","mention":[]}',
+      type: 'TEXT',
+      attachmentKey: 'uploads/message/user-1/dm-user-1-user-2/file.jpg',
+      attachmentUrl: 'https://cdn.example.com/legacy-file.jpg',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        attachmentAsset: expect.objectContaining({
+          key: 'uploads/message/user-1/dm-user-1-user-2/file.jpg',
+        }),
+        attachmentUrl: undefined,
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            attachmentAsset: expect.objectContaining({
+              key: 'uploads/message/user-1/dm-user-1-user-2/file.jpg',
+            }),
+            attachmentUrl: undefined,
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('recalls a message for everyone by updating the stored message state', async () => {
     const actorMessage: StoredMessage = {
       ...latestMessage,
