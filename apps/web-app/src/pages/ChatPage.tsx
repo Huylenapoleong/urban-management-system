@@ -9,12 +9,10 @@ import { useConversations, useMessages } from "@/hooks/shared/useChatData";
 import { format } from "date-fns";
 import { useLocation } from "react-router-dom";
 import { uploadMedia } from "@/services/upload.api";
-import { getUserById, getUserPresence, type PresenceState } from "@/services/user.api";
-import { listMyFriends } from "@/services/friends.api";
+import { getUserById, searchUserExactByContact, getUserPresence, type PresenceState } from "@/services/user.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { leaveGroup, listGroupMembers, manageGroupMember } from "@/services/group.api";
 import { listMyFriendRequests, listMyFriends, sendFriendRequest } from "@/services/friends.api";
-import { getUserById, searchUserExactByContact } from "@/services/user.api";
 import { toast } from "react-hot-toast";
 import type { MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
 import type { GroupMemberRole } from "@urban/shared-constants";
@@ -1938,18 +1936,23 @@ export function ChatPage() {
           {renderedConversations.map((chat) => (
             (() => {
               const effectiveUnreadCount = chat.conversationId === activeChat ? 0 : (chat.unreadCount ?? 0);
-              const chatAvatarUrl =
-                resolveConversationAvatarUrl(chat as ConversationAvatarLike) ||
-                resolveDmAvatarFromFriendMap(chat as ConversationAvatarLike, friendAvatarByUserId, user?.sub) ||
-                dmAvatarMap[chat.conversationId];
               const chatDmUserId = chat.isGroup
                 ? undefined
                 : extractDirectPeerUserId(chat as ConversationAvatarLike, user?.sub);
               const chatPresence = chatDmUserId ? dmPresenceByUserId[chatDmUserId] : undefined;
               const chatLastSeenBadge = formatLastSeenShort(chatPresence);
               const chatGroupId = extractGroupIdFromConversationId(chat.conversationId);
+              const chatAvatarFromConversation = resolveConversationAvatarUrl(chat as ConversationAvatarLike);
+              const chatAvatarFromFriendMap = resolveDmAvatarFromFriendMap(
+                chat as ConversationAvatarLike,
+                friendAvatarByUserId,
+                user?.sub,
+              );
               const chatAvatarUrl =
                 (chatGroupId ? groupAvatarOverrides[chatGroupId] : undefined) ||
+                chatAvatarFromConversation ||
+                chatAvatarFromFriendMap ||
+                dmAvatarMap[chat.conversationId] ||
                 (chat as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }).avatarAsset?.resolvedUrl ||
                 (chat as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }).avatarUrl;
               return (
