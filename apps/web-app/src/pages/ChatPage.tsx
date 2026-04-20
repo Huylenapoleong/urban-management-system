@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2 } from "lucide-react";
+import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useWebRTC } from "@/hooks/shared/useWebRTC";
 import { CallModal } from "@/components/CallModal";
 import { useAuth } from "@/providers/AuthProvider";
@@ -41,6 +41,27 @@ type MentionCandidate = {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?84|0)\d{9,10}$/;
+const GROUP_AVATAR_OVERRIDES_STORAGE_KEY = "web-app-group-avatar-overrides";
+
+function extractGroupIdFromConversationId(conversationId?: string | null): string | undefined {
+  if (!conversationId) {
+    return undefined;
+  }
+
+  if (/^group:/i.test(conversationId)) {
+    return conversationId.replace(/^group:/i, "").trim() || undefined;
+  }
+
+  if (/^grp#/i.test(conversationId)) {
+    return conversationId.replace(/^grp#/i, "").trim() || undefined;
+  }
+
+  return undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export function ChatPage() {
   const location = useLocation();
@@ -76,7 +97,30 @@ export function ChatPage() {
   const [selectedInviteUserIds, setSelectedInviteUserIds] = useState<string[]>([]);
   const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<string | null>(null);
   const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<string | null>(null);
+  const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
+  const [groupAvatarOverrides, setGroupAvatarOverrides] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") {
+      return {};
+    }
+
+    try {
+      const raw = window.localStorage.getItem(GROUP_AVATAR_OVERRIDES_STORAGE_KEY);
+      if (!raw) {
+        return {};
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return {};
+      }
+
+      return parsed as Record<string, string>;
+    } catch {
+      return {};
+    }
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const groupAvatarInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLInputElement>(null);
   const rtc = useWebRTC();
   const { user } = useAuth();
@@ -135,21 +179,7 @@ export function ChatPage() {
     : mergedConversations;
 
   const activeContact = renderedConversations.find((c) => c.conversationId === activeChat);
-  const activeGroupId = (() => {
-    if (!activeChat) {
-      return undefined;
-    }
-
-    if (/^group:/i.test(activeChat)) {
-      return activeChat.replace(/^group:/i, "").trim() || undefined;
-    }
-
-    if (/^grp#/i.test(activeChat)) {
-      return activeChat.replace(/^grp#/i, "").trim() || undefined;
-    }
-
-    return undefined;
-  })();
+  const activeGroupId = extractGroupIdFromConversationId(activeChat);
   const normalizedForwardSearch = forwardSearch.trim().toLowerCase();
   const forwardDestinationConversations = mergedConversations.filter((conversation) => {
     if (conversation.conversationId === activeChat) {
@@ -173,9 +203,12 @@ export function ChatPage() {
     return haystack.includes(normalizedForwardSearch);
   });
   const cachedProfile = queryClient.getQueryData<UserProfile>(["profile"]);
-  const activeContactAvatarUrl =
+  const activeContactBaseAvatarUrl =
     (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarAsset?.resolvedUrl ||
-    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarUrl ||
+    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarUrl;
+  const activeContactAvatarUrl =
+    (activeGroupId ? groupAvatarOverrides[activeGroupId] : undefined) ||
+    activeContactBaseAvatarUrl ||
     chatState.avatarUrl;
   const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
   const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
@@ -230,6 +263,46 @@ export function ChatPage() {
     () => new Set(myFriends.map((friend) => friend.userId)),
     [myFriends],
   );
+  const messageSenderNameByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+
+    messages.forEach((message) => {
+      const senderName = message.senderName?.trim();
+      if (message.senderId && senderName) {
+        map.set(message.senderId, senderName);
+      }
+    });
+
+    return map;
+  }, [messages]);
+  const mentionNameByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+
+    activeGroupMembers.forEach((member) => {
+      const profile = memberProfilesById[member.userId];
+      const displayName =
+        profile?.fullName ||
+        myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
+        messageSenderNameByUserId.get(member.userId);
+
+      if (displayName) {
+        map.set(member.userId, displayName);
+      }
+    });
+
+    if (user?.sub) {
+      map.set(user.sub, cachedProfile?.fullName || "Bạn");
+    }
+
+    return map;
+  }, [
+    activeGroupMembers,
+    cachedProfile?.fullName,
+    memberProfilesById,
+    messageSenderNameByUserId,
+    myFriends,
+    user?.sub,
+  ]);
   const outgoingFriendRequestUserIds = useMemo(
     () => new Set(outgoingFriendRequests.map((friendRequest) => friendRequest.userId)),
     [outgoingFriendRequests],
@@ -268,23 +341,19 @@ export function ChatPage() {
 
     const keyword = mentionQuery.trim().toLowerCase();
     const candidates = activeGroupMembers
-      .map((member) => {
-        const profile = memberProfilesById[member.userId];
-        const displayName =
-          profile?.fullName ||
-          myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
-          member.userId;
+      .map((member, index) => {
+        const displayName = mentionNameByUserId.get(member.userId);
 
         return {
           userId: member.userId,
-          displayName,
+          displayName: displayName || `Thành viên ${index + 1}`,
         };
       })
       .filter((candidate) => candidate.userId !== user?.sub);
 
     const filtered = keyword
       ? candidates.filter((candidate) =>
-          `${candidate.displayName} ${candidate.userId}`
+          `${candidate.displayName}`
             .toLowerCase()
             .includes(keyword),
         )
@@ -294,17 +363,22 @@ export function ChatPage() {
   }, [
     activeGroupId,
     activeGroupMembers,
-    memberProfilesById,
+    mentionNameByUserId,
     mentionStartIndex,
     mentionQuery,
-    myFriends,
     user?.sub,
   ]);
   const isMentionMenuOpen = mentionStartIndex !== null && mentionCandidates.length > 0;
   const canManageGroupMembers =
     currentUserMembership?.roleInGroup === "OWNER" ||
     currentUserMembership?.roleInGroup === "OFFICER";
-  const canViewGroupMemberList = user?.role === "ADMIN";
+  const canShowAddMemberSection =
+    user?.role !== "CITIZEN" &&
+    (canManageGroupMembers || user?.role === "ADMIN");
+  const canViewGroupMemberList = Boolean(user?.sub);
+  const canViewConversationCode = user?.role === "ADMIN";
+  const canInviteGroupFriends = Boolean(activeGroupId && user?.sub);
+  const canUpdateGroupAvatar = Boolean(activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"));
 
   const manageGroupMemberMutation = useMutation({
     mutationFn: ({ groupId, userId, action, roleInGroup }: { groupId: string; userId: string; action: "add" | "update" | "remove"; roleInGroup?: GroupMemberRole }) =>
@@ -389,6 +463,21 @@ export function ChatPage() {
       setIsInfoOpen(false);
     }
   }, [activeChat]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        GROUP_AVATAR_OVERRIDES_STORAGE_KEY,
+        JSON.stringify(groupAvatarOverrides),
+      );
+    } catch {
+      // Ignore storage quota or privacy mode failures.
+    }
+  }, [groupAvatarOverrides]);
 
   useEffect(() => {
     setActiveMessageMenuId(null);
@@ -736,10 +825,141 @@ export function ChatPage() {
     return /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(url);
   };
 
+  const replaceMentionIdsWithNames = (text: string, mentionPayload: unknown): string => {
+    if (!text || !Array.isArray(mentionPayload) || mentionPayload.length === 0) {
+      return text;
+    }
+
+    const mentionIds = mentionPayload
+      .map((entry) => {
+        if (typeof entry === "string") {
+          return entry;
+        }
+
+        if (!entry || typeof entry !== "object") {
+          return undefined;
+        }
+
+        const record = entry as Record<string, unknown>;
+        if (typeof record.userId === "string") {
+          return record.userId;
+        }
+
+        if (typeof record.id === "string") {
+          return record.id;
+        }
+
+        return undefined;
+      })
+      .filter((value): value is string => Boolean(value?.trim()));
+
+    let nextText = text;
+    mentionIds.forEach((userId) => {
+      const displayName = mentionNameByUserId.get(userId);
+      if (!displayName) {
+        return;
+      }
+
+      const escapedUserId = escapeRegExp(userId);
+      const mentionPattern = new RegExp(`@${escapedUserId}(?=\\b|\\s|$)`, "g");
+      nextText = nextText.replace(mentionPattern, `@${displayName}`);
+    });
+
+    return nextText;
+  };
+
+  const extractMentionDisplayNames = (mentionPayload: unknown): string[] => {
+    if (!Array.isArray(mentionPayload)) {
+      return [];
+    }
+
+    const uniqueNames = new Set<string>();
+    mentionPayload.forEach((entry) => {
+      let userId: string | undefined;
+
+      if (typeof entry === "string") {
+        userId = entry;
+      } else if (entry && typeof entry === "object") {
+        const record = entry as Record<string, unknown>;
+        if (typeof record.userId === "string") {
+          userId = record.userId;
+        } else if (typeof record.id === "string") {
+          userId = record.id;
+        }
+      }
+
+      if (!userId) {
+        return;
+      }
+
+      const displayName = mentionNameByUserId.get(userId);
+      if (displayName) {
+        uniqueNames.add(displayName);
+      }
+    });
+
+    return Array.from(uniqueNames);
+  };
+
+  const renderMessageTextWithMentions = (content: string, isMe: boolean) => {
+    let parsedMentionPayload: unknown;
+    let textValue = content;
+
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        textValue = typeof (parsed as { text?: unknown }).text === "string"
+          ? (parsed as { text: string }).text
+          : content;
+        parsedMentionPayload = (parsed as { mention?: unknown }).mention;
+      }
+    } catch {
+      textValue = content;
+    }
+
+    const normalizedText = replaceMentionIdsWithNames(textValue, parsedMentionPayload);
+    const mentionTokens = extractMentionDisplayNames(parsedMentionPayload)
+      .map((name) => `@${name}`)
+      .sort((left, right) => right.length - left.length);
+
+    if (mentionTokens.length === 0) {
+      return normalizedText;
+    }
+
+    const mentionPattern = new RegExp(
+      `(${mentionTokens.map((token) => escapeRegExp(token)).join("|")})`,
+      "g",
+    );
+    const parts = normalizedText.split(mentionPattern).filter(Boolean);
+    const mentionTokenSet = new Set(mentionTokens);
+
+    return parts.map((part, index) => {
+      if (!mentionTokenSet.has(part)) {
+        return <span key={`plain-${index}`}>{part}</span>;
+      }
+
+      return (
+        <span
+          key={`mention-${index}`}
+          className={isMe ? "font-bold text-blue-100" : "font-bold text-blue-600 dark:text-blue-400"}
+        >
+          {part}
+        </span>
+      );
+    });
+  };
+
   const extractMessageText = (content: string): string => {
     try {
       const parsed = JSON.parse(content);
-      return parsed.text || content;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const text = typeof (parsed as { text?: unknown }).text === "string"
+          ? (parsed as { text: string }).text
+          : content;
+        return replaceMentionIdsWithNames(text, (parsed as { mention?: unknown }).mention);
+      }
+
+      return content;
     } catch {
       return content;
     }
@@ -932,6 +1152,39 @@ export function ChatPage() {
     setQueuedAttachments((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const handleGroupAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file || !activeGroupId) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Vui lòng chọn tệp ảnh hợp lệ.");
+      return;
+    }
+
+    try {
+      setIsUpdatingGroupAvatar(true);
+      const uploaded = await uploadMedia({
+        file,
+        target: "GENERAL",
+        entityId: activeGroupId,
+      });
+
+      setGroupAvatarOverrides((prev) => ({
+        ...prev,
+        [activeGroupId]: uploaded.url,
+      }));
+      toast.success("Đã cập nhật ảnh nhóm.");
+    } catch (error: any) {
+      toast.error(error?.message || "Không thể cập nhật ảnh nhóm lúc này.");
+    } finally {
+      setIsUpdatingGroupAvatar(false);
+    }
+  };
+
   const handleComposerPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const items = Array.from(e.clipboardData.items || []);
     const pastedFiles = items
@@ -1102,7 +1355,7 @@ export function ChatPage() {
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0 hide-scrollbar">
           {loadingConversations && <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">Đang tải cuộc trò chuyện...</div>}
            {!loadingConversations && renderedConversations.length === 0 && (
              <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">
@@ -1112,6 +1365,11 @@ export function ChatPage() {
           {renderedConversations.map((chat) => (
             (() => {
               const effectiveUnreadCount = chat.conversationId === activeChat ? 0 : (chat.unreadCount ?? 0);
+              const chatGroupId = extractGroupIdFromConversationId(chat.conversationId);
+              const chatAvatarUrl =
+                (chatGroupId ? groupAvatarOverrides[chatGroupId] : undefined) ||
+                (chat as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }).avatarAsset?.resolvedUrl ||
+                (chat as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }).avatarUrl;
               return (
             <div 
               key={chat.conversationId} 
@@ -1121,6 +1379,7 @@ export function ChatPage() {
               }`}
             >
               <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
+                {chatAvatarUrl ? <AvatarImage src={chatAvatarUrl} alt={chat.groupName || "Avatar nhóm"} /> : null}
                 <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
                   {chat.groupName ? chat.groupName.charAt(0).toUpperCase() : "U"}
                 </AvatarFallback>
@@ -1151,7 +1410,7 @@ export function ChatPage() {
       </div>
 
       {/* Cột phải: Detail (Chi tiết Chat) */}
-      <div className={`${activeChat ? "flex" : "hidden md:flex"} flex-1 flex-col bg-slate-50 dark:bg-slate-950 relative overflow-hidden h-full lg:transition-[padding] lg:duration-200 ${isInfoOpen ? "lg:pr-[356px]" : ""}`}>
+      <div className={`${activeChat ? "flex" : "hidden md:flex"} flex-1 flex-col bg-[#f3f6fb] dark:bg-slate-950 relative overflow-hidden h-full lg:transition-[padding] lg:duration-200 ${isInfoOpen ? "lg:pr-[356px]" : ""}`}>
         {!activeChat ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-slate-500 gap-4 mt-20">
             <UserRound size={60} className="opacity-20" />
@@ -1171,6 +1430,7 @@ export function ChatPage() {
                   <X size={18} />
                 </button>
                 <Avatar className="h-10 w-10">
+                  {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Avatar nhóm"} /> : null}
                   <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
                     {activeContact?.groupName?.charAt(0).toUpperCase() || "U"}
                   </AvatarFallback>
@@ -1218,46 +1478,84 @@ export function ChatPage() {
             ) : null}
 
             <aside
-              className={`absolute right-0 top-16 z-30 flex h-[calc(100%-4rem)] w-full max-w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 dark:border-slate-700 dark:bg-slate-900 sm:w-[360px] sm:max-w-[90%] md:w-[340px] lg:right-3 lg:top-[4.5rem] lg:h-[calc(100%-5.25rem)] lg:rounded-2xl lg:border lg:border-slate-200/80 lg:shadow-[0_20px_50px_rgba(2,6,23,0.25)] dark:lg:border-slate-700/80 ${isInfoOpen ? "translate-x-0" : "translate-x-full"}`}
+              className={`absolute right-0 top-16 z-30 flex h-[calc(100%-4rem)] w-full max-w-full flex-col border-l border-slate-200 bg-[#eef3fb] shadow-xl transition-transform duration-200 dark:border-slate-700 dark:bg-slate-900 sm:w-[360px] sm:max-w-[90%] md:w-[340px] lg:right-0 lg:top-0 lg:h-full lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-slate-200 dark:lg:border-slate-700 lg:shadow-none ${isInfoOpen ? "translate-x-0" : "translate-x-full"}`}
             >
-              <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-700 px-4 py-3">
-                <h3 className="text-sm font-semibold text-gray-800 dark:text-slate-100">Thông tin cuộc trò chuyện</h3>
+              <div className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 dark:border-slate-700 dark:bg-slate-900">
+                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Thông tin cuộc trò chuyện</h3>
                 <button
                   onClick={() => setIsInfoOpen(false)}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800"
+                  className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   Đóng
                 </button>
               </div>
-              <div className="flex-1 space-y-4 overflow-y-auto p-4 text-sm text-gray-700 dark:text-slate-300">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-400">Tên hiển thị</p>
-                  <p className="mt-1 font-medium text-gray-900 dark:text-slate-100">{activeContact?.groupName || "Không rõ tên"}</p>
+              <div className="flex-1 space-y-3 overflow-y-auto p-3 text-sm text-slate-700 dark:text-slate-300 hide-scrollbar">
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Tên hiển thị</p>
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{activeContact?.groupName || "Không rõ tên"}</p>
                 </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-400">Loại cuộc trò chuyện</p>
-                  <p className="mt-1">{activeContact?.isGroup ? "Nhóm" : "Trực tiếp"}</p>
-                </div>
-                {canViewGroupMemberList ? (
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-400">Mã hội thoại</p>
-                    <p className="mt-1 break-all text-xs text-gray-600 dark:text-slate-300">{activeContact?.conversationId || "-"}</p>
+                {activeGroupId ? (
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Ảnh nhóm</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <Avatar className="h-14 w-14">
+                        {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Ảnh nhóm"} /> : null}
+                        <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold text-lg">
+                          {activeContact?.groupName?.charAt(0).toUpperCase() || "G"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Tải ảnh nhóm để hiển thị ngay trên giao diện chat.
+                        </p>
+                        {canUpdateGroupAvatar ? (
+                          <>
+                            <input
+                              ref={groupAvatarInputRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(event) => void handleGroupAvatarFileChange(event)}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => groupAvatarInputRef.current?.click()}
+                              disabled={isUpdatingGroupAvatar}
+                              className="mt-2 inline-flex items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <ImagePlus size={12} />
+                              {isUpdatingGroupAvatar ? "Đang tải..." : "Đổi ảnh nhóm"}
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                 ) : null}
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-400">Tin nhắn mới</p>
-                  <p className="mt-1">{activeContact?.unreadCount ?? 0}</p>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Loại cuộc trò chuyện</p>
+                  <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{activeContact?.isGroup ? "Nhóm" : "Trực tiếp"}</p>
                 </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-400">Cập nhật gần nhất</p>
-                  <p className="mt-1">{activeContact?.updatedAt ? format(new Date(activeContact.updatedAt), "HH:mm dd/MM/yyyy") : "-"}</p>
+                {canViewConversationCode ? (
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Mã hội thoại</p>
+                    <p className="mt-1 break-all text-xs text-slate-600 dark:text-slate-300">{activeContact?.conversationId || "-"}</p>
+                  </div>
+                ) : null}
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Tin nhắn mới</p>
+                  <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{activeContact?.unreadCount ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Cập nhật gần nhất</p>
+                  <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{activeContact?.updatedAt ? format(new Date(activeContact.updatedAt), "HH:mm dd/MM/yyyy") : "-"}</p>
                 </div>
 
                 {activeGroupId ? (
-                  <div className="space-y-3 border-t border-gray-100 pt-3 dark:border-slate-700">
+                  <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-400">Thành viên nhóm</p>
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-300">{activeGroupMembers.length}</span>
+                      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Thành viên nhóm</p>
+                      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{activeGroupMembers.length}</span>
                     </div>
 
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -1274,7 +1572,7 @@ export function ChatPage() {
                       <button
                         type="button"
                         onClick={() => void refetchGroupMembers()}
-                        className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
                       >
                         Thử tải lại thành viên
                       </button>
@@ -1282,13 +1580,13 @@ export function ChatPage() {
 
                     {canViewGroupMemberList ? (
                       isLoadingGroupMembers ? (
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Đang tải danh sách thành viên...</p>
+                        <p className="text-xs text-slate-500">Đang tải danh sách thành viên...</p>
                       ) : (
-                        <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+                        <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
                           {activeGroupMembers.length === 0 ? (
                             <p className="px-1 py-1 text-xs text-slate-500 dark:text-slate-400">Chưa có thành viên hiển thị.</p>
                           ) : (
-                            activeGroupMembers.map((member) => (
+                            activeGroupMembers.map((member, index) => (
                               <div
                                 key={member.userId}
                                 className="flex items-center justify-between rounded-md px-2 py-1 text-xs text-slate-700 dark:text-slate-200"
@@ -1299,7 +1597,8 @@ export function ChatPage() {
                                     const displayName =
                                       profile?.fullName ||
                                       myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
-                                      member.userId;
+                                      messageSenderNameByUserId.get(member.userId) ||
+                                      `Thành viên ${index + 1}`;
 
                                     return (
                                       <>
@@ -1307,7 +1606,6 @@ export function ChatPage() {
                                           {displayName}
                                           {member.userId === user?.sub ? " (Bạn)" : ""}
                                         </p>
-                                        <p className="truncate text-[10px] text-slate-500 dark:text-slate-400">{member.userId}</p>
                                       </>
                                     );
                                   })()}
@@ -1321,7 +1619,7 @@ export function ChatPage() {
                                           <button
                                             type="button"
                                             onClick={() => void handleToggleMemberRole(member.userId, member.roleInGroup)}
-                                            className="rounded px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                                            className="rounded px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-50"
                                           >
                                             {member.roleInGroup === "OFFICER" ? "Hạ quyền" : "Nâng quyền"}
                                           </button>
@@ -1329,7 +1627,7 @@ export function ChatPage() {
                                         <button
                                           type="button"
                                           onClick={() => void handleRemoveGroupMember(member.userId)}
-                                          className="rounded px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                          className="rounded px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50"
                                         >
                                           Xóa
                                         </button>
@@ -1337,15 +1635,15 @@ export function ChatPage() {
                                     ) : null}
 
                                     {friendUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                      <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
                                         Bạn bè
                                       </span>
                                     ) : outgoingFriendRequestUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                                      <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
                                         Đã gửi lời mời
                                       </span>
                                     ) : incomingFriendRequestUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                                      <span className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
                                         Đã nhận lời mời
                                       </span>
                                     ) : (
@@ -1353,7 +1651,7 @@ export function ChatPage() {
                                         type="button"
                                         onClick={() => void handleSendFriendRequest(member.userId)}
                                         disabled={sendFriendRequestMutation.isPending && sendingFriendRequestUserId === member.userId}
-                                        className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/70"
+                                        className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         {sendFriendRequestMutation.isPending && sendingFriendRequestUserId === member.userId
                                           ? "Đang gửi..."
@@ -1367,18 +1665,16 @@ export function ChatPage() {
                           )}
                         </div>
                       )
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Danh sách thành viên chỉ hiển thị cho tài khoản admin.</p>
-                    )}
+                    ) : null}
 
-                    {canManageGroupMembers ? (
-                      <form onSubmit={handleAddGroupMember} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+                    {canShowAddMemberSection ? (
+                      <form onSubmit={handleAddGroupMember} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Thêm thành viên</p>
                         <input
                           value={memberLookupInput}
                           onChange={(event) => setMemberLookupInput(event.target.value)}
                           placeholder="Nhập số điện thoại hoặc email"
-                          className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900"
+                          className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         />
                         <p className="text-[10px] text-slate-500 dark:text-slate-400">
                           Hệ thống sẽ tra cứu chính xác người dùng theo số điện thoại/email rồi thêm vào nhóm.
@@ -1386,7 +1682,7 @@ export function ChatPage() {
                         <select
                           value={memberRoleInput}
                           onChange={(event) => setMemberRoleInput(event.target.value as GroupMemberRole)}
-                          className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900"
+                          className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         >
                           <option value="MEMBER">MEMBER</option>
                           <option value="OFFICER">OFFICER</option>
@@ -1401,19 +1697,19 @@ export function ChatPage() {
                       </form>
                     ) : null}
 
-                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Mời bạn bè</p>
                       <button
                         type="button"
                         onClick={() => setIsInviteDialogOpen(true)}
-                        disabled={!canManageGroupMembers}
-                        className="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/70"
+                        disabled={!canInviteGroupFriends}
+                        className="w-full rounded border border-blue-300 bg-blue-50 px-2 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Mời bạn bè vào nhóm
                       </button>
-                      {!canManageGroupMembers ? (
+                      {!canInviteGroupFriends ? (
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Bạn chưa có quyền mời thành viên (cần vai trò OWNER/OFFICER).
+                          Không thể mời thành viên ở cuộc trò chuyện hiện tại.
                         </p>
                       ) : (
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -1446,7 +1742,7 @@ export function ChatPage() {
             </aside>
 
             {/* Nội dung tin nhắn */}
-            <div className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative">
+            <div className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar">
               {loadingMessages && <div className="text-center py-4 text-sm text-gray-500 dark:text-slate-400">Đang tải tin nhắn...</div>}
               
               <div className="flex flex-col gap-3 pb-4">
@@ -1620,7 +1916,7 @@ export function ChatPage() {
                               </div>
                             </div>
                           ) : (
-                            <p className="text-[15px]">{extractMessageText(msg.content)}</p>
+                            <p className="text-[15px]">{renderMessageTextWithMentions(msg.content, isMe)}</p>
                           )}
                         </div>
                         {msg.attachmentUrl ? (
@@ -1699,7 +1995,7 @@ export function ChatPage() {
                       className="bg-slate-50 dark:bg-slate-800 dark:border-slate-700"
                     />
 
-                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 hide-scrollbar">
                       {forwardDestinationConversations.length === 0 ? (
                         <div className="p-3 text-sm text-slate-500 dark:text-slate-400">Không có cuộc trò chuyện phù hợp.</div>
                       ) : (
@@ -1791,7 +2087,7 @@ export function ChatPage() {
                       className="bg-slate-50 dark:bg-slate-800 dark:border-slate-700"
                     />
 
-                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 hide-scrollbar">
                       {inviteCandidateFriends.length === 0 ? (
                         <div className="p-3 text-sm text-slate-500 dark:text-slate-400">Không còn bạn bè phù hợp để mời.</div>
                       ) : (
@@ -1916,7 +2212,7 @@ export function ChatPage() {
                 </div>
               ) : null}
               {queuedAttachments.length > 0 ? (
-                <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-36 overflow-y-auto pr-1 hide-scrollbar">
                   {queuedAttachments.map((item) => (
                     <div key={item.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2">
                       <div className="flex items-center justify-between gap-3">
@@ -1990,7 +2286,7 @@ export function ChatPage() {
                   onPaste={handleComposerPaste}
                 />
                 {isMentionMenuOpen ? (
-                  <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                  <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
                     {mentionCandidates.map((candidate) => (
                       <button
                         key={candidate.userId}

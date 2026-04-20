@@ -18,6 +18,7 @@ export default function GroupsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const canCreateOfficialGroup = user?.role === "OFFICIAL" || user?.role === "ADMIN";
 
   const [isJoining, setIsJoining] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState<string | null>(null);
@@ -115,6 +116,11 @@ export default function GroupsPage() {
       return;
     }
 
+    if (!canCreateOfficialGroup && formState.groupType === "OFFICIAL") {
+      toast.error("Tài khoản hiện tại không thể tạo nhóm OFFICIAL.");
+      return;
+    }
+
     createGroupMutation.mutate({
       groupName: formState.groupName.trim(),
       description: formState.description.trim() || undefined,
@@ -194,7 +200,7 @@ export default function GroupsPage() {
               >
                 <option value="AREA">AREA</option>
                 <option value="TOPIC">TOPIC</option>
-                <option value="OFFICIAL">OFFICIAL</option>
+                {canCreateOfficialGroup ? <option value="OFFICIAL">OFFICIAL</option> : null}
                 <option value="PRIVATE">PRIVATE</option>
               </select>
             </div>
