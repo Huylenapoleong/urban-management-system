@@ -9,6 +9,7 @@ import { GroupsService } from './groups.service';
 describe('GroupsService', () => {
   const repository = {
     batchGet: jest.fn(),
+    delete: jest.fn(),
     get: jest.fn(),
     put: jest.fn(),
     queryByGsi1: jest.fn(),
@@ -33,6 +34,10 @@ describe('GroupsService', () => {
   const groupCleanupService = {
     buildGroupDeleteCleanupTask: jest.fn(),
     processTask: jest.fn(),
+  };
+  const chatRealtimeService = {
+    emitToUser: jest.fn(),
+    leaveConversationForUser: jest.fn(),
   };
   const config = {
     dynamodbGroupsTableName: 'Groups',
@@ -86,6 +91,10 @@ describe('GroupsService', () => {
     deletedAt: null,
     updatedAt: '2026-03-18T10:00:00.000Z',
   };
+  const memberActorMembership: StoredMembership = {
+    ...actorMembership,
+    roleInGroup: 'MEMBER',
+  };
 
   const memberTwo: StoredMembership = {
     ...actorMembership,
@@ -114,9 +123,11 @@ describe('GroupsService', () => {
       authorizationService as never,
       usersService as never,
       groupCleanupService as never,
+      chatRealtimeService as never,
       config as never,
     );
     repository.batchGet.mockResolvedValue([]);
+    repository.delete.mockResolvedValue(undefined);
     repository.queryByGsi1.mockResolvedValue([]);
     repository.transactPut.mockResolvedValue(undefined);
     repository.transactWrite.mockResolvedValue(undefined);
@@ -267,5 +278,152 @@ describe('GroupsService', () => {
       new ForbiddenException('Citizens can only add their friends to groups.'),
     );
     expect(repository.transactWrite).not.toHaveBeenCalled();
+  });
+
+  it('removes the actor from group chat access when leaving a group', async () => {
+    authorizationService.canDeleteGroup.mockReturnValue(false);
+    repository.get.mockImplementation(
+      (tableName: string, _pk: string, sk: string) => {
+        if (tableName === 'Groups') {
+          return group;
+        }
+
+        if (tableName === 'Memberships') {
+          if (sk === actorMembership.SK) {
+            return memberActorMembership;
+          }
+
+          if (sk === memberTwo.SK) {
+            return memberTwo;
+          }
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-1' &&
+          options?.beginsWith === 'CONV#GRP#group-1#LAST#'
+        ) {
+          return [
+            {
+              PK: 'USER#user-1',
+              SK: 'CONV#GRP#group-1#LAST#2026-03-18T10:30:00.000Z',
+              entityType: 'CONVERSATION',
+              GSI1PK: 'USER#user-1#TYPE#GRP',
+              userId: 'user-1',
+              conversationId: 'GRP#group-1',
+              groupName: 'Area 1',
+              lastMessagePreview: 'Hello',
+              lastSenderName: 'Ward Officer',
+              unreadCount: 1,
+              isGroup: true,
+              deletedAt: null,
+              updatedAt: '2026-03-18T10:30:00.000Z',
+            },
+          ];
+        }
+
+        return [actorMembership, memberTwo];
+      },
+    );
+
+    const result = await service.leaveGroup(
+      {
+        ...actor,
+        role: 'MEMBER' as never,
+      },
+      group.groupId,
+    );
+
+    expect(repository.delete).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-1',
+      'CONV#GRP#group-1#LAST#2026-03-18T10:30:00.000Z',
+    );
+    expect(chatRealtimeService.leaveConversationForUser).toHaveBeenCalledWith(
+      'user-1',
+      'GRP#group-1',
+    );
+    expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
+      'user-1',
+      'conversation.removed',
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        conversationKey: 'GRP#group-1',
+        reason: 'conversation.deleted',
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        groupId: 'group-1',
+        userId: 'user-1',
+      }),
+    );
+  });
+
+  it('removes a kicked member from group chat access immediately', async () => {
+    authorizationService.canManageGroup.mockReturnValue(true);
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-2' &&
+          options?.beginsWith === 'CONV#GRP#group-1#LAST#'
+        ) {
+          return [
+            {
+              PK: 'USER#user-2',
+              SK: 'CONV#GRP#group-1#LAST#2026-03-18T10:31:00.000Z',
+              entityType: 'CONVERSATION',
+              GSI1PK: 'USER#user-2#TYPE#GRP',
+              userId: 'user-2',
+              conversationId: 'GRP#group-1',
+              groupName: 'Area 1',
+              lastMessagePreview: 'Hello',
+              lastSenderName: 'Ward Officer',
+              unreadCount: 1,
+              isGroup: true,
+              deletedAt: null,
+              updatedAt: '2026-03-18T10:31:00.000Z',
+            },
+          ];
+        }
+
+        return [actorMembership, memberTwo];
+      },
+    );
+
+    const result = await service.manageMember(actor, group.groupId, 'user-2', {
+      action: 'remove',
+    });
+
+    expect(repository.delete).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-2',
+      'CONV#GRP#group-1#LAST#2026-03-18T10:31:00.000Z',
+    );
+    expect(chatRealtimeService.leaveConversationForUser).toHaveBeenCalledWith(
+      'user-2',
+      'GRP#group-1',
+    );
+    expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
+      'user-2',
+      'conversation.removed',
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        conversationKey: 'GRP#group-1',
+        reason: 'conversation.deleted',
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        groupId: 'group-1',
+        userId: 'user-2',
+      }),
+    );
   });
 });
