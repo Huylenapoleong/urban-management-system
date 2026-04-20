@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Shield, AlertTriangle } from "lucide-react";
+import { Loader2, Shield, AlertTriangle, Users, CheckCircle2, Clock3, MessageCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { getReports } from "@/services/report.api";
 import { getGroups } from "@/services/group.api";
@@ -14,6 +14,11 @@ export default function HomePage() {
     queryKey: ["groups"],
     queryFn: () => getGroups(),
   });
+
+  const totalReports = reports?.length ?? 0;
+  const pendingReports = (reports ?? []).filter((report: any) => report.status === "PENDING").length;
+  const resolvedReports = (reports ?? []).filter((report: any) => report.status === "RESOLVED").length;
+  const totalGroups = groups?.length ?? 0;
 
   return (
     <div className="container mx-auto p-4 max-w-5xl space-y-8">
@@ -39,6 +44,74 @@ export default function HomePage() {
           </Link>
         </div>
       </header>
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Tổng báo cáo</p>
+          <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{totalReports}</p>
+          <div className="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Cập nhật theo dữ liệu mới nhất
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
+          <p className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">Đang chờ xử lý</p>
+          <p className="mt-2 text-2xl font-bold text-amber-800 dark:text-amber-200">{pendingReports}</p>
+          <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
+            <Clock3 className="h-3.5 w-3.5" />
+            Cần ưu tiên theo dõi
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
+          <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Đã xử lý</p>
+          <p className="mt-2 text-2xl font-bold text-emerald-800 dark:text-emerald-200">{resolvedReports}</p>
+          <div className="mt-3 flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Theo dõi tiến độ tích cực
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
+          <p className="text-xs uppercase tracking-wide text-blue-700 dark:text-blue-300">Nhóm đang tham gia</p>
+          <p className="mt-2 text-2xl font-bold text-blue-800 dark:text-blue-200">{totalGroups}</p>
+          <div className="mt-3 flex items-center gap-2 text-xs text-blue-700 dark:text-blue-300">
+            <Users className="h-3.5 w-3.5" />
+            Kết nối cộng đồng
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Thao tác nhanh</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Truy cập nhanh các luồng chính</p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Link
+            to="/reports/new"
+            className="flex items-center gap-3 rounded-lg border border-red-100 bg-red-50 p-3 transition hover:bg-red-100 dark:border-red-900/40 dark:bg-red-950/20 dark:hover:bg-red-950/30"
+          >
+            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <span className="text-sm font-medium text-red-700 dark:text-red-300">Tạo báo cáo sự cố</span>
+          </Link>
+          <Link
+            to="/groups"
+            className="flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 transition hover:bg-blue-100 dark:border-blue-900/40 dark:bg-blue-950/20 dark:hover:bg-blue-950/30"
+          >
+            <Shield className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">Khám phá nhóm</span>
+          </Link>
+          <Link
+            to="/chat"
+            className="flex items-center gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30"
+          >
+            <MessageCircle className="h-4 w-4 text-emerald-600" />
+            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Mở trò chuyện</span>
+          </Link>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Reports Section */}

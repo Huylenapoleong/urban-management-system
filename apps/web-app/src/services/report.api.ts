@@ -3,10 +3,10 @@ import ApiClient from "@/lib/api-client";
 export type ReportPayload = {
   title: string;
   description: string;
-  categoryId: string;
+  category: string;
+  priority: string;
   locationCode: string;
   mediaUrls?: string[];
-  isAnonymous: boolean;
 };
 
 export async function submitReport(payload: ReportPayload): Promise<any> {

@@ -15,6 +15,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^(\+?84|0)\d{9,10}$/;
+
+function normalizePhone(value: string): string {
+  return value.replace(/[\s.-]/g, "");
+}
+
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -110,6 +117,7 @@ export function SettingsPage() {
       queryClient.setQueryData(["profile"], updatedContext);
       queryClient.setQueryData(["profile", "me"], updatedContext);
       setAvatarUploading(false);
+      setProfileMessage({ text: "Cập nhật ảnh đại diện thành công", type: "success" });
     },
     onError: (err: { message?: string }) => {
       setAvatarUploading(false);
@@ -120,7 +128,31 @@ export function SettingsPage() {
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setProfileMessage({ text: "", type: "" });
-    profileMutation.mutate(formData);
+
+    const normalizedFullName = formData.fullName.trim();
+    const normalizedEmail = formData.email.trim();
+    const normalizedPhone = normalizePhone(formData.phone.trim());
+
+    if (normalizedFullName.length < 2) {
+      setProfileMessage({ text: "Họ và tên cần ít nhất 2 ký tự.", type: "error" });
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      setProfileMessage({ text: "Email không đúng định dạng.", type: "error" });
+      return;
+    }
+
+    if (!PHONE_REGEX.test(normalizedPhone)) {
+      setProfileMessage({ text: "Số điện thoại không hợp lệ.", type: "error" });
+      return;
+    }
+
+    profileMutation.mutate({
+      fullName: normalizedFullName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
+    });
   };
 
   const handleOpenPasswordModal = () => {
@@ -131,8 +163,13 @@ export function SettingsPage() {
   const handleOtpStepSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordMessage({ text: "", type: "" });
-    if (!otpCode.trim()) {
+    const otp = otpCode.trim();
+    if (!otp) {
       setPasswordMessage({ text: "Vui lòng nhập mã OTP", type: "error" });
+      return;
+    }
+    if (!/^\d{6}$/.test(otp)) {
+      setPasswordMessage({ text: "Mã OTP phải gồm đúng 6 chữ số.", type: "error" });
       return;
     }
     setPasswordStep("password");
@@ -144,6 +181,18 @@ export function SettingsPage() {
     if (!otpCode.trim()) {
       setPasswordMessage({ text: "Thiếu mã OTP, vui lòng nhập lại", type: "error" });
       setPasswordStep("otp");
+      return;
+    }
+    if (passwordData.currentPassword.trim().length < 8) {
+      setPasswordMessage({ text: "Mật khẩu hiện tại phải có ít nhất 8 ký tự.", type: "error" });
+      return;
+    }
+    if (passwordData.newPassword.trim().length < 8) {
+      setPasswordMessage({ text: "Mật khẩu mới phải có ít nhất 8 ký tự.", type: "error" });
+      return;
+    }
+    if (passwordData.newPassword === passwordData.currentPassword) {
+      setPasswordMessage({ text: "Mật khẩu mới phải khác mật khẩu hiện tại.", type: "error" });
       return;
     }
     if (passwordData.newPassword !== passwordData.confirmPassword) {
