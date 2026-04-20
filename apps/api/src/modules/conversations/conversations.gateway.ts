@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -60,6 +60,10 @@ type AuthenticatedSocket = Socket<
   {
     user?: AuthenticatedUser;
     sessionId?: string;
+    claims?: {
+      exp: number;
+    };
+    authenticatedAtMs?: number;
   }
 >;
 
@@ -71,6 +75,9 @@ type AuthenticatedSocket = Socket<
 export class ConversationsGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
+  private readonly logger = new Logger(ConversationsGateway.name);
+  private readonly socketAuthCacheWindowMs = 30_000;
+
   @WebSocketServer()
   server!: Server;
 
@@ -89,8 +96,7 @@ export class ConversationsGateway
     try {
       const authContext = await this.chatSocketAuthService.authenticate(client);
       const { user, sessionId } = authContext;
-      client.data.user = user;
-      client.data.sessionId = sessionId;
+      this.cacheSocketAuthContext(client, authContext);
       await this.chatRealtimeService.attachUserSocket(
         client,
         user.id,
@@ -563,83 +569,60 @@ export class ConversationsGateway
       const user = await this.getSocketUser(client);
       const signalPayload = ensureObject(payload);
       const conversationId = this.extractConversationId(payload);
-
-      let access: ResolvedConversationAccess;
-      try {
-        access = await this.conversationsService.resolveConversationAccess(
-          user,
-          conversationId,
-          true,
-        );
-      } catch (error: unknown) {
-        if (
-          this.isHttpStatusError(error, 403, 404) &&
-          conversationId.startsWith('dm:')
-        ) {
-          const targetId = conversationId.replace('dm:', '').trim();
-          if (targetId && targetId !== user.id) {
-            // Auto-create room by sending an initial system message about the call
-            let contentText = '📞 Cuộc gọi thoại';
-            if (
-              event === CHAT_SOCKET_EVENTS.CALL_INIT &&
-              signalPayload.isVideo === true
-            )
-              contentText = '🎥 Cuộc gọi Video';
-            if (event === CHAT_SOCKET_EVENTS.CALL_REJECT)
-              contentText = '❌ Cuộc gọi nhỡ';
-            if (event === CHAT_SOCKET_EVENTS.CALL_END)
-              contentText = '🛑 Cuộc gọi kết thúc';
-
-            await this.conversationsService.sendDirectMessage(user, {
-              targetUserId: targetId,
-              content: contentText,
-              type: 'SYSTEM',
-            });
-            // Retry access resolution
-            access = await this.conversationsService.resolveConversationAccess(
-              user,
-              conversationId,
-              true,
-            );
-          } else {
-            throw error;
-          }
-        } else {
-          throw error;
-        }
-      }
-
-      this.chatRealtimeService.emitToConversation(
-        access.conversationKey,
-        event,
-        payload,
-        client.id,
+      const access = await this.conversationsService.resolveConversationAccess(
+        user,
+        conversationId,
+        true,
       );
 
-      // If the call ends or is rejected, and it already existed, we still want to log it
+      this.emitSignal(access, event, signalPayload, client.id, user.id);
+
+      // Call signaling should stay fast. Persisting a system log is best-effort only.
       if (
         event === CHAT_SOCKET_EVENTS.CALL_REJECT ||
         event === CHAT_SOCKET_EVENTS.CALL_END
       ) {
-        try {
-          await this.conversationsService.sendMessage(
-            user,
-            access.conversationKey,
-            {
-              content:
-                event === CHAT_SOCKET_EVENTS.CALL_REJECT
-                  ? '❌ Cuộc gọi nhỡ'
-                  : '🛑 Cuộc gọi kết thúc',
-              type: 'SYSTEM',
-            },
-          );
-        } catch {
-          return undefined;
-        }
+        void this.conversationsService
+          .sendMessage(user, access.conversationKey, {
+            content:
+              event === CHAT_SOCKET_EVENTS.CALL_REJECT
+                ? 'Call was rejected.'
+                : 'Call ended.',
+            type: 'SYSTEM',
+          })
+          .catch(() => {
+            this.logger.warn(
+              `Failed to persist ${event} system message for ${access.conversationKey}.`,
+            );
+          });
       }
 
       return { success: true };
     }, errorCode);
+  }
+
+  private emitSignal(
+    access: ResolvedConversationAccess,
+    event: string,
+    payload: Record<string, unknown>,
+    exceptSocketId: string,
+    actorUserId: string,
+  ): void {
+    if (!access.isGroup) {
+      const recipientUserIds = access.participants.filter(
+        (participantId) => participantId !== actorUserId,
+      );
+
+      this.chatRealtimeService.emitToUsers(recipientUserIds, event, payload);
+      return;
+    }
+
+    this.chatRealtimeService.emitToConversation(
+      access.conversationKey,
+      event,
+      payload,
+      exceptSocketId,
+    );
   }
 
   private async emitPresenceSnapshot(
@@ -689,15 +672,41 @@ export class ConversationsGateway
   private async getSocketUser(
     client: AuthenticatedSocket,
   ): Promise<AuthenticatedUser> {
+    const now = Date.now();
+    const cachedUser = client.data.user;
+    const authenticatedAtMs = client.data.authenticatedAtMs;
+    const claims = client.data.claims;
+
+    if (
+      cachedUser &&
+      typeof authenticatedAtMs === 'number' &&
+      now - authenticatedAtMs <= this.socketAuthCacheWindowMs &&
+      claims &&
+      claims.exp * 1000 > now
+    ) {
+      return cachedUser;
+    }
+
     try {
       const authContext = await this.chatSocketAuthService.authenticate(client);
-      client.data.user = authContext.user;
-      client.data.sessionId = authContext.sessionId;
+      this.cacheSocketAuthContext(client, authContext);
       return authContext.user;
     } catch (error) {
       client.disconnect(true);
       throw error;
     }
+  }
+
+  private cacheSocketAuthContext(
+    client: AuthenticatedSocket,
+    authContext: Awaited<ReturnType<ChatSocketAuthService['authenticate']>>,
+  ): void {
+    client.data.user = authContext.user;
+    client.data.sessionId = authContext.sessionId;
+    client.data.claims = {
+      exp: authContext.claims.exp,
+    };
+    client.data.authenticatedAtMs = Date.now();
   }
 
   private extractConversationId(payload: unknown): string {
@@ -706,15 +715,6 @@ export class ConversationsGateway
       minLength: 1,
       maxLength: 200,
     });
-  }
-
-  private isHttpStatusError(
-    error: unknown,
-    ...statuses: number[]
-  ): error is HttpException {
-    return (
-      error instanceof HttpException && statuses.includes(error.getStatus())
-    );
   }
 
   private async withAck<TData>(
