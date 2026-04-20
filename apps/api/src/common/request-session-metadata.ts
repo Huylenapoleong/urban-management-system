@@ -49,17 +49,35 @@ export function deriveSessionScope(input: {
     /android|iphone|ipad|ipod|mobile|ios|blackberry|iemobile|opera mini/i.test(
       userAgent,
     );
+  const isBrowserLikeUserAgent =
+    typeof userAgent === 'string' &&
+    /mozilla\/|applewebkit\/|chrome\/|safari\/|firefox\/|edg\/|opr\//i.test(
+      userAgent,
+    );
+  const isNativeAppLikeUserAgent =
+    typeof userAgent === 'string' &&
+    /okhttp\/|cfnetwork\/|darwin\/|reactnative|react-native|expo|expo-go|dalvik\//i.test(
+      userAgent,
+    );
 
-  if (appVariant === 'mobile-app') {
+  if (isNativeAppVariant(appVariant)) {
     return 'MOBILE_APP';
   }
 
-  if (appVariant?.includes('web')) {
+  if (isWebAppVariant(appVariant)) {
+    return isMobileUserAgent ? 'WEB_MOBILE' : 'WEB_DESKTOP';
+  }
+
+  if (isNativeAppLikeUserAgent) {
+    return 'MOBILE_APP';
+  }
+
+  if (isBrowserLikeUserAgent) {
     return isMobileUserAgent ? 'WEB_MOBILE' : 'WEB_DESKTOP';
   }
 
   if (isMobileUserAgent) {
-    return 'MOBILE_APP';
+    return 'WEB_MOBILE';
   }
 
   if (userAgent) {
@@ -67,6 +85,26 @@ export function deriveSessionScope(input: {
   }
 
   return 'UNKNOWN';
+}
+
+function isNativeAppVariant(appVariant?: string): boolean {
+  if (!appVariant) {
+    return false;
+  }
+
+  return /(^|[-_])(mobile-app|native|react-native|expo|ios-app|android-app)([-_]|$)/i.test(
+    appVariant,
+  );
+}
+
+function isWebAppVariant(appVariant?: string): boolean {
+  if (!appVariant) {
+    return false;
+  }
+
+  return /(^|[-_])(web|browser|admin-web|citizen-web|mobile-web)([-_]|$)/i.test(
+    appVariant,
+  );
 }
 
 function readHeader(
