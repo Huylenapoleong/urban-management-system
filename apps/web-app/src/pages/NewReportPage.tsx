@@ -1,29 +1,58 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import { Loader2, AlertTriangle, ArrowLeft } from "lucide-react";
 import { submitReport } from "@/services/report.api";
+import { useAuth } from "@/providers/AuthProvider";
 
 type FormValues = {
   title: string;
   description: string;
-  categoryId: string;
+  category: string;
+  priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
   locationCode: string;
-  isAnonymous: boolean;
 };
+
+function normalizeLocationCode(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function isValidLocationCode(value: string): boolean {
+  const normalized = normalizeLocationCode(value);
+  const segments = normalized.split("-").filter(Boolean);
+  if (segments.length < 2 || segments.length > 4) {
+    return false;
+  }
+  if (segments[0] !== "VN") {
+    return false;
+  }
+  return segments.slice(1).every((segment) => /^[A-Z0-9]+$/.test(segment));
+}
 
 export default function NewReportPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, setValue, getValues, formState: { errors } } = useForm<FormValues>({
     defaultValues: {
-      isAnonymous: false,
+      priority: "MEDIUM",
+      locationCode: user?.locationCode ?? "",
     }
   });
+
+  useEffect(() => {
+    if (!user?.locationCode) {
+      return;
+    }
+
+    if (!getValues("locationCode")) {
+      setValue("locationCode", normalizeLocationCode(user.locationCode));
+    }
+  }, [user?.locationCode, getValues, setValue]);
 
   const mutation = useMutation({
     mutationFn: submitReport,
@@ -33,14 +62,20 @@ export default function NewReportPage() {
       toast.success("Gửi báo cáo thành công!");
       navigate("/reports");
     },
-    onError: () => {
-      toast.error("Không thể gửi báo cáo lúc này.");
+    onError: (error: any) => {
+      toast.error(error?.message || "Không thể gửi báo cáo lúc này.");
     },
     onSettled: () => setIsSubmitting(false),
   });
 
   const onSubmit = (data: FormValues) => {
-    mutation.mutate(data);
+    mutation.mutate({
+      title: data.title.trim(),
+      description: data.description.trim(),
+      category: data.category,
+      priority: data.priority,
+      locationCode: normalizeLocationCode(data.locationCode),
+    });
   };
 
   return (
@@ -89,39 +124,45 @@ export default function NewReportPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Danh mục *</label>
             <select
-              {...register("categoryId", { required: "Vui lòng chọn danh mục" })}
+              {...register("category", { required: "Vui lòng chọn danh mục" })}
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Chọn danh mục</option>
               <option value="INFRASTRUCTURE">Hạ tầng</option>
               <option value="ENVIRONMENT">Môi trường</option>
               <option value="SECURITY">An ninh</option>
-              <option value="OTHER">Khác</option>
+              <option value="ADMIN">Hành chính</option>
             </select>
-            {errors.categoryId && <p className="text-red-500 text-xs mt-1">{errors.categoryId.message}</p>}
+            {errors.category && <p className="text-red-500 text-xs mt-1">{errors.category.message}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mức độ ưu tiên *</label>
+            <select
+              {...register("priority", { required: "Vui lòng chọn mức độ ưu tiên" })}
+              className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="LOW">Thấp</option>
+              <option value="MEDIUM">Trung bình</option>
+              <option value="HIGH">Cao</option>
+              <option value="URGENT">Khẩn cấp</option>
+            </select>
+            {errors.priority && <p className="text-red-500 text-xs mt-1">{errors.priority.message}</p>}
           </div>
 
           <div>
              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mã khu vực *</label>
             <input
-              {...register("locationCode", { required: "Vui lòng nhập mã khu vực" })}
+              {...register("locationCode", {
+                required: "Vui lòng nhập mã khu vực",
+                validate: (value) =>
+                  isValidLocationCode(value) || "Mã khu vực không hợp lệ (ví dụ: VN-HCM-BQ1-P01)",
+              })}
                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="VD: Q1-PBN"
+              placeholder="VD: VN-HCM-BQ1-P01"
             />
             {errors.locationCode && <p className="text-red-500 text-xs mt-1">{errors.locationCode.message}</p>}
           </div>
-        </div>
-
-        <div className="flex items-center gap-2 mt-4">
-          <input 
-            type="checkbox" 
-            id="isAnonymous"
-            {...register("isAnonymous")}
-            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-          />
-          <label htmlFor="isAnonymous" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-             Gửi ẩn danh
-          </label>
         </div>
 
         <div className="pt-4 flex justify-end gap-3 border-t border-gray-100 dark:border-gray-700">

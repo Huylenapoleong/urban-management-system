@@ -1,13 +1,48 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, FileText, Plus } from "lucide-react";
+import { Loader2, FileText, Plus, Search, ArrowUpDown } from "lucide-react";
 import { Link } from "react-router-dom";
 import { getReports } from "@/services/report.api";
 
+type SortOrder = "newest" | "oldest";
+
 export function ReportsPage() {
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [searchText, setSearchText] = useState("");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
+
   const { data: reports, isLoading } = useQuery({
     queryKey: ["reports"],
     queryFn: getReports,
   });
+
+  const normalizedSearch = searchText.trim().toLowerCase();
+  const filteredReports = useMemo(() => {
+    const source = reports ?? [];
+
+    const byStatus =
+      statusFilter === "ALL"
+        ? source
+        : source.filter((report: any) => report.status === statusFilter);
+
+    const bySearch = normalizedSearch
+      ? byStatus.filter((report: any) => {
+          const haystack = [report.title, report.description, report.status]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(normalizedSearch);
+        })
+      : byStatus;
+
+    const sorted = [...bySearch].sort((a: any, b: any) => {
+      const left = new Date(a.createdAt).getTime();
+      const right = new Date(b.createdAt).getTime();
+      return sortOrder === "newest" ? right - left : left - right;
+    });
+
+    return sorted;
+  }, [reports, statusFilter, normalizedSearch, sortOrder]);
 
   if (isLoading) {
     return (
@@ -33,6 +68,44 @@ export function ReportsPage() {
         </Link>
       </div>
 
+      <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div className="relative md:col-span-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder="Tìm theo tiêu đề hoặc mô tả..."
+              className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"
+            />
+          </div>
+
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"
+          >
+            <option value="ALL">Tất cả trạng thái</option>
+            <option value="PENDING">PENDING</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="RESOLVED">RESOLVED</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => setSortOrder((prev) => (prev === "newest" ? "oldest" : "newest"))}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            <ArrowUpDown className="h-4 w-4" />
+            {sortOrder === "newest" ? "Mới nhất trước" : "Cũ nhất trước"}
+          </button>
+        </div>
+
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          Hiển thị {filteredReports.length} / {reports?.length ?? 0} báo cáo.
+        </p>
+      </div>
+
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -45,7 +118,7 @@ export function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {reports?.map((report: any) => (
+              {filteredReports.map((report: any) => (
                 <tr key={report.id} className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 last:border-0 transition">
                   <td className="px-6 py-4 font-medium text-gray-900 dark:text-slate-100">{report.title}</td>
                   <td className="px-6 py-4 text-gray-500 dark:text-slate-300 max-w-[200px] truncate">{report.description}</td>
@@ -67,10 +140,12 @@ export function ReportsPage() {
                   </td>
                 </tr>
               ))}
-              {reports?.length === 0 && (
+              {filteredReports.length === 0 && (
                 <tr>
                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500 dark:text-slate-300">
-                      Chưa có báo cáo nào
+                      {reports && reports.length > 0
+                        ? "Không có báo cáo phù hợp bộ lọc hiện tại"
+                        : "Chưa có báo cáo nào"}
                    </td>
                 </tr>
               )}

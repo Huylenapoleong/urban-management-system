@@ -283,13 +283,13 @@ export default function FriendsPage() {
                       {!canMessage && !canSendFriendRequest && item.relationState === "OUTGOING_REQUEST" ? (
                         <span className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">
                           <Clock3 className="h-3 w-3" />
-                          Dang cho chap nhan
+                          Đang chờ chấp nhận
                         </span>
                       ) : null}
                       {!canMessage && !canSendFriendRequest && item.relationState === "INCOMING_REQUEST" ? (
                         <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800">
                           <UserCheck2 className="h-3 w-3" />
-                          Co yeu cau den
+                          Có yêu cầu đến
                         </span>
                       ) : null}
                     </>
@@ -331,7 +331,7 @@ export default function FriendsPage() {
                         className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
                       >
                         {isAccepting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck2 className="h-4 w-4" />}
-                        Chap nhan
+                        Chấp nhận
                       </button>
                       <button
                         type="button"
@@ -344,7 +344,7 @@ export default function FriendsPage() {
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                       >
                         {isRejecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRoundX className="h-4 w-4" />}
-                        Tu choi
+                        Từ chối
                       </button>
                     </>
                   }
@@ -364,7 +364,7 @@ export default function FriendsPage() {
                   disabled={loadingMoreIncoming}
                   className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                 >
-                  {loadingMoreIncoming ? "Dang tai..." : "Tai them"}
+                  {loadingMoreIncoming ? "Đang tải..." : "Tải thêm"}
                 </button>
               </div>
             ) : null}
@@ -395,7 +395,7 @@ export default function FriendsPage() {
                       className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                     >
                       {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRoundX className="h-4 w-4" />}
-                      Huy yeu cau
+                      Hủy yêu cầu
                     </button>
                   }
                 />
@@ -414,7 +414,7 @@ export default function FriendsPage() {
                   disabled={loadingMoreOutgoing}
                   className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                 >
-                  {loadingMoreOutgoing ? "Dang tai..." : "Tai them"}
+                  {loadingMoreOutgoing ? "Đang tải..." : "Tải thêm"}
                 </button>
               </div>
             ) : null}
@@ -441,7 +441,7 @@ export default function FriendsPage() {
                         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                       >
                         <MessageCircle className="h-4 w-4" />
-                        Nhan tin
+                        Nhắn tin
                       </button>
                       <button
                         type="button"
@@ -454,7 +454,7 @@ export default function FriendsPage() {
                         className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                       >
                         {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
-                        Huỷ kết bạn
+                        Hủy kết bạn
                       </button>
                     </>
                   }
@@ -463,7 +463,7 @@ export default function FriendsPage() {
             })}
             {filteredFriends.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
-                Ban chưa có bạn bè nào.
+                Bạn chưa có bạn bè nào.
               </div>
             ) : null}
             {hasMoreFriends ? (
@@ -474,7 +474,7 @@ export default function FriendsPage() {
                   disabled={loadingMoreFriends}
                   className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                 >
-                  {loadingMoreFriends ? "Dang tai..." : "Tai them"}
+                  {loadingMoreFriends ? "Đang tải..." : "Tải thêm"}
                 </button>
               </div>
             ) : null}

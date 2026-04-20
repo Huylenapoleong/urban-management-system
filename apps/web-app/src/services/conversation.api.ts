@@ -10,6 +10,7 @@ export interface SendMessageInput {
   attachmentKey?: string;
   type?: ChatMessageType;
   replyTo?: string;
+  mentions?: string[];
 }
 
 export type RecallScope = "SELF" | "EVERYONE";
@@ -203,7 +204,10 @@ export async function sendMessage(
   };
 
   if (trimmedText) {
-    payload.content = JSON.stringify({ text: trimmedText, mention: [] });
+    payload.content = JSON.stringify({
+      text: trimmedText,
+      mention: Array.isArray(input.mentions) ? [...new Set(input.mentions.filter(Boolean))] : [],
+    });
   }
 
   if (attachmentKey) {

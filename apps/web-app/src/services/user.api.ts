@@ -55,3 +55,7 @@ export async function getUserById(userId: string): Promise<UserProfile> {
 export async function getUserPresence(userId: string): Promise<PresenceState> {
   return await ApiClient.get(`/users/${encodeURIComponent(userId)}/presence`);
 }
+
+export async function searchUserExactByContact(query: string): Promise<UserProfile> {
+  return await ApiClient.get(`/users/search?q=${encodeURIComponent(query.trim())}`);
+}
