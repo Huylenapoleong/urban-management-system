@@ -43,3 +43,7 @@ export async function changePassword(payload: { currentPassword?: string, newPas
 export async function getUserById(userId: string): Promise<UserProfile> {
   return await ApiClient.get(`/users/${encodeURIComponent(userId)}`);
 }
+
+export async function searchUserExactByContact(query: string): Promise<UserProfile> {
+  return await ApiClient.get(`/users/search?q=${encodeURIComponent(query.trim())}`);
+}
