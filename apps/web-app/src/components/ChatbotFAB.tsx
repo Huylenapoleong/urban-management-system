@@ -36,7 +36,7 @@ export function ChatbotFAB() {
     onSuccess: (data) => {
       setMessages((prev) => [
         ...prev,
-        { id: Date.now().toString(), sender: "bot", text: data.response },
+        { id: Date.now().toString(), sender: "bot", text: data.answer },
       ]);
     },
     onError: () => {
@@ -59,7 +59,7 @@ export function ChatbotFAB() {
       ...prev,
       { id: Date.now().toString(), sender: "user", text: inputText },
     ]);
-    chatbotMutation.mutate({ message: inputText });
+    chatbotMutation.mutate({ question: inputText });
     setInputText("");
   };
 

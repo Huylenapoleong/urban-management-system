@@ -22,10 +22,12 @@ export class KnowledgeRepository {
   ): Promise<KnowledgeDocument[]> {
     const maxDocs = limit ?? this.config.chatbotMaxContextDocs;
 
-    const records = await this.repo.queryByGsi1<StoredKnowledgeDocument>(
+    const records = await this.repo.queryByIndex<StoredKnowledgeDocument>(
       this.config.dynamodbKnowledgeTableName,
-      'category-index',  // ← tên index đúng
-      category,          // ← giá trị `category` trực tiếp, không cần prefix
+      'category-index',
+      'category',
+      'docId',
+      category,
       { limit: maxDocs },
     );
 

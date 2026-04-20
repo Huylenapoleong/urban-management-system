@@ -54,5 +54,85 @@
     "category": "administrative",
     "source": "Nghị định 61/2018/NĐ-CP - Điều 14",
     "metadata": { "lawName": "Nghị định 61/2018/NĐ-CP", "chapter": "Chương II", "section": "Điều 14" }
+  },
+  {
+    "docId": "public-service-online-decree-42-art-10",
+    "title": "Điều 10. Nguyên tắc cung cấp dịch vụ công trực tuyến",
+    "content": "Cơ quan nhà nước phải công khai quy trình, thành phần hồ sơ, thời hạn giải quyết và lệ phí trên cổng dịch vụ công. Người dân có quyền nộp hồ sơ, nhận thông báo bổ sung và nhận kết quả trực tuyến đối với thủ tục đã được cung cấp mức độ 3, mức độ 4.",
+    "category": "administrative",
+    "source": "Nghị định 42/2022/NĐ-CP - Điều 10",
+    "metadata": { "lawName": "Nghị định 42/2022/NĐ-CP", "chapter": "Chương II", "section": "Điều 10" }
+  },
+  {
+    "docId": "public-service-identity-card-proc-2024",
+    "title": "Thủ tục cấp thẻ căn cước lần đầu trên cổng dịch vụ công",
+    "content": "Hồ sơ gồm: tờ khai điện tử, dữ liệu sinh trắc học theo lịch hẹn và giấy tờ chứng minh thông tin cư trú nếu dữ liệu chưa đồng bộ. Người dân đặt lịch, khai thông tin trực tuyến, đến điểm tiếp nhận để đối chiếu và nhận kết quả theo hình thức trực tiếp hoặc bưu chính công ích.",
+    "category": "administrative",
+    "source": "Luật Căn cước 2023 và văn bản hướng dẫn thi hành",
+    "metadata": { "lawName": "Luật Căn cước 2023", "chapter": "Chương III", "section": "Thủ tục cấp thẻ" }
+  },
+  {
+    "docId": "public-service-residence-confirmation-2023",
+    "title": "Xác nhận thông tin cư trú qua dịch vụ công",
+    "content": "Người dân có thể đề nghị xác nhận thông tin cư trú trực tuyến khi cần bổ sung hồ sơ hành chính. Cơ quan công an có trách nhiệm kiểm tra dữ liệu cư trú, phản hồi tình trạng xử lý và cấp kết quả xác nhận theo thời hạn công bố trên hệ thống.",
+    "category": "administrative",
+    "source": "Luật Cư trú 2020 và quy trình dịch vụ công cư trú",
+    "metadata": { "lawName": "Luật Cư trú 2020", "chapter": "Chương IV", "section": "Xác nhận thông tin cư trú" }
+  },
+  {
+    "docId": "public-service-household-business-reg-2021",
+    "title": "Đăng ký hộ kinh doanh qua cơ chế một cửa",
+    "content": "Hồ sơ đăng ký hộ kinh doanh gồm: giấy đề nghị đăng ký hộ kinh doanh, bản sao giấy tờ pháp lý của cá nhân và biên bản họp thành viên hộ gia đình (nếu có). Cơ quan đăng ký kinh doanh cấp huyện tiếp nhận, xử lý và trả kết quả theo thời hạn niêm yết.",
+    "category": "administrative",
+    "source": "Nghị định 01/2021/NĐ-CP - Quy định về đăng ký doanh nghiệp",
+    "metadata": { "lawName": "Nghị định 01/2021/NĐ-CP", "chapter": "Chương VIII", "section": "Đăng ký hộ kinh doanh" }
+  },
+  {
+    "docId": "public-service-construction-permit-online-2024",
+    "title": "Nộp hồ sơ cấp giấy phép xây dựng trực tuyến",
+    "content": "Tổ chức, cá nhân được nộp hồ sơ xin cấp giấy phép xây dựng qua cổng dịch vụ công của địa phương. Thành phần hồ sơ điện tử bao gồm đơn đề nghị, giấy tờ về quyền sử dụng đất và bản vẽ thiết kế. Cơ quan có thẩm quyền tiếp nhận, thẩm định và trả kết quả theo quy định.",
+    "category": "construction",
+    "source": "Luật Xây dựng 2014 (sửa đổi 2020) và quy trình dịch vụ công địa phương",
+    "metadata": { "lawName": "Luật Xây dựng 2014", "chapter": "Chương VII", "section": "Dịch vụ công cấp phép" }
+  },
+  {
+    "docId": "public-service-land-record-extract-2022",
+    "title": "Cấp trích lục hồ sơ địa chính cho người sử dụng đất",
+    "content": "Người sử dụng đất có quyền đề nghị cấp trích lục bản đồ địa chính hoặc thông tin thửa đất để phục vụ giao dịch dân sự, thủ tục hành chính. Hồ sơ có thể nộp trực tiếp hoặc trực tuyến; cơ quan đăng ký đất đai trả kết quả theo thời hạn do địa phương công bố.",
+    "category": "land",
+    "source": "Luật Đất đai 2024 và quy định về đăng ký đất đai",
+    "metadata": { "lawName": "Luật Đất đai 2024", "chapter": "Đăng ký đất đai", "section": "Trích lục hồ sơ địa chính" }
+  },
+  {
+    "docId": "public-service-civil-status-copy-2020",
+    "title": "Cấp bản sao trích lục hộ tịch trực tuyến",
+    "content": "Người dân có thể yêu cầu cấp bản sao trích lục khai sinh, kết hôn hoặc khai tử qua cổng dịch vụ công. Hồ sơ gồm tờ khai điện tử và thông tin định danh người yêu cầu. Cơ quan hộ tịch cấp xã hoặc cấp huyện xử lý, trả bản sao điện tử hoặc bản giấy theo nhu cầu.",
+    "category": "administrative",
+    "source": "Luật Hộ tịch 2014 và quy trình dịch vụ công hộ tịch",
+    "metadata": { "lawName": "Luật Hộ tịch 2014", "chapter": "Chương III", "section": "Cấp bản sao trích lục" }
+  },
+  {
+    "docId": "public-service-social-assistance-2021",
+    "title": "Giải quyết trợ giúp xã hội thường xuyên tại cộng đồng",
+    "content": "Đối tượng bảo trợ xã hội có thể nộp hồ sơ hưởng trợ cấp thường xuyên tại bộ phận một cửa hoặc qua dịch vụ công trực tuyến. Hồ sơ được thẩm định theo điều kiện đối tượng, mức hưởng và thời hạn giải quyết do UBND cấp huyện công bố.",
+    "category": "administrative",
+    "source": "Nghị định 20/2021/NĐ-CP - Chính sách trợ giúp xã hội",
+    "metadata": { "lawName": "Nghị định 20/2021/NĐ-CP", "chapter": "Chương II", "section": "Trợ giúp xã hội thường xuyên" }
+  },
+  {
+    "docId": "public-service-traffic-fine-payment-2023",
+    "title": "Nộp phạt vi phạm giao thông qua cổng dịch vụ công",
+    "content": "Cá nhân, tổ chức vi phạm hành chính trong lĩnh vực giao thông có thể tra cứu quyết định xử phạt và thực hiện nộp phạt trực tuyến. Sau khi hoàn thành thanh toán, hệ thống cập nhật trạng thái và hỗ trợ nhận lại giấy tờ theo quy trình của cơ quan xử phạt.",
+    "category": "administrative",
+    "source": "Nghị định 118/2021/NĐ-CP và quy trình nộp phạt trực tuyến",
+    "metadata": { "lawName": "Nghị định 118/2021/NĐ-CP", "chapter": "Thi hành quyết định xử phạt", "section": "Nộp phạt trực tuyến" }
+  },
+  {
+    "docId": "public-service-complaint-handling-2018",
+    "title": "Tiếp nhận và xử lý phản ánh, kiến nghị trên cổng dịch vụ công",
+    "content": "Người dân có quyền gửi phản ánh, kiến nghị về thủ tục hành chính qua cổng dịch vụ công quốc gia hoặc hệ thống địa phương. Cơ quan tiếp nhận phải phân loại nội dung, chuyển đơn vị xử lý và phản hồi kết quả trong thời hạn theo quy định công khai.",
+    "category": "administrative",
+    "source": "Nghị định 61/2018/NĐ-CP và quy chế tiếp nhận phản ánh, kiến nghị",
+    "metadata": { "lawName": "Nghị định 61/2018/NĐ-CP", "chapter": "Cơ chế một cửa", "section": "Phản ánh, kiến nghị" }
   }
 ]
