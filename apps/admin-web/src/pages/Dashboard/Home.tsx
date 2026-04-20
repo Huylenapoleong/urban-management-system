@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { Link } from "react-router";
+import { useEffect, useMemo, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import { useI18n } from "../../i18n/I18nContext";
 import { usersService, User } from "../../services/users.service";
+import { groupsService, type GroupMetadata } from "../../services/groups.service";
 
 // ── tiny stat card ──────────────────────────────────────────────────────────
 interface StatCardProps {
@@ -78,7 +80,9 @@ const StatusDot: React.FC<{ status: string; t: (key: string) => string }> = ({ s
 export default function Home() {
   const { t } = useI18n();
   const [users, setUsers] = useState<User[]>([]);
+  const [groups, setGroups] = useState<GroupMetadata[]>([]);
   const [loading, setLoading] = useState(true);
+  const [groupLoading, setGroupLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -88,6 +92,14 @@ export default function Home() {
       } catch (_) {}
       finally { setLoading(false); }
     })();
+
+    (async () => {
+      try {
+        const response = await groupsService.getAllGroups({ maxPages: 20, pageSize: 100 });
+        if (response.success && response.data) setGroups(response.data);
+      } catch (_) {}
+      finally { setGroupLoading(false); }
+    })();
   }, []);
 
   // derived stats
@@ -96,6 +108,12 @@ export default function Home() {
   const officers = users.filter(u => ["WARD_OFFICER", "PROVINCE_OFFICER", "ADMIN"].includes(u.role?.toUpperCase())).length;
   const citizens = users.filter(u => u.role?.toUpperCase() === "CITIZEN").length;
   const recent = [...users].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 6);
+  const activeGroups = useMemo(() => groups.filter((group) => !group.deletedAt), [groups]);
+  const officialGroups = useMemo(() => activeGroups.filter((group) => group.isOfficial), [activeGroups]);
+  const recentGroups = useMemo(
+    () => [...activeGroups].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 4),
+    [activeGroups]
+  );
 
   // role distribution
   const roleCounts = users.reduce<Record<string, number>>((acc, u) => {
@@ -185,6 +203,75 @@ export default function Home() {
               </svg>
             }
           />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:border-gray-800 dark:from-white/[0.03] dark:via-white/[0.03] dark:to-blue-950/20 p-5 lg:col-span-2">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{t("home.groupOverview")}</p>
+                <h3 className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{t("home.groupManagement")}</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("home.groupOverviewDescription")}</p>
+              </div>
+              <Link
+                to="/groups"
+                className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                {t("home.manageGroups")}
+              </Link>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-3">
+              <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/60">
+                <p className="text-xs text-gray-500">{t("home.totalGroups")}</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{groupLoading ? "—" : activeGroups.length}</p>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/60">
+                <p className="text-xs text-gray-500">{t("home.officialGroups")}</p>
+                <p className="mt-1 text-2xl font-bold text-purple-600">{groupLoading ? "—" : officialGroups.length}</p>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/60">
+                <p className="text-xs text-gray-500">{t("home.recentGroups")}</p>
+                <p className="mt-1 text-2xl font-bold text-blue-600">{groupLoading ? "—" : recentGroups.length}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 dark:text-white">{t("home.recentGroups")}</h3>
+                <p className="text-xs text-gray-400 mt-0.5">{t("home.latestGroups")}</p>
+              </div>
+              <Link to="/groups" className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
+                {t("home.viewAll")}
+              </Link>
+            </div>
+            <div className="mt-4 space-y-3">
+              {groupLoading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((item) => (
+                    <div key={item} className="h-14 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />
+                  ))}
+                </div>
+              ) : recentGroups.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-400">{t("groups.noGroups")}</p>
+              ) : (
+                recentGroups.map((group) => (
+                  <div key={group.id} className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 dark:border-gray-800 dark:bg-gray-800/40">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{group.groupName}</p>
+                        <p className="text-xs text-gray-400">{group.locationCode}</p>
+                      </div>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                        {group.memberCount}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
         {/* ── Bottom two-col grid ── */}
@@ -295,6 +382,7 @@ export default function Home() {
               <div className="space-y-2">
                 {[
                   { label: t("home.manageUsers"), href: "/users", icon: "M17 20h5v-2a4 4 0 00-5-3.87M9 20H4v-2a4 4 0 015-3.87m6-4.13a4 4 0 11-8 0 4 4 0 018 0z", color: "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400" },
+                  { label: t("home.manageGroups"), href: "/groups", icon: "M17 20h5v-2a4 4 0 00-5-3.87M9 20H4v-2a4 4 0 015-3.87m6-4.13a4 4 0 11-8 0 4 4 0 018 0z", color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 dark:text-indigo-400" },
                   { label: t("home.viewReports"), href: "/reports", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z", color: "text-purple-600 bg-purple-50 dark:bg-purple-900/20 dark:text-purple-400" },
                   { label: t("home.systemSettings"), href: "/settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z", color: "text-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-gray-400" },
                 ].map(({ label, href, icon, color }) => (

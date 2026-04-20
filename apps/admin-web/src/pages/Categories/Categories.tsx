@@ -6,6 +6,7 @@ import React, { useState, useEffect } from "react";
 import PageBreadCrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { Modal } from "../../components/ui/modal";
+import { useI18n } from "../../i18n/I18nContext";
 import { categoriesService, Category } from "../../services/categories.service";
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -35,6 +36,7 @@ const Field = ({ label, required, error, children }: {
 );
 
 const Categories: React.FC = () => {
+  const { t } = useI18n();
   const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch]         = useState("");
   const [loading, setLoading]       = useState(false);
@@ -53,8 +55,8 @@ const Categories: React.FC = () => {
     try {
       const res = await categoriesService.getCategories();
       if (res.success && res.data) setCategories(res.data.items);
-      else setError(res.error || "Failed to load categories");
-    } catch { setError("Failed to load categories"); }
+      else setError(res.error || t("categories.error"));
+    } catch { setError(t("categories.error")); }
     finally { setLoading(false); }
   };
 
@@ -69,8 +71,8 @@ const Categories: React.FC = () => {
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!form.name.trim()) e.name = "Name is required";
-    else if (form.name.trim().length < 2) e.name = "At least 2 characters";
+    if (!form.name.trim()) e.name = t("categories.nameRequired");
+    else if (form.name.trim().length < 2) e.name = t("categories.nameMinLength");
     setFErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -82,47 +84,47 @@ const Categories: React.FC = () => {
       if (editing) {
         const res = await categoriesService.updateCategory(editing.id, { name: form.name.trim(), description: form.description.trim() || undefined });
         if (res.success && res.data) { setCategories(cs => cs.map(c => c.id === editing.id ? res.data! : c)); closeModal(); }
-        else setError(res.error || "Update failed");
+        else setError(res.error || t("categories.updateError"));
       } else {
         const res = await categoriesService.createCategory({ name: form.name.trim(), description: form.description.trim() || undefined });
         if (res.success && res.data) { setCategories(cs => [...cs, res.data!]); closeModal(); }
-        else setError(res.error || "Create failed");
+        else setError(res.error || t("categories.createError"));
       }
-    } catch { setError("Something went wrong"); }
+    } catch { setError(t("categories.saveError")); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
     const res = await categoriesService.deleteCategory(id);
     if (res.success) { setCategories(cs => cs.filter(c => c.id !== id)); setDeleteConfirm(null); }
-    else setError(res.error || "Delete failed");
+    else setError(res.error || t("categories.deleteError"));
   };
 
   return (
     <>
-      <PageMeta title="Categories" description="Manage incident categories" />
-      <PageBreadCrumb pageTitle="Categories" />
+      <PageMeta title={t("categories.title")} description={t("categories.description")} />
+      <PageBreadCrumb pageTitle={t("categories.title")} />
 
       <div className="space-y-5">
         {/* header card */}
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] overflow-hidden">
           <div className="px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800">
             <div>
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">Incident Categories</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{loading ? "Loading…" : `${filtered.length} categories`}</p>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">{t("categories.categoryList")}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">{loading ? t("categories.loading") : `${filtered.length} ${t("categories.itemCountSuffix")}`}</p>
             </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-56">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
-                <input type="text" placeholder="Search categories…" value={search} onChange={e => setSearch(e.target.value)}
+                <input type="text" placeholder={t("categories.searchPlaceholder")} value={search} onChange={e => setSearch(e.target.value)}
                   className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all" />
               </div>
               <button onClick={openCreate}
                 className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors shadow-sm flex-shrink-0">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
-                Add Category
+                {t("categories.addCategory")}
               </button>
             </div>
           </div>
@@ -139,13 +141,13 @@ const Categories: React.FC = () => {
             {loading ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"/>
-                <p className="text-sm text-gray-400">Loading categories…</p>
+                <p className="text-sm text-gray-400">{t("categories.loading")}</p>
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">🏷️</div>
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No categories found</p>
-                <button onClick={openCreate} className="text-xs text-blue-600 hover:underline">+ Create your first category</button>
+                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("categories.noCategories")}</p>
+                <button onClick={openCreate} className="text-xs text-blue-600 hover:underline">+ {t("categories.createFirst")}</button>
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -162,7 +164,7 @@ const Categories: React.FC = () => {
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{cat.description}</p>
                         )}
                         <p className="text-xs text-gray-300 dark:text-gray-600 mt-2">
-                          Created {new Date(cat.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          {t("categories.createdOn")} {new Date(cat.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                         </p>
                       </div>
                     </div>
@@ -192,27 +194,27 @@ const Categories: React.FC = () => {
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 dark:border-gray-800">
               <div>
                 <h2 className="text-base font-semibold text-gray-900 dark:text-white">{editing ? "Edit Category" : "New Category"}</h2>
-                <p className="text-xs text-gray-400 mt-0.5">{editing ? "Update category details" : "Add a new incident category"}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{editing ? t("categories.updateDetails") : t("categories.addDetails")}</p>
               </div>
               <button onClick={closeModal} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
             <div className="px-6 py-5 space-y-4">
-              <Field label="Category Name" required error={formErrors.name}>
-                <input type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Infrastructure"
+              <Field label={t("categories.name")} required error={formErrors.name}>
+                <input type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder={t("categories.namePlaceholder")}
                   className={`w-full px-3.5 py-2.5 text-sm rounded-xl border transition-all focus:outline-none focus:ring-2 ${formErrors.name ? "border-red-300 focus:ring-red-100 bg-red-50" : "border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:ring-blue-100 focus:border-blue-400"}`} />
               </Field>
-              <Field label="Description" error={formErrors.description}>
-                <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Brief description of this category…" rows={3}
+              <Field label={t("categories.fieldDescription")} error={formErrors.description}>
+                <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder={t("categories.descriptionPlaceholder")} rows={3}
                   className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all resize-none" />
               </Field>
             </div>
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800">
-              <button onClick={closeModal} disabled={saving} className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50">Cancel</button>
+              <button onClick={closeModal} disabled={saving} className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
               <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-50 flex items-center gap-2">
                 {saving && <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>}
-                {saving ? "Saving…" : editing ? "Save Changes" : "Create Category"}
+                {saving ? t("categories.saving") : editing ? t("categories.saveChanges") : t("categories.addCategory")}
               </button>
             </div>
           </div>
@@ -226,13 +228,13 @@ const Categories: React.FC = () => {
             <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4">
               <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </div>
-            <h3 className="text-center font-semibold text-gray-900 dark:text-white mb-1">Delete Category</h3>
+            <h3 className="text-center font-semibold text-gray-900 dark:text-white mb-1">{t("categories.deleteCategory")}</h3>
             <p className="text-center text-sm text-gray-500 dark:text-gray-400 mb-5">
-              Are you sure? This action cannot be undone.
+              {t("categories.deleteConfirm")}
             </p>
             <div className="flex gap-2">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Cancel</button>
-              <button onClick={() => handleDelete(deleteConfirm)} className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors">Delete</button>
+              <button onClick={() => setDeleteConfirm(null)} className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">{t("common.cancel")}</button>
+              <button onClick={() => handleDelete(deleteConfirm)} className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors">{t("common.delete")}</button>
             </div>
           </div>
         </div>

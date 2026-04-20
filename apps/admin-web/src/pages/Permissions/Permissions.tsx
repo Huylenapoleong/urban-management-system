@@ -9,15 +9,13 @@ type RoleKey = "SUPER_ADMIN" | "ADMIN" | "PROVINCE_OFFICER" | "WARD_OFFICER" | "
 type Capability = "read" | "write" | "delete" | "approve" | "manage";
 
 interface CapabilityRow {
-  resource: string;
-  description: string;
+  resourceKey: string;
+  descriptionKey: string;
   permissions: Record<RoleKey, Capability[]>;
 }
 
 interface RoleSummary {
   role: RoleKey;
-  label: string;
-  description: string;
   color: string;
   badge: string;
 }
@@ -27,36 +25,26 @@ const roleOrder: RoleKey[] = ["SUPER_ADMIN", "ADMIN", "PROVINCE_OFFICER", "WARD_
 const roleSummaries: RoleSummary[] = [
   {
     role: "SUPER_ADMIN",
-    label: "Super Admin",
-    description: "Full system control, including security and maintenance workflows",
     color: "text-purple-700 dark:text-purple-300",
     badge: "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-900/40",
   },
   {
     role: "ADMIN",
-    label: "Admin",
-    description: "Operational control over users, reports, groups, and system settings",
     color: "text-blue-700 dark:text-blue-300",
     badge: "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-900/40",
   },
   {
     role: "PROVINCE_OFFICER",
-    label: "Province Officer",
-    description: "Regional oversight and escalation management within scope",
     color: "text-emerald-700 dark:text-emerald-300",
     badge: "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/40",
   },
   {
     role: "WARD_OFFICER",
-    label: "Ward Officer",
-    description: "Local operations for assigned ward or district scope",
     color: "text-sky-700 dark:text-sky-300",
     badge: "bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-900/40",
   },
   {
     role: "CITIZEN",
-    label: "Citizen",
-    description: "Self-service reporting and conversation participation",
     color: "text-gray-700 dark:text-gray-300",
     badge: "bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700",
   },
@@ -64,8 +52,8 @@ const roleSummaries: RoleSummary[] = [
 
 const capabilityRows: CapabilityRow[] = [
   {
-    resource: "Users",
-    description: "Account management and status control",
+    resourceKey: "users",
+    descriptionKey: "users",
     permissions: {
       SUPER_ADMIN: ["read", "write", "delete", "manage"],
       ADMIN: ["read", "write", "delete", "manage"],
@@ -75,8 +63,8 @@ const capabilityRows: CapabilityRow[] = [
     },
   },
   {
-    resource: "Reports",
-    description: "Incident lifecycle, assignment, and audit review",
+    resourceKey: "reports",
+    descriptionKey: "reports",
     permissions: {
       SUPER_ADMIN: ["read", "write", "delete", "approve", "manage"],
       ADMIN: ["read", "write", "delete", "approve", "manage"],
@@ -86,8 +74,8 @@ const capabilityRows: CapabilityRow[] = [
     },
   },
   {
-    resource: "Groups & Conversations",
-    description: "Moderation, inbox operations, and linked report channels",
+    resourceKey: "groupsConversations",
+    descriptionKey: "groupsConversations",
     permissions: {
       SUPER_ADMIN: ["read", "write", "delete", "manage"],
       ADMIN: ["read", "write", "delete", "manage"],
@@ -97,8 +85,8 @@ const capabilityRows: CapabilityRow[] = [
     },
   },
   {
-    resource: "Maintenance",
-    description: "Retention repair and chat reconciliation operations",
+    resourceKey: "maintenance",
+    descriptionKey: "maintenance",
     permissions: {
       SUPER_ADMIN: ["read", "write", "delete", "manage"],
       ADMIN: ["read", "write", "delete", "manage"],
@@ -108,8 +96,8 @@ const capabilityRows: CapabilityRow[] = [
     },
   },
   {
-    resource: "Settings",
-    description: "System settings and operational configuration",
+    resourceKey: "settings",
+    descriptionKey: "settings",
     permissions: {
       SUPER_ADMIN: ["read", "write", "delete", "manage"],
       ADMIN: ["read", "write", "delete", "manage"],
@@ -182,6 +170,12 @@ const Permissions: React.FC = () => {
     allowed: hasPermission(selectedRole, row.permissions[selectedRole]),
   }));
 
+  const roleLabel = (role: RoleKey) => t(`permissions.roles.${role}`);
+  const roleDescription = (role: RoleKey) => t(`permissions.roleDescriptions.${role}`);
+  const resourceLabel = (key: string) => t(`permissions.resources.${key}`);
+  const resourceDescription = (key: string) => t(`permissions.resourceDescriptions.${key}`);
+  const capabilityLabel = (capability: Capability) => t(`permissions.capabilities.${capability}`);
+
   const totalUsers = users.length;
   const activeUsers = users.filter((user) => user.status?.toUpperCase() === "ACTIVE").length;
 
@@ -227,7 +221,7 @@ const Permissions: React.FC = () => {
               >
                 {roleSummaries.map((role) => (
                   <option key={role.role} value={role.role}>
-                    {role.label}
+                    {roleLabel(role.role)}
                   </option>
                 ))}
               </select>
@@ -235,11 +229,11 @@ const Permissions: React.FC = () => {
               <div className={`rounded-2xl border p-4 ${selectedSummary.badge}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className={`text-base font-semibold ${selectedSummary.color}`}>{selectedSummary.label}</p>
-                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{selectedSummary.description}</p>
+                    <p className={`text-base font-semibold ${selectedSummary.color}`}>{roleLabel(selectedSummary.role)}</p>
+                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{roleDescription(selectedSummary.role)}</p>
                   </div>
                   <span className="rounded-full bg-white/70 px-3 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-900/50 dark:text-gray-200">
-                    {roleStats.get(selectedRole)?.total ?? 0} users
+                    {roleStats.get(selectedRole)?.total ?? 0} {t("permissions.usersSuffix")}
                   </span>
                 </div>
               </div>
@@ -260,12 +254,12 @@ const Permissions: React.FC = () => {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="font-medium text-gray-900 dark:text-white">{role.label}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{role.description}</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{roleLabel(role.role)}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{roleDescription(role.role)}</p>
                         </div>
                         <div className="text-right text-sm">
                           <p className="font-semibold text-gray-900 dark:text-white">{stats.total}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{stats.active} active</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{stats.active} {t("permissions.activeSuffix")}</p>
                         </div>
                       </div>
                     </button>
@@ -281,16 +275,16 @@ const Permissions: React.FC = () => {
                 <thead className="bg-gray-50 dark:bg-gray-800/50">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">{t("permissions.resource")}</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">{selectedSummary.label}</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">{roleLabel(selectedSummary.role)}</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">{t("permissions.notes")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selectedCapabilityRows.map((row) => (
-                    <tr key={row.resource} className="border-t border-gray-100 dark:border-gray-800">
+                    <tr key={row.resourceKey} className="border-t border-gray-100 dark:border-gray-800">
                       <td className="px-4 py-3 align-top">
-                        <div className="font-medium text-gray-900 dark:text-white">{row.resource}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{row.description}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{resourceLabel(row.resourceKey)}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{resourceDescription(row.descriptionKey)}</div>
                       </td>
                       <td className="px-4 py-3 align-top">
                         <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.allowed ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
@@ -298,7 +292,7 @@ const Permissions: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 align-top text-xs text-gray-500 dark:text-gray-400">
-                        {row.permissions[selectedRole].join(", ") || t("permissions.noAccess")}
+                        {row.permissions[selectedRole].map(capabilityLabel).join(", ") || t("permissions.noAccess")}
                       </td>
                     </tr>
                   ))}
@@ -314,8 +308,8 @@ const Permissions: React.FC = () => {
               const stats = roleStats.get(role.role) || { total: 0, active: 0 };
               return (
                 <div key={role.role} className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{role.label}</p>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{role.description}</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{roleLabel(role.role)}</p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{roleDescription(role.role)}</p>
                   <div className="mt-3 flex items-center justify-between text-sm">
                     <span className="text-gray-500 dark:text-gray-400">{t("permissions.totalUsers")}</span>
                     <span className="font-semibold text-gray-900 dark:text-white">{stats.total}</span>

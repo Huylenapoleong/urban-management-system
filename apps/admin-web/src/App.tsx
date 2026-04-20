@@ -25,6 +25,7 @@ import Users from "./pages/Users/Users";
 import Categories from "./pages/Categories/Categories";
 import Regions from "./pages/Regions/Regions";
 import Reports from "./pages/Reports/Reports";
+import Groups from "./pages/Groups/Groups";
 
 // Smart City Modules - Analytics & Dashboard
 import DashboardHeatmap from "./pages/Dashboard/DashboardHeatmap";
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="/categories" element={<Categories />} />
             <Route path="/regions" element={<Regions />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/groups" element={<Groups />} />
 
             {/* Smart City Analytics & Dashboard Routes */}
             <Route path="/dashboard/heatmap" element={<DashboardHeatmap />} />

@@ -19,6 +19,7 @@ import {
 } from "../../services/reports.service";
 import { uploadsService } from "../../services/uploads.service";
 import { useAuth } from "../../context/AuthContext";
+import { useI18n } from "../../i18n/I18nContext";
 
 type ReportMediaItem = {
   key?: string;
@@ -103,6 +104,7 @@ const NativeSelect = ({ value, onChange, children, className = "" }: {
 
 const Reports: React.FC = () => {
   const { currentUser } = useAuth();
+  const { t } = useI18n();
 
   const [reports, setReports]       = useState<Report[]>([]);
   const [loading, setLoading]       = useState(false);
@@ -142,8 +144,8 @@ const Reports: React.FC = () => {
         q:        search || undefined,
       });
       if (res.success && res.data) setReports(res.data.items);
-      else setError(res.error || "Failed to load reports");
-    } catch { setError("Failed to load reports"); }
+      else setError(res.error || t("reports.error"));
+    } catch { setError(t("reports.error")); }
     finally { setLoading(false); }
   }, [statusFilter, categoryFilter, priorityFilter, search]);
 
@@ -170,16 +172,16 @@ const Reports: React.FC = () => {
         if (auditResponse.success && auditResponse.data) {
           setReportAuditTrail(auditResponse.data);
         } else {
-          setDetailError(auditResponse.error || "Failed to load audit trail");
+          setDetailError(auditResponse.error || t("reports.auditTrailLoadError"));
         }
 
         if (conversationResponse.success && conversationResponse.data) {
           setLinkedConversations(conversationResponse.data);
         } else if (!detailError) {
-          setDetailError(conversationResponse.error || "Failed to load linked conversations");
+          setDetailError(conversationResponse.error || t("reports.linkedConversationsLoadError"));
         }
       } catch {
-        setDetailError("Failed to load report details");
+        setDetailError(t("reports.detailsLoadError"));
       } finally {
         setDetailLoading(false);
       }
@@ -243,8 +245,8 @@ const Reports: React.FC = () => {
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!form.title.trim()) e.title = "Title is required";
-    if (!form.locationCode.trim()) e.locationCode = "Location code is required";
+    if (!form.title.trim()) e.title = t("reports.titleRequired");
+    if (!form.locationCode.trim()) e.locationCode = t("reports.regionRequired");
     setFErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -274,7 +276,7 @@ const Reports: React.FC = () => {
           await reportsService.updateStatus(editingReport.id, form.status);
         }
         if (res.success) { await load(); closeModal(); }
-        else setError(res.error || "Update failed");
+        else setError(res.error || t("reports.updateError"));
       } else {
         const mediaKeys = mediaItems.length > 0 && mediaItems.every((item) => item.key)
           ? mediaItems.map((item) => item.key as string)
@@ -291,37 +293,52 @@ const Reports: React.FC = () => {
         };
         const res = await reportsService.createReport(createData);
         if (res.success) { await load(); closeModal(); }
-        else setError(res.error || "Create failed");
+        else setError(res.error || t("reports.createError"));
       }
-    } catch { setError("Something went wrong"); }
+    } catch { setError(t("reports.saveError")); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
     const res = await reportsService.deleteReport(id);
     if (res.success) { setReports(rs => rs.filter(r => r.id !== id)); setDelConf(null); }
-    else setError(res.error || "Delete failed");
+    else setError(res.error || t("reports.deleteError"));
   };
 
   const handleStatusChange = async (report: Report, status: ReportStatus) => {
     const res = await reportsService.updateStatus(report.id, status);
     if (res.success && res.data) setReports(rs => rs.map(r => r.id === report.id ? { ...r, ...res.data } : r));
-    else setError(res.error || "Status update failed");
+    else setError(res.error || t("reports.updateError"));
+  };
+
+  const statusLabel = (status: ReportStatus) => {
+    const translated = t(`exportReports.statuses.${status}`);
+    return translated.startsWith("exportReports.statuses.") ? STATUS_CONFIG[status].label : translated;
+  };
+
+  const priorityLabel = (priority: ReportPriority) => {
+    const translated = t(`exportReports.priorities.${priority}`);
+    return translated.startsWith("exportReports.priorities.") ? PRIORITY_CONFIG[priority].label : translated;
+  };
+
+  const categoryLabel = (category: ReportCategory) => {
+    const translated = t(`exportReports.categories.${category}`);
+    return translated.startsWith("exportReports.categories.") ? CATEGORY_CONFIG[category].label : translated;
   };
 
   return (
     <>
-      <PageMeta title="Reports" description="Manage citizen incident reports" />
-      <PageBreadCrumb pageTitle="Reports" />
+      <PageMeta title={t("reports.title")} description={t("reports.description")} />
+      <PageBreadCrumb pageTitle={t("reports.title")} />
 
       <div className="space-y-5">
         {/* stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Total Reports", value: stats.total,      color: "text-blue-600",    bg: "bg-blue-50 dark:bg-blue-900/10" },
-            { label: "New",           value: stats.new,        color: "text-blue-600",    bg: "bg-blue-50 dark:bg-blue-900/10" },
-            { label: "In Progress",   value: stats.inProgress, color: "text-amber-600",   bg: "bg-amber-50 dark:bg-amber-900/10" },
-            { label: "Resolved",      value: stats.resolved,   color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/10" },
+            { label: t("dashboard.totalReports"), value: stats.total,      color: "text-blue-600",    bg: "bg-blue-50 dark:bg-blue-900/10" },
+            { label: t("exportReports.statuses.NEW"),           value: stats.new,        color: "text-blue-600",    bg: "bg-blue-50 dark:bg-blue-900/10" },
+            { label: t("exportReports.statuses.IN_PROGRESS"),   value: stats.inProgress, color: "text-amber-600",   bg: "bg-amber-50 dark:bg-amber-900/10" },
+            { label: t("exportReports.statuses.RESOLVED"),      value: stats.resolved,   color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/10" },
           ].map(({ label, value, color, bg }) => (
             <div key={label} className={`${bg} rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3`}>
               <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">{label}</p>
@@ -335,8 +352,8 @@ const Reports: React.FC = () => {
           {/* toolbar */}
           <div className="px-5 py-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800">
             <div>
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">Incident Reports</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{loading ? "Loading…" : `${reports.length} reports`}</p>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">{t("reports.reportList")}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">{loading ? t("reports.loading") : `${reports.length} ${t("reports.itemCountSuffix")}`}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
               {/* search */}
@@ -344,26 +361,26 @@ const Reports: React.FC = () => {
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
-                <input type="text" placeholder="Search reports…" value={search} onChange={e => setSearch(e.target.value)}
+                <input type="text" placeholder={t("reports.searchPlaceholder")} value={search} onChange={e => setSearch(e.target.value)}
                   className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all" />
               </div>
               {/* filters */}
               <NativeSelect value={statusFilter} onChange={v => setStatus(v as any)}>
-                <option value="">All Status</option>
-                {ALL_STATUSES.map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
+                <option value="">{t("reports.allStatus")}</option>
+                {ALL_STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
               </NativeSelect>
               <NativeSelect value={categoryFilter} onChange={v => setCat(v as any)}>
-                <option value="">All Categories</option>
-                {ALL_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_CONFIG[c].label}</option>)}
+                <option value="">{t("exportReports.allCategories")}</option>
+                {ALL_CATEGORIES.map(c => <option key={c} value={c}>{categoryLabel(c)}</option>)}
               </NativeSelect>
               <NativeSelect value={priorityFilter} onChange={v => setPri(v as any)}>
-                <option value="">All Priorities</option>
-                {ALL_PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_CONFIG[p].label}</option>)}
+                <option value="">{t("exportReports.allPriorities")}</option>
+                {ALL_PRIORITIES.map(p => <option key={p} value={p}>{priorityLabel(p)}</option>)}
               </NativeSelect>
               <button onClick={openCreate}
                 className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors shadow-sm flex-shrink-0">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
-                New Report
+                {t("reports.addReport")}
               </button>
             </div>
           </div>
@@ -379,20 +396,20 @@ const Reports: React.FC = () => {
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"/>
-              <p className="text-sm text-gray-400">Loading reports…</p>
+              <p className="text-sm text-gray-400">{t("reports.loading")}</p>
             </div>
           ) : reports.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">📋</div>
-              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No reports found</p>
-              <button onClick={openCreate} className="text-xs text-blue-600 hover:underline">+ Submit first report</button>
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("reports.noReports")}</p>
+              <button onClick={openCreate} className="text-xs text-blue-600 hover:underline">+ {t("reports.firstReportCta")}</button>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 dark:border-gray-800">
-                    {["Report", "Category", "Location", "Priority", "Status", "Date", ""].map(h => (
+                    {[t("reports.reportColumn"), t("reports.category"), t("reports.location"), t("reports.priority"), t("reports.status"), t("reports.date"), ""].map(h => (
                       <th key={h} className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
@@ -412,7 +429,7 @@ const Reports: React.FC = () => {
                         </td>
                         <td className="px-5 py-3.5">
                           <span className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-                            <span>{category.icon}</span>{category.label}
+                            <span>{category.icon}</span>{categoryLabel(report.category)}
                           </span>
                         </td>
                         <td className="px-5 py-3.5">
@@ -420,7 +437,7 @@ const Reports: React.FC = () => {
                         </td>
                         <td className="px-5 py-3.5">
                           <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${priority.badge}`}>
-                            {priority.label}
+                            {priorityLabel(report.priority)}
                           </span>
                         </td>
                         <td className="px-5 py-3.5">
@@ -431,7 +448,7 @@ const Reports: React.FC = () => {
                             className="text-xs py-1 px-2 rounded-full border-0 font-medium cursor-pointer"
                           >
                             {ALL_STATUSES.map(s => (
-                              <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
+                              <option key={s} value={s}>{statusLabel(s)}</option>
                             ))}
                           </NativeSelect>
                         </td>
@@ -441,15 +458,15 @@ const Reports: React.FC = () => {
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => setViewing(report)}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors" title="View">
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors" title={t("reports.view")}>
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                             </button>
                             <button onClick={() => openEdit(report)}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors" title="Edit">
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors" title={t("reports.edit")}>
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                             </button>
                             <button onClick={() => setDelConf(report.id)}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Delete">
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title={t("reports.delete")}>
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                             </button>
                           </div>
@@ -470,8 +487,8 @@ const Reports: React.FC = () => {
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col border border-gray-100 dark:border-gray-800" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
               <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">{editingReport ? "Edit Report" : "New Report"}</h2>
-                <p className="text-xs text-gray-400 mt-0.5">{editingReport ? "Update report details" : "Submit a new incident report"}</p>
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">{editingReport ? t("reports.editReport") : t("reports.addReport")}</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{editingReport ? t("reports.updateDetails") : t("reports.submitDetails")}</p>
               </div>
               <button onClick={closeModal} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
@@ -479,13 +496,13 @@ const Reports: React.FC = () => {
             </div>
 
             <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
-              <Field label="Title" required error={formErrors.title}>
-                <TInput value={form.title} onChange={e => setForm({...form, title: e.target.value})} placeholder="Brief description of the issue" error={formErrors.title}/>
+              <Field label={t("reports.title")} required error={formErrors.title}>
+                <TInput value={form.title} onChange={e => setForm({...form, title: e.target.value})} placeholder={t("reports.titlePlaceholder")} error={formErrors.title}/>
               </Field>
 
-              <Field label="Description">
+              <Field label={t("categories.fieldDescription")}>
                 <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})}
-                  placeholder="Provide more details about the incident…" rows={3}
+                  placeholder={t("reports.descriptionPlaceholder")} rows={3}
                   className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all resize-none"/>
               </Field>
 
@@ -498,7 +515,7 @@ const Reports: React.FC = () => {
                     onChange={(event) => void handleMediaUpload(event.target.files)}
                     className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-700"
                   />
-                  {uploadingMedia && <p className="text-xs text-gray-400">Uploading images...</p>}
+                  {uploadingMedia && <p className="text-xs text-gray-400">{t("reports.uploadingImages")}</p>}
                   {mediaItems.length > 0 && (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {mediaItems.map((item) => (
@@ -513,40 +530,40 @@ const Reports: React.FC = () => {
               </Field>
 
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Category" required>
+                <Field label={t("reports.category")} required>
                   <select value={form.category} onChange={e => setForm({...form, category: e.target.value as ReportCategory})}
                     className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all">
-                    {ALL_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_CONFIG[c].icon} {CATEGORY_CONFIG[c].label}</option>)}
+                    {ALL_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_CONFIG[c].icon} {categoryLabel(c)}</option>)}
                   </select>
                 </Field>
 
-                <Field label="Priority" required>
+                <Field label={t("reports.priority")} required>
                   <select value={form.priority} onChange={e => setForm({...form, priority: e.target.value as ReportPriority})}
                     className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all">
-                    {ALL_PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_CONFIG[p].label}</option>)}
+                    {ALL_PRIORITIES.map(p => <option key={p} value={p}>{priorityLabel(p)}</option>)}
                   </select>
                 </Field>
               </div>
 
-              <Field label="Location Code" required error={formErrors.locationCode}>
+              <Field label={t("reports.region")} required error={formErrors.locationCode}>
                 <TInput value={form.locationCode} onChange={e => setForm({...form, locationCode: e.target.value})} placeholder="VN-HCM-BQ1-P01" error={formErrors.locationCode}/>
               </Field>
 
               {editingReport && (
-                <Field label="Status">
+                <Field label={t("reports.status")}>
                   <select value={form.status} onChange={e => setForm({...form, status: e.target.value as ReportStatus})}
                     className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all">
-                    {ALL_STATUSES.map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
+                    {ALL_STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                   </select>
                 </Field>
               )}
             </div>
 
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex-shrink-0">
-              <button onClick={closeModal} disabled={saving} className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50">Cancel</button>
+              <button onClick={closeModal} disabled={saving} className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
               <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-50 flex items-center gap-2">
                 {saving && <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>}
-                {saving ? "Saving…" : editingReport ? "Save Changes" : "Submit Report"}
+                {saving ? t("reports.saving") : editingReport ? t("reports.saveChanges") : t("reports.addReport")}
               </button>
             </div>
           </div>

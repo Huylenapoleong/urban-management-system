@@ -111,8 +111,8 @@ const Users: React.FC = () => {
       if (res.success && res.data) {
         setUsers(res.data.items);
         setTotal(res.data.totalPages);
-      } else setError(res.error || "Failed to load users");
-    } catch { setError("Failed to load users"); }
+      } else setError(res.error || t("users.error"));
+    } catch { setError(t("users.error")); }
     finally { setLoading(false); }
   };
 
@@ -122,7 +122,7 @@ const Users: React.FC = () => {
     if (!confirm(t("users.deleteConfirm"))) return;
     const res = await usersService.deleteUser(id);
     if (res.success) setUsers(u => u.filter(x => x.id !== id));
-    else setError(res.error || "Delete failed");
+    else setError(res.error || t("users.deleteError"));
   };
 
   const openCreate = () => { setEditing(null); setForm(emptyForm()); setFErrors({}); setModal(true); };
@@ -141,16 +141,16 @@ const Users: React.FC = () => {
   const validate = () => {
     const e: Record<string, string> = {};
     if (!editingUser) {
-      if (!form.name.trim() || form.name.trim().length < 2) e.name = "At least 2 characters required";
-      if (!form.email.trim()) e.email = "Email is required";
-      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Invalid email address";
-      if (form.phone && !/^0\d{9}$/.test(form.phone.trim())) e.phone = "10 digits starting with 0";
-      if (!form.locationCode.trim()) e.locationCode = "Required";
-      else if (!/^VN(-[A-Z0-9]+){1,4}$/.test(form.locationCode.trim())) e.locationCode = "Format: VN-HCM-BQ1-P01";
-      if (!form.password.trim()) e.password = "Password is required";
-      else if (form.password.length < 8) e.password = "Minimum 8 characters";
+      if (!form.name.trim() || form.name.trim().length < 2) e.name = t("users.nameMinLength");
+      if (!form.email.trim()) e.email = t("users.emailRequired");
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = t("users.emailInvalid");
+      if (form.phone && !/^0\d{9}$/.test(form.phone.trim())) e.phone = t("users.phoneInvalid");
+      if (!form.locationCode.trim()) e.locationCode = t("users.locationRequired");
+      else if (!/^VN(-[A-Z0-9]+){1,4}$/.test(form.locationCode.trim())) e.locationCode = t("users.locationInvalid");
+      if (!form.password.trim()) e.password = t("users.passwordRequired");
+      else if (form.password.length < 8) e.password = t("users.passwordMinLength");
       if (["WARD_OFFICER","PROVINCE_OFFICER","ADMIN"].includes(form.role) && !form.unit.trim())
-        e.unit = "Required for this role";
+        e.unit = t("users.unitRequired");
     }
     setFErrors(e);
     return Object.keys(e).length === 0;
@@ -163,17 +163,35 @@ const Users: React.FC = () => {
       if (editingUser) {
         const res = await usersService.changeUserStatus(editingUser.id, form.status);
         if (res.success && res.data) { setUsers(u => u.map(x => x.id === editingUser.id ? { ...x, ...res.data } : x)); closeModal(); }
-        else setError(res.error || "Update failed");
+        else setError(res.error || t("users.updateError"));
       } else {
         const res = await usersService.createUser({
           fullName: form.name, email: form.email || undefined, phone: form.phone || undefined,
           password: form.password, role: form.role, locationCode: form.locationCode, unit: form.unit || undefined,
         });
         if (res.success) { await fetchUsers(page, searchTerm); closeModal(); }
-        else setError(res.error || "Create failed");
+        else setError(res.error || t("users.createError"));
       }
-    } catch { setError("Something went wrong"); }
+    } catch { setError(t("users.saveError")); }
     finally { setSaving(false); }
+  };
+
+  const getRoleLabel = (role: string) => {
+    const normalized = role?.toUpperCase();
+    if (normalized === "ADMIN") return t("users.admin");
+    if (normalized === "PROVINCE_OFFICER") return t("home.provinceOfficer");
+    if (normalized === "WARD_OFFICER") return t("home.wardOfficer");
+    if (normalized === "OFFICER") return t("users.officer");
+    if (normalized === "CITIZEN") return t("users.citizen");
+    return role;
+  };
+
+  const getStatusLabel = (status: string) => {
+    const normalized = status?.toUpperCase();
+    if (normalized === "ACTIVE") return t("users.active");
+    if (normalized === "INACTIVE") return t("users.inactive");
+    if (normalized === "DEACTIVATED") return t("users.deactivated");
+    return status;
   };
 
   const totalCount  = users.length;
@@ -181,17 +199,17 @@ const Users: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="User Management" description="Manage system users" />
-      <PageBreadCrumb pageTitle="User Management" />
+      <PageMeta title={t("users.title")} description={t("users.description")} />
+      <PageBreadCrumb pageTitle={t("users.title")} />
 
       <div className="space-y-5">
         {/* ── top stat strip ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Total Users",   value: totalCount,                        color: "text-blue-600",   bg: "bg-blue-50 dark:bg-blue-900/10" },
-            { label: "Active",        value: activeCount,                       color: "text-emerald-600",bg: "bg-emerald-50 dark:bg-emerald-900/10" },
-            { label: "Officers",      value: users.filter(u => ["WARD_OFFICER","PROVINCE_OFFICER","ADMIN"].includes(u.role?.toUpperCase())).length, color: "text-purple-600", bg: "bg-purple-50 dark:bg-purple-900/10" },
-            { label: "Citizens",      value: users.filter(u => u.role?.toUpperCase() === "CITIZEN").length, color: "text-amber-600",  bg: "bg-amber-50 dark:bg-amber-900/10" },
+            { label: t("home.totalUsers"),   value: totalCount,                        color: "text-blue-600",   bg: "bg-blue-50 dark:bg-blue-900/10" },
+            { label: t("users.active"),      value: activeCount,                       color: "text-emerald-600",bg: "bg-emerald-50 dark:bg-emerald-900/10" },
+            { label: t("home.officers"),     value: users.filter(u => ["WARD_OFFICER","PROVINCE_OFFICER","ADMIN"].includes(u.role?.toUpperCase())).length, color: "text-purple-600", bg: "bg-purple-50 dark:bg-purple-900/10" },
+            { label: t("home.citizens"),     value: users.filter(u => u.role?.toUpperCase() === "CITIZEN").length, color: "text-amber-600",  bg: "bg-amber-50 dark:bg-amber-900/10" },
           ].map(({ label, value, color, bg }) => (
             <div key={label} className={`${bg} rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3`}>
               <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">{label}</p>
@@ -205,8 +223,8 @@ const Users: React.FC = () => {
           {/* toolbar */}
           <div className="px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800">
             <div>
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">All Users</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{loading ? "Loading…" : `${totalCount} accounts found`}</p>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">{t("users.userList")}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">{loading ? t("users.loading") : `${totalCount} ${t("users.accountsFound")}`}</p>
             </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
               {/* search */}
@@ -216,7 +234,7 @@ const Users: React.FC = () => {
                 </svg>
                 <input
                   type="text"
-                  placeholder="Search by name or email…"
+                  placeholder={t("users.searchPlaceholder")}
                   value={searchTerm}
                   onChange={e => handleSearch(e.target.value)}
                   className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all"
@@ -230,7 +248,7 @@ const Users: React.FC = () => {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                Add User
+                {t("users.addUser")}
               </button>
             </div>
           </div>
@@ -249,7 +267,7 @@ const Users: React.FC = () => {
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm text-gray-400">Loading users…</p>
+              <p className="text-sm text-gray-400">{t("users.loading")}</p>
             </div>
           ) : users.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
@@ -259,8 +277,8 @@ const Users: React.FC = () => {
                 </svg>
               </div>
               <div className="text-center">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-300">No users found</p>
-                <p className="text-xs text-gray-400 mt-0.5">Try adjusting your search or add a new user</p>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-300">{t("users.noUsers")}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{t("users.noUsersHint")}</p>
               </div>
             </div>
           ) : (
@@ -268,11 +286,11 @@ const Users: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 dark:border-gray-800">
-                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">User</th>
-                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider hidden md:table-cell">Contact</th>
-                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Role</th>
-                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
-                    <th className="text-right px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
+                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t("users.user")}</th>
+                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider hidden md:table-cell">{t("users.contact")}</th>
+                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t("users.role")}</th>
+                    <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t("users.status")}</th>
+                    <th className="text-right px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t("users.actions")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
@@ -301,14 +319,14 @@ const Users: React.FC = () => {
                         {/* Role */}
                         <td className="px-5 py-3.5">
                           <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${role.color}`}>
-                            {role.label}
+                            {getRoleLabel(user.role)}
                           </span>
                         </td>
                         {/* Status */}
                         <td className="px-5 py-3.5">
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${status.badge}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
-                            {status.label}
+                            {getStatusLabel(status.label)}
                           </span>
                         </td>
                         {/* Actions */}
@@ -317,7 +335,7 @@ const Users: React.FC = () => {
                             <button
                               onClick={() => openEdit(user)}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                              title="Edit user"
+                              title={t("users.edit")}
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -326,7 +344,7 @@ const Users: React.FC = () => {
                             <button
                               onClick={() => handleDelete(user.id)}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                              title="Delete user"
+                              title={t("users.delete")}
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -345,21 +363,21 @@ const Users: React.FC = () => {
           {/* pagination */}
           {!loading && users.length > 0 && (
             <div className="px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-              <p className="text-xs text-gray-400">Page {page} of {totalPages}</p>
+              <p className="text-xs text-gray-400">{t("users.page")} {page} {t("users.of")} {totalPages}</p>
               <div className="flex gap-1.5">
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page === 1}
                   className="px-3 py-1.5 text-xs font-medium border border-gray-200 dark:border-gray-700 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
-                  ← Prev
+                  {t("users.previous")}
                 </button>
                 <button
                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}
                   className="px-3 py-1.5 text-xs font-medium border border-gray-200 dark:border-gray-700 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
-                  Next →
+                  {t("users.next")}
                 </button>
               </div>
             </div>
@@ -378,10 +396,10 @@ const Users: React.FC = () => {
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
               <div>
                 <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-                  {editingUser ? "Edit User" : "Add New User"}
+                  {editingUser ? t("users.editUser") : t("users.addUser")}
                 </h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {editingUser ? "Update account status" : "Create a new system account"}
+                  {editingUser ? t("users.updateAccountStatus") : t("users.createSystemAccount")}
                 </p>
               </div>
               <button onClick={closeModal} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
@@ -399,45 +417,45 @@ const Users: React.FC = () => {
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2">
-                      <Field label="Full Name" required error={formErrors.name}>
-                        <TInput value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Enter full name" error={formErrors.name} />
+                      <Field label={t("users.name")} required error={formErrors.name}>
+                        <TInput value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder={t("users.namePlaceholder")} error={formErrors.name} />
                       </Field>
                     </div>
                     <div className="col-span-2">
-                      <Field label="Email" required error={formErrors.email}>
-                        <TInput type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} placeholder="user@example.com" error={formErrors.email} />
+                      <Field label={t("users.email")} required error={formErrors.email}>
+                        <TInput type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} placeholder={t("users.emailPlaceholder")} error={formErrors.email} />
                       </Field>
                     </div>
-                    <Field label="Phone" error={formErrors.phone}>
-                      <TInput value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} placeholder="0912345678" error={formErrors.phone} />
+                    <Field label={t("users.phone")} error={formErrors.phone}>
+                      <TInput value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} placeholder={t("users.phonePlaceholder")} error={formErrors.phone} />
                     </Field>
-                    <Field label="Password" required error={formErrors.password}>
-                      <TInput type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="Min. 8 chars" error={formErrors.password} />
+                    <Field label={t("users.password")} required error={formErrors.password}>
+                      <TInput type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder={t("users.passwordPlaceholder")} error={formErrors.password} />
                     </Field>
                     <div className="col-span-2">
-                      <Field label="Location Code" required error={formErrors.locationCode}>
+                      <Field label={t("users.locationCode")} required error={formErrors.locationCode}>
                         <TInput value={form.locationCode} onChange={e => setForm({...form, locationCode: e.target.value})} placeholder="VN-HCM-BQ1-P01" error={formErrors.locationCode} />
                       </Field>
                     </div>
                     <div className="col-span-2">
-                      <Field label="Role">
+                      <Field label={t("users.role")}>
                         <Select
                           options={[
-                            { value: "CITIZEN",          label: "Citizen" },
-                            { value: "WARD_OFFICER",     label: "Ward Officer" },
-                            { value: "PROVINCE_OFFICER", label: "Province Officer" },
-                            { value: "ADMIN",            label: "Admin" },
+                            { value: "CITIZEN",          label: t("users.citizen") },
+                            { value: "WARD_OFFICER",     label: t("home.wardOfficer") },
+                            { value: "PROVINCE_OFFICER", label: t("home.provinceOfficer") },
+                            { value: "ADMIN",            label: t("users.admin") },
                           ]}
                           defaultValue={form.role}
                           onChange={v => setForm({...form, role: v as any, unit: ""})}
-                          placeholder="Select role"
+                          placeholder={t("users.selectRole")}
                         />
                       </Field>
                     </div>
                     {["WARD_OFFICER","PROVINCE_OFFICER","ADMIN"].includes(form.role) && (
                       <div className="col-span-2">
-                        <Field label="Unit" required error={formErrors.unit}>
-                          <TInput value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} placeholder="e.g. Ward Police Unit 1" error={formErrors.unit} />
+                        <Field label={t("users.unit")} required error={formErrors.unit}>
+                          <TInput value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} placeholder={t("users.unitPlaceholder")} error={formErrors.unit} />
                         </Field>
                       </div>
                     )}
@@ -465,13 +483,13 @@ const Users: React.FC = () => {
                   <Field label="Status" required>
                     <Select
                       options={[
-                        { value: "ACTIVE",      label: "Active" },
-                        { value: "INACTIVE",    label: "Inactive" },
-                        { value: "DEACTIVATED", label: "Deactivated" },
+                        { value: "ACTIVE",      label: t("users.active") },
+                        { value: "INACTIVE",    label: t("users.inactive") },
+                        { value: "DEACTIVATED", label: t("users.deactivated") },
                       ]}
                       defaultValue={form.status}
                       onChange={v => setForm({...form, status: v as any})}
-                      placeholder="Select status"
+                      placeholder={t("users.selectStatus")}
                     />
                   </Field>
                 </>
@@ -481,11 +499,11 @@ const Users: React.FC = () => {
             {/* modal footer */}
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex-shrink-0">
               <button onClick={closeModal} disabled={saving} className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50">
-                Cancel
+                {t("common.cancel")}
               </button>
               <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-50 flex items-center gap-2">
                 {saving && <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>}
-                {saving ? "Saving…" : editingUser ? "Save Changes" : "Create User"}
+                {saving ? t("users.saving") : editingUser ? t("users.saveChanges") : t("users.addUser")}
               </button>
             </div>
           </div>

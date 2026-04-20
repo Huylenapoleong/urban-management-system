@@ -6,6 +6,7 @@ import {
   RetentionPreviewResult,
   ChatReconciliationPreviewResult,
 } from "../../services/maintenance.service";
+import { useI18n } from "../../i18n/I18nContext";
 
 type MaintenanceOperation = "RETENTION_PREVIEW" | "RETENTION_PURGE" | "CHAT_PREVIEW" | "CHAT_REPAIR" | null;
 
@@ -18,6 +19,7 @@ interface OperationResult {
 }
 
 export const Maintenance: React.FC = () => {
+  const { t } = useI18n();
   const [retentionPreview, setRetentionPreview] = useState<RetentionPreviewResult | null>(null);
   const [chatPreview, setChatPreview] = useState<ChatReconciliationPreviewResult | null>(null);
   const [executing, setExecuting] = useState<MaintenanceOperation>(null);
@@ -50,7 +52,7 @@ export const Maintenance: React.FC = () => {
         data: response,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to preview retention";
+      const message = err instanceof Error ? err.message : t("maintenance.errors.previewRetention");
       setError(message);
       maintenanceService.recordAuditEvent({
         type: "RETENTION_PREVIEW",
@@ -90,7 +92,7 @@ export const Maintenance: React.FC = () => {
         data: response,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to purge retention";
+      const message = err instanceof Error ? err.message : t("maintenance.errors.purgeRetention");
       setError(message);
       maintenanceService.recordAuditEvent({
         type: "RETENTION_PURGE",
@@ -129,7 +131,7 @@ export const Maintenance: React.FC = () => {
         data: response,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to preview chat reconciliation";
+      const message = err instanceof Error ? err.message : t("maintenance.errors.previewChat");
       setError(message);
       maintenanceService.recordAuditEvent({
         type: "CHAT_PREVIEW",
@@ -169,7 +171,7 @@ export const Maintenance: React.FC = () => {
         data: response,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to repair chat reconciliation";
+      const message = err instanceof Error ? err.message : t("maintenance.errors.repairChat");
       setError(message);
       maintenanceService.recordAuditEvent({
         type: "CHAT_REPAIR",
@@ -200,11 +202,25 @@ export const Maintenance: React.FC = () => {
     generatedAt: chatPreview?.generatedAt,
   }), [chatPreview]);
 
+  const tr = (key: string, params?: Record<string, string>) => {
+    let text = t(key);
+    if (!params) return text;
+    Object.entries(params).forEach(([k, v]) => {
+      text = text.replace(new RegExp(`\\{${k}\\}`, "g"), v);
+    });
+    return text;
+  };
+
+  const operationLabel = (operation: MaintenanceOperation) => {
+    if (!operation) return "-";
+    return t(`maintenance.operations.${operation}`);
+  };
+
   return (
     <div className="bg-gray-50 dark:bg-gray-900 min-h-screen">
       <div className="mx-auto max-w-7xl p-6">
-        <PageMeta title="Maintenance" description="System maintenance operations" />
-        <PageBreadCrumb pageTitle="Maintenance" />
+        <PageMeta title={t("maintenance.title")} description={t("maintenance.description")} />
+        <PageBreadCrumb pageTitle={t("maintenance.title")} />
 
         <div className="space-y-6 mt-8">
           {/* Error Alert */}
@@ -217,8 +233,8 @@ export const Maintenance: React.FC = () => {
           {/* Retention Maintenance Section */}
           <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-100 dark:border-gray-800">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Data Retention Purge</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Preview and purge expired data records</p>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("maintenance.retentionTitle")}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t("maintenance.retentionDescription")}</p>
             </div>
             <div className="px-6 py-5 space-y-4">
               {/* Retention Preview Button */}
@@ -227,7 +243,7 @@ export const Maintenance: React.FC = () => {
                 disabled={executing !== null}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 rounded-lg transition-colors"
               >
-                {executing === "RETENTION_PREVIEW" ? "Previewing..." : "Preview Retention Candidates"}
+                {executing === "RETENTION_PREVIEW" ? t("maintenance.previewing") : t("maintenance.previewRetention")}
               </button>
 
               {/* Retention Preview Results */}
@@ -235,23 +251,23 @@ export const Maintenance: React.FC = () => {
                 <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Total Candidates</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">{t("maintenance.totalCandidates")}</p>
                       <p className="text-2xl font-bold text-gray-900 dark:text-white">{retentionStats.candidates}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Generated At</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">{t("maintenance.generatedAt")}</p>
                       <p className="text-sm text-gray-600 dark:text-gray-300">
-                        {retentionStats.generatedAt ? new Date(retentionStats.generatedAt).toLocaleString() : "N/A"}
+                        {retentionStats.generatedAt ? new Date(retentionStats.generatedAt).toLocaleString() : t("maintenance.notAvailable")}
                       </p>
                     </div>
                   </div>
                   {retentionPreview.buckets?.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Purge Breakdown:</p>
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">{t("maintenance.purgeBreakdown")}</p>
                       <div className="space-y-1">
                         {retentionPreview.buckets.map((bucket, idx) => (
                           <div key={idx} className="text-xs text-gray-600 dark:text-gray-400 flex justify-between">
-                            <span>{Object.entries(bucket)[0]?.[0] || `Bucket ${idx + 1}`}:</span>
+                            <span>{Object.entries(bucket)[0]?.[0] || `${t("maintenance.bucket")} ${idx + 1}`}:</span>
                             <span className="font-mono">{Object.entries(bucket)[0]?.[1]?.toString() || "0"}</span>
                           </div>
                         ))}
@@ -265,12 +281,12 @@ export const Maintenance: React.FC = () => {
                       onClick={() => setConfirmPurge(true)}
                       className="w-full mt-3 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
                     >
-                      Purge {retentionStats.candidates} Records
+                      {tr("maintenance.purgeRecords", { count: retentionStats.candidates.toString() })}
                     </button>
                   ) : (
                     <div className="w-full mt-3 p-3 bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg">
                       <p className="text-sm text-red-700 dark:text-red-300 mb-2 font-semibold">
-                        ⚠️ This will permanently delete {retentionStats.candidates} records. Are you sure?
+                        {tr("maintenance.purgeConfirm", { count: retentionStats.candidates.toString() })}
                       </p>
                       <div className="flex gap-2">
                         <button
@@ -278,13 +294,13 @@ export const Maintenance: React.FC = () => {
                           disabled={executing === "RETENTION_PURGE"}
                           className="flex-1 px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:bg-gray-400 rounded-lg transition-colors"
                         >
-                          {executing === "RETENTION_PURGE" ? "Purging..." : "Yes, Purge"}
+                          {executing === "RETENTION_PURGE" ? t("maintenance.purging") : t("maintenance.yesPurge")}
                         </button>
                         <button
                           onClick={() => setConfirmPurge(false)}
                           className="flex-1 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
                         >
-                          Cancel
+                          {t("common.cancel")}
                         </button>
                       </div>
                     </div>
@@ -297,8 +313,8 @@ export const Maintenance: React.FC = () => {
           {/* Chat Reconciliation Section */}
           <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-100 dark:border-gray-800">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Chat Reconciliation</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Detect and repair inbox summary drift</p>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("maintenance.chatTitle")}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t("maintenance.chatDescription")}</p>
             </div>
             <div className="px-6 py-5 space-y-4">
               {/* Chat Preview Button */}
@@ -307,7 +323,7 @@ export const Maintenance: React.FC = () => {
                 disabled={executing !== null}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 rounded-lg transition-colors"
               >
-                {executing === "CHAT_PREVIEW" ? "Scanning..." : "Preview Reconciliation Candidates"}
+                {executing === "CHAT_PREVIEW" ? t("maintenance.scanning") : t("maintenance.previewChat")}
               </button>
 
               {/* Chat Preview Results */}
@@ -315,27 +331,27 @@ export const Maintenance: React.FC = () => {
                 <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
                   <div className="grid grid-cols-3 gap-4">
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Candidates</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">{t("maintenance.candidates")}</p>
                       <p className="text-2xl font-bold text-gray-900 dark:text-white">{chatStats.candidates}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Issues</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">{t("maintenance.issues")}</p>
                       <p className="text-2xl font-bold text-orange-600">{chatStats.issues}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Scanned At</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">{t("maintenance.scannedAt")}</p>
                       <p className="text-sm text-gray-600 dark:text-gray-300">
-                        {chatStats.generatedAt ? new Date(chatStats.generatedAt).toLocaleString() : "N/A"}
+                        {chatStats.generatedAt ? new Date(chatStats.generatedAt).toLocaleString() : t("maintenance.notAvailable")}
                       </p>
                     </div>
                   </div>
                   {chatPreview.buckets?.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Repair Breakdown:</p>
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">{t("maintenance.repairBreakdown")}</p>
                       <div className="space-y-1">
                         {chatPreview.buckets.map((bucket, idx) => (
                           <div key={idx} className="text-xs text-gray-600 dark:text-gray-400 flex justify-between">
-                            <span>{Object.entries(bucket)[0]?.[0] || `Bucket ${idx + 1}`}:</span>
+                            <span>{Object.entries(bucket)[0]?.[0] || `${t("maintenance.bucket")} ${idx + 1}`}:</span>
                             <span className="font-mono">{Object.entries(bucket)[0]?.[1]?.toString() || "0"}</span>
                           </div>
                         ))}
@@ -344,7 +360,7 @@ export const Maintenance: React.FC = () => {
                   )}
                   {chatPreview.issues?.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 mb-2">Issues Found:</p>
+                      <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 mb-2">{t("maintenance.issuesFound")}</p>
                       <div className="space-y-1">
                         {chatPreview.issues.map((issue, idx) => (
                           <div key={idx} className="text-xs text-gray-600 dark:text-gray-400 p-2 bg-orange-50 dark:bg-orange-900/20 rounded border border-orange-200 dark:border-orange-800">
@@ -361,12 +377,12 @@ export const Maintenance: React.FC = () => {
                       onClick={() => setConfirmRepair(true)}
                       className="w-full mt-3 px-4 py-2 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors"
                     >
-                      Repair {chatStats.candidates} Inbox(es)
+                      {tr("maintenance.repairInboxes", { count: chatStats.candidates.toString() })}
                     </button>
                   ) : (
                     <div className="w-full mt-3 p-3 bg-orange-100 dark:bg-orange-900/20 border border-orange-300 dark:border-orange-800 rounded-lg">
                       <p className="text-sm text-orange-700 dark:text-orange-300 mb-2 font-semibold">
-                        ⚠️ This will repair {chatStats.candidates} inbox summaries. Continue?
+                        {tr("maintenance.repairConfirm", { count: chatStats.candidates.toString() })}
                       </p>
                       <div className="flex gap-2">
                         <button
@@ -374,13 +390,13 @@ export const Maintenance: React.FC = () => {
                           disabled={executing === "CHAT_REPAIR"}
                           className="flex-1 px-3 py-1.5 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 rounded-lg transition-colors"
                         >
-                          {executing === "CHAT_REPAIR" ? "Repairing..." : "Yes, Repair"}
+                          {executing === "CHAT_REPAIR" ? t("maintenance.repairing") : t("maintenance.yesRepair")}
                         </button>
                         <button
                           onClick={() => setConfirmRepair(false)}
                           className="flex-1 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
                         >
-                          Cancel
+                          {t("common.cancel")}
                         </button>
                       </div>
                     </div>
@@ -394,7 +410,7 @@ export const Maintenance: React.FC = () => {
           {operationHistory.length > 0 && (
             <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] overflow-hidden">
               <div className="px-6 py-5 border-b border-gray-100 dark:border-gray-800">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Operation History</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("maintenance.operationHistory")}</h2>
               </div>
               <div className="px-6 py-5">
                 <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -408,14 +424,14 @@ export const Maintenance: React.FC = () => {
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-semibold">{operation.type}</span>
+                        <span className="font-semibold">{operationLabel(operation.type)}</span>
                         <span className="text-[11px] opacity-75">
                           {new Date(operation.timestamp).toLocaleTimeString()}
                         </span>
                       </div>
                       {operation.error && <p className="text-[11px] mt-1">{operation.error}</p>}
                       {operation.success && !operation.error && (
-                        <p className="text-[11px] mt-1 opacity-75">Completed successfully</p>
+                        <p className="text-[11px] mt-1 opacity-75">{t("maintenance.completed")}</p>
                       )}
                     </div>
                   ))}

@@ -35,6 +35,7 @@ const getNavItems = (t: (key: string) => string): NavItem[] => [
     icon: <TableIcon />,
     subItems: [
       { name: t("navigation.users"), path: "/users", pro: false },
+      { name: t("navigation.groups"), path: "/groups", pro: false },
       { name: t("navigation.categories"), path: "/categories", pro: false },
       { name: t("navigation.regions"), path: "/regions", pro: false },
       { name: t("navigation.reports"), path: "/reports", pro: false },
