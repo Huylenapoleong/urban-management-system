@@ -18,6 +18,7 @@ export type StorageEntityType =
   | 'USER_IDENTITY_CLAIM'
   | 'USER_FRIEND_EDGE'
   | 'USER_FRIEND_REQUEST'
+  | 'USER_BLOCK_EDGE'
   | 'USER_REFRESH_SESSION'
   | 'USER_SESSION_SLOT'
   | 'USER_REFRESH_TOKEN_REVOCATION'
@@ -78,6 +79,15 @@ export interface StoredUserFriendRequest extends TableItemBase {
   requesterUserId: string;
   targetUserId: string;
   direction: 'INCOMING' | 'OUTGOING';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredUserBlockEdge extends TableItemBase {
+  entityType: 'USER_BLOCK_EDGE';
+  blockerUserId: string;
+  blockedUserId: string;
+  direction: 'OUTGOING' | 'INCOMING';
   createdAt: string;
   updatedAt: string;
 }

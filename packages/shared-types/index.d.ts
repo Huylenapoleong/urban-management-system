@@ -125,6 +125,17 @@ export interface UserFriendRequestItem {
   requestedAt: string;
 }
 
+export interface UserBlockedItem {
+  userId: string;
+  fullName: string;
+  role: UserRole;
+  locationCode: string;
+  avatarAsset?: MediaAsset;
+  avatarUrl?: string;
+  status: UserStatus;
+  blockedAt: string;
+}
+
 export interface UserDirectoryItem {
   userId: string;
   fullName: string;
