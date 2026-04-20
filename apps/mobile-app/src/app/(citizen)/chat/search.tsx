@@ -32,11 +32,16 @@ export default function CitizenSearchUserScreen() {
   };
 
   const handleChat = () => {
-    if (!result?.id) {
+    const targetUserId = (result?.userId || result?.id || '').trim();
+
+    if (!targetUserId) {
       return;
     }
 
-    router.replace(`/(citizen)/chat/dm-${result.id}` as any);
+    router.replace({
+      pathname: '/(citizen)/chat/[id]',
+      params: { id: `dm:${targetUserId}` },
+    } as any);
   };
 
   return (

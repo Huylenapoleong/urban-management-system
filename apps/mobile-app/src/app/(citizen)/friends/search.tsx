@@ -17,7 +17,7 @@ export default function UserSearchScreen() {
 
   const handleAction = async (userId: string, isFriend: boolean) => {
     if (isFriend) {
-      router.push(`/(citizen)/chat/${userId}`);
+      router.push(`/(citizen)/chat/${encodeURIComponent(`dm:${userId}`)}`);
       return;
     }
 
@@ -38,12 +38,12 @@ export default function UserSearchScreen() {
     <View style={styles.container}>
       <Appbar.Header elevated>
         <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title="Tim kiem nguoi dung" />
+        <Appbar.Content title="Tìm kiếm người dùng" />
       </Appbar.Header>
 
       <View style={styles.searchContainer}>
         <Searchbar
-          placeholder="Nhap ten nguoi dung..."
+          placeholder="Nhập tên người dùng..."
           onChangeText={setSearchQuery}
           value={searchQuery}
           loading={isSearching}
@@ -54,7 +54,7 @@ export default function UserSearchScreen() {
 
       <View style={styles.content}>
         <Text variant="labelLarge" style={styles.sectionTitle}>
-          {searchQuery.length >= 2 ? 'Ket qua tim kiem' : 'Goi y ket ban'}
+          {searchQuery.length >= 2 ? 'Kết quả tìm kiếm' : 'Gợi ý kết bạn'}
         </Text>
 
         {isLoading ? (
@@ -75,7 +75,7 @@ export default function UserSearchScreen() {
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text variant="bodyMedium" style={{ color: '#667085' }}>
-                  {searchQuery.length >= 2 ? 'Khong tim thay nguoi dung nao.' : 'Hien tai khong co goi y nao.'}
+                  {searchQuery.length >= 2 ? 'Không tìm thấy người dùng nào.' : 'Hiện tại không có gợi ý nào.'}
                 </Text>
               </View>
             }

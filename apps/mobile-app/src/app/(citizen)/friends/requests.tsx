@@ -35,7 +35,7 @@ export default function FriendRequestsScreen() {
     <View style={styles.container}>
       <Appbar.Header elevated>
         <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title="Loi moi ket ban" />
+        <Appbar.Content title="Lời mời kết bạn" />
       </Appbar.Header>
 
       <View style={styles.tabContainer}>
@@ -45,7 +45,7 @@ export default function FriendRequestsScreen() {
           style={styles.tabBtn}
           compact
         > 
-          Loi moi ({(requests || []).filter(r => r.direction === 'INCOMING').length})
+          Lời mời ({(requests || []).filter(r => r.direction === 'INCOMING').length})
         </Button>
         <Button 
           mode={activeTab === 'OUTGOING' ? 'contained' : 'text'} 
@@ -53,7 +53,7 @@ export default function FriendRequestsScreen() {
           style={styles.tabBtn}
           compact
         > 
-          Da gui ({(requests || []).filter(r => r.direction === 'OUTGOING').length})
+          Đã gửi ({(requests || []).filter(r => r.direction === 'OUTGOING').length})
         </Button>
       </View>
 
@@ -72,7 +72,7 @@ export default function FriendRequestsScreen() {
             return (
               <List.Item
                 title={item.fullName}
-                description={activeTab === 'INCOMING' ? `Da gui ngay ${new Date(item.requestedAt).toLocaleDateString('vi-VN')}` : `Cho phan hoi tu ${new Date(item.requestedAt).toLocaleDateString('vi-VN')}`}
+                description={activeTab === 'INCOMING' ? `Đã gửi ngày ${new Date(item.requestedAt).toLocaleDateString('vi-VN')}` : `Chờ phản hồi từ ${new Date(item.requestedAt).toLocaleDateString('vi-VN')}`}
                 titleStyle={styles.title}
                 descriptionStyle={styles.desc}
                 left={() => (
@@ -119,7 +119,7 @@ export default function FriendRequestsScreen() {
                         disabled={actingId !== null}
                         style={styles.actionBtn}
                       >
-                        Huy yc
+                        Hủy YC
                       </Button>
                     )}
                   </View>
@@ -130,7 +130,7 @@ export default function FriendRequestsScreen() {
           }}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={{ color: '#667085' }}>Hien tai khong co loi moi nao tai day.</Text>
+              <Text style={{ color: '#667085' }}>Hiện tại không có lời mời nào tại đây.</Text>
             </View>
           }
           refreshControl={

@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, Image, ScrollView, Alert, Share, Modal as NativeModal } from 'react-native';
+﻿import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, Image, ScrollView, Alert, Share } from 'react-native';
 import { Text, TextInput, IconButton, Appbar, ActivityIndicator, Avatar, Portal, Modal, Button } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, useSegments } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,6 +11,9 @@ import { useWebRTCContext } from '../../../providers/WebRTCContext';
 import { ApiClient } from '../../../lib/api-client';
 import { ENV_CONFIG } from '../../../constants/env';
 import { convertToS3Url } from '../../../constants/s3';
+import ConfirmDialog from '@/components/shared/ConfirmDialog';
+import { ChatDetailHeader } from './_components/ChatDetailHeader';
+import { ChatMediaPanels } from './_components/ChatMediaPanels';
 
 const OFFICIAL_CHAT_PRIMARY = '#1f3e68';
 const OFFICIAL_CHAT_TEXT = '#ffffff';
@@ -169,13 +172,60 @@ export default function OfficialChatScreen() {
   
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [convInfo, setConvInfo] = useState<any>(null);
+  const [accessDeniedDialogVisible, setAccessDeniedDialogVisible] = useState(false);
+  const [isDeletingDeniedConversation, setIsDeletingDeniedConversation] = useState(false);
 
   // States for @mention functionality
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
 
-  const { messages, isLoadingHistory, isReady, sendMessage, sendMedia, sendTyping, typingUsers, markRead, deleteMessage, updateMessage } = useChatConversation(decodedId, currentUser);
-  const [convInfo, setConvInfo] = useState<any>(null);
+  const handleConversationAccessDenied = useCallback(() => {
+    setAccessDeniedDialogVisible(true);
+  }, []);
+
+  const handleDeniedKeepConversation = useCallback(() => {
+    if (isDeletingDeniedConversation) {
+      return;
+    }
+
+    setAccessDeniedDialogVisible(false);
+    router.replace(chatListPath as any);
+  }, [chatListPath, isDeletingDeniedConversation, router]);
+
+  const handleDeniedDeleteConversation = useCallback(() => {
+    if (isDeletingDeniedConversation) {
+      return;
+    }
+
+    setIsDeletingDeniedConversation(true);
+    void (async () => {
+      try {
+        await ApiClient.delete(`/conversations/${encodeURIComponent(decodedId)}`);
+      } catch (error: any) {
+        Alert.alert('Lỗi', error?.message || 'Không thể xóa cuộc trò chuyện lúc này.');
+      } finally {
+        setIsDeletingDeniedConversation(false);
+        setAccessDeniedDialogVisible(false);
+        router.replace(chatListPath as any);
+      }
+    })();
+  }, [chatListPath, decodedId, isDeletingDeniedConversation, router]);
+
+  const {
+    messages,
+    isLoadingHistory,
+    isReady,
+    sendMessage,
+    sendMedia,
+    sendTyping,
+    typingUsers,
+    markRead,
+    deleteMessage,
+    updateMessage,
+  } = useChatConversation(decodedId, currentUser, {
+    onConversationAccessDenied: handleConversationAccessDenied,
+  });
 
   const isGroup = useMemo(() => decodedId?.startsWith('GRP#') || decodedId?.startsWith('group:'), [decodedId]);
   const groupId = useMemo(() => {
@@ -622,6 +672,8 @@ export default function OfficialChatScreen() {
   }, [sendDroppedFiles]);
 
   const activeTypers = Object.values(typingUsers).filter(u => u.isTyping).map(u => u.fullName).join(', ');
+  const keyboardBehavior: 'padding' | 'height' | undefined = Platform.OS === 'ios' ? 'padding' : 'height';
+  const keyboardVerticalOffset = Platform.select({ ios: 8, android: 20, default: 0 });
 
   const renderMessageContent = (item: any) => {
     const isMe = currentUser?.sub === item.senderId;
@@ -707,7 +759,7 @@ export default function OfficialChatScreen() {
     );
   };
 
-  const MessageBubble = React.memo(({ item }: { item: any }) => {
+  const MessageBubble = React.memo(function MessageBubble({ item }: { item: any }) {
     const isMe = currentUser?.sub === item.senderId;
 
     const reactions = useMemo(() => {
@@ -718,6 +770,10 @@ export default function OfficialChatScreen() {
         return {};
       }
     }, [item.content]);
+
+    const thumbUpUsers: string[] = Array.isArray(reactions['👍']) ? reactions['👍'] : [];
+    const likeCount = thumbUpUsers.length;
+    const likedByMe = !!currentUser?.sub && thumbUpUsers.includes(currentUser.sub);
 
     return (
       <View style={[styles.messageWrapper, isMe ? styles.messageWrapperRight : styles.messageWrapperLeft]}>
@@ -749,6 +805,15 @@ export default function OfficialChatScreen() {
             {renderMessageContent(item)}
             
             <View style={styles.bubbleFooter}>
+              <TouchableOpacity
+                style={styles.quickLikeButton}
+                onPress={() => handleReaction(item, '👍')}
+                activeOpacity={0.75}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={[styles.quickLikeIcon, likedByMe && styles.quickLikeIconActive]}>👍</Text>
+                {likeCount > 0 && <Text style={styles.quickLikeCount}>{likeCount}</Text>}
+              </TouchableOpacity>
               <Text variant="labelSmall" style={[styles.timeText, { color: OFFICIAL_CHAT_COLORS.mutedTextOnPrimary }]}>
                 {item.isOptimistic ? 'Đang gửi...' : new Date(item.sentAt || Date.now()).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
               </Text>
@@ -880,19 +945,26 @@ export default function OfficialChatScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: OFFICIAL_CHAT_COLORS.surface }]}>
-      <Appbar.Header style={{ backgroundColor: OFFICIAL_CHAT_COLORS.surface, borderBottomWidth: 0.5, borderColor: OFFICIAL_CHAT_COLORS.border, elevation: 0 }}>
-        <Appbar.BackAction onPress={() => router.push(chatListPath as any)} color={OFFICIAL_CHAT_COLORS.primary} />
-        <Avatar.Icon size={36} icon="account-group" style={{ backgroundColor: OFFICIAL_CHAT_COLORS.primarySoft }} />
-        <Appbar.Content
-          title={convInfo?.groupName || 'Phòng Trao Đổi'}
-          titleStyle={{ fontSize: 17, fontWeight: 'bold' }}
-          subtitle={isReady ? 'Đang hoạt động' : 'Đang kết nối...'}
-          subtitleStyle={{ fontSize: 11, color: isReady ? OFFICIAL_CHAT_COLORS.primary : OFFICIAL_CHAT_COLORS.mutedOnSurface }}
-        />
-        <Appbar.Action icon="phone" onPress={handleStartAudioCall} disabled={!isReady} color={OFFICIAL_CHAT_COLORS.primary} />
-        <Appbar.Action icon="video" onPress={handleStartVideoCall} disabled={!isReady} color={OFFICIAL_CHAT_COLORS.primary} />
-        <Appbar.Action icon="information" onPress={() => {}} color={OFFICIAL_CHAT_COLORS.primary} />
-      </Appbar.Header>
+      <ChatDetailHeader
+        styles={styles}
+        colors={OFFICIAL_CHAT_COLORS}
+        isGroup={isGroup}
+        headerAvatarUrl={null}
+        conversationDisplayName={convInfo?.groupName || 'Phong Trao Doi'}
+        subtitleText={isReady ? 'Dang hoat dong' : 'Dang ket noi...'}
+        isPeerOnline={isReady}
+        onBack={() => {
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.location.replace('/chat');
+            return;
+          }
+
+          router.replace(chatListPath as any);
+        }}
+        onStartAudioCall={handleStartAudioCall}
+        onStartVideoCall={handleStartVideoCall}
+        onOpenInfo={() => {}}
+      />
 
       {pinnedMessages.length > 0 && (
         <View style={styles.pinnedBanner}>
@@ -913,8 +985,8 @@ export default function OfficialChatScreen() {
       <KeyboardAvoidingView
         {...dropZoneProps}
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        behavior={keyboardBehavior}
+        keyboardVerticalOffset={keyboardVerticalOffset}
       >
         {isLoadingHistory ? (
           <View style={styles.center}>
@@ -927,6 +999,8 @@ export default function OfficialChatScreen() {
             data={messages}
             keyExtractor={item => item.id}
             renderItem={renderMessage}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             contentContainerStyle={styles.listContent}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
@@ -1024,6 +1098,7 @@ export default function OfficialChatScreen() {
             style={styles.input}
             placeholder="Nhập tin nhắn..."
             value={text}
+            onFocus={() => flatListRef.current?.scrollToEnd({ animated: true })}
             onChangeText={(val) => {
               setText(val);
               sendTyping(val.length > 0);
@@ -1163,47 +1238,25 @@ export default function OfficialChatScreen() {
         </Modal>
       </Portal>
 
-      <NativeModal
-        visible={Boolean(fullscreenMedia)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFullscreenMedia(null)}
-      >
-        <View style={styles.fullscreenOverlay}>
-          <TouchableOpacity style={styles.fullscreenCloseButton} onPress={() => setFullscreenMedia(null)}>
-            <IconButton icon="close" iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} size={26} />
-          </TouchableOpacity>
+      <ConfirmDialog
+        visible={accessDeniedDialogVisible}
+        title="Không thể nhắn tin"
+        message={`${convInfo?.groupName || 'Người dùng này'} đã hủy kết bạn với bạn. Bạn có muốn xóa cuộc trò chuyện này khỏi danh sách?`}
+        confirmText="Có, xóa"
+        confirmLoading={isDeletingDeniedConversation}
+        disableClose={isDeletingDeniedConversation}
+        onCancel={handleDeniedKeepConversation}
+        onConfirm={handleDeniedDeleteConversation}
+      />
 
-          {fullscreenMedia?.type === 'image' ? (
-            <Image source={{ uri: fullscreenMedia.uri }} style={styles.fullscreenMedia} resizeMode="contain" />
-          ) : null}
-
-          {fullscreenMedia?.type === 'video' ? (
-            <Video
-              source={{ uri: fullscreenMedia.uri }}
-              style={styles.fullscreenMedia}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-              isLooping={false}
-            />
-          ) : null}
-
-          {fullscreenMedia?.uri ? (
-            <TouchableOpacity
-              style={styles.fullscreenShareButton}
-              onPress={() => void handleSaveFullscreenMedia()}
-              disabled={downloadingMedia}
-            >
-              {downloadingMedia ? (
-                <ActivityIndicator size="small" color={OFFICIAL_CHAT_COLORS.textOnPrimary} />
-              ) : (
-                <Text style={{ color: OFFICIAL_CHAT_COLORS.textOnPrimary, fontWeight: '700' }}>Lưu</Text>
-              )}
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </NativeModal>
+      <ChatMediaPanels
+        styles={styles}
+        colors={OFFICIAL_CHAT_COLORS}
+        fullscreenMedia={fullscreenMedia}
+        onCloseFullscreen={() => setFullscreenMedia(null)}
+        onSaveFullscreenMedia={handleSaveFullscreenMedia}
+        downloadingMedia={downloadingMedia}
+      />
     </SafeAreaView>
   );
 }
@@ -1213,7 +1266,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { padding: 16, paddingBottom: 32 },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 300 },
-  messageWrapper: { flexDirection: 'row', marginBottom: 12, maxWidth: '85%' },
+  messageWrapper: { flexDirection: 'row', marginBottom: 12, maxWidth: '94%' },
   messageWrapperLeft: { alignSelf: 'flex-start' },
   messageWrapperRight: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   avatar: { marginRight: 8, marginTop: 4 },
@@ -1335,8 +1388,29 @@ const styles = StyleSheet.create({
   bubbleFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     marginTop: 4,
+  },
+  quickLikeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: OFFICIAL_CHAT_COLORS.primarySoftStrong,
+  },
+  quickLikeIcon: {
+    fontSize: 12,
+    color: OFFICIAL_CHAT_COLORS.textOnPrimary,
+  },
+  quickLikeIconActive: {
+    transform: [{ scale: 1.1 }],
+  },
+  quickLikeCount: {
+    marginLeft: 4,
+    fontSize: 10,
+    fontWeight: '700',
+    color: OFFICIAL_CHAT_COLORS.textOnPrimary,
   },
   reactionContainer: {
     flexDirection: 'row',

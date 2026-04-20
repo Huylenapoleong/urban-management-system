@@ -14,6 +14,17 @@ type UploadMediaParams = {
 
 const API_BASE_URL = ENV_CONFIG.API_BASE_URL;
 
+const buildApiUrl = (path: string) => {
+  const base = API_BASE_URL.replace(/\/+$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  if (base.endsWith('/api')) {
+    return `${base}${normalizedPath}`;
+  }
+
+  return `${base}/api${normalizedPath}`;
+};
+
 async function getAccessToken(): Promise<string | null> {
   try {
     if (Platform.OS === 'web') {
@@ -26,25 +37,36 @@ async function getAccessToken(): Promise<string | null> {
 }
 
 function inferMimeType(fileName: string, mimeType?: string) {
-  if (mimeType) {
-    return mimeType;
-  }
-
   const lowerCaseName = fileName.toLowerCase();
+  const rawMime = (mimeType || '').split(';')[0].trim().toLowerCase();
 
-  if (lowerCaseName.endsWith(".png")) {
-    return "image/png";
+  const explicitMimeMap: Record<string, string> = {
+    'audio/x-m4a': 'audio/mp4',
+    'audio/m4a': 'audio/mp4',
+    'audio/mp4a-latm': 'audio/aac',
+    'video/mov': 'video/quicktime',
+  };
+
+  if (rawMime && rawMime !== 'application/octet-stream') {
+    return explicitMimeMap[rawMime] || rawMime;
   }
 
-  if (lowerCaseName.endsWith(".heic")) {
-    return "image/heic";
+  if (/\.(jpg|jpeg)$/.test(lowerCaseName)) return 'image/jpeg';
+  if (lowerCaseName.endsWith('.png')) return 'image/png';
+  if (lowerCaseName.endsWith('.webp')) return 'image/webp';
+  if (lowerCaseName.endsWith('.gif')) return 'image/gif';
+  if (lowerCaseName.endsWith('.mp4')) return 'video/mp4';
+  if (lowerCaseName.endsWith('.mov')) return 'video/quicktime';
+  if (lowerCaseName.endsWith('.mp3')) return 'audio/mpeg';
+  if (lowerCaseName.endsWith('.m4a')) return 'audio/mp4';
+  if (lowerCaseName.endsWith('.aac')) return 'audio/aac';
+  if (lowerCaseName.endsWith('.pdf')) return 'application/pdf';
+  if (lowerCaseName.endsWith('.doc')) return 'application/msword';
+  if (lowerCaseName.endsWith('.docx')) {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   }
 
-  if (lowerCaseName.endsWith(".webp")) {
-    return "image/webp";
-  }
-
-  return "image/jpeg";
+  return 'image/jpeg';
 }
 
 export async function uploadMedia({
@@ -62,11 +84,7 @@ export async function uploadMedia({
 
   const resolvedFileName = fileName || uri.split("/").pop() || `upload-${Date.now()}.jpg`;
   const contentType = inferMimeType(resolvedFileName, mimeType);
-  
-  // Convert URI to Blob for proper file upload
-  const fileUri = Platform.OS === 'android' ? uri : uri.replace('file://', '');
-  const response = await fetch(fileUri);
-  const blob = await response.blob();
+  const uploadUrl = buildApiUrl('/uploads/media');
   
   const formData = new FormData();
   formData.append("target", target);
@@ -75,10 +93,19 @@ export async function uploadMedia({
     formData.append("entityId", entityId);
   }
 
-  // Append blob as actual file
-  formData.append("file", blob, resolvedFileName);
+  if (Platform.OS === 'web') {
+    const fileResponse = await fetch(uri);
+    const blob = await fileResponse.blob();
+    formData.append('file', blob, resolvedFileName);
+  } else {
+    formData.append("file", {
+      uri,
+      name: resolvedFileName,
+      type: contentType,
+    } as any);
+  }
 
-  const uploadResponse = await fetch(`${API_BASE_URL}/api/uploads/media`, {
+  const uploadResponse = await fetch(uploadUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -103,7 +130,7 @@ export async function uploadMedia({
 
 export async function getUploadLimits(): Promise<any> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/api/uploads/limits`, {
+  const response = await fetch(buildApiUrl('/uploads/limits'), {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -115,7 +142,7 @@ export async function getUploadLimits(): Promise<any> {
 
 export async function deleteMedia(key: string): Promise<void> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/api/uploads/media`, {
+  const response = await fetch(buildApiUrl('/uploads/media'), {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -131,7 +158,7 @@ export async function deleteMedia(key: string): Promise<void> {
 
 export async function getPresignedUploadUrl(params: { fileName: string; contentType: string; target: string; entityId?: string }): Promise<any> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/api/uploads/presign/upload`, {
+  const response = await fetch(buildApiUrl('/uploads/presign/upload'), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -146,7 +173,7 @@ export async function getPresignedUploadUrl(params: { fileName: string; contentT
 
 export async function getPresignedDownloadUrl(key: string): Promise<any> {
   const token = await getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/api/uploads/presign/download`, {
+  const response = await fetch(buildApiUrl('/uploads/presign/download'), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

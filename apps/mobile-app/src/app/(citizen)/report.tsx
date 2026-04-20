@@ -54,17 +54,6 @@ type CreateReportPayload = {
 
 const API_REPORT_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
-const hasCitizenS3Config = Boolean(
-  process.env.S3_BUCKET_NAME ||
-    process.env.EXPO_PUBLIC_S3_ENDPOINT ||
-    process.env.EXPO_PUBLIC_S3_ACCESS_KEY ||
-    process.env.EXPO_PUBLIC_S3_SECRET_KEY ||
-    process.env.S3_BUCKET_NAME ||
-    process.env.S3_ENDPOINT ||
-    process.env.AWS_ACCESS_KEY_ID ||
-    process.env.AWS_SECRET_ACCESS_KEY,
-);
-
 function toSelectedImage(asset: ImagePickerAsset): SelectedImage {
   return {
     uri: asset.uri,
@@ -111,7 +100,7 @@ async function appendReportUploadFile(formData: FormData, image: SelectedImage) 
   const contentType = inferReportImageMimeType(image);
 
   if (!API_REPORT_IMAGE_MIME_TYPES.has(contentType)) {
-    throw new Error("API chi nhan anh JPEG, PNG, WEBP hoac GIF. Vui long chon anh khac.");
+    throw new Error("API chỉ nhận ảnh JPEG, PNG, WEBP hoặc GIF. Vui lòng chọn ảnh khác.");
   }
 
   if (Platform.OS === "web") {
@@ -120,7 +109,7 @@ async function appendReportUploadFile(formData: FormData, image: SelectedImage) 
       : await fetch(image.uri).then((response) => response.blob());
 
     if (sourceBlob.size <= 0) {
-      throw new Error("Tep anh dang rong. Vui long chon lai anh khac.");
+      throw new Error("Tệp ảnh đang rỗng. Vui lòng chọn lại ảnh khác.");
     }
 
     const uploadBlob =
@@ -216,10 +205,10 @@ export default function ReportPage() {
     }
 
     return [
-      { key: "country", label: "Quoc gia", value: locationSegments.country },
-      { key: "province", label: "Tinh/Thanh", value: locationSegments.province },
-      { key: "district", label: "Quan/Huyen", value: locationSegments.district },
-      { key: "ward", label: "Phuong/Xa", value: locationSegments.ward },
+      { key: "country", label: "Quốc gia", value: locationSegments.country },
+      { key: "province", label: "Tỉnh/Thành", value: locationSegments.province },
+      { key: "district", label: "Quận/Huyện", value: locationSegments.district },
+      { key: "ward", label: "Phường/Xã", value: locationSegments.ward },
     ];
   }, [locationSegments]);
 
@@ -248,7 +237,7 @@ export default function ReportPage() {
       );
       setError(null);
     } catch (err: unknown) {
-      setError((err as Error)?.message ?? "Khong the tai danh sach phan anh");
+      setError((err as Error)?.message ?? "Không thể tải danh sách phản ánh");
     } finally {
       setLoadingReports(false);
     }
@@ -262,7 +251,7 @@ export default function ReportPage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("Can quyen truy cap", "Vui long cap quyen thu vien anh de dinh kem tep.");
+      Alert.alert("Cần quyền truy cập", "Vui lòng cấp quyền thư viện ảnh để đính kèm tệp.");
       return;
     }
 
@@ -281,7 +270,7 @@ export default function ReportPage() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("Can quyen camera", "Vui long cap quyen camera de chup anh moi.");
+      Alert.alert("Cần quyền camera", "Vui lòng cấp quyền camera để chụp ảnh mới.");
       return;
     }
 
@@ -298,12 +287,12 @@ export default function ReportPage() {
 
   const submit = async () => {
     if (!user?.locationCode) {
-      setError("Khong xac dinh duoc khu vuc cua ban");
+      setError("Không xác định được khu vực của bạn");
       return;
     }
 
     if (!title.trim() || !description.trim()) {
-      setError("Vui long nhap day du tieu de va noi dung phan anh");
+      setError("Vui lòng nhập đầy đủ tiêu đề và nội dung phản ánh");
       return;
     }
 
@@ -318,7 +307,7 @@ export default function ReportPage() {
         const uploadedUrl = resolveReportMediaUrl(uploadedAsset.url) || resolveReportMediaUrl(uploadedAsset.key);
 
         if (!uploadedUrl) {
-          throw new Error("Upload thanh cong nhung khong nhan duoc URL anh.");
+          throw new Error("Upload thành công nhưng không nhận được URL ảnh.");
         }
 
         mediaUrls.push(uploadedUrl);
@@ -343,14 +332,14 @@ export default function ReportPage() {
       setDescription("");
       setSelectedImage(null);
       setError(null);
-      setSuccessMessage("Da gui phan anh thanh cong");
+      setSuccessMessage("Đã gửi phản ánh thành công");
       
       // Invalidate queries để home page auto-refresh
       await queryClient.invalidateQueries({ queryKey: ['reports'] });
     } catch (err: unknown) {
-      const message = (err as Error)?.message ?? "Khong the gui phan anh";
+      const message = (err as Error)?.message ?? "Không thể gửi phản ánh";
       setError(message);
-      Alert.alert("Loi gui phan anh", message);
+      Alert.alert("Lỗi gửi phản ánh", message);
     } finally {
       setSubmitting(false);
     }
@@ -358,21 +347,12 @@ export default function ReportPage() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Header title="Gui phan anh" subtitle="Them anh dinh kem, gui dung dia ban, va theo doi lich su da gui" />
-
-      <View style={styles.infoCard}>
-        <Ionicons name="information-circle-outline" size={18} color="#1d4ed8" />
-        <Text style={styles.infoText}>
-          {hasCitizenS3Config
-            ? "Citizen app dang co bien moi truong lien quan den S3. Upload anh se di qua upload API hien co cua he thong."
-            : "Khong tim thay cau hinh S3 trong .env cua Citizen app. Minh khong them key moi; upload anh se goi upload API san co va thanh cong hay khong se phu thuoc cau hinh S3 phia backend."}
-        </Text>
-      </View>
+      <Header title="Gửi phản ánh" subtitle="Thêm ảnh đính kèm, gửi đúng địa bàn, và theo dõi lịch sử đã gửi" />
 
       <View style={styles.locationCard}>
-        <Text style={styles.cardTitle}>Vi tri phan anh</Text>
+        <Text style={styles.cardTitle}>Vị trí phản ánh</Text>
         <Text style={styles.cardHint}>
-          Tai khoan cong dan chi duoc tao phan anh trong dung dia ban da dang ky.
+          Tài khoản công dân chỉ được tạo phản ánh trong đúng địa bàn đã đăng ký.
         </Text>
         <View style={styles.locationGrid}>
           {locationOptions.map((item) => (
@@ -385,20 +365,20 @@ export default function ReportPage() {
         {user?.locationCode ? (
           <Text style={styles.helperText}>{`Location code: ${user.locationCode}`}</Text>
         ) : (
-          <Text style={styles.errorText}>Khong tai duoc locationCode cua tai khoan.</Text>
+          <Text style={styles.errorText}>Không tải được locationCode của tài khoản.</Text>
         )}
       </View>
 
-      <Text style={styles.label}>Tieu de phan anh</Text>
+      <Text style={styles.label}>Tiêu đề phản ánh</Text>
       <TextInput
         style={styles.input}
         value={title}
         onChangeText={setTitle}
-        placeholder="Vi du: Den duong hong tai hem 12"
+        placeholder="Ví dụ: Đèn đường hỏng tại hẻm 12"
         placeholderTextColor={colors.textSecondary}
       />
 
-      <Text style={styles.label}>Danh muc</Text>
+      <Text style={styles.label}>Danh mục</Text>
       <View style={styles.selectorRow}>
         {REPORT_CATEGORIES.map((item) => (
           <TouchableOpacity
@@ -411,7 +391,7 @@ export default function ReportPage() {
         ))}
       </View>
 
-      <Text style={styles.label}>Do uu tien</Text>
+      <Text style={styles.label}>Độ ưu tiên</Text>
       <View style={styles.selectorRow}>
         {REPORT_PRIORITIES.map((item) => (
           <TouchableOpacity
@@ -424,26 +404,26 @@ export default function ReportPage() {
         ))}
       </View>
 
-      <Text style={styles.label}>Noi dung phan anh</Text>
+      <Text style={styles.label}>Nội dung phản ánh</Text>
       <TextInput
         style={styles.textarea}
         value={description}
         onChangeText={setDescription}
-        placeholder="Mo ta ro su co, thoi gian, vi tri, tac dong thuc te..."
+        placeholder="Mô tả rõ sự cố, thời gian, vị trí, tác động thực tế..."
         placeholderTextColor={colors.textSecondary}
         multiline
         numberOfLines={6}
       />
 
-      <Text style={styles.label}>Anh dinh kem</Text>
+      <Text style={styles.label}>Ảnh đính kèm</Text>
       <View style={styles.imageActionRow}>
         <Pressable style={styles.imageActionButton} onPress={() => void handlePickImage()}>
           <Ionicons name="images-outline" size={18} color={colors.primary} />
-          <Text style={styles.imageActionText}>Chon tu thu vien</Text>
+          <Text style={styles.imageActionText}>Chọn từ thư viện</Text>
         </Pressable>
         <Pressable style={styles.imageActionButton} onPress={() => void handleTakePhoto()}>
           <Ionicons name="camera-outline" size={18} color={colors.primary} />
-          <Text style={styles.imageActionText}>Chup anh moi</Text>
+          <Text style={styles.imageActionText}>Chụp ảnh mới</Text>
         </Pressable>
       </View>
 
@@ -452,7 +432,7 @@ export default function ReportPage() {
           <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} contentFit="cover" />
           <View style={styles.previewContent}>
             <Text style={styles.previewTitle}>{selectedImage.fileName}</Text>
-            <Text style={styles.previewSubtitle}>Anh nay se duoc upload len he thong khi gui phan anh.</Text>
+            <Text style={styles.previewSubtitle}>Ảnh này sẽ được upload lên hệ thống khi gửi phản ánh.</Text>
           </View>
           <Pressable style={styles.removeImageButton} onPress={() => setSelectedImage(null)}>
             <Ionicons name="close" size={16} color="#b91c1c" />
@@ -461,7 +441,7 @@ export default function ReportPage() {
       ) : (
         <View style={styles.emptyUploadCard}>
           <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
-          <Text style={styles.emptyUploadText}>Ban co the chon anh hoac chup anh moi de gui kem.</Text>
+          <Text style={styles.emptyUploadText}>Bạn có thể chọn ảnh hoặc chụp ảnh mới để gửi kèm.</Text>
         </View>
       )}
 
@@ -469,7 +449,7 @@ export default function ReportPage() {
         onPress={() => void submit()}
         disabled={!title.trim() || !description.trim() || !user?.locationCode || submitting}
       >
-        {submitting ? "Dang gui..." : "Gui phan anh"}
+        {submitting ? "Đang gửi..." : "Gửi phản ánh"}
       </Button>
 
       {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
@@ -477,8 +457,8 @@ export default function ReportPage() {
 
       <View style={styles.historyHeader}>
         <View>
-          <Text style={styles.historyTitle}>Phan anh da gui</Text>
-          <Text style={styles.historySubtitle}>Day du anh, noi dung, trang thai va thoi gian gui</Text>
+          <Text style={styles.historyTitle}>Phản ánh đã gửi</Text>
+          <Text style={styles.historySubtitle}>Đầy đủ ảnh, nội dung, trạng thái và thời gian gửi</Text>
         </View>
       </View>
 
@@ -488,8 +468,8 @@ export default function ReportPage() {
         reports.map((report) => <CitizenReportCard key={report.id} report={report} />)
       ) : (
         <View style={styles.emptyHistoryCard}>
-          <Text style={styles.emptyHistoryTitle}>Chua co lich su phan anh</Text>
-          <Text style={styles.emptyHistoryText}>Phan anh vua gui se xuat hien trong danh sach nay.</Text>
+          <Text style={styles.emptyHistoryTitle}>Chưa có lịch sử phản ánh</Text>
+          <Text style={styles.emptyHistoryText}>Phản ánh vừa gửi sẽ xuất hiện trong danh sách này.</Text>
         </View>
       )}
     </ScrollView>
@@ -504,25 +484,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 14,
     paddingBottom: 34,
-  },
-  infoCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: "#eff6ff",
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    marginBottom: 12,
-  },
-  infoText: {
-    flex: 1,
-    color: "#1e3a8a",
-    lineHeight: 20,
-    fontSize: 13,
-    fontWeight: "600",
   },
   locationCard: {
     backgroundColor: "white",

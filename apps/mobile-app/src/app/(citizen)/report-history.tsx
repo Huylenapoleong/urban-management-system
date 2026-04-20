@@ -58,9 +58,9 @@ export default function ReportHistoryPage() {
       setReports(data.map((report) => normalizeReportMedia(report)));
       setError(null);
     } catch (err: unknown) {
-      const message = (err as Error)?.message ?? "Khong the tai lich su phan anh";
+      const message = (err as Error)?.message ?? "Không thể tải lịch sử phản ánh";
       setError(message);
-      Alert.alert("Loi", message);
+      Alert.alert("Lỗi", message);
     } finally {
       setLoading(false);
     }
@@ -73,8 +73,8 @@ export default function ReportHistoryPage() {
   return (
     <View style={styles.container}>
       <Header
-        title="Lich su phan anh"
-        subtitle="Tat ca phan anh ban da gui, kem anh, trang thai va thoi gian"
+        title="Lịch sử phản ánh"
+        subtitle="Tất cả phản ánh bạn đã gửi, kèm ảnh, trạng thái và thời gian"
       />
 
       {loading ? (
@@ -86,9 +86,9 @@ export default function ReportHistoryPage() {
             reports.map((report) => <CitizenReportCard key={report.id} report={report} />)
           ) : (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Ban chua gui phan anh nao</Text>
+              <Text style={styles.emptyTitle}>Bạn chưa gửi phản ánh nào</Text>
               <Text style={styles.emptyText}>
-                Khi gui phan anh moi, danh sach lich su se hien day du tai day.
+                Khi gửi phản ánh mới, danh sách lịch sử sẽ hiện đầy đủ tại đây.
               </Text>
             </View>
           )}

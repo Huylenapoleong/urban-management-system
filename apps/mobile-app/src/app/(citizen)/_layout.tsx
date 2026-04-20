@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Animated,
   PanResponder,
   Pressable,
@@ -11,13 +12,21 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import type { ConversationSummary } from "@urban/shared-types";
 import colors from "@/constants/colors";
 import { useAuth } from "@/providers/AuthProvider";
 import { listConversations } from "@/services/api/conversation.api";
 
 const CHAT_BUBBLE_SETTING_KEY = "citizen.chatBubble.enabled";
+
+async function readChatBubbleSetting(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(CHAT_BUBBLE_SETTING_KEY);
+  } catch {
+    return null;
+  }
+}
 
 function ChatBubbleOverlay() {
   const router = useRouter();
@@ -45,7 +54,7 @@ function ChatBubbleOverlay() {
   );
 
   const loadSetting = useCallback(async () => {
-    const value = await AsyncStorage.getItem(CHAT_BUBBLE_SETTING_KEY).catch(() => null);
+    const value = await readChatBubbleSetting();
     setEnabled(value === null ? true : value === "true");
   }, []);
 
@@ -75,15 +84,26 @@ function ChatBubbleOverlay() {
 
   useEffect(() => {
     void loadSetting();
-    const interval = setInterval(() => void loadSetting(), 2000);
-    return () => clearInterval(interval);
   }, [loadSetting]);
 
   useEffect(() => {
     void refreshUnread();
-    const interval = setInterval(() => void refreshUnread(), 8000);
-    return () => clearInterval(interval);
   }, [refreshUnread]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        return;
+      }
+
+      void loadSetting();
+      void refreshUnread();
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loadSetting, refreshUnread]);
 
   if (!enabled || unreadCount <= 0 || !targetConversation) {
     return null;

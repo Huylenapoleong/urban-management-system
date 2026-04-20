@@ -11,6 +11,7 @@ export default function LoginScreen() {
   
   const [loginVal, setLoginVal] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -66,10 +67,13 @@ export default function LoginScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
             style={styles.input}
+            contentStyle={styles.inputContent}
             disabled={loading}
             outlineColor="#e0e0e0"
             activeOutlineColor="#1976D2"
             left={<TextInput.Icon icon="account-outline" color="#9e9e9e" />}
+            placeholder="Nhập email hoặc số điện thoại"
+            placeholderTextColor="#6b7280"
           />
 
           <TextInput
@@ -77,12 +81,21 @@ export default function LoginScreen() {
             mode="outlined"
             value={password}
             onChangeText={setPassword}
-            secureTextEntry
+            secureTextEntry={!showPassword}
             style={styles.input}
+            contentStyle={styles.inputContent}
             disabled={loading}
             outlineColor="#e0e0e0"
             activeOutlineColor="#1976D2"
             left={<TextInput.Icon icon="lock-outline" color="#9e9e9e" />}
+            right={
+              <TextInput.Icon
+                icon={showPassword ? 'eye-off' : 'eye'}
+                onPress={() => setShowPassword((prev) => !prev)}
+              />
+            }
+            placeholder="Nhập mật khẩu"
+            placeholderTextColor="#6b7280"
           />
 
           {!!errorMsg && (
@@ -136,7 +149,7 @@ const styles = StyleSheet.create({
   headerOverlay: { flex: 1, backgroundColor: 'rgba(0,35,90,0.65)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
   logo: { marginBottom: 16 },
   brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '900', letterSpacing: 2, textAlign: 'center', lineHeight: 38 },
-  brandSubtitle: { color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 12, letterSpacing: 0.5 },
+  brandSubtitle: { color: 'rgba(255,255,255,0.92)', fontSize: 14, marginTop: 12, letterSpacing: 0.5, fontWeight: '700' },
   
   keyboardView: { flex: 1, marginTop: -60 },
   loginCard: {
@@ -145,34 +158,37 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 24,
     paddingTop: 32,
+    borderWidth: 1,
+    borderColor: '#dbe4ee',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.1,
     shadowRadius: 15,
   },
-  cardTitle: { fontWeight: '800', textAlign: 'center', color: '#1a1a1a', marginBottom: 6 },
-  cardSubtitle: { textAlign: 'center', color: '#757575', marginBottom: 28 },
+  cardTitle: { fontWeight: '900', textAlign: 'center', color: '#0f172a', marginBottom: 6 },
+  cardSubtitle: { textAlign: 'center', color: '#374151', marginBottom: 28, fontWeight: '700' },
   
   input: { marginBottom: 16, backgroundColor: '#fafafa' },
+  inputContent: { fontWeight: '800', color: '#111827' },
   
-  errorText: { paddingHorizontal: 0, marginTop: -8, marginBottom: 8, fontSize: 13 },
+  errorText: { paddingHorizontal: 0, marginTop: -8, marginBottom: 8, fontSize: 13, fontWeight: '700' },
   
   loginButton: { marginTop: 8, borderRadius: 12 },
   buttonContent: { height: 50 },
-  buttonLabel: { fontSize: 15, fontWeight: '700', letterSpacing: 1 },
+  buttonLabel: { fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   
   forgotPasswordContainer: {
     marginTop: 12,
     alignItems: 'center',
   },
   forgotPasswordLink: {
-    color: '#757575',
+    color: '#334155',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '800',
     textDecorationLine: 'underline',
   },
   
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  footerText: { color: '#757575', fontSize: 14 },
-  footerLink: { color: '#1976D2', fontSize: 14, fontWeight: '700' }
+  footerText: { color: '#334155', fontSize: 14, fontWeight: '700' },
+  footerLink: { color: '#1976D2', fontSize: 14, fontWeight: '900' }
 });

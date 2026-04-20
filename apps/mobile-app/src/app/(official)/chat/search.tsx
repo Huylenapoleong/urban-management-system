@@ -33,8 +33,14 @@ export default function SearchUserScreen() {
   };
 
   const handleChat = () => {
-    if (!result?.id) return;
-    router.replace(`/(official)/chat/dm-${result.id}` as any);
+    const targetUserId = (result?.userId || result?.id || '').trim();
+
+    if (!targetUserId) return;
+
+    router.replace({
+      pathname: '/(official)/chat/[id]',
+      params: { id: `dm:${targetUserId}` },
+    } as any);
   };
 
   return (

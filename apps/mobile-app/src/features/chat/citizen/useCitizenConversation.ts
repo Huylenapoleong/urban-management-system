@@ -433,16 +433,17 @@ export function useCitizenConversation({
     return true;
   }, [conversationId]);
 
-  const deleteMessage = useCallback(async (messageId: string) => {
+  const recallMessage = useCallback(async (messageId: string) => {
     if (!conversationId || !messageId) {
       return false;
     }
 
     const response = await emitChatAck(
-      CHAT_SOCKET_EVENTS.MESSAGE_DELETE,
+      CHAT_SOCKET_EVENTS.MESSAGE_RECALL,
       {
         conversationId,
         messageId,
+        scope: "EVERYONE",
       },
     );
 
@@ -454,6 +455,9 @@ export function useCitizenConversation({
     setError(null);
     return true;
   }, [conversationId]);
+
+  // Backward compatibility for existing callsites.
+  const deleteMessage = recallMessage;
 
   const typingUsers = useMemo(
     () => Object.values(typingByUser).map((item) => item.fullName).filter(Boolean),
@@ -485,6 +489,7 @@ export function useCitizenConversation({
     sendMessage,
     setTyping,
     updateMessage,
+    recallMessage,
     deleteMessage,
     typingUsers,
   };

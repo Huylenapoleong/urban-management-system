@@ -368,6 +368,8 @@ export class AppConfigService {
       'audio/mpeg',
       'audio/mp4',
       'audio/aac',
+      'audio/webm',
+      'audio/ogg',
       'application/pdf',
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

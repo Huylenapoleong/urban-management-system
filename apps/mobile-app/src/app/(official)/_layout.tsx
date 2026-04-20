@@ -36,6 +36,7 @@ export default function OfficialLayout() {
   return (
     <Tabs screenOptions={{
       tabBarActiveTintColor: theme.colors.primary,
+      headerShown: false,
     }}>
       <Tabs.Screen 
         name="index" 

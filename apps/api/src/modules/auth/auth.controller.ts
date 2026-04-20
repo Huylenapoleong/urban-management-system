@@ -8,11 +8,13 @@ import {
   Req,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import type { AuthenticatedUser, JwtClaims } from '@urban/shared-types';
@@ -42,6 +44,7 @@ import {
   DeleteAccountConfirmRequestDto,
   DeleteAccountResultDto,
   DismissSessionHistoryResultDto,
+  ErrorResponseDto,
   ForgotPasswordConfirmRequestDto,
   ForgotPasswordConfirmResultDto,
   ForgotPasswordRequestDto,

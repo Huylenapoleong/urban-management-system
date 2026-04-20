@@ -19,13 +19,15 @@ import type {
   UserFriendRequestItem,
 } from "@urban/shared-types";
 import Avatar from "@/components/Avatar";
+import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import colors from "@/constants/colors";
 import { ENV_CONFIG } from "@/constants/env";
 import { convertToS3Url } from "@/constants/s3";
 import { ApiClient } from "@/lib/api-client";
 
 type FriendTab = "SUGGESTIONS" | "OUTGOING" | "FRIENDS";
-type FriendAction = "send" | "cancel" | "accept" | "reject";
+type FriendAction = "send" | "cancel" | "accept" | "reject" | "unfriend";
+const FRIENDS_AUTO_REFRESH_MS = 5000;
 
 function resolveRemoteUrl(value?: string | null): string | null {
   if (!value?.trim()) {
@@ -64,6 +66,7 @@ export default function FriendsScreen() {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [unfriendTarget, setUnfriendTarget] = useState<UserFriendItem | null>(null);
 
   const normalizeRequest = useCallback(
     (item: UserFriendRequestItem): UserFriendRequestItem => ({
@@ -90,11 +93,13 @@ export default function FriendsScreen() {
   );
 
   const loadFriendsData = useCallback(
-    async (query = searchQuery, showLoader = false) => {
-      if (showLoader) {
-        setLoading(true);
-      } else {
-        setSearching(true);
+    async (query = searchQuery, showLoader = false, silent = false) => {
+      if (!silent) {
+        if (showLoader) {
+          setLoading(true);
+        } else {
+          setSearching(true);
+        }
       }
 
       const keyword = query.trim();
@@ -126,10 +131,12 @@ export default function FriendsScreen() {
         setFriends(friendsData.map(normalizeFriend));
         setSuggestions(suggestionsData.map(normalizeSuggestion));
       } catch (err: unknown) {
-        Alert.alert("Loi ket ban", (err as Error)?.message || "Khong the tai du lieu ban be.");
+        Alert.alert("Lỗi kết bạn", (err as Error)?.message || "Không thể tải dữ liệu bạn bè.");
       } finally {
-        setLoading(false);
-        setSearching(false);
+        if (!silent) {
+          setLoading(false);
+          setSearching(false);
+        }
       }
     },
     [normalizeFriend, normalizeRequest, normalizeSuggestion, searchQuery],
@@ -153,6 +160,22 @@ export default function FriendsScreen() {
     }, [loadFriendsData, searchQuery]),
   );
 
+  // Keep friends/request lists fresh while user stays on this screen
+  // so accepted requests appear without a manual reload.
+  useFocusEffect(
+    useCallback(() => {
+      const intervalId = setInterval(() => {
+        if (actingId) {
+          return;
+        }
+
+        void loadFriendsData(searchQuery, false, true);
+      }, FRIENDS_AUTO_REFRESH_MS);
+
+      return () => clearInterval(intervalId);
+    }, [actingId, loadFriendsData, searchQuery]),
+  );
+
   const handleOpenChat = useCallback(
     (userId: string) => {
       router.push({
@@ -174,13 +197,15 @@ export default function FriendsScreen() {
           await ApiClient.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/cancel`);
         } else if (action === "accept") {
           await ApiClient.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/accept`);
-        } else {
+        } else if (action === "reject") {
           await ApiClient.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/reject`);
+        } else {
+          await ApiClient.delete(`/users/me/friends/${encodeURIComponent(userId)}`);
         }
 
         await loadFriendsData(searchQuery, false);
       } catch (err: unknown) {
-        Alert.alert("Loi ket ban", (err as Error)?.message || "Khong the thuc hien thao tac.");
+        Alert.alert("Lỗi kết bạn", (err as Error)?.message || "Không thể thực hiện thao tác.");
       } finally {
         setActingId(null);
       }
@@ -188,11 +213,30 @@ export default function FriendsScreen() {
     [loadFriendsData, searchQuery],
   );
 
+  const handleConfirmUnfriend = useCallback(
+    (item: UserFriendItem) => {
+      setUnfriendTarget(item);
+    },
+    [],
+  );
+
+  const isUnfriendSubmitting =
+    Boolean(unfriendTarget) && actingId === `unfriend:${unfriendTarget?.userId}`;
+
+  const handleSubmitUnfriend = useCallback(async () => {
+    if (!unfriendTarget) {
+      return;
+    }
+
+    await handleFriendAction(unfriendTarget.userId, "unfriend");
+    setUnfriendTarget(null);
+  }, [handleFriendAction, unfriendTarget]);
+
   const tabs = useMemo(
     () => [
       { key: "SUGGESTIONS" as const, label: "Goi y" },
       { key: "OUTGOING" as const, label: "Da gui", count: outgoingRequests.length },
-      { key: "FRIENDS" as const, label: "Ban be", count: friends.length },
+      { key: "FRIENDS" as const, label: "Bạn bè", count: friends.length },
     ],
     [friends.length, outgoingRequests.length],
   );
@@ -242,7 +286,7 @@ export default function FriendsScreen() {
         disabled={actingId !== null}
       >
         <Text style={styles.friendButtonPrimaryText}>
-          {actingId === `send:${item.userId}` ? "Dang gui..." : "Ket ban"}
+          {actingId === `send:${item.userId}` ? "Đang gửi..." : "Kết bạn"}
         </Text>
       </Pressable>
     );
@@ -258,7 +302,7 @@ export default function FriendsScreen() {
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Tim theo ten..."
+              placeholder="Tìm theo tên..."
               placeholderTextColor={colors.textSecondary}
             />
           </View>
@@ -266,8 +310,8 @@ export default function FriendsScreen() {
           {searching ? <ActivityIndicator style={styles.loader} color={colors.primary} /> : null}
           {!searching && suggestions.length === 0 ? (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Chua co goi y phu hop</Text>
-              <Text style={styles.emptyText}>Thu doi tu khoa khac de tim them nguoi dung.</Text>
+              <Text style={styles.emptyTitle}>Chưa có gợi ý phù hợp</Text>
+              <Text style={styles.emptyText}>Thử đổi từ khóa khác để tìm thêm người dùng.</Text>
             </View>
           ) : null}
           {suggestions.map((item) => (
@@ -287,7 +331,7 @@ export default function FriendsScreen() {
             <View key={item.userId} style={styles.friendCard}>
               {renderFriendIdentity(
                 item,
-                `Da gui ${new Date(item.requestedAt).toLocaleDateString("vi-VN")}`,
+                `Đã gửi ${new Date(item.requestedAt).toLocaleDateString("vi-VN")}`,
               )}
               <Pressable
                 style={[styles.friendButton, styles.friendButtonSecondary]}
@@ -295,7 +339,7 @@ export default function FriendsScreen() {
                 disabled={actingId !== null}
               >
                 <Text style={styles.friendButtonSecondaryText}>
-                  {actingId === `cancel:${item.userId}` ? "Dang huy..." : "Huy loi moi"}
+                  {actingId === `cancel:${item.userId}` ? "Đang hủy..." : "Hủy lời mời"}
                 </Text>
               </Pressable>
             </View>
@@ -303,8 +347,8 @@ export default function FriendsScreen() {
         </>
       ) : (
         <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Chua gui loi moi nao</Text>
-          <Text style={styles.emptyText}>Loi moi ban gui se hien tai day.</Text>
+          <Text style={styles.emptyTitle}>Chưa gửi lời mời nào</Text>
+          <Text style={styles.emptyText}>Lời mời bạn gửi sẽ hiện tại đây.</Text>
         </View>
       );
     }
@@ -312,19 +356,36 @@ export default function FriendsScreen() {
     return friends.length > 0 ? (
       <>
         {friends.map((item) => (
-          <Pressable key={item.userId} style={styles.friendCard} onPress={() => handleOpenChat(item.userId)}>
+          <View key={item.userId} style={styles.friendCard}>
             {renderFriendIdentity(
               item,
-              `Ban be tu ${new Date(item.friendsSince).toLocaleDateString("vi-VN")}`,
+              `Bạn bè từ ${new Date(item.friendsSince).toLocaleDateString("vi-VN")}`,
             )}
-            <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.primary} />
-          </Pressable>
+            <View style={styles.incomingActions}>
+              <Pressable
+                style={[styles.friendButton, styles.friendButtonPrimary]}
+                onPress={() => handleOpenChat(item.userId)}
+                disabled={actingId !== null}
+              >
+                <Text style={styles.friendButtonPrimaryText}>Nhắn tin</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.friendButton, styles.friendButtonSecondary]}
+                onPress={() => handleConfirmUnfriend(item)}
+                disabled={actingId !== null}
+              >
+                <Text style={styles.friendButtonSecondaryText}>
+                  {actingId === `unfriend:${item.userId}` ? "Đang hủy..." : "Hủy kết bạn"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
         ))}
       </>
     ) : (
       <View style={styles.emptyCard}>
-        <Text style={styles.emptyTitle}>Chua co ban be</Text>
-        <Text style={styles.emptyText}>Ket ban de bat dau nhan tin rieng.</Text>
+        <Text style={styles.emptyTitle}>Chưa có bạn bè</Text>
+        <Text style={styles.emptyText}>Kết bạn để bắt đầu nhắn tin riêng.</Text>
       </View>
     );
   };
@@ -344,8 +405,8 @@ export default function FriendsScreen() {
           <Ionicons name="chevron-back" size={20} color={colors.text} />
         </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.headerTitle}>Ban be</Text>
-          <Text style={styles.headerSubtitle}>Tim kiem, quan ly loi moi va mo chat nhanh.</Text>
+          <Text style={styles.headerTitle}>Bạn bè</Text>
+          <Text style={styles.headerSubtitle}>Tìm kiếm, quản lý lời mời và mở chat nhanh.</Text>
         </View>
       </View>
 
@@ -353,7 +414,7 @@ export default function FriendsScreen() {
         {incomingRequests.length > 0 ? (
           <View style={styles.incomingBanner}>
             <View style={styles.bannerHeader}>
-              <Text style={styles.bannerTitle}>Loi moi nhan duoc</Text>
+              <Text style={styles.bannerTitle}>Lời mời nhận được</Text>
               <View style={styles.bannerBadge}>
                 <Text style={styles.bannerBadgeText}>{incomingRequests.length}</Text>
               </View>
@@ -362,7 +423,7 @@ export default function FriendsScreen() {
               <View key={item.userId} style={styles.incomingItem}>
                 {renderFriendIdentity(
                   item,
-                  `Gui ${new Date(item.requestedAt).toLocaleDateString("vi-VN")}`,
+                  `Gửi ${new Date(item.requestedAt).toLocaleDateString("vi-VN")}`,
                 )}
                 <View style={styles.incomingActions}>
                   <Pressable
@@ -370,14 +431,14 @@ export default function FriendsScreen() {
                     onPress={() => void handleFriendAction(item.userId, "accept")}
                     disabled={actingId !== null}
                   >
-                    <Text style={styles.friendButtonPrimaryText}>Dong y</Text>
+                    <Text style={styles.friendButtonPrimaryText}>Đồng ý</Text>
                   </Pressable>
                   <Pressable
                     style={[styles.friendButton, styles.friendButtonSecondary]}
                     onPress={() => void handleFriendAction(item.userId, "reject")}
                     disabled={actingId !== null}
                   >
-                    <Text style={styles.friendButtonSecondaryText}>Tu choi</Text>
+                    <Text style={styles.friendButtonSecondaryText}>Từ chối</Text>
                   </Pressable>
                 </View>
               </View>
@@ -401,6 +462,21 @@ export default function FriendsScreen() {
 
         {renderTabContent()}
       </ScrollView>
+
+      <ConfirmDialog
+        visible={Boolean(unfriendTarget)}
+        title="Huy ket ban?"
+        message={`Ban va ${unfriendTarget?.fullName || unfriendTarget?.userId || 'nguoi dung nay'} se khong con trong danh sach ban be.`}
+        cancelText="Giu ban be"
+        confirmText="Huy ket ban"
+        variant="danger"
+        confirmLoading={Boolean(isUnfriendSubmitting)}
+        disableClose={Boolean(isUnfriendSubmitting)}
+        onCancel={() => setUnfriendTarget(null)}
+        onConfirm={() => {
+          void handleSubmitUnfriend();
+        }}
+      />
     </View>
   );
 }

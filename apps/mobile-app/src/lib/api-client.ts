@@ -8,7 +8,9 @@ const rawUrl = ENV_CONFIG.API_BASE_URL;
 const API_BASE_URL = rawUrl.endsWith('/') ? rawUrl.slice(0, -1) : rawUrl;
 const FINAL_API_URL = API_BASE_URL.endsWith('/api') ? API_BASE_URL : `${API_BASE_URL}/api`;
 
-console.log('[ApiClient] Base URL configured as:', FINAL_API_URL);
+if (__DEV__) {
+  console.log('[ApiClient] Base URL configured as:', FINAL_API_URL);
+}
 
 function extractErrorMessage(payload: any): string {
   if (!payload) {
@@ -69,7 +71,9 @@ export class ApiClient {
     }
 
     const fullUrl = `${FINAL_API_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-    console.log(`[ApiClient] Fetching: ${options.method || 'GET'} ${fullUrl}`);
+    if (__DEV__) {
+      console.log(`[ApiClient] Fetching: ${options.method || 'GET'} ${fullUrl}`);
+    }
 
     const response = await fetch(fullUrl, {
       ...options,
@@ -86,15 +90,23 @@ export class ApiClient {
     return data.data !== undefined ? data.data : data;
   }
 
-  static get<T = any>(endpoint: string, params?: Record<string, any>) {
+  static get<T = any>(
+    endpoint: string,
+    params?: Record<string, any>,
+    options: RequestInit = {},
+  ) {
     const searchParams = params
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
-    return this.request<T>(`${endpoint}${searchParams}`, { method: 'GET' });
+    return this.request<T>(`${endpoint}${searchParams}`, {
+      ...options,
+      method: 'GET',
+    });
   }
 
-  static post<T = any>(endpoint: string, body?: any) {
+  static post<T = any>(endpoint: string, body?: any, options: RequestInit = {}) {
     return this.request<T>(endpoint, {
+      ...options,
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -107,14 +119,15 @@ export class ApiClient {
     });
   }
 
-  static patch<T = any>(endpoint: string, body?: any) {
+  static patch<T = any>(endpoint: string, body?: any, options: RequestInit = {}) {
     return this.request<T>(endpoint, {
+      ...options,
       method: 'PATCH',
       body: body ? JSON.stringify(body) : undefined,
     });
   }
 
-  static delete<T = any>(endpoint: string) {
-    return this.request<T>(endpoint, { method: 'DELETE' });
+  static delete<T = any>(endpoint: string, options: RequestInit = {}) {
+    return this.request<T>(endpoint, { ...options, method: 'DELETE' });
   }
 }

@@ -1,11 +1,13 @@
 import React from 'react';
-import { View, ScrollView, StyleSheet, ImageBackground, StatusBar } from 'react-native';
-import { Text, Card, Chip, Button, useTheme, Surface, IconButton, ActivityIndicator } from 'react-native-paper';
+import { View, ScrollView, StyleSheet, ImageBackground, StatusBar, Pressable } from 'react-native';
+import { Text, Button, useTheme, Surface, IconButton, ActivityIndicator } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useReports } from '../../hooks/shared/useReports';
 import { useAuth } from '../../providers/AuthProvider';
 import { useProfile } from '../../hooks/shared/useProfile';
+import CitizenReportCard from '../../components/shared/CitizenReportCard';
+import { isSameProvince, isSameWard } from '@urban/shared-utils';
 
 export default function OfficialDashboardScreen() {
   const theme = useTheme();
@@ -18,9 +20,40 @@ export default function OfficialDashboardScreen() {
     locationCode: user?.locationCode,
   });
 
-  const totalReports = reports?.length || 0;
-  const pendingCount = reports?.filter(r => r.status === 'NEW').length || 0;
-  const inProgressCount = reports?.filter(r => r.status === 'IN_PROGRESS').length || 0;
+  const scopedReports = React.useMemo(() => {
+    const source = Array.isArray(reports) ? reports : [];
+    const officerLocationCode = String(user?.locationCode || '').trim();
+    const role = String(user?.role || '');
+
+    if (role === 'ADMIN') {
+      return source;
+    }
+
+    if (!officerLocationCode) {
+      return [];
+    }
+
+    return source.filter((item: any) => {
+      const reportLocationCode = String(item?.locationCode || '').trim();
+      if (!reportLocationCode) {
+        return false;
+      }
+
+      if (role === 'WARD_OFFICER') {
+        return isSameWard(reportLocationCode, officerLocationCode);
+      }
+
+      if (role === 'PROVINCE_OFFICER') {
+        return isSameProvince(reportLocationCode, officerLocationCode);
+      }
+
+      return reportLocationCode === officerLocationCode;
+    });
+  }, [reports, user?.locationCode, user?.role]);
+
+  const totalReports = scopedReports.length;
+  const pendingCount = scopedReports.filter(r => r.status === 'NEW').length;
+  const inProgressCount = scopedReports.filter(r => r.status === 'IN_PROGRESS').length;
 
   return (
     <View style={[styles.container, { backgroundColor: '#f2f5f9' }]}>
@@ -83,42 +116,13 @@ export default function OfficialDashboardScreen() {
           {isLoading ? (
             <ActivityIndicator animating size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
           ) : (
-            reports?.slice(0, 4).map((item) => (
-              <Surface key={item.id} style={styles.incidentCard} elevation={1}>
-                <View style={styles.cardContent}>
-                  <View style={styles.cardInfo}>
-                    <Text variant="titleMedium" numberOfLines={1} style={styles.cardTitle}>{item.title}</Text>
-                    <View style={styles.locationRow}>
-                      <MaterialCommunityIcons name="map-marker-radius" size={16} color="#666" />
-                      <Text variant="bodySmall" style={styles.locationText}>{item.locationCode || 'Khu vực chung'}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.actionColumn}>
-                    <Chip 
-                      compact 
-                      textStyle={{ fontSize: 11, fontWeight: 'bold', color: item.status === 'NEW' ? '#d32f2f' : '#f57c00' }} 
-                      style={[
-                        styles.statusChip, 
-                        { backgroundColor: item.status === 'NEW' ? '#ffcdd2' : '#ffe0b2' }
-                      ]}
-                    >
-                      {item.status === 'NEW' ? 'MỚI' : 'XỬ LÝ'}
-                    </Chip>
-                  </View>
-                </View>
-                <Button 
-                  mode="contained-tonal" 
-                  style={styles.cardButton} 
-                  contentStyle={{ height: 36 }}
-                  labelStyle={{ fontSize: 13, fontWeight: 'bold' }}
-                  onPress={() => router.push(`/(official)/reports/${item.id}` as any)}
-                >
-                  XEM CHI TIẾT
-                </Button>
-              </Surface>
+            scopedReports.slice(0, 4).map((item) => (
+              <Pressable key={item.id} onPress={() => router.push(`/(official)/reports/${item.id}` as any)}>
+                <CitizenReportCard report={item as any} />
+              </Pressable>
             ))
           )}
-          {reports?.length === 0 && !isLoading && (
+          {scopedReports.length === 0 && !isLoading && (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons name="check-decagram" size={48} color="#4caf50" />
               <Text variant="bodyLarge" style={{ color: '#666', marginTop: 12 }}>Tuyệt vời! Khu vực hiện tại không có sự cố nào.</Text>
@@ -148,16 +152,6 @@ const styles = StyleSheet.create({
   recentSection: { paddingHorizontal: 20, marginTop: 24 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontWeight: '800', fontSize: 18, color: '#1a1a1a' },
-  
-  incidentCard: { marginBottom: 16, borderRadius: 20, backgroundColor: '#ffffff', padding: 16, overflow: 'hidden' },
-  cardContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  cardInfo: { flex: 1, paddingRight: 12 },
-  cardTitle: { fontWeight: '700', fontSize: 16, color: '#2c3e50', marginBottom: 6 },
-  locationRow: { flexDirection: 'row', alignItems: 'center' },
-  locationText: { marginLeft: 6, color: '#607d8b', fontSize: 13, fontWeight: '500' },
-  actionColumn: { alignItems: 'flex-end' },
-  statusChip: { borderRadius: 12 },
-  cardButton: { marginTop: 16, borderRadius: 12 },
   
   emptyState: { alignItems: 'center', marginTop: 40, padding: 20 }
 });

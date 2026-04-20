@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Alert } from 'react-native';
 import {
   RTCPeerConnection,
   RTCIceCandidate,
@@ -176,17 +177,33 @@ export const useWebRTC = (conversationId?: string) => {
   // Make a Call
   const startCall = async (isVideo: boolean, convId: string, targetId: string) => {
     if (callState !== 'IDLE') return;
+
+    try {
+      await socketClient.connect();
+    } catch (error) {
+      console.error('[useWebRTC] Cannot start call because socket is not connected', error);
+      Alert.alert('Thong bao', 'Khong the ket noi de thuc hien cuoc goi. Vui long thu lai.');
+      cleanup();
+      return;
+    }
+
     setCallState('CALLING');
     
     const config = { isVideo, targetUserId: targetId, conversationId: convId };
     setActiveConfig(config);
 
-    safeEmit(CHAT_SOCKET_EVENTS.CALL_INIT, {
-      conversationId: convId,
-      callerId: user?.sub,
-      callerName: (user as any)?.fullName || 'Người gọi',
-      isVideo,
-    });
+    try {
+      await socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CALL_INIT, {
+        conversationId: convId,
+        callerId: user?.sub,
+        callerName: (user as any)?.fullName || 'Người gọi',
+        isVideo,
+      });
+    } catch (error) {
+      console.error('[useWebRTC] CALL_INIT failed', error);
+      Alert.alert('Thong bao', 'Khong the bat dau cuoc goi luc nay. Vui long thu lai.');
+      cleanup();
+    }
   };
 
   // Accept a Call

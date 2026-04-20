@@ -7,7 +7,7 @@ import { JwtClaims } from '@urban/shared-types';
 import { useRouter, useSegments } from 'expo-router';
 import { socketClient } from '../lib/socket-client';
 import { ACCESS_TOKEN_KEY, AUTH_TOKEN_KEY, clearWebToken, readWebToken, writeWebToken } from '../lib/web-token-storage';
-import { disconnectChatSocket } from '../services/chat-socket';
+import { connectChatSocket, disconnectChatSocket } from '../services/chat-socket';
 
 interface AuthContextType {
   user: JwtClaims | null;
@@ -37,7 +37,7 @@ interface AuthContextType {
   deactivateAccount: (otpCode: string) => Promise<void>;
   requestDeleteAccountOtp: () => Promise<void>;
   deleteAccount: (otpCode: string) => Promise<void>;
-  listSessions: () => Promise<any[]>;
+  listSessions: (options?: { signal?: AbortSignal }) => Promise<any[]>;
   revokeSession: (sessionId: string) => Promise<void>;
 }
 
@@ -147,6 +147,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     previousUserIdRef.current = nextUserId;
+  }, [user?.sub, isLoading]);
+
+  useEffect(() => {
+    if (isLoading || !user?.sub) {
+      return;
+    }
+
+    void connectChatSocket().catch((error) => {
+      console.warn('[AuthProvider] Failed to connect chat socket on auth', error);
+    });
   }, [user?.sub, isLoading]);
 
   const login = useCallback(async (phone: string, password: string) => {
@@ -267,8 +277,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await ApiClient.post('/auth/account/delete/confirm', { otpCode });
   }, []);
 
-  const listSessions = useCallback(async () => {
-    return await ApiClient.get<any[]>('/auth/sessions');
+  const listSessions = useCallback(async (options?: { signal?: AbortSignal }) => {
+    return await ApiClient.get<any[]>('/auth/sessions', undefined, {
+      signal: options?.signal,
+    });
   }, []);
 
   const revokeSession = useCallback(async (sessionId: string) => {
