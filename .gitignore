@@ -10,6 +10,7 @@ coverage
 .DS_Store
 /.claude
 /.gitnexus
+/.claude/skills/gitnexus/gitnexus-cli
 AGENTS.md
 api-log.txt
 apps/api/seed-output.txt
