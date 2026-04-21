@@ -374,25 +374,34 @@ export function ChatPage() {
     (participant) => participant.isTyping && participant.userId !== user?.sub,
   );
   const typingIndicatorText = (() => {
-    if (activeTypingParticipants.length === 0) {
+    const typingCount = activeTypingParticipants.length;
+    if (typingCount === 0) {
       return "";
     }
 
-    const uniqueNames = Array.from(
-      new Set(
-        activeTypingParticipants.map((participant) => participant.fullName?.trim() || participant.userId),
-      ),
-    );
-
-    if (uniqueNames.length === 1) {
-      return `${uniqueNames[0]} đang soạn tin...`;
+    if (typingCount >= 3) {
+      return "Nhiều người đang soạn tin...";
     }
 
-    if (uniqueNames.length === 2) {
-      return `${uniqueNames[0]} và ${uniqueNames[1]} đang soạn tin...`;
+    const uniqueNames = Array.from(new Set(
+      activeTypingParticipants
+        .map((participant) => participant.fullName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ));
+
+    if (typingCount === 1) {
+      return `${uniqueNames[0] || "Một thành viên"} đang soạn tin...`;
     }
 
-    return `${uniqueNames[0]}, ${uniqueNames[1]} và ${uniqueNames.length - 2} người khác đang soạn tin...`;
+    if (typingCount === 2) {
+      if (uniqueNames.length >= 2) {
+        return `${uniqueNames[0]} và ${uniqueNames[1]} đang soạn tin...`;
+      }
+
+      return "Hai người đang soạn tin...";
+    }
+
+    return "Nhiều người đang soạn tin...";
   })();
   const normalizedForwardSearch = forwardSearch.trim().toLowerCase();
   const forwardDestinationConversations = mergedConversations.filter((conversation) => {
@@ -2027,7 +2036,6 @@ export function ChatPage() {
                 </button>
                 <Avatar className="h-10 w-10">
                     {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Avatar"} /> : null}
-                    {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Avatar nhóm"} /> : null}
                   <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
                       {activeContact?.groupName?.charAt(0).toUpperCase() || "U"}
                     </AvatarFallback>
@@ -2913,35 +2921,58 @@ export function ChatPage() {
               >
                 <Paperclip size={18} />
               </button>
-              <Input 
-                type="text" 
-                placeholder="Nhập tin nhắn..." 
-                className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
-                ref={composerInputRef}
-                value={inputText}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  setInputText(nextValue);
+              <div className="relative flex-1">
+                <Input 
+                  type="text" 
+                  placeholder={activeGroupId ? "Nhập tin nhắn... gõ @ để tag thành viên" : "Nhập tin nhắn..."}
+                  className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
+                  ref={composerInputRef}
+                  value={inputText}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    handleComposerInputChange(nextValue, e.target.selectionStart);
 
-                  if (!activeChat) {
-                    return;
+                    if (!activeChat) {
+                      return;
+                    }
+
+                    if (!nextValue.trim()) {
+                      stopTyping();
+                      return;
+                    }
+
+                    if (!isTypingRef.current) {
+                      isTypingRef.current = true;
+                      void sendTyping(true);
+                    }
+
+                    scheduleTypingStop();
+                  }}
+                  onClick={(event) =>
+                    syncMentionContext(inputText, event.currentTarget.selectionStart)
                   }
-
-                  if (!nextValue.trim()) {
-                    stopTyping();
-                    return;
+                  onKeyUp={(event) =>
+                    syncMentionContext(inputText, event.currentTarget.selectionStart)
                   }
-
-                  if (!isTypingRef.current) {
-                    isTypingRef.current = true;
-                    void sendTyping(true);
-                  }
-
-                  scheduleTypingStop();
-                }}
-                disabled={isSending || isUploading}
-                onPaste={handleComposerPaste}
-              />
+                  onKeyDown={handleComposerKeyDown}
+                  disabled={isSending || isUploading}
+                  onPaste={handleComposerPaste}
+                />
+                {isMentionMenuOpen ? (
+                  <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
+                    {mentionCandidates.map((candidate) => (
+                      <button
+                        key={candidate.userId}
+                        type="button"
+                        onClick={() => handleInsertMention(candidate)}
+                        className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        <span className="truncate font-medium">{candidate.displayName}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <button 
                 type="submit" 
                 disabled={isSending || isUploading || (!inputText.trim() && queuedAttachments.length === 0)}

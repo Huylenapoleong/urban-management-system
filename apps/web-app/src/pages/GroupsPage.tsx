@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Users, Plus, ShieldCheck, MessageCircle, LogOut, X } from "lucide-react";
 import { createGroup, getGroups, joinGroup, leaveGroup } from "@/services/group.api";
@@ -18,6 +18,7 @@ export default function GroupsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const accountLocationCode = user?.locationCode?.trim() ?? "";
   const canCreateOfficialGroup = user?.role === "OFFICIAL" || user?.role === "ADMIN";
 
   const [isJoining, setIsJoining] = useState<string | null>(null);
@@ -103,6 +104,23 @@ export default function GroupsPage() {
     setIsCreateOpen(true);
   };
 
+  useEffect(() => {
+    if (!isCreateOpen || !user?.locationCode) {
+      return;
+    }
+
+    setFormState((prev) => {
+      if (prev.locationCode === user.locationCode) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        locationCode: user.locationCode,
+      };
+    });
+  }, [isCreateOpen, user?.locationCode]);
+
   const handleCreateGroup = (event: React.FormEvent) => {
     event.preventDefault();
 
@@ -111,7 +129,7 @@ export default function GroupsPage() {
       return;
     }
 
-    if (!formState.locationCode.trim()) {
+    if (!accountLocationCode) {
       toast.error("Vui lòng nhập mã khu vực.");
       return;
     }
@@ -125,7 +143,7 @@ export default function GroupsPage() {
       groupName: formState.groupName.trim(),
       description: formState.description.trim() || undefined,
       groupType: formState.groupType,
-      locationCode: formState.locationCode.trim(),
+      locationCode: accountLocationCode,
     });
   };
 
@@ -208,10 +226,8 @@ export default function GroupsPage() {
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Mã khu vực</label>
               <input
                 value={formState.locationCode}
-                onChange={(event) =>
-                  setFormState((prev) => ({ ...prev, locationCode: event.target.value }))
-                }
                 placeholder="VN-HCM-BQ1-P01"
+                readOnly
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               />
             </div>
