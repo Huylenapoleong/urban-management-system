@@ -32,12 +32,21 @@ import {
   ApiNotFoundExamples,
 } from '../../common/openapi/swagger-errors';
 import {
+  AddGroupMemberRequestDto,
+  BanGroupMemberRequestDto,
+  AuditEventItemDto,
   CreateGroupRequestDto,
+  CreateGroupInviteLinkRequestDto,
   ErrorResponseDto,
+  GroupBanDto,
+  GroupInviteLinkDto,
   GroupMembershipDto,
   GroupMetadataDto,
+  LeaveGroupRequestDto,
+  ListAuditQueryDto,
   ListGroupsQueryDto,
   ManageGroupMemberRequestDto,
+  UpdateGroupMemberRoleRequestDto,
   UpdateGroupRequestDto,
 } from '../../common/openapi/swagger.models';
 import { GroupsService } from './groups.service';
@@ -277,17 +286,19 @@ export class GroupsController {
   @ApiOperation({
     summary: 'Leave group',
     description:
-      'Leaves a group by soft-deleting the current membership. Owners cannot leave directly and must transfer/remove ownership through management flow.',
+      'Leaves a group by soft-deleting the current membership. When the current actor is the owner, they must provide a successor active member who will become the new owner in the same transaction.',
   })
   @ApiParam({ name: 'groupId', type: String })
+  @ApiBody({ type: LeaveGroupRequestDto, required: false })
   @ApiOkEnvelopeResponse(GroupMembershipDto, {
     description: 'Soft-deleted membership record after leaving the group.',
   })
   @ApiBadRequestExamples('The leave-group action is invalid.', [
     {
-      name: 'ownerCannotLeave',
-      summary: 'Owner cannot leave directly',
-      message: 'Owner cannot leave the group directly.',
+      name: 'ownerSuccessorRequired',
+      summary: 'Owner must choose successor',
+      message:
+        'Owner must choose another active member as the new owner before leaving.',
       path: '/api/groups/01JPCY1000AREAGROUP0000000/leave',
     },
   ])
@@ -305,8 +316,9 @@ export class GroupsController {
   leaveGroup(
     @CurrentUser() user: AuthenticatedUser,
     @Param('groupId') groupId: string,
+    @Body() body?: LeaveGroupRequestDto,
   ) {
-    return this.groupsService.leaveGroup(user, groupId);
+    return this.groupsService.leaveGroup(user, groupId, body);
   }
 
   @Get(':groupId/members')
@@ -343,11 +355,319 @@ export class GroupsController {
     return this.groupsService.listMembers(user, groupId);
   }
 
+  @Get(':groupId/audit')
+  @ApiOperation({
+    summary: 'List group audit events',
+    description:
+      'Returns structured audit events for the group lifecycle and member management actions. This is separate from conversation audit history.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiOkEnvelopeResponse(AuditEventItemDto, {
+    isArray: true,
+    description: 'Structured group audit events.',
+  })
+  @ApiForbiddenExamples('The actor cannot view group audit events.', [
+    {
+      name: 'groupAuditForbidden',
+      summary: 'Group audit access denied',
+      message: 'You cannot manage members of this group.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/audit',
+    },
+  ])
+  listAuditEvents(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Query() query: ListAuditQueryDto,
+  ) {
+    return this.groupsService.listAuditEvents(
+      user,
+      groupId,
+      query as Record<string, unknown>,
+    );
+  }
+
+  @Get(':groupId/bans')
+  @ApiOperation({
+    summary: 'List active group bans',
+    description:
+      'Returns currently active bans for the group. Only owner, deputy, or admin may view group moderation state.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiOkEnvelopeResponse(GroupBanDto, {
+    isArray: true,
+    description: 'Currently active bans for the group.',
+  })
+  @ApiForbiddenExamples('The actor cannot view group bans.', [
+    {
+      name: 'listBansForbidden',
+      summary: 'Ban list access denied',
+      message: 'You cannot manage members of this group.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/bans',
+    },
+  ])
+  listBans(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+  ) {
+    return this.groupsService.listBans(user, groupId);
+  }
+
+  @Post(':groupId/bans/:userId')
+  @ApiOperation({
+    summary: 'Ban user from group',
+    description:
+      'Creates or returns an active group ban. If the target is an active member, their group membership is revoked immediately and the group conversation is removed from their inbox/realtime rooms.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiBody({ type: BanGroupMemberRequestDto, required: false })
+  @ApiOkEnvelopeResponse(GroupBanDto, {
+    description: 'Active ban state for the target user.',
+  })
+  @ApiBadRequestExamples('The ban request is invalid.', [
+    {
+      name: 'banSelfForbidden',
+      summary: 'Cannot ban self',
+      message: 'You cannot ban yourself from the group.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/bans/01JPCY0000CITIZENA00000000',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot ban the target user.', [
+    {
+      name: 'banOwnerForbidden',
+      summary: 'Owner cannot be banned',
+      message: 'The group owner cannot be banned.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/bans/01JPCY0000CITIZENB00000000',
+    },
+    {
+      name: 'banHierarchyForbidden',
+      summary: 'Deputy cannot ban elevated member',
+      message: 'Deputies can only ban regular members.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/bans/01JPCY0000CITIZENB00000000',
+    },
+  ])
+  banMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Param('userId') userId: string,
+    @Body() body?: BanGroupMemberRequestDto,
+  ) {
+    return this.groupsService.banMember(user, groupId, userId, body);
+  }
+
+  @Delete(':groupId/bans/:userId')
+  @ApiOperation({
+    summary: 'Unban user from group',
+    description:
+      'Removes an active group ban. Unbanning restores eligibility to join again, but does not restore the previous membership automatically.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(GroupBanDto, {
+    description: 'The active ban that was removed.',
+  })
+  @ApiNotFoundExamples('The target user does not have an active group ban.', [
+    {
+      name: 'groupBanMissing',
+      summary: 'Group ban not found',
+      message: 'Group ban not found.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/bans/01JPCY0000CITIZENB00000000',
+    },
+  ])
+  unbanMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.groupsService.unbanMember(user, groupId, userId);
+  }
+
+  @Get(':groupId/invite-links')
+  @ApiOperation({
+    summary: 'List group invite links',
+    description:
+      'Returns invite links managed for the group. Only owner, deputy, or admin may list invite links.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiOkEnvelopeResponse(GroupInviteLinkDto, {
+    isArray: true,
+    description: 'Invite links currently registered for the group.',
+  })
+  listInviteLinks(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+  ) {
+    return this.groupsService.listInviteLinks(user, groupId);
+  }
+
+  @Post(':groupId/invite-links')
+  @ApiOperation({
+    summary: 'Create group invite link',
+    description:
+      'Creates a new invite link for onboarding into the group. Invite links are managed by owner, deputy, or admin and redeemed through the invite-code join endpoint.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiBody({ type: CreateGroupInviteLinkRequestDto, required: false })
+  @ApiOkEnvelopeResponse(GroupInviteLinkDto, {
+    description: 'Created invite link.',
+  })
+  createInviteLink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Body() body?: CreateGroupInviteLinkRequestDto,
+  ) {
+    return this.groupsService.createInviteLink(user, groupId, body);
+  }
+
+  @Delete(':groupId/invite-links/:inviteId')
+  @ApiOperation({
+    summary: 'Revoke group invite link',
+    description:
+      'Disables an invite link and removes its code lookup so it can no longer be redeemed.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiParam({ name: 'inviteId', type: String })
+  @ApiOkEnvelopeResponse(GroupInviteLinkDto, {
+    description: 'Invite link state after revocation.',
+  })
+  revokeInviteLink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Param('inviteId') inviteId: string,
+  ) {
+    return this.groupsService.revokeInviteLink(user, groupId, inviteId);
+  }
+
+  @Post('invite-links/:code/join')
+  @ApiOperation({
+    summary: 'Join group by invite code',
+    description:
+      'Redeems an invite link code and joins the actor to the target group when the code is still active and the actor is not banned.',
+  })
+  @ApiParam({ name: 'code', type: String })
+  @ApiOkEnvelopeResponse(GroupMembershipDto, {
+    description: 'Active membership after invite redemption.',
+  })
+  joinByInvite(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('code') code: string,
+  ) {
+    return this.groupsService.joinGroupByInvite(user, code);
+  }
+
+  @Post(':groupId/members')
+  @ApiOperation({
+    summary: 'Add member to group',
+    description:
+      'Adds a new active member to the group. The new member may be assigned MEMBER or DEPUTY. Owner cannot be assigned through this endpoint.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiBody({ type: AddGroupMemberRequestDto })
+  @ApiOkEnvelopeResponse(GroupMembershipDto, {
+    description: 'Membership state after the member was added.',
+  })
+  @ApiBadRequestExamples('The add-member payload is invalid.', [
+    {
+      name: 'memberExists',
+      summary: 'Member already exists',
+      message: 'Membership already exists.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/members',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot add this member to the group.', [
+    {
+      name: 'addMemberForbidden',
+      summary: 'Add member denied',
+      message: 'You cannot manage members of this group.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/members',
+    },
+  ])
+  addMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Body() body: AddGroupMemberRequestDto,
+  ) {
+    return this.groupsService.addMember(user, groupId, body);
+  }
+
+  @Patch(':groupId/members/:userId/role')
+  @ApiOperation({
+    summary: 'Update member role in group',
+    description:
+      'Updates an active member role between DEPUTY and MEMBER. Owner role cannot be assigned through this endpoint.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiBody({ type: UpdateGroupMemberRoleRequestDto })
+  @ApiOkEnvelopeResponse(GroupMembershipDto, {
+    description: 'Membership state after the role update.',
+  })
+  @ApiBadRequestExamples('The role update request is invalid.', [
+    {
+      name: 'ownerRoleForbidden',
+      summary: 'Owner role cannot be assigned',
+      message: 'Owner role cannot be assigned via member management.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/members/01JPCY0000CITIZENB00000000/role',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot update this member role.', [
+    {
+      name: 'updateRoleForbidden',
+      summary: 'Role update denied',
+      message: 'You cannot manage members of this group.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/members/01JPCY0000CITIZENB00000000/role',
+    },
+  ])
+  updateMemberRole(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Param('userId') userId: string,
+    @Body() body: UpdateGroupMemberRoleRequestDto,
+  ) {
+    return this.groupsService.updateMemberRole(user, groupId, userId, body);
+  }
+
+  @Delete(':groupId/members/:userId')
+  @ApiOperation({
+    summary: 'Remove member from group',
+    description:
+      'Removes an active member from the group. Owner cannot be removed through this endpoint.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(GroupMembershipDto, {
+    description: 'Soft-deleted membership state after the member was removed.',
+  })
+  @ApiForbiddenExamples('The actor cannot remove this member.', [
+    {
+      name: 'removeMemberForbidden',
+      summary: 'Remove member denied',
+      message: 'You cannot manage members of this group.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/members/01JPCY0000CITIZENB00000000',
+    },
+  ])
+  @ApiNotFoundExamples('The target membership does not exist.', [
+    {
+      name: 'removeMemberMissing',
+      summary: 'Membership not found',
+      message: 'Membership not found.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/members/01JPCY0000CITIZENB00000000',
+    },
+  ])
+  removeMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.groupsService.removeMember(user, groupId, userId);
+  }
+
   @Patch(':groupId/members/:userId')
   @ApiOperation({
     summary: 'Manage member in group',
+    deprecated: true,
     description:
-      'Adds, updates, or removes group members. Citizens can only add their friends to groups. Owner role cannot be assigned or removed through this endpoint.',
+      'Legacy member-management endpoint. Prefer the explicit add-member, update-role, and remove-member routes for new integrations.',
   })
   @ApiParam({ name: 'groupId', type: String })
   @ApiParam({ name: 'userId', type: String })
