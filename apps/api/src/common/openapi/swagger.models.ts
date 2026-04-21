@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  GROUP_MESSAGE_POLICIES,
   GROUP_MEMBER_ROLES,
   GROUP_TYPES,
   MESSAGE_DELIVERY_STATES,
@@ -19,16 +20,24 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsInt,
   IsIn,
   IsNumber,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
+  Max,
+  Min,
   MinLength,
 } from 'class-validator';
 
 const GROUP_MEMBER_ACTIONS = ['add', 'update', 'remove'] as const;
+const GROUP_MEMBER_ROLE_INPUT_VALUES = [
+  ...GROUP_MEMBER_ROLES,
+  'OFFICER',
+] as const;
+const ASSIGNABLE_GROUP_MEMBER_ROLES = ['DEPUTY', 'MEMBER'] as const;
 const BOOLEAN_QUERY_VALUES = ['true', 'false'] as const;
 const FRIEND_REQUEST_DIRECTION_VALUES = ['INCOMING', 'OUTGOING'] as const;
 const FRIEND_ACTION_VALUES = ['REJECTED', 'CANCELED'] as const;
@@ -466,8 +475,11 @@ export class AuditEventItemDto {
   @ApiProperty({ example: '01JPDAUDIT0000000000000000' })
   id!: string;
 
-  @ApiProperty({ enum: ['REPORT', 'CONVERSATION'], example: 'REPORT' })
-  scope!: 'REPORT' | 'CONVERSATION';
+  @ApiProperty({
+    enum: ['REPORT', 'CONVERSATION', 'GROUP'],
+    example: 'REPORT',
+  })
+  scope!: 'REPORT' | 'CONVERSATION' | 'GROUP';
 
   @ApiProperty({ example: 'REPORT_STATUS_UPDATED' })
   action!: string;
@@ -593,6 +605,14 @@ export class GroupMetadataDto {
   @ApiProperty({ enum: GROUP_TYPES, example: 'AREA' })
   groupType!: (typeof GROUP_TYPES)[number];
 
+  @ApiProperty({
+    enum: GROUP_MESSAGE_POLICIES,
+    example: 'ALL_MEMBERS',
+    description:
+      'Controls which active group members may send new messages to the group conversation.',
+  })
+  messagePolicy!: (typeof GROUP_MESSAGE_POLICIES)[number];
+
   @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
   locationCode!: string;
 
@@ -633,6 +653,72 @@ export class GroupMembershipDto {
 
   @ApiPropertyOptional({ example: null, nullable: true })
   deletedAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class GroupBanDto {
+  @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
+  groupId!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  bannedByUserId!: string;
+
+  @ApiPropertyOptional({
+    example: 'Repeated spam and abusive messages in the group.',
+  })
+  reason?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-05-01T00:00:00.000Z',
+    nullable: true,
+  })
+  expiresAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class GroupInviteLinkDto {
+  @ApiProperty({ example: '01JPCY1000INVITELINK000000' })
+  inviteId!: string;
+
+  @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
+  groupId!: string;
+
+  @ApiProperty({ example: '01kq2f6a6f5y3e5t5t2y93r9ax' })
+  code!: string;
+
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  createdByUserId!: string;
+
+  @ApiPropertyOptional({
+    example: '2026-05-01T00:00:00.000Z',
+    nullable: true,
+  })
+  expiresAt!: string | null;
+
+  @ApiPropertyOptional({ example: 100, nullable: true })
+  maxUses!: number | null;
+
+  @ApiProperty({ example: 3 })
+  usedCount!: number;
+
+  @ApiPropertyOptional({
+    example: null,
+    nullable: true,
+  })
+  disabledAt!: string | null;
+
+  @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
+  createdAt!: string;
 
   @ApiProperty({ example: '2026-03-17T07:00:00.000Z' })
   updatedAt!: string;
@@ -1413,6 +1499,17 @@ export class CreateGroupRequestDto {
   @IsOptional()
   @IsBoolean()
   isOfficial?: boolean;
+
+  @ApiPropertyOptional({
+    enum: GROUP_MESSAGE_POLICIES,
+    example: 'ALL_MEMBERS',
+    default: 'ALL_MEMBERS',
+    description:
+      'Optional send-message policy for the group. Defaults to ALL_MEMBERS.',
+  })
+  @IsOptional()
+  @IsIn(GROUP_MESSAGE_POLICIES)
+  messagePolicy?: (typeof GROUP_MESSAGE_POLICIES)[number];
 }
 
 export class UpdateGroupRequestDto {
@@ -1444,6 +1541,16 @@ export class UpdateGroupRequestDto {
   @IsOptional()
   @IsBoolean()
   isOfficial?: boolean;
+
+  @ApiPropertyOptional({
+    enum: GROUP_MESSAGE_POLICIES,
+    example: 'OWNER_AND_DEPUTIES',
+    description:
+      'Only owners may change the group message policy. Deputies may update other metadata but not this field.',
+  })
+  @IsOptional()
+  @IsIn(GROUP_MESSAGE_POLICIES)
+  messagePolicy?: (typeof GROUP_MESSAGE_POLICIES)[number];
 }
 
 export class ManageGroupMemberRequestDto {
@@ -1451,10 +1558,95 @@ export class ManageGroupMemberRequestDto {
   @IsIn(GROUP_MEMBER_ACTIONS)
   action!: (typeof GROUP_MEMBER_ACTIONS)[number];
 
-  @ApiPropertyOptional({ enum: GROUP_MEMBER_ROLES, example: 'OFFICER' })
+  @ApiPropertyOptional({
+    enum: GROUP_MEMBER_ROLES,
+    example: 'DEPUTY',
+    description:
+      'Canonical values are OWNER, DEPUTY, MEMBER. Legacy payloads may still send OFFICER temporarily and will be normalized to DEPUTY.',
+  })
   @IsOptional()
-  @IsIn(GROUP_MEMBER_ROLES)
-  roleInGroup?: (typeof GROUP_MEMBER_ROLES)[number];
+  @IsIn(GROUP_MEMBER_ROLE_INPUT_VALUES)
+  roleInGroup?: (typeof GROUP_MEMBER_ROLE_INPUT_VALUES)[number];
+}
+
+export class AddGroupMemberRequestDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(50)
+  userId!: string;
+
+  @ApiPropertyOptional({
+    enum: ASSIGNABLE_GROUP_MEMBER_ROLES,
+    example: 'MEMBER',
+  })
+  @IsOptional()
+  @IsIn(ASSIGNABLE_GROUP_MEMBER_ROLES)
+  roleInGroup?: (typeof ASSIGNABLE_GROUP_MEMBER_ROLES)[number];
+}
+
+export class UpdateGroupMemberRoleRequestDto {
+  @ApiProperty({ enum: ASSIGNABLE_GROUP_MEMBER_ROLES, example: 'DEPUTY' })
+  @IsIn(ASSIGNABLE_GROUP_MEMBER_ROLES)
+  roleInGroup!: (typeof ASSIGNABLE_GROUP_MEMBER_ROLES)[number];
+}
+
+export class BanGroupMemberRequestDto {
+  @ApiPropertyOptional({
+    example: 'Repeated spam and abusive messages in the group.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-05-01T00:00:00.000Z',
+    description:
+      'Optional ISO timestamp when the ban expires. Omit for an indefinite ban.',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/, {
+    message: 'expiresAt must be a valid ISO-8601 UTC timestamp.',
+  })
+  expiresAt?: string;
+}
+
+export class CreateGroupInviteLinkRequestDto {
+  @ApiPropertyOptional({
+    example: '2026-05-01T00:00:00.000Z',
+    description:
+      'Optional ISO timestamp when the invite link expires. Omit for no time-based expiry.',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/, {
+    message: 'expiresAt must be a valid ISO-8601 UTC timestamp.',
+  })
+  expiresAt?: string;
+
+  @ApiPropertyOptional({
+    example: 100,
+    description:
+      'Optional maximum number of successful joins allowed by this invite link.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  maxUses?: number;
+}
+
+export class LeaveGroupRequestDto {
+  @ApiProperty({
+    example: '01JPCY0000DEPUTY0000000000000',
+    description:
+      'Required only when the current actor is the owner. The selected active member becomes the new owner while the current owner leaves the group in the same transaction.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  @MaxLength(50)
+  successorUserId?: string;
 }
 
 export class SendDirectMessageRequestDto {

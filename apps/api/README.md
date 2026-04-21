@@ -31,7 +31,7 @@ These are intentional product/backend policies, not accidental restrictions:
 
 - Direct messages are not globally open. Citizen-to-citizen DM is allowed only when users are friends or a same-scope direct message request was accepted; staff/service DM remains constrained by role and scope.
 - Public groups expose metadata/discovery by scope, but the actual group conversation stream is member-only.
-- Group management is membership-based. `ADMIN` can manage any group, while non-admin staff must be an `OWNER` or `OFFICER` member to manage a group.
+- Group management is membership-based. `ADMIN` can manage any group, while non-admin staff must be an `OWNER` or `DEPUTY` member to manage a group.
 - Report status transitions follow a backend state machine. FE should only show actions valid for the current status.
 
 ## Environment

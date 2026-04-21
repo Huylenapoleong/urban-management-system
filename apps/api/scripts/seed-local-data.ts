@@ -163,6 +163,7 @@ function makeGroup(input: {
   id: string;
   groupName: string;
   groupType: 'AREA' | 'TOPIC' | 'OFFICIAL' | 'PRIVATE';
+  messagePolicy?: 'ALL_MEMBERS' | 'OWNER_AND_DEPUTIES' | 'OWNER_ONLY';
   locationCode: string;
   createdBy: string;
   description?: string;
@@ -178,6 +179,7 @@ function makeGroup(input: {
     groupId: input.id,
     groupName: input.groupName,
     groupType: input.groupType,
+    messagePolicy: input.messagePolicy ?? 'ALL_MEMBERS',
     locationCode: input.locationCode,
     createdBy: input.createdBy,
     description: input.description,
@@ -192,7 +194,7 @@ function makeGroup(input: {
 function makeMembership(input: {
   groupId: string;
   userId: string;
-  roleInGroup: 'OWNER' | 'OFFICER' | 'MEMBER';
+  roleInGroup: 'OWNER' | 'DEPUTY' | 'MEMBER';
   joinedAt: string;
 }): StoredMembership {
   return {
@@ -546,13 +548,13 @@ async function main(): Promise<void> {
     makeMembership({
       groupId: FIXTURE_IDS.officialGroup,
       userId: FIXTURE_IDS.wardOfficer,
-      roleInGroup: 'OFFICER',
+      roleInGroup: 'DEPUTY',
       joinedAt: '2026-03-17T07:06:00.000Z',
     }),
     makeMembership({
       groupId: FIXTURE_IDS.officialGroup,
       userId: FIXTURE_IDS.admin,
-      roleInGroup: 'OFFICER',
+      roleInGroup: 'DEPUTY',
       joinedAt: '2026-03-17T07:07:00.000Z',
     }),
     makeMembership({
