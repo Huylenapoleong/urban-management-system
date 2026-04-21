@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
 import {
   listConversations,
   deleteMessage,
   forwardMessage,
-  listMessages,
+  listMessagesPage,
+  type CursorPage,
   markConversationAsRead,
   sendMessage,
   updateMessage,
@@ -25,16 +26,27 @@ export function useConversations(searchTerm?: string) {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
+    const handleConversationRemoved = (payload: any) => {
+      const removedConversationId = payload?.conversationId || payload?.data?.conversationId;
+      if (removedConversationId) {
+        joinedConversationIdsRef.current.delete(removedConversationId);
+        queryClient.removeQueries({ queryKey: ["messages", removedConversationId] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    };
+
     const handleSocketConnect = () => {
       joinedConversationIdsRef.current.clear();
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
     socketClient.socket?.on("connect", handleSocketConnect);
 
     return () => {
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
+      socketClient.socket?.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
       socketClient.socket?.off("connect", handleSocketConnect);
     };
   }, [queryClient]);
@@ -85,12 +97,21 @@ export function useConversations(searchTerm?: string) {
 export function useMessages(conversationId?: string) {
   const queryClient = useQueryClient();
   const [typingUsers, setTypingUsers] = useState<Record<string, ChatTypingStateEvent>>({});
+  const messageQueryKey = useMemo(() => ["messages", conversationId] as const, [conversationId]);
 
-  const query = useQuery({
-    queryKey: ["messages", conversationId],
-    queryFn: () => listMessages(conversationId!),
+  const query = useInfiniteQuery({
+    queryKey: messageQueryKey,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      listMessagesPage(conversationId!, {
+        limit: 40,
+        cursor: pageParam,
+      }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     enabled: !!conversationId,
   });
+
+  const messages = query.data?.pages.flatMap((page) => page.items) ?? [];
 
   useEffect(() => {
     if (!conversationId) return;
@@ -131,29 +152,50 @@ export function useMessages(conversationId?: string) {
       // payload could be a ChatMessageCreatedEvent
       const newMsg = payload.message || payload;
       if (newMsg?.conversationId === conversationId) {
-        // Optimistically update or invalidate
-        queryClient.setQueryData<MessageItem[]>(["messages", conversationId], (oldData) => {
-          if (!oldData) return [newMsg];
-          // Deduplicate
-          if (oldData.some(msg => msg.id === newMsg.id)) {
+        // Keep newest page fresh while preserving older pages.
+        queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(messageQueryKey, (oldData) => {
+          if (!oldData || oldData.pages.length === 0) {
+            return {
+              pages: [{ items: [newMsg], nextCursor: undefined }],
+              pageParams: [undefined],
+            };
+          }
+
+          if (oldData.pages.some((page) => page.items.some((msg) => msg.id === newMsg.id))) {
             return oldData;
           }
-          // Determine if we need to append at the beginning or end based on order.
-          // Usually listMessages returns newest first (descending), so newMsg goes at index 0
-          return [newMsg, ...oldData];
+
+          const [firstPage, ...restPages] = oldData.pages;
+          return {
+            ...oldData,
+            pages: [{ ...firstPage, items: [newMsg, ...firstPage.items] }, ...restPages],
+          };
         });
       }
     };
 
+    const handleConversationRemoved = (payload: any) => {
+      const removedConversationId = payload?.conversationId || payload?.data?.conversationId;
+      if (!removedConversationId || removedConversationId !== conversationId) {
+        return;
+      }
+
+      setTypingUsers({});
+      queryClient.removeQueries({ queryKey: messageQueryKey });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    };
+
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
 
     return () => {
       socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE, { conversationId }).catch(() => {});
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
+      socketClient.socket?.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
     };
-  }, [conversationId, queryClient]);
+  }, [conversationId, messageQueryKey, queryClient]);
 
   const sendTyping = useCallback(
     async (isTyping: boolean) => {
@@ -178,7 +220,7 @@ export function useMessages(conversationId?: string) {
   const sendMutation = useMutation({
     mutationFn: (payload: SendMessageInput) => sendMessage(conversationId!, payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: messageQueryKey });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (error) => {
@@ -200,7 +242,7 @@ export function useMessages(conversationId?: string) {
     mutationFn: ({ messageId, text }: { messageId: string; text: string }) =>
       updateMessage(conversationId!, messageId, text),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: messageQueryKey });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
@@ -209,7 +251,7 @@ export function useMessages(conversationId?: string) {
     mutationFn: ({ messageId, scope }: { messageId: string; scope?: RecallScope }) =>
       deleteMessage(conversationId!, messageId, scope),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: messageQueryKey });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
@@ -218,13 +260,17 @@ export function useMessages(conversationId?: string) {
     mutationFn: ({ messageId, conversationIds }: { messageId: string; conversationIds: string[] }) =>
       forwardMessage(conversationId!, messageId, conversationIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      queryClient.invalidateQueries({ queryKey: messageQueryKey });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
 
   return {
     ...query,
+    data: messages,
+    loadMore: query.fetchNextPage,
+    hasMore: query.hasNextPage,
+    isLoadingMore: query.isFetchingNextPage,
     typingUsers,
     sendMessage: sendMutation.mutate,
     sendMessageAsync: sendMutation.mutateAsync,

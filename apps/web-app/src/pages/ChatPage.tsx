@@ -318,6 +318,9 @@ export function ChatPage() {
   const {
     data: messages = [],
     isLoading: loadingMessages,
+    hasMore,
+    isLoadingMore,
+    loadMore,
     sendMessageAsync,
     isSending,
     markAsRead,
@@ -441,7 +444,11 @@ export function ChatPage() {
   const activeLastSeenBadge = formatLastSeenShort(activePresence);
   const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
   const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const previousMessageCountRef = useRef(0);
+  const loadingOlderMessagesRef = useRef(false);
+  const previousScrollHeightRef = useRef(0);
   const {
     data: activeGroupMembers = [],
     isLoading: isLoadingGroupMembers,
@@ -924,10 +931,40 @@ export function ChatPage() {
     };
   }, [activeDmUserId]);
 
-  // Auto scroll to bottom when messages load or new messages appear
+  // Auto scroll to bottom for new messages, preserve position while loading older pages.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = messagesContainerRef.current;
+
+    if (loadingOlderMessagesRef.current && container) {
+      const delta = container.scrollHeight - previousScrollHeightRef.current;
+      container.scrollTop = container.scrollTop + Math.max(0, delta);
+      loadingOlderMessagesRef.current = false;
+      previousScrollHeightRef.current = 0;
+      previousMessageCountRef.current = messages.length;
+      return;
+    }
+
+    const previousCount = previousMessageCountRef.current;
+    const isFirstLoad = previousCount === 0 && messages.length > 0;
+    const hasNewMessage = previousCount > 0 && messages.length > previousCount;
+
+    if (isFirstLoad || hasNewMessage) {
+      messagesEndRef.current?.scrollIntoView({ behavior: isFirstLoad ? "auto" : "smooth" });
+    }
+
+    previousMessageCountRef.current = messages.length;
   }, [messages]);
+
+  const handleLoadMoreMessages = async () => {
+    const container = messagesContainerRef.current;
+    if (!container || !hasMore || isLoadingMore) {
+      return;
+    }
+
+    previousScrollHeightRef.current = container.scrollHeight;
+    loadingOlderMessagesRef.current = true;
+    await loadMore();
+  };
 
   useEffect(() => {
     if (!activeChat) {
@@ -986,6 +1023,9 @@ export function ChatPage() {
     setInviteSearchText("");
     setSelectedInviteUserIds([]);
     setPendingRemoveMemberUserId(null);
+    previousMessageCountRef.current = 0;
+    loadingOlderMessagesRef.current = false;
+    previousScrollHeightRef.current = 0;
   }, [activeChat]);
 
   const toggleInviteSelection = (userId: string) => {
@@ -2348,10 +2388,22 @@ export function ChatPage() {
             </aside>
 
             {/* Nội dung tin nhắn */}
-            <div className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar">
               {loadingMessages && <div className="text-center py-4 text-sm text-gray-500 dark:text-slate-400">Đang tải tin nhắn...</div>}
               
               <div className="flex flex-col gap-3 pb-4">
+                {hasMore ? (
+                  <div className="flex justify-center py-1">
+                    <button
+                      type="button"
+                      onClick={() => void handleLoadMoreMessages()}
+                      disabled={isLoadingMore}
+                      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {isLoadingMore ? "Đang tải thêm..." : "Tải thêm tin nhắn cũ"}
+                    </button>
+                  </div>
+                ) : null}
                 {/* Đảo ngược array nếu API trả về tin mới nhất trước (thường thấy nếu limit offset) */}
                 {[...messages].reverse().map((msg) => {
                   const isMe = msg.senderId === user?.sub;

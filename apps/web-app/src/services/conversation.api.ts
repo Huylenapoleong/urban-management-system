@@ -1,4 +1,5 @@
 import ApiClient from "@/lib/api-client";
+import { buildSessionMetadataHeaders, readAccessToken } from "@/lib/api-client";
 import { socketClient } from "@/lib/socket-client";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type { ConversationSummary, MessageItem } from "@urban/shared-types";
@@ -14,6 +15,11 @@ export interface SendMessageInput {
 }
 
 export type RecallScope = "SELF" | "EVERYONE";
+
+export interface CursorPage<T> {
+  items: T[];
+  nextCursor?: string;
+}
 
 function createClientMessageId(): string {
   // Use a deterministic prefix so backend logs can quickly identify web-app send attempts.
@@ -151,10 +157,58 @@ export async function listConversations(searchTerm?: string): Promise<Conversati
 }
 
 export async function listMessages(conversationId: string): Promise<MessageItem[]> {
+  const page = await listMessagesPage(conversationId, { limit: 100 });
+  return page.items;
+}
+
+export async function listMessagesPage(
+  conversationId: string,
+  params?: {
+    cursor?: string;
+    limit?: number;
+  },
+): Promise<CursorPage<MessageItem>> {
+  const limit = params?.limit ?? 40;
+  const query = new URLSearchParams();
+  query.set("limit", String(limit));
+  if (params?.cursor) {
+    query.set("cursor", params.cursor);
+  }
+
+  const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
+  const token = readAccessToken();
+
   let lastError: unknown;
   for (const id of buildConversationIdCandidates(conversationId)) {
     try {
-      return await ApiClient.get(`/conversations/${encodeURIComponent(id)}/messages?limit=100`);
+      const response = await fetch(
+        `${baseUrl}/conversations/${encodeURIComponent(id)}/messages?${query.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            ...buildSessionMetadataHeaders(),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        },
+      );
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.success === false) {
+        const message =
+          payload?.error?.message || payload?.message || "Request failed";
+        throw {
+          message,
+          status: response.status,
+        };
+      }
+
+      return {
+        items: Array.isArray(payload?.data) ? payload.data : [],
+        nextCursor:
+          typeof payload?.meta?.nextCursor === "string"
+            ? payload.meta.nextCursor
+            : undefined,
+      };
     } catch (error: any) {
       lastError = error;
       if (error?.status !== 400) {

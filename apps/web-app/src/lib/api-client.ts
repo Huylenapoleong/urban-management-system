@@ -15,6 +15,24 @@ const client = axios.create({
 });
 
 export const AUTH_TOKEN_KEY = "auth_token";
+const WEB_APP_VARIANT = "citizen-web";
+
+function detectWebSessionScope(): "WEB_DESKTOP" | "WEB_MOBILE" {
+  if (typeof navigator === "undefined") {
+    return "WEB_DESKTOP";
+  }
+
+  const userAgent = navigator.userAgent?.toLowerCase() ?? "";
+  const isMobile = /android|iphone|ipad|ipod|mobile|ios|blackberry|iemobile|opera mini/.test(userAgent);
+  return isMobile ? "WEB_MOBILE" : "WEB_DESKTOP";
+}
+
+export function buildSessionMetadataHeaders(): Record<string, string> {
+  return {
+    "x-app-variant": WEB_APP_VARIANT,
+    "x-session-scope": detectWebSessionScope(),
+  };
+}
 
 export function readAccessToken(): string | null {
   return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -61,6 +79,12 @@ function normalizeConversationRoute(url?: string): string | undefined {
 }
 
 client.interceptors.request.use((config) => {
+  config.headers = config.headers ?? {};
+
+  const sessionHeaders = buildSessionMetadataHeaders();
+  config.headers["x-app-variant"] = sessionHeaders["x-app-variant"];
+  config.headers["x-session-scope"] = sessionHeaders["x-session-scope"];
+
   const token = readAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
