@@ -18,8 +18,15 @@ export type UserStatus = (typeof USER_STATUSES)[number];
 export const GROUP_TYPES: readonly ["AREA", "TOPIC", "OFFICIAL", "PRIVATE"];
 export type GroupType = (typeof GROUP_TYPES)[number];
 
-export const GROUP_MEMBER_ROLES: readonly ["OWNER", "OFFICER", "MEMBER"];
+export const GROUP_MEMBER_ROLES: readonly ["OWNER", "DEPUTY", "MEMBER"];
 export type GroupMemberRole = (typeof GROUP_MEMBER_ROLES)[number];
+
+export const GROUP_MESSAGE_POLICIES: readonly [
+  "ALL_MEMBERS",
+  "OWNER_AND_DEPUTIES",
+  "OWNER_ONLY",
+];
+export type GroupMessagePolicy = (typeof GROUP_MESSAGE_POLICIES)[number];
 
 export const MESSAGE_TYPES: readonly [
   "TEXT",

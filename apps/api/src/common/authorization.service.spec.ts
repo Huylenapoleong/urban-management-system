@@ -74,6 +74,7 @@ describe('AuthorizationService', () => {
     groupId: 'group-1',
     groupName: 'Ward Group',
     groupType: 'AREA',
+    messagePolicy: 'ALL_MEMBERS',
     locationCode: 'VN-HCM-BQ1-P01',
     createdBy: 'owner-1',
     description: undefined,
@@ -121,7 +122,7 @@ describe('AuthorizationService', () => {
   });
 
   it('allows only owners or admins to delete a group', () => {
-    expect(service.canDeleteGroup(citizenActor, group, 'OFFICER')).toBe(false);
+    expect(service.canDeleteGroup(citizenActor, group, 'DEPUTY')).toBe(false);
     expect(service.canDeleteGroup(citizenActor, group, 'OWNER')).toBe(true);
   });
 
@@ -129,11 +130,45 @@ describe('AuthorizationService', () => {
     expect(service.canManageGroup(wardOfficerActor, group)).toBe(false);
   });
 
-  it('allows owner or officer members to manage a group', () => {
+  it('allows owner or deputy members to manage a group', () => {
     expect(service.canManageGroup(wardOfficerActor, group, 'OWNER')).toBe(true);
+    expect(service.canManageGroup(wardOfficerActor, group, 'DEPUTY')).toBe(
+      true,
+    );
+  });
+
+  it('temporarily accepts the legacy officer alias for group management', () => {
     expect(service.canManageGroup(wardOfficerActor, group, 'OFFICER')).toBe(
       true,
     );
+  });
+
+  it('allows all active members to send messages when the policy is ALL_MEMBERS', () => {
+    expect(
+      service.canSendGroupMessage(citizenActor, 'MEMBER', 'ALL_MEMBERS'),
+    ).toBe(true);
+  });
+
+  it('restricts group messages to owners and deputies when the policy requires it', () => {
+    expect(
+      service.canSendGroupMessage(
+        wardOfficerActor,
+        'DEPUTY',
+        'OWNER_AND_DEPUTIES',
+      ),
+    ).toBe(true);
+    expect(
+      service.canSendGroupMessage(citizenActor, 'MEMBER', 'OWNER_AND_DEPUTIES'),
+    ).toBe(false);
+  });
+
+  it('restricts owner-only group messaging to the owner role', () => {
+    expect(
+      service.canSendGroupMessage(citizenActor, 'OWNER', 'OWNER_ONLY'),
+    ).toBe(true);
+    expect(
+      service.canSendGroupMessage(citizenActor, 'DEPUTY', 'OWNER_ONLY'),
+    ).toBe(false);
   });
 
   it('does not allow assigning a report to an inactive officer', () => {

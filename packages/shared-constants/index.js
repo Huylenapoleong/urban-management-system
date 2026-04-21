@@ -15,7 +15,12 @@ const USER_STATUSES = Object.freeze([
 
 const GROUP_TYPES = Object.freeze(["AREA", "TOPIC", "OFFICIAL", "PRIVATE"]);
 
-const GROUP_MEMBER_ROLES = Object.freeze(["OWNER", "OFFICER", "MEMBER"]);
+const GROUP_MEMBER_ROLES = Object.freeze(["OWNER", "DEPUTY", "MEMBER"]);
+const GROUP_MESSAGE_POLICIES = Object.freeze([
+  "ALL_MEMBERS",
+  "OWNER_AND_DEPUTIES",
+  "OWNER_ONLY",
+]);
 
 const MESSAGE_TYPES = Object.freeze([
   "TEXT",
@@ -116,6 +121,7 @@ module.exports = {
   DEFAULT_PAGE_SIZE,
   EMAIL_PATTERN,
   GROUP_MEMBER_ROLES,
+  GROUP_MESSAGE_POLICIES,
   GROUP_TYPES,
   LOCATION_CODE_PATTERN,
   MAX_PAGE_SIZE,

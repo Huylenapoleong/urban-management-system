@@ -1,5 +1,6 @@
 import type {
   GroupMemberRole,
+  GroupMessagePolicy,
   GroupType,
   MessageDeliveryState,
   MessageRecallScope,
@@ -154,6 +155,7 @@ export interface GroupMetadata {
   id: string;
   groupName: string;
   groupType: GroupType;
+  messagePolicy: GroupMessagePolicy;
   locationCode: string;
   createdBy: string;
   description?: string;
@@ -170,6 +172,29 @@ export interface GroupMembership {
   roleInGroup: GroupMemberRole;
   joinedAt: string;
   deletedAt: string | null;
+  updatedAt: string;
+}
+
+export interface GroupBan {
+  groupId: string;
+  userId: string;
+  bannedByUserId: string;
+  reason?: string;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupInviteLink {
+  inviteId: string;
+  groupId: string;
+  code: string;
+  createdByUserId: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+  usedCount: number;
+  disabledAt: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -296,7 +321,7 @@ export interface PushDevice {
 
 export interface AuditEventItem {
   id: string;
-  scope: "REPORT" | "CONVERSATION";
+  scope: "REPORT" | "CONVERSATION" | "GROUP";
   action: string;
   actorUserId: string;
   occurredAt: string;
