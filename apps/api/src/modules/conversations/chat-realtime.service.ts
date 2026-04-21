@@ -50,6 +50,20 @@ export class ChatRealtimeService {
     this.server?.to(this.makeUserRoom(userId)).emit(event, payload);
   }
 
+  emitToUsers<TPayload>(
+    userIds: string[],
+    event: string,
+    payload: TPayload,
+  ): void {
+    const uniqueUserIds = Array.from(
+      new Set(userIds.map((userId) => userId.trim()).filter(Boolean)),
+    );
+
+    for (const userId of uniqueUserIds) {
+      this.emitToUser(userId, event, payload);
+    }
+  }
+
   emitToConversation<TPayload>(
     conversationKey: string,
     event: string,

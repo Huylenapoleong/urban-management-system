@@ -11,6 +11,10 @@ export class ChatPresenceService implements OnApplicationShutdown {
   private readonly heartbeatTimers = new Map<string, NodeJS.Timeout>();
   private readonly memorySocketsByUser = new Map<string, Set<string>>();
   private readonly memoryLastSeen = new Map<string, string>();
+  private readonly memoryLastActivity = new Map<string, string>();
+  private readonly memoryRecentActivityExpiresAt = new Map<string, number>();
+  private readonly httpActivityThrottleMs = 10_000;
+  private readonly lastHttpActivityWriteAt = new Map<string, number>();
 
   constructor(
     private readonly config: AppConfigService,
@@ -44,6 +48,25 @@ export class ChatPresenceService implements OnApplicationShutdown {
     const sockets = this.memorySocketsByUser.get(userId) ?? new Set<string>();
     sockets.add(socketId);
     this.memorySocketsByUser.set(userId, sockets);
+    this.touchMemoryActivity(userId);
+  }
+
+  async recordHttpActivity(userId: string): Promise<void> {
+    const nowMs = Date.now();
+    const lastWrittenAt = this.lastHttpActivityWriteAt.get(userId) ?? 0;
+
+    if (nowMs - lastWrittenAt < this.httpActivityThrottleMs) {
+      return;
+    }
+
+    this.lastHttpActivityWriteAt.set(userId, nowMs);
+
+    if (this.realtimeRedisService.enabled) {
+      await this.touchRedisActivity(userId);
+      return;
+    }
+
+    this.touchMemoryActivity(userId);
   }
 
   async getPresence(userId: string): Promise<ChatPresenceState> {
@@ -102,6 +125,7 @@ export class ChatPresenceService implements OnApplicationShutdown {
     const client = this.requireRedisClient();
     const expiresAtMs = Date.now() + this.config.chatPresenceTtlSeconds * 1000;
     const ttlSeconds = Math.max(this.config.chatPresenceTtlSeconds * 2, 60);
+    const occurredAt = nowIso();
 
     await client
       .multi()
@@ -110,6 +134,27 @@ export class ChatPresenceService implements OnApplicationShutdown {
         value: socketId,
       })
       .expire(this.makeSocketsKey(userId), ttlSeconds)
+      .set(this.makeRecentActivityKey(userId), occurredAt, {
+        EX: this.config.chatPresenceTtlSeconds,
+      })
+      .set(this.makeLastActivityKey(userId), occurredAt, {
+        EX: this.config.chatPresenceLastSeenTtlSeconds,
+      })
+      .exec();
+  }
+
+  private async touchRedisActivity(userId: string): Promise<void> {
+    const client = this.requireRedisClient();
+    const occurredAt = nowIso();
+
+    await client
+      .multi()
+      .set(this.makeRecentActivityKey(userId), occurredAt, {
+        EX: this.config.chatPresenceTtlSeconds,
+      })
+      .set(this.makeLastActivityKey(userId), occurredAt, {
+        EX: this.config.chatPresenceLastSeenTtlSeconds,
+      })
       .exec();
   }
 
@@ -123,6 +168,7 @@ export class ChatPresenceService implements OnApplicationShutdown {
     await client
       .multi()
       .zRem(this.makeSocketsKey(userId), socketId)
+      .del(this.makeRecentActivityKey(userId))
       .set(this.makeLastSeenKey(userId), occurredAt, {
         EX: this.config.chatPresenceLastSeenTtlSeconds,
       })
@@ -138,16 +184,22 @@ export class ChatPresenceService implements OnApplicationShutdown {
     const client = this.requireRedisClient();
     await client.zRemRangeByScore(this.makeSocketsKey(userId), 0, Date.now());
 
-    const [activeSocketCount, lastSeenAt] = await Promise.all([
-      client.zCard(this.makeSocketsKey(userId)),
-      client.get(this.makeLastSeenKey(userId)),
-    ]);
+    const [activeSocketCount, recentActivityAt, lastSeenAt, lastActivityAt] =
+      await Promise.all([
+        client.zCard(this.makeSocketsKey(userId)),
+        client.get(this.makeRecentActivityKey(userId)),
+        client.get(this.makeLastSeenKey(userId)),
+        client.get(this.makeLastActivityKey(userId)),
+      ]);
+    const isActive = activeSocketCount > 0 || Boolean(recentActivityAt);
 
     return {
       userId,
-      isActive: activeSocketCount > 0,
+      isActive,
       activeSocketCount,
-      lastSeenAt: activeSocketCount > 0 ? undefined : (lastSeenAt ?? undefined),
+      lastSeenAt: isActive
+        ? undefined
+        : this.pickLatestTimestamp(lastSeenAt, lastActivityAt),
       occurredAt,
     };
   }
@@ -163,6 +215,7 @@ export class ChatPresenceService implements OnApplicationShutdown {
 
       if (sockets.size === 0) {
         this.memorySocketsByUser.delete(userId);
+        this.memoryRecentActivityExpiresAt.delete(userId);
       }
     }
 
@@ -176,15 +229,45 @@ export class ChatPresenceService implements OnApplicationShutdown {
     occurredAt = nowIso(),
   ): ChatPresenceState {
     const activeSocketCount = this.memorySocketsByUser.get(userId)?.size ?? 0;
+    const nowMs = Date.now();
+    const recentActivityExpiresAt =
+      this.memoryRecentActivityExpiresAt.get(userId) ?? 0;
+    const hasRecentActivity = recentActivityExpiresAt > nowMs;
+
+    if (!hasRecentActivity && recentActivityExpiresAt > 0) {
+      this.memoryRecentActivityExpiresAt.delete(userId);
+    }
+
+    const isActive = activeSocketCount > 0 || hasRecentActivity;
 
     return {
       userId,
-      isActive: activeSocketCount > 0,
+      isActive,
       activeSocketCount,
-      lastSeenAt:
-        activeSocketCount > 0 ? undefined : this.memoryLastSeen.get(userId),
+      lastSeenAt: isActive
+        ? undefined
+        : this.pickLatestTimestamp(
+            this.memoryLastSeen.get(userId),
+            this.memoryLastActivity.get(userId),
+          ),
       occurredAt,
     };
+  }
+
+  private touchMemoryActivity(userId: string, occurredAt = nowIso()): void {
+    this.memoryRecentActivityExpiresAt.set(
+      userId,
+      Date.now() + this.config.chatPresenceTtlSeconds * 1000,
+    );
+    this.memoryLastActivity.set(userId, occurredAt);
+  }
+
+  private pickLatestTimestamp(
+    ...values: Array<string | null | undefined>
+  ): string | undefined {
+    return values
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => right.localeCompare(left))[0];
   }
 
   private requireRedisClient(): ReturnType<typeof createClient> {
@@ -203,5 +286,13 @@ export class ChatPresenceService implements OnApplicationShutdown {
 
   private makeLastSeenKey(userId: string): string {
     return `${this.config.redisKeyPrefix}:presence:user:${userId}:last-seen`;
+  }
+
+  private makeRecentActivityKey(userId: string): string {
+    return `${this.config.redisKeyPrefix}:presence:user:${userId}:recent-activity`;
+  }
+
+  private makeLastActivityKey(userId: string): string {
+    return `${this.config.redisKeyPrefix}:presence:user:${userId}:last-activity`;
   }
 }

@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CHAT_SOCKET_EVENTS,
   GROUP_MEMBER_ROLES,
   GROUP_TYPES,
   type GroupMemberRole,
@@ -24,6 +25,7 @@ import {
   makeGroupMetadataSk,
   makeGroupPk,
   makeGroupTypeLocationKey,
+  makeInboxPk,
   makeMembershipSk,
   makeUserGroupsKey,
   makeUserGroupsSk,
@@ -36,6 +38,7 @@ import {
 } from '../../common/pagination';
 import { toGroupMetadata, toMembership } from '../../common/mappers';
 import type {
+  StoredConversation,
   StoredGroup,
   StoredMembership,
 } from '../../common/storage-records';
@@ -54,6 +57,7 @@ import {
 } from '../../common/validation';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { ChatRealtimeService } from '../conversations/chat-realtime.service';
 import { GroupCleanupService } from './group-cleanup.service';
 import { UsersService } from '../users/users.service';
 
@@ -66,6 +70,7 @@ export class GroupsService {
     private readonly authorizationService: AuthorizationService,
     private readonly usersService: UsersService,
     private readonly groupCleanupService: GroupCleanupService,
+    private readonly chatRealtimeService: ChatRealtimeService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -490,6 +495,11 @@ export class GroupsService {
         ':expectedDeletedAt': null,
       },
     });
+    await this.removeGroupConversationAccess(
+      actor.id,
+      groupId,
+      nextMembership.updatedAt,
+    );
 
     return toMembership(nextMembership);
   }
@@ -675,6 +685,11 @@ export class GroupsService {
           ':expectedDeletedAt': null,
         },
       });
+      await this.removeGroupConversationAccess(
+        userId,
+        groupId,
+        nextMembership.updatedAt,
+      );
       return toMembership(nextMembership);
     }
 
@@ -839,6 +854,46 @@ export class GroupsService {
       makeGroupPk(groupId),
       {
         beginsWith: 'MEMBER#',
+      },
+    );
+  }
+
+  private async removeGroupConversationAccess(
+    userId: string,
+    groupId: string,
+    removedAt: string,
+  ): Promise<void> {
+    const conversationId = `GRP#${groupId}`;
+    const summaries = await this.repository.queryByPk<StoredConversation>(
+      this.config.dynamodbConversationsTableName,
+      makeInboxPk(userId),
+      {
+        beginsWith: `CONV#${conversationId}#LAST#`,
+      },
+    );
+
+    for (const summary of summaries) {
+      if (summary.entityType !== 'CONVERSATION') {
+        continue;
+      }
+
+      await this.repository.delete(
+        this.config.dynamodbConversationsTableName,
+        summary.PK,
+        summary.SK,
+      );
+    }
+
+    this.chatRealtimeService.leaveConversationForUser(userId, conversationId);
+    this.chatRealtimeService.emitToUser(
+      userId,
+      CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
+      {
+        eventId: createUlid(),
+        conversationId: `group:${groupId}`,
+        conversationKey: conversationId,
+        reason: 'conversation.deleted',
+        occurredAt: removedAt,
       },
     );
   }

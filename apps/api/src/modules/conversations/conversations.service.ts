@@ -1608,6 +1608,18 @@ export class ConversationsService {
       );
     }
 
+    if (
+      status === 'ACCEPTED' &&
+      (await this.usersService.isInteractionBlocked(
+        request.requesterUserId,
+        request.targetUserId,
+      ))
+    ) {
+      throw new ForbiddenException(
+        'Direct messaging is blocked between these users.',
+      );
+    }
+
     const activeMessages =
       await this.conversationSummaryService.listActiveMessages(conversationKey);
     const latestMessage = activeMessages[0];
@@ -1695,6 +1707,14 @@ export class ConversationsService {
     conversationId: string,
   ): Promise<void> {
     if (
+      await this.usersService.isInteractionBlocked(actor.id, targetUser.userId)
+    ) {
+      throw new ForbiddenException(
+        'Direct messaging is blocked between these users.',
+      );
+    }
+
+    if (
       !this.authorizationService.canAccessDirectConversation(actor, targetUser)
     ) {
       throw new ForbiddenException(
@@ -1741,7 +1761,21 @@ export class ConversationsService {
       return;
     }
 
+    if (
+      await this.usersService.isInteractionBlocked(actor.id, targetUser.userId)
+    ) {
+      throw new ForbiddenException(
+        'Direct messaging is blocked between these users.',
+      );
+    }
+
     if (await this.usersService.canStartCitizenDm(actor, targetUser)) {
+      return;
+    }
+
+    if (
+      await this.hasExistingDirectConversationSummary(actor.id, conversationId)
+    ) {
       return;
     }
 
@@ -3127,7 +3161,26 @@ export class ConversationsService {
       return true;
     }
 
+    if (
+      await this.hasExistingDirectConversationSummary(actor.id, conversationId)
+    ) {
+      return true;
+    }
+
     const directRequest = await this.getDirectMessageRequest(conversationId);
     return directRequest?.status === 'ACCEPTED';
+  }
+
+  private async hasExistingDirectConversationSummary(
+    userId: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    const summary =
+      await this.conversationSummaryService.getConversationSummary(
+        userId,
+        conversationId,
+      );
+
+    return Boolean(summary && !summary.deletedAt && !summary.requestStatus);
   }
 }

@@ -10,6 +10,7 @@ import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.
 import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { JwtTokenService } from '../../infrastructure/security/jwt-token.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
+import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -20,6 +21,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly config: AppConfigService,
     private readonly refreshSessionService: RefreshSessionService,
     private readonly mediaAssetService: MediaAssetService,
+    private readonly chatPresenceService: ChatPresenceService,
   ) {}
 
   async canActivate(
@@ -62,6 +64,7 @@ export class JwtAuthGuard implements CanActivate {
       toAuthenticatedUser(user),
     );
     request.authClaims = claims;
+    await this.chatPresenceService.recordHttpActivity(user.userId);
     return true;
   }
 }

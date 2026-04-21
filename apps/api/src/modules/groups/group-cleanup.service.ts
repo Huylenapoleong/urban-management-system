@@ -5,7 +5,7 @@ import type {
   StoredMembership,
   StoredReport,
 } from '../../common/storage-records';
-import { nowIso } from '@urban/shared-utils';
+import { makeInboxPk, nowIso } from '@urban/shared-utils';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 
@@ -38,9 +38,11 @@ export class GroupCleanupService {
 
   async processTask(task: StoredGroupDeleteCleanupTask): Promise<void> {
     try {
-      await this.softDeleteMembershipsForGroup(task.groupId, task.deletedAt);
+      const memberships = await this.listMembershipsForGroup(task.groupId);
+      await this.softDeleteMemberships(memberships, task.deletedAt);
       await this.softDeleteConversationSummariesForGroup(
         task.groupId,
+        memberships,
         task.deletedAt,
       );
       await this.detachReportsFromGroup(task.groupId, task.deletedAt);
@@ -111,18 +113,22 @@ export class GroupCleanupService {
     return `TASK#${deletedAt}#${groupId}`;
   }
 
-  private async softDeleteMembershipsForGroup(
+  private async listMembershipsForGroup(
     groupId: string,
-    deletedAt: string,
-  ): Promise<void> {
-    const memberships = await this.repository.queryByPk<StoredMembership>(
+  ): Promise<StoredMembership[]> {
+    return this.repository.queryByPk<StoredMembership>(
       this.config.dynamodbMembershipsTableName,
       `GROUP#${groupId}`,
       {
         beginsWith: 'MEMBER#',
       },
     );
+  }
 
+  private async softDeleteMemberships(
+    memberships: StoredMembership[],
+    deletedAt: string,
+  ): Promise<void> {
     for (const membership of memberships) {
       if (
         membership.deletedAt ||
@@ -146,32 +152,40 @@ export class GroupCleanupService {
 
   private async softDeleteConversationSummariesForGroup(
     groupId: string,
+    memberships: StoredMembership[],
     deletedAt: string,
   ): Promise<void> {
     const conversationId = `GRP#${groupId}`;
-    const summaries = await this.repository.scanAll<StoredConversation>(
-      this.config.dynamodbConversationsTableName,
-    );
 
-    for (const summary of summaries) {
-      if (
-        summary.entityType !== 'CONVERSATION' ||
-        summary.conversationId !== conversationId ||
-        summary.deletedAt
-      ) {
-        continue;
-      }
-
-      const nextSummary: StoredConversation = {
-        ...summary,
-        deletedAt,
-        updatedAt: deletedAt,
-      };
-
-      await this.repository.put(
+    for (const membership of memberships) {
+      const summaries = await this.repository.queryByPk<StoredConversation>(
         this.config.dynamodbConversationsTableName,
-        nextSummary,
+        makeInboxPk(membership.userId),
+        {
+          beginsWith: `CONV#${conversationId}#LAST#`,
+        },
       );
+
+      for (const summary of summaries) {
+        if (
+          summary.entityType !== 'CONVERSATION' ||
+          summary.conversationId !== conversationId ||
+          summary.deletedAt
+        ) {
+          continue;
+        }
+
+        const nextSummary: StoredConversation = {
+          ...summary,
+          deletedAt,
+          updatedAt: deletedAt,
+        };
+
+        await this.repository.put(
+          this.config.dynamodbConversationsTableName,
+          nextSummary,
+        );
+      }
     }
   }
 

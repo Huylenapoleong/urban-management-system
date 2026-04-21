@@ -9,7 +9,11 @@ describe('ConversationsGateway', () => {
     authenticate: jest.fn(),
   };
   const chatRealtimeService = {
+    attachUserSocket: jest.fn(),
     bindServer: jest.fn(),
+    emitToConversation: jest.fn(),
+    emitToUser: jest.fn(),
+    emitToUsers: jest.fn(),
     joinConversation: jest.fn(),
   };
   const chatPresenceService = {
@@ -21,6 +25,7 @@ describe('ConversationsGateway', () => {
   const conversationsService = {
     deleteConversation: jest.fn(),
     resolveConversationAccess: jest.fn(),
+    sendMessage: jest.fn(),
   };
 
   const actor: AuthenticatedUser = {
@@ -80,6 +85,72 @@ describe('ConversationsGateway', () => {
     expect(disconnect).not.toHaveBeenCalled();
   });
 
+  it('reuses the cached socket auth context for hot-path events after connection', async () => {
+    const { client, disconnect } = createSocketClient();
+    const removedAt = '2026-03-18T15:30:00.000Z';
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    conversationsService.deleteConversation.mockResolvedValue({
+      conversationId: 'group:group-1',
+      removedAt,
+    });
+
+    await gateway.handleConnection(client);
+    const result = await gateway.deleteConversation(client, {
+      conversationId: 'group:group-1',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: {
+        conversationId: 'group:group-1',
+        removedAt,
+      },
+    });
+    expect(chatSocketAuthService.authenticate).toHaveBeenCalledTimes(1);
+    expect(chatRealtimeService.attachUserSocket).toHaveBeenCalledWith(
+      client,
+      actor.id,
+      'session-1',
+    );
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('revalidates stale cached socket auth context before handling an event', async () => {
+    const { client, disconnect } = createSocketClient();
+    const baseNow = Date.now();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(baseNow / 1000) + 300,
+      },
+    });
+    conversationsService.deleteConversation.mockResolvedValue({
+      conversationId: 'group:group-1',
+      removedAt: '2026-03-18T15:30:00.000Z',
+    });
+
+    await gateway.handleConnection(client);
+    client.data.authenticatedAtMs = baseNow - 31_000;
+
+    await gateway.deleteConversation(client, {
+      conversationId: 'group:group-1',
+    });
+
+    expect(chatSocketAuthService.authenticate).toHaveBeenCalledTimes(2);
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
   it('returns a normalized error ack when deleteConversation fails', async () => {
     const { client, disconnect } = createSocketClient();
 
@@ -136,6 +207,139 @@ describe('ConversationsGateway', () => {
       },
     });
     expect(chatRealtimeService.joinConversation).not.toHaveBeenCalled();
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('routes DM call-init signals directly to the target user room', async () => {
+    const { client, disconnect } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    conversationsService.resolveConversationAccess.mockResolvedValue({
+      conversationId: 'dm:user-2',
+      conversationKey: 'DM#user-1#user-2',
+      participants: ['user-1', 'user-2'],
+      isGroup: false,
+    });
+
+    const result = await gateway.handleCallInit(client, {
+      conversationId: 'dm:user-2',
+      callerId: actor.id,
+      callerName: actor.fullName,
+      isVideo: true,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatRealtimeService.emitToUsers).toHaveBeenCalledWith(
+      ['user-2'],
+      'call.init',
+      {
+        conversationId: 'dm:user-2',
+        callerId: actor.id,
+        callerName: actor.fullName,
+        isVideo: true,
+      },
+    );
+    expect(chatRealtimeService.emitToConversation).not.toHaveBeenCalled();
+    expect(conversationsService.sendMessage).not.toHaveBeenCalled();
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('keeps group call signals on the conversation room', async () => {
+    const { client, disconnect } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    conversationsService.resolveConversationAccess.mockResolvedValue({
+      conversationId: 'group:group-1',
+      conversationKey: 'GRP#group-1',
+      participants: ['user-1', 'user-2', 'user-3'],
+      isGroup: true,
+    });
+
+    const result = await gateway.handleCallAccept(client, {
+      conversationId: 'group:group-1',
+      calleeId: 'user-2',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatRealtimeService.emitToConversation).toHaveBeenCalledWith(
+      'GRP#group-1',
+      'call.accept',
+      {
+        conversationId: 'group:group-1',
+        calleeId: 'user-2',
+      },
+      client.id,
+    );
+    expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalled();
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('returns success for call-end even when persisting the system message fails', async () => {
+    const { client, disconnect } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    conversationsService.resolveConversationAccess.mockResolvedValue({
+      conversationId: 'dm:user-2',
+      conversationKey: 'DM#user-1#user-2',
+      participants: ['user-1', 'user-2'],
+      isGroup: false,
+    });
+    conversationsService.sendMessage.mockRejectedValueOnce(
+      new Error('Outbox unavailable.'),
+    );
+
+    const result = await gateway.handleCallEnd(client, {
+      conversationId: 'dm:user-2',
+      endedByUserId: actor.id,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatRealtimeService.emitToUsers).toHaveBeenCalledWith(
+      ['user-2'],
+      'call.end',
+      {
+        conversationId: 'dm:user-2',
+        endedByUserId: actor.id,
+      },
+    );
+    expect(conversationsService.sendMessage).toHaveBeenCalledWith(
+      actor,
+      'DM#user-1#user-2',
+      expect.objectContaining({
+        type: 'SYSTEM',
+        content: 'Call ended.',
+      }),
+    );
     expect(disconnect).not.toHaveBeenCalled();
   });
 });

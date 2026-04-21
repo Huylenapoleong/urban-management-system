@@ -22,6 +22,7 @@ describe('ConversationsService', () => {
     isAdmin: jest.fn(),
   };
   const usersService = {
+    isInteractionBlocked: jest.fn(),
     canStartCitizenDm: jest.fn(),
     getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
@@ -191,7 +192,6 @@ describe('ConversationsService', () => {
     repository as never,
     conversationStateService as never,
     usersService as never,
-    groupsService as never,
     config as never,
   );
 
@@ -249,6 +249,7 @@ describe('ConversationsService', () => {
       throw new Error(`Unexpected user lookup: ${userId}`);
     });
     usersService.canStartCitizenDm.mockResolvedValue(true);
+    usersService.isInteractionBlocked.mockResolvedValue(false);
     repository.delete.mockResolvedValue(undefined);
     repository.scanAll.mockResolvedValue([]);
     repository.put.mockResolvedValue(undefined);
@@ -961,6 +962,126 @@ describe('ConversationsService', () => {
       }),
     );
     expect(repository.transactPut).toHaveBeenCalled();
+  });
+
+  it('allows continuing an existing DM after unfriend when the inbox summary still exists', async () => {
+    const remoteCitizen: StoredUser = {
+      ...sameScopeCitizen,
+      userId: 'user-9',
+      PK: 'USER#user-9',
+      email: 'citizen.remote@example.com',
+      fullName: 'Citizen Remote',
+      locationCode: 'VN-01-001-00001',
+    };
+    const remoteConversationKey = makeDmConversationId(
+      actor.id,
+      remoteCitizen.userId,
+    );
+    const remoteSummary: StoredConversation = {
+      ...actorSummary,
+      SK: `CONV#${remoteConversationKey}#LAST#2026-03-18T10:05:00.000Z`,
+      conversationId: remoteConversationKey,
+      groupName: remoteCitizen.fullName,
+    };
+
+    usersService.getActiveByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === remoteCitizen.userId) {
+        return remoteCitizen;
+      }
+
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
+      }
+
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      throw new Error(`Unexpected active user lookup: ${userId}`);
+    });
+    usersService.getByIdOrThrow.mockImplementation((userId: string) => {
+      if (userId === actor.id) {
+        return actorUser;
+      }
+
+      if (userId === otherUser.userId) {
+        return otherUser;
+      }
+
+      if (userId === sameScopeCitizen.userId) {
+        return sameScopeCitizen;
+      }
+
+      if (userId === remoteCitizen.userId) {
+        return remoteCitizen;
+      }
+
+      throw new Error(`Unexpected user lookup: ${userId}`);
+    });
+    authorizationService.canAccessDirectConversation.mockReturnValue(false);
+    usersService.canStartCitizenDm.mockResolvedValue(false);
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${remoteConversationKey}#LAST#`
+        ) {
+          return [remoteSummary];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.sendMessage(
+      actor,
+      `dm:${remoteCitizen.userId}`,
+      {
+        content: '{"text":"Van tiep tuc inbox cu.","mention":[]}',
+        type: 'TEXT',
+      },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${remoteCitizen.userId}`,
+        senderId: actor.id,
+        type: 'TEXT',
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalled();
+  });
+
+  it('blocks direct messages when the user pair is blocked', async () => {
+    usersService.isInteractionBlocked.mockResolvedValueOnce(true);
+
+    await expect(
+      service.sendDirectMessage(actor, {
+        targetUserId: sameScopeCitizen.userId,
+        content: '{"text":"Khong gui duoc nua.","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow('Direct messaging is blocked between these users.');
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('blocks direct message requests when the user pair is blocked', async () => {
+    usersService.isInteractionBlocked.mockResolvedValueOnce(true);
+    usersService.canStartCitizenDm.mockResolvedValueOnce(false);
+
+    await expect(
+      service.createDirectMessageRequest(actor, {
+        targetUserId: sameScopeCitizen.userId,
+        content: '{"text":"Xin cho phep nhan tin.","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow('Direct messaging is blocked between these users.');
+    expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
   it('prevents non-senders from editing another user message', async () => {

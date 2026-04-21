@@ -240,13 +240,25 @@ export class PresenceStateDto {
   @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
   userId!: string;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({
+    example: true,
+    description:
+      'True when the user currently has an active chat socket or has shown recent authenticated activity within the short presence window.',
+  })
   isActive!: boolean;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({
+    example: 2,
+    description:
+      'Number of active chat sockets currently tracked for the user. `isActive` may still be true when this value is 0 if the user was recently active through authenticated requests.',
+  })
   activeSocketCount!: number;
 
-  @ApiPropertyOptional({ example: '2026-03-18T03:10:00.000Z' })
+  @ApiPropertyOptional({
+    example: '2026-03-18T03:10:00.000Z',
+    description:
+      'Best-effort last seen timestamp. This is omitted while the user is considered active.',
+  })
   lastSeenAt?: string;
 
   @ApiProperty({ example: '2026-03-18T03:11:15.000Z' })
@@ -311,6 +323,32 @@ export class FriendRequestItemDto {
   requestedAt!: string;
 }
 
+export class BlockedUserItemDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Tran Van Citizen B' })
+  fullName!: string;
+
+  @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
+  role!: (typeof USER_ROLES)[number];
+
+  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  locationCode!: string;
+
+  @ApiPropertyOptional({ type: () => MediaAssetDto })
+  avatarAsset?: MediaAssetDto;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-b.jpg' })
+  avatarUrl?: string;
+
+  @ApiProperty({ enum: USER_STATUSES, example: 'ACTIVE' })
+  status!: (typeof USER_STATUSES)[number];
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  blockedAt!: string;
+}
+
 export class FriendActionResultDto {
   @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
   userId!: string;
@@ -323,6 +361,17 @@ export class FriendActionResultDto {
 
   @ApiPropertyOptional({ example: '2026-03-20T06:05:00.000Z' })
   removedAt?: string;
+}
+
+export class BlockActionResultDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiPropertyOptional({ example: '2026-03-20T06:05:00.000Z' })
+  blockedAt?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-20T06:05:00.000Z' })
+  unblockedAt?: string;
 }
 
 export class UserDirectoryItemDto {

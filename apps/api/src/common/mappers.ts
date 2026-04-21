@@ -9,6 +9,7 @@ import type {
   PushDevice,
   ReportConversationLinkItem,
   ReportItem,
+  UserBlockedItem,
   UserFriendItem,
   UserFriendRequestItem,
   UserProfile,
@@ -84,6 +85,22 @@ export function toUserFriendRequestItem(
     status: user.status,
     direction,
     requestedAt,
+  };
+}
+
+export function toUserBlockedItem(
+  user: StoredUser,
+  blockedAt: string,
+): UserBlockedItem {
+  return {
+    userId: user.userId,
+    fullName: user.fullName,
+    role: user.role,
+    locationCode: user.locationCode,
+    avatarAsset: user.avatarAsset,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    blockedAt,
   };
 }
 

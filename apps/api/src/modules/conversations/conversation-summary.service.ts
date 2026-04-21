@@ -1,21 +1,23 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   getConversationKind,
+  isDmConversationId,
   isGroupConversationId,
+  makeGroupMetadataSk,
+  makeGroupPk,
   makeConversationPk,
   makeConversationSummarySk,
   makeInboxPk,
   makeInboxStatsKey,
 } from '@urban/shared-utils';
-import type { AuthenticatedUser } from '@urban/shared-types';
 import type {
   StoredConversation,
+  StoredGroup,
   StoredMessage,
 } from '../../common/storage-records';
 import { ConversationStateService } from '../../common/services/conversation-state.service';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
-import { GroupsService } from '../groups/groups.service';
 import { UsersService } from '../users/users.service';
 
 export interface ConversationSummaryAccess {
@@ -44,7 +46,6 @@ export class ConversationSummaryService {
     private readonly repository: UrbanTableRepository,
     private readonly conversationStateService: ConversationStateService,
     private readonly usersService: UsersService,
-    private readonly groupsService: GroupsService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -411,6 +412,10 @@ export class ConversationSummaryService {
   private async resolveConversationSummaryParticipants(
     access: ConversationSummaryAccess,
   ): Promise<string[]> {
+    if (isDmConversationId(access.conversationKey)) {
+      return Array.from(new Set(access.participants));
+    }
+
     const storedSummaries = await this.repository.scanAll<StoredConversation>(
       this.config.dynamodbConversationsTableName,
     );
@@ -425,6 +430,23 @@ export class ConversationSummaryService {
     conversationId: string,
     participants: string[],
   ): Promise<Map<string, string>> {
+    if (isGroupConversationId(conversationId)) {
+      const groupId = conversationId.slice('GRP#'.length);
+      const group = await this.repository.get<StoredGroup>(
+        this.config.dynamodbGroupsTableName,
+        makeGroupPk(groupId),
+        makeGroupMetadataSk(),
+      );
+      const groupName = group?.groupName ?? groupId;
+      const labelMap = new Map<string, string>();
+
+      for (const participantId of participants) {
+        labelMap.set(participantId, groupName);
+      }
+
+      return labelMap;
+    }
+
     const userMap = new Map<
       string,
       Awaited<ReturnType<UsersService['getByIdOrThrow']>>
@@ -438,50 +460,18 @@ export class ConversationSummaryService {
     for (const participantId of participants) {
       labelMap.set(
         participantId,
-        await this.getConversationLabel(
-          participantId,
-          conversationId,
-          participants,
-          userMap,
-        ),
+        this.getDmConversationLabel(participantId, participants, userMap),
       );
     }
 
     return labelMap;
   }
 
-  private async getConversationLabel(
+  private getDmConversationLabel(
     participantId: string,
-    conversationId: string,
     participants: string[],
     userMap: Map<string, Awaited<ReturnType<UsersService['getByIdOrThrow']>>>,
-  ): Promise<string> {
-    if (isGroupConversationId(conversationId)) {
-      const user = userMap.get(participantId);
-
-      if (!user) {
-        throw new NotFoundException('Conversation participant not found.');
-      }
-
-      const group = await this.groupsService.getGroup(
-        {
-          id: participantId,
-          phone: user.phone,
-          email: user.email,
-          fullName: user.fullName,
-          role: user.role,
-          locationCode: user.locationCode,
-          unit: user.unit,
-          avatarUrl: user.avatarUrl,
-          status: user.status,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-        } satisfies AuthenticatedUser,
-        conversationId.slice('GRP#'.length),
-      );
-      return group.groupName;
-    }
-
+  ): string {
     const otherParticipantId = participants.find(
       (userId) => userId !== participantId,
     );

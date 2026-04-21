@@ -12,6 +12,7 @@ import type {
   AuthenticatedUser,
   MediaAsset,
   PushDevice,
+  UserBlockedItem,
   UserDirectoryItem,
   UserFriendItem,
   UserFriendRequestItem,
@@ -19,7 +20,10 @@ import type {
 } from '@urban/shared-types';
 import {
   createUlid,
+  makeConversationSummarySk,
   makeDmConversationId,
+  makeInboxPk,
+  makeInboxStatsKey,
   makeUserPk,
   makeUserProfileSk,
   nowIso,
@@ -32,9 +36,12 @@ import {
 import {
   toUserFriendItem,
   toUserFriendRequestItem,
+  toUserBlockedItem,
   toUserProfile,
 } from '../../common/mappers';
 import type {
+  StoredConversation,
+  StoredUserBlockEdge,
   StoredUserFriendEdge,
   StoredUserFriendRequest,
   StoredDirectMessageRequest,
@@ -832,6 +839,58 @@ export class UsersService {
     return buildPaginatedResponse(data, page.nextCursor);
   }
 
+  async listBlockedUsers(
+    actor: AuthenticatedUser,
+    query: Record<string, unknown>,
+  ): Promise<ApiSuccessResponse<UserBlockedItem[], ApiResponseMeta>> {
+    await this.getActiveByIdOrThrow(actor.id);
+    const limit = parseLimit(query.limit);
+    const edges = (
+      await this.repository.queryByPk<StoredUserBlockEdge>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'BLOCK#',
+        },
+      )
+    )
+      .filter((item) => item.entityType === 'USER_BLOCK_EDGE')
+      .filter((item) => item.direction === 'OUTGOING')
+      .filter((item) => item.blockedUserId !== actor.id);
+    const page = paginateSortedItems(
+      edges,
+      limit,
+      query.cursor,
+      (edge) => edge.createdAt,
+      (edge) => edge.blockedUserId,
+    );
+
+    const users = await this.getUsersByIds(
+      page.items.map((item) => item.blockedUserId),
+    );
+    const userMap = new Map(users.map((user) => [user.userId, user]));
+    const data = (
+      await Promise.all(
+        page.items.map(async (item) => {
+          const blockedUser = userMap.get(item.blockedUserId);
+
+          if (
+            !blockedUser ||
+            blockedUser.deletedAt ||
+            blockedUser.status === 'DELETED' ||
+            blockedUser.status === 'LOCKED'
+          ) {
+            return undefined;
+          }
+
+          return this.serializeUserBlockedItem(blockedUser, item.createdAt);
+        }),
+      )
+    ).filter((item): item is UserBlockedItem => item !== undefined);
+
+    return buildPaginatedResponse(data, page.nextCursor);
+  }
+
   async listFriendRequests(
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
@@ -926,23 +985,38 @@ export class UsersService {
     }
 
     const mode = modeRaw as UserDiscoveryMode;
-    const [allUsers, edges, requests] = await Promise.all([
-      this.repository.scanAll<StoredUser>(this.config.dynamodbUsersTableName),
-      this.repository.queryByPk<StoredUserFriendEdge>(
-        this.config.dynamodbUsersTableName,
-        makeUserPk(actor.id),
-        {
-          beginsWith: 'FRIEND#',
-        },
-      ),
-      this.repository.queryByPk<StoredUserFriendRequest>(
-        this.config.dynamodbUsersTableName,
-        makeUserPk(actor.id),
-        {
-          beginsWith: 'FRIEND_REQUEST#',
-        },
-      ),
-    ]);
+    const [allUsers, edges, requests, outgoingBlocks, incomingBlocks] =
+      await Promise.all([
+        this.repository.scanAll<StoredUser>(this.config.dynamodbUsersTableName),
+        this.repository.queryByPk<StoredUserFriendEdge>(
+          this.config.dynamodbUsersTableName,
+          makeUserPk(actor.id),
+          {
+            beginsWith: 'FRIEND#',
+          },
+        ),
+        this.repository.queryByPk<StoredUserFriendRequest>(
+          this.config.dynamodbUsersTableName,
+          makeUserPk(actor.id),
+          {
+            beginsWith: 'FRIEND_REQUEST#',
+          },
+        ),
+        this.repository.queryByPk<StoredUserBlockEdge>(
+          this.config.dynamodbUsersTableName,
+          makeUserPk(actor.id),
+          {
+            beginsWith: 'BLOCK#',
+          },
+        ),
+        this.repository.queryByPk<StoredUserBlockEdge>(
+          this.config.dynamodbUsersTableName,
+          makeUserPk(actor.id),
+          {
+            beginsWith: 'BLOCKED_BY#',
+          },
+        ),
+      ]);
 
     const friendUserIds = new Set(
       edges
@@ -961,10 +1035,27 @@ export class UsersService {
         .filter((request) => request.direction === 'OUTGOING')
         .map((request) => request.targetUserId),
     );
+    const blockedUserIds = new Set(
+      outgoingBlocks
+        .filter((block) => block.entityType === 'USER_BLOCK_EDGE')
+        .filter((block) => block.direction === 'OUTGOING')
+        .map((block) => block.blockedUserId),
+    );
+    const blockedByUserIds = new Set(
+      incomingBlocks
+        .filter((block) => block.entityType === 'USER_BLOCK_EDGE')
+        .filter((block) => block.direction === 'INCOMING')
+        .map((block) => block.blockerUserId),
+    );
     const citizenCandidateIds = allUsers
       .filter((user) => user.entityType === 'USER_PROFILE')
       .filter((user) => !user.deletedAt && user.status === 'ACTIVE')
       .filter((user) => user.userId !== actor.id)
+      .filter(
+        (user) =>
+          !blockedUserIds.has(user.userId) &&
+          !blockedByUserIds.has(user.userId),
+      )
       .filter((user) => user.role === 'CITIZEN')
       .map((user) => user.userId);
     const directMessageRequests =
@@ -997,6 +1088,11 @@ export class UsersService {
       .filter((user) => user.entityType === 'USER_PROFILE')
       .filter((user) => !user.deletedAt && user.status === 'ACTIVE')
       .filter((user) => user.userId !== actor.id)
+      .filter(
+        (user) =>
+          !blockedUserIds.has(user.userId) &&
+          !blockedByUserIds.has(user.userId),
+      )
       .filter((user) => this.canDiscoverUser(actor, user))
       .filter((user) => {
         if (!keyword) {
@@ -1108,6 +1204,12 @@ export class UsersService {
       );
     }
 
+    await this.ensureUsersAreNotBlocked(
+      requester.userId,
+      target.userId,
+      'Friend requests are blocked between these users.',
+    );
+
     const existingFriendship = await this.getFriendEdge(
       requester.userId,
       target.userId,
@@ -1193,6 +1295,12 @@ export class UsersService {
       throw new BadRequestException('Cannot accept your own friend request.');
     }
 
+    await this.ensureUsersAreNotBlocked(
+      receiver.userId,
+      requester.userId,
+      'Friend requests are blocked between these users.',
+    );
+
     const incomingRequest = await this.getFriendRequest(
       receiver.userId,
       requester.userId,
@@ -1225,6 +1333,17 @@ export class UsersService {
       receiver.userId,
       now,
     );
+    const friendConversationId = makeDmConversationId(
+      receiver.userId,
+      requester.userId,
+    );
+    const bootstrapConversationItems =
+      await this.buildFriendConversationBootstrapWrites(
+        receiver,
+        requester,
+        friendConversationId,
+        now,
+      );
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
     >[0] = [
@@ -1246,6 +1365,7 @@ export class UsersService {
           SK: incomingRequest.SK,
         },
       },
+      ...bootstrapConversationItems,
     ];
 
     if (outgoingRequest) {
@@ -1457,6 +1577,130 @@ export class UsersService {
     };
   }
 
+  async blockUser(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+  ): Promise<{ userId: string; blockedAt: string }> {
+    const blocker = await this.getActiveByIdOrThrow(actor.id);
+    const target = await this.getActiveByIdOrThrow(targetUserId);
+
+    if (blocker.userId === target.userId) {
+      throw new BadRequestException('Cannot block yourself.');
+    }
+
+    const existingBlock = await this.getBlockEdge(
+      blocker.userId,
+      target.userId,
+      'OUTGOING',
+    );
+
+    if (existingBlock) {
+      return {
+        userId: target.userId,
+        blockedAt: existingBlock.createdAt,
+      };
+    }
+
+    const occurredAt = nowIso();
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: this.buildBlockEdgeRecord(
+          blocker.userId,
+          target.userId,
+          'OUTGOING',
+          occurredAt,
+        ),
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: this.buildBlockEdgeRecord(
+          blocker.userId,
+          target.userId,
+          'INCOMING',
+          occurredAt,
+        ),
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      },
+    ];
+
+    this.pushFriendshipCleanupWrites(
+      transactionItems,
+      blocker.userId,
+      target.userId,
+      await this.getFriendEdge(blocker.userId, target.userId),
+      await this.getFriendEdge(target.userId, blocker.userId),
+    );
+
+    await this.repository.transactWrite(transactionItems);
+
+    return {
+      userId: target.userId,
+      blockedAt: occurredAt,
+    };
+  }
+
+  async unblockUser(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+  ): Promise<{ userId: string; unblockedAt: string }> {
+    await this.getActiveByIdOrThrow(actor.id);
+    await this.getByIdOrThrow(targetUserId);
+
+    const outgoingBlock = await this.getBlockEdge(
+      actor.id,
+      targetUserId,
+      'OUTGOING',
+    );
+
+    if (!outgoingBlock) {
+      throw new NotFoundException('Blocked user not found.');
+    }
+
+    const incomingBlock = await this.getBlockEdge(
+      actor.id,
+      targetUserId,
+      'INCOMING',
+    );
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: outgoingBlock.PK,
+          SK: outgoingBlock.SK,
+        },
+      },
+    ];
+
+    if (incomingBlock) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: incomingBlock.PK,
+          SK: incomingBlock.SK,
+        },
+      });
+    }
+
+    await this.repository.transactWrite(transactionItems);
+
+    return {
+      userId: targetUserId,
+      unblockedAt: nowIso(),
+    };
+  }
+
   async areFriends(userId: string, otherUserId: string): Promise<boolean> {
     if (userId === otherUserId) {
       return false;
@@ -1475,6 +1719,22 @@ export class UsersService {
     }
 
     return this.areFriends(actor.id, target.userId);
+  }
+
+  async isInteractionBlocked(
+    userId: string,
+    otherUserId: string,
+  ): Promise<boolean> {
+    if (userId === otherUserId) {
+      return false;
+    }
+
+    const [outgoingBlock, incomingBlock] = await Promise.all([
+      this.getBlockEdge(userId, otherUserId, 'OUTGOING'),
+      this.getBlockEdge(userId, otherUserId, 'INCOMING'),
+    ]);
+
+    return Boolean(outgoingBlock || incomingBlock);
   }
 
   private async hydrateFirst(
@@ -1653,6 +1913,226 @@ export class UsersService {
     };
   }
 
+  private buildBlockEdgeRecord(
+    blockerUserId: string,
+    blockedUserId: string,
+    direction: 'OUTGOING' | 'INCOMING',
+    occurredAt: string,
+  ): StoredUserBlockEdge {
+    return {
+      PK: makeUserPk(direction === 'OUTGOING' ? blockerUserId : blockedUserId),
+      SK:
+        direction === 'OUTGOING'
+          ? this.makeOutgoingBlockSk(blockedUserId)
+          : this.makeIncomingBlockSk(blockerUserId),
+      entityType: 'USER_BLOCK_EDGE',
+      blockerUserId,
+      blockedUserId,
+      direction,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    };
+  }
+
+  private pushFriendshipCleanupWrites(
+    transactionItems: Parameters<UrbanTableRepository['transactWrite']>[0],
+    leftUserId: string,
+    rightUserId: string,
+    leftToRightEdge?: StoredUserFriendEdge,
+    rightToLeftEdge?: StoredUserFriendEdge,
+  ): void {
+    if (leftToRightEdge) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: leftToRightEdge.PK,
+          SK: leftToRightEdge.SK,
+        },
+      });
+    }
+
+    if (rightToLeftEdge) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: rightToLeftEdge.PK,
+          SK: rightToLeftEdge.SK,
+        },
+      });
+    }
+
+    transactionItems.push(
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(leftUserId),
+          SK: this.makeOutgoingFriendRequestSk(rightUserId),
+        },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(leftUserId),
+          SK: this.makeIncomingFriendRequestSk(rightUserId),
+        },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(rightUserId),
+          SK: this.makeOutgoingFriendRequestSk(leftUserId),
+        },
+      },
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(rightUserId),
+          SK: this.makeIncomingFriendRequestSk(leftUserId),
+        },
+      },
+    );
+  }
+
+  private async ensureUsersAreNotBlocked(
+    leftUserId: string,
+    rightUserId: string,
+    message: string,
+  ): Promise<void> {
+    if (await this.isInteractionBlocked(leftUserId, rightUserId)) {
+      throw new ForbiddenException(message);
+    }
+  }
+
+  private async buildFriendConversationBootstrapWrites(
+    receiver: StoredUser,
+    requester: StoredUser,
+    conversationId: string,
+    occurredAt: string,
+  ): Promise<Parameters<UrbanTableRepository['transactWrite']>[0]> {
+    const receiverConversation = await this.getConversationSummaryRecord(
+      receiver.userId,
+      conversationId,
+    );
+    const requesterConversation = await this.getConversationSummaryRecord(
+      requester.userId,
+      conversationId,
+    );
+
+    return [
+      ...this.buildFriendConversationSummaryWriteItems(
+        receiver.userId,
+        requester.fullName,
+        conversationId,
+        occurredAt,
+        receiverConversation,
+      ),
+      ...this.buildFriendConversationSummaryWriteItems(
+        requester.userId,
+        receiver.fullName,
+        conversationId,
+        occurredAt,
+        requesterConversation,
+      ),
+    ];
+  }
+
+  private buildFriendConversationSummaryWriteItems(
+    ownerUserId: string,
+    counterpartName: string,
+    conversationId: string,
+    occurredAt: string,
+    existingConversation?: StoredConversation,
+  ): Parameters<UrbanTableRepository['transactWrite']>[0] {
+    const nextConversation = this.buildFriendConversationSummary(
+      ownerUserId,
+      counterpartName,
+      conversationId,
+      occurredAt,
+      existingConversation,
+    );
+
+    if (!nextConversation) {
+      return [];
+    }
+
+    const transactionItems: Parameters<
+      UrbanTableRepository['transactWrite']
+    >[0] = [];
+
+    if (
+      existingConversation &&
+      existingConversation.SK !== nextConversation.SK
+    ) {
+      transactionItems.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbConversationsTableName,
+        key: {
+          PK: existingConversation.PK,
+          SK: existingConversation.SK,
+        },
+      });
+    }
+
+    transactionItems.push({
+      kind: 'put',
+      tableName: this.config.dynamodbConversationsTableName,
+      item: nextConversation,
+    });
+
+    return transactionItems;
+  }
+
+  private buildFriendConversationSummary(
+    ownerUserId: string,
+    counterpartName: string,
+    conversationId: string,
+    occurredAt: string,
+    existingConversation?: StoredConversation,
+  ): StoredConversation | undefined {
+    if (
+      existingConversation &&
+      !existingConversation.deletedAt &&
+      !existingConversation.requestStatus &&
+      !existingConversation.requestDirection &&
+      !existingConversation.requestRequestedAt &&
+      !existingConversation.requestRespondedAt &&
+      !existingConversation.requestRespondedByUserId
+    ) {
+      return undefined;
+    }
+
+    return {
+      PK: makeInboxPk(ownerUserId),
+      SK: makeConversationSummarySk(conversationId, occurredAt),
+      entityType: 'CONVERSATION',
+      GSI1PK: makeInboxStatsKey(ownerUserId, 'DM'),
+      userId: ownerUserId,
+      conversationId,
+      groupName: existingConversation?.groupName ?? counterpartName,
+      lastMessagePreview: existingConversation?.lastMessagePreview ?? '',
+      lastSenderName: existingConversation?.lastSenderName ?? '',
+      unreadCount: 0,
+      isGroup: false,
+      isPinned: existingConversation?.isPinned ?? false,
+      archivedAt: existingConversation?.archivedAt ?? null,
+      mutedUntil: existingConversation?.mutedUntil ?? null,
+      requestStatus: null,
+      requestDirection: null,
+      requestRequestedAt: null,
+      requestRespondedAt: null,
+      requestRespondedByUserId: null,
+      deletedAt: null,
+      updatedAt: occurredAt,
+      lastReadAt: existingConversation?.lastReadAt ?? null,
+    };
+  }
+
   private async getFriendEdge(
     userId: string,
     friendUserId: string,
@@ -1701,6 +2181,53 @@ export class UsersService {
     return request;
   }
 
+  private async getConversationSummaryRecord(
+    userId: string,
+    conversationId: string,
+  ): Promise<StoredConversation | undefined> {
+    const items = await this.repository.queryByPk<StoredConversation>(
+      this.config.dynamodbConversationsTableName,
+      makeInboxPk(userId),
+      {
+        beginsWith: `CONV#${conversationId}#LAST#`,
+      },
+    );
+
+    return items
+      .filter((item) => item.entityType === 'CONVERSATION')
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  }
+
+  private async getBlockEdge(
+    ownerUserId: string,
+    otherUserId: string,
+    direction: 'OUTGOING' | 'INCOMING',
+  ): Promise<StoredUserBlockEdge | undefined> {
+    const block = await this.repository.get<StoredUserBlockEdge>(
+      this.config.dynamodbUsersTableName,
+      makeUserPk(ownerUserId),
+      direction === 'OUTGOING'
+        ? this.makeOutgoingBlockSk(otherUserId)
+        : this.makeIncomingBlockSk(otherUserId),
+    );
+
+    if (!block || block.entityType !== 'USER_BLOCK_EDGE') {
+      return undefined;
+    }
+
+    if (
+      block.blockerUserId !==
+        (direction === 'OUTGOING' ? ownerUserId : otherUserId) ||
+      block.blockedUserId !==
+        (direction === 'OUTGOING' ? otherUserId : ownerUserId) ||
+      block.direction !== direction
+    ) {
+      return undefined;
+    }
+
+    return block;
+  }
+
   private makeFriendEdgeSk(friendUserId: string): string {
     return `FRIEND#${friendUserId}`;
   }
@@ -1711,6 +2238,14 @@ export class UsersService {
 
   private makeOutgoingFriendRequestSk(targetUserId: string): string {
     return `FRIEND_REQUEST#TO#${targetUserId}`;
+  }
+
+  private makeOutgoingBlockSk(blockedUserId: string): string {
+    return `BLOCK#${blockedUserId}`;
+  }
+
+  private makeIncomingBlockSk(blockerUserId: string): string {
+    return `BLOCKED_BY#${blockerUserId}`;
   }
 
   private resolvePasswordPolicyProfile(
@@ -1784,6 +2319,24 @@ export class UsersService {
     requestedAt: string,
   ): Promise<UserFriendRequestItem> {
     const item = toUserFriendRequestItem(user, direction, requestedAt);
+    const { asset, url } =
+      await this.mediaAssetService.resolveAssetWithLegacyUrl(
+        item.avatarAsset,
+        item.avatarUrl,
+      );
+
+    return {
+      ...item,
+      avatarAsset: asset,
+      avatarUrl: url,
+    };
+  }
+
+  private async serializeUserBlockedItem(
+    user: StoredUser,
+    blockedAt: string,
+  ): Promise<UserBlockedItem> {
+    const item = toUserBlockedItem(user, blockedAt);
     const { asset, url } =
       await this.mediaAssetService.resolveAssetWithLegacyUrl(
         item.avatarAsset,
