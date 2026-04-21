@@ -19,11 +19,36 @@ import type { ChatTypingStateEvent, MessageItem } from "@urban/shared-types";
 export function useConversations(searchTerm?: string) {
   const queryClient = useQueryClient();
   const joinedConversationIdsRef = useRef<Set<string>>(new Set());
+  const lastConversationRefreshAtRef = useRef(0);
+  const scheduledConversationRefreshRef = useRef<number | null>(null);
+
+  const scheduleConversationsRefresh = useCallback(() => {
+    const minIntervalMs = 1200;
+    const now = Date.now();
+    const elapsed = now - lastConversationRefreshAtRef.current;
+
+    if (elapsed >= minIntervalMs) {
+      lastConversationRefreshAtRef.current = now;
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      return;
+    }
+
+    if (scheduledConversationRefreshRef.current !== null) {
+      return;
+    }
+
+    const waitMs = Math.max(0, minIntervalMs - elapsed);
+    scheduledConversationRefreshRef.current = window.setTimeout(() => {
+      scheduledConversationRefreshRef.current = null;
+      lastConversationRefreshAtRef.current = Date.now();
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }, waitMs);
+  }, [queryClient]);
 
   useEffect(() => {
     const handleNewMessage = () => {
       // payload probably has conversationId
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      scheduleConversationsRefresh();
     };
 
     const handleConversationRemoved = (payload: any) => {
@@ -32,12 +57,12 @@ export function useConversations(searchTerm?: string) {
         joinedConversationIdsRef.current.delete(removedConversationId);
         queryClient.removeQueries({ queryKey: ["messages", removedConversationId] });
       }
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      scheduleConversationsRefresh();
     };
 
     const handleSocketConnect = () => {
       joinedConversationIdsRef.current.clear();
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      scheduleConversationsRefresh();
     };
 
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
@@ -45,15 +70,22 @@ export function useConversations(searchTerm?: string) {
     socketClient.socket?.on("connect", handleSocketConnect);
 
     return () => {
+      if (scheduledConversationRefreshRef.current !== null) {
+        window.clearTimeout(scheduledConversationRefreshRef.current);
+        scheduledConversationRefreshRef.current = null;
+      }
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
       socketClient.socket?.off("connect", handleSocketConnect);
     };
-  }, [queryClient]);
+  }, [queryClient, scheduleConversationsRefresh]);
 
   const query = useQuery({
     queryKey: ["conversations", searchTerm?.trim() ?? ""],
     queryFn: () => listConversations(searchTerm),
+    staleTime: 10 * 1000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   useEffect(() => {

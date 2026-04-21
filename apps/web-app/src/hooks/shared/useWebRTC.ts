@@ -43,6 +43,12 @@ export function useWebRTC() {
   const [callError, setCallError] = useState<string | null>(null);
   
   const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const userIdRef = useRef<string | undefined>(user?.sub);
+  const sentIceCandidateKeysRef = useRef<Set<string>>(new Set());
+  const pendingIceSignalsRef = useRef<Array<{ conversationId: string; candidate: RTCIceCandidateInit }>>([]);
+  const iceSignalTimerRef = useRef<number | null>(null);
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const activeConfigRef = useRef<CallConfig | null>(null);
   const callStateRef = useRef<CallState>('IDLE');
@@ -58,47 +64,91 @@ export function useWebRTC() {
     };
   };
 
+  const resolveSignalConversationId = useCallback(
+    (config?: CallConfig | null, fallbackConversationId?: string): string | undefined => {
+      const rawConversationId = (config?.conversationId ?? fallbackConversationId)?.trim();
+      if (!rawConversationId) {
+        return undefined;
+      }
+
+      const isGroupConversation = /^(group:|grp#|group#)/i.test(rawConversationId);
+      const isIncomingDmCall =
+        !isGroupConversation &&
+        Boolean(config?.callerId) &&
+        config?.callerId !== user?.sub;
+
+      if (isIncomingDmCall) {
+        return `dm:${config!.callerId}`;
+      }
+
+      return rawConversationId;
+    },
+    [user?.sub],
+  );
+
   const cleanup = useCallback((options?: { remoteDurationSeconds?: number }) => {
     console.log('[WebRTC] Dọn dẹp kết nối');
     const currentConfig = activeConfigRef.current;
     const isConnectedCall = callStateRef.current === 'CONNECTED' && Boolean(currentConfig);
 
-    if (isConnectedCall && callStartedAtRef.current) {
+    if (currentConfig && callStateRef.current !== 'IDLE') {
       const endedAt = Date.now();
-      const computedDuration = Math.max(0, Math.round((endedAt - callStartedAtRef.current) / 1000));
+      const computedDuration = (isConnectedCall && callStartedAtRef.current) 
+        ? Math.max(0, Math.round((endedAt - callStartedAtRef.current) / 1000))
+        : 0;
       const durationSeconds = typeof options?.remoteDurationSeconds === 'number'
         ? Math.max(0, Math.round(options.remoteDurationSeconds))
         : computedDuration;
       setLastEndedCall({
-        conversationId: currentConfig!.conversationId || '',
-        peerUserId: currentConfig?.callerId === user?.sub ? currentConfig?.targetUserId : currentConfig?.callerId,
-        peerName: currentConfig?.peerName || currentConfig?.callerName || 'Người dùng',
-        peerAvatarUrl: currentConfig?.peerAvatarUrl || currentConfig?.callerAvatarUrl,
-        isVideo: Boolean(currentConfig?.isVideo),
+        conversationId: currentConfig.conversationId || '',
+        peerUserId: currentConfig.callerId === userIdRef.current ? currentConfig.targetUserId : currentConfig.callerId,
+        peerName: currentConfig.peerName || currentConfig.callerName || 'Người dùng',
+        peerAvatarUrl: currentConfig.peerAvatarUrl || currentConfig.callerAvatarUrl,
+        isVideo: Boolean(currentConfig.isVideo),
         durationSeconds,
         endedAt: new Date(endedAt).toISOString(),
-        direction: currentConfig?.callerId === user?.sub ? 'outgoing' : 'incoming',
+        direction: currentConfig.callerId === userIdRef.current ? 'outgoing' : 'incoming',
       });
     }
 
     callStartedAtRef.current = null;
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
       setLocalStream(null);
     }
-    if (remoteStream) {
-      remoteStream.getTracks().forEach(track => track.stop());
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach(track => track.stop());
+      remoteStreamRef.current = null;
       setRemoteStream(null);
     }
     if (peerConnection.current) {
       peerConnection.current.close();
       peerConnection.current = null;
     }
+    if (iceSignalTimerRef.current !== null) {
+      window.clearTimeout(iceSignalTimerRef.current);
+      iceSignalTimerRef.current = null;
+    }
+    pendingIceSignalsRef.current = [];
+    sentIceCandidateKeysRef.current.clear();
     pendingIceCandidatesRef.current = [];
     setCallState('IDLE');
     setActiveConfig(null);
     setCallError(null);
-  }, [localStream, remoteStream, user?.sub]);
+  }, []);
+
+  useEffect(() => {
+    localStreamRef.current = localStream;
+  }, [localStream]);
+
+  useEffect(() => {
+    remoteStreamRef.current = remoteStream;
+  }, [remoteStream]);
+
+  useEffect(() => {
+    userIdRef.current = user?.sub;
+  }, [user?.sub]);
 
   useEffect(() => {
     activeConfigRef.current = activeConfig;
@@ -137,16 +187,76 @@ export function useWebRTC() {
 
   // Handle emitting signal via Web Socket
   // Here we fix the buggy silent fail approach from mobile app
-  const emitSignal = useCallback(async (event: string, payload: any) => {
+  const emitSignal = useCallback(async (event: string, payload: any): Promise<boolean> => {
     try {
       await socketClient.safeEmitValidated(event, payload);
+      return true;
     } catch (error: any) {
       console.error(`[WebRTC] Góp báo vòng cảnh kết nối gửi tín hiệu ở ${event}`, error);
       setCallError(error.message || 'Lỗi gửi tín hiệu qua máy chủ.');
       // Cleanup to prevent ghost calls if signal can't be established
       cleanup();
+      return false;
     }
   }, [cleanup]);
+
+  const flushQueuedIceSignals = useCallback(() => {
+    if (iceSignalTimerRef.current !== null) {
+      return;
+    }
+
+    const processQueue = async () => {
+      const nextItem = pendingIceSignalsRef.current.shift();
+      if (!nextItem) {
+        iceSignalTimerRef.current = null;
+        return;
+      }
+
+      await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
+        conversationId: nextItem.conversationId,
+        candidate: nextItem.candidate,
+      });
+
+      if (pendingIceSignalsRef.current.length === 0) {
+        iceSignalTimerRef.current = null;
+        return;
+      }
+
+      iceSignalTimerRef.current = window.setTimeout(() => {
+        void processQueue();
+      }, 120);
+    };
+
+    iceSignalTimerRef.current = window.setTimeout(() => {
+      void processQueue();
+    }, 0);
+  }, [emitSignal]);
+
+  const queueIceCandidateSignal = useCallback(
+    (conversationId: string, candidate: RTCIceCandidateInit) => {
+      const key = `${candidate.candidate || ''}|${candidate.sdpMid || ''}|${candidate.sdpMLineIndex ?? ''}`;
+      if (!key.trim()) {
+        return;
+      }
+
+      if (sentIceCandidateKeysRef.current.has(key)) {
+        return;
+      }
+
+      // Cap candidate fan-out per call to avoid saturating backend rate limits.
+      if (sentIceCandidateKeysRef.current.size >= 24) {
+        return;
+      }
+
+      sentIceCandidateKeysRef.current.add(key);
+      pendingIceSignalsRef.current.push({
+        conversationId,
+        candidate,
+      });
+      flushQueuedIceSignals();
+    },
+    [flushQueuedIceSignals],
+  );
 
   const flushPendingIceCandidates = useCallback(async () => {
     if (!peerConnection.current || !peerConnection.current.remoteDescription) {
@@ -225,14 +335,9 @@ export function useWebRTC() {
       const connection = pc;
 
       connection.onicecandidate = (event) => {
-        if (event.candidate && config.conversationId) {
-          const targetConvId = !isCaller && config.callerId ? `dm:${config.callerId}` : config.conversationId;
-          
-          // Gửi ICE lên server cho peer đối diện
-          emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
-            conversationId: targetConvId,
-            candidate: event.candidate,
-          });
+        const signalConversationId = resolveSignalConversationId(config);
+        if (event.candidate && signalConversationId) {
+          queueIceCandidateSignal(signalConversationId, event.candidate.toJSON());
         }
       };
 
@@ -256,12 +361,20 @@ export function useWebRTC() {
       });
 
       if (isCaller) {
+        const signalConversationId = resolveSignalConversationId(config);
+        if (!signalConversationId) {
+          throw new Error('Missing signaling conversation id');
+        }
+
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
-        await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
-          conversationId: config.conversationId,
+        const sent = await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
+          conversationId: signalConversationId,
           offer,
         });
+        if (!sent) {
+          throw new Error('Failed to send WebRTC offer');
+        }
       }
 
     } catch (error) {
@@ -281,7 +394,7 @@ export function useWebRTC() {
     }
 
     return pc!;
-  }, [emitSignal]);
+  }, [emitSignal, queueIceCandidateSignal, resolveSignalConversationId]);
 
   const startCall = useCallback(async (config: CallConfig) => {
     if (callStateRef.current !== 'IDLE') return;
@@ -291,46 +404,60 @@ export function useWebRTC() {
     setCallState('CALLING');
     setCallError(null);
 
-    try {
-      await emitSignal(CHAT_SOCKET_EVENTS.CALL_INIT, {
-        conversationId: config.conversationId,
-        callerId: user?.sub,
-        callerName: config.callerName || 'Người gọi',
-        callerAvatarUrl: config.callerAvatarUrl,
-        isVideo: config.isVideo,
-      });
-    } catch (error) {
+    const signalConversationId = resolveSignalConversationId(config);
+    if (!signalConversationId) {
+      cleanup();
+      return;
+    }
+
+    const sent = await emitSignal(CHAT_SOCKET_EVENTS.CALL_INIT, {
+      conversationId: signalConversationId,
+      callerId: user?.sub,
+      callerName: config.callerName || 'Người gọi',
+      callerAvatarUrl: config.callerAvatarUrl,
+      isVideo: config.isVideo,
+    });
+
+    if (!sent) {
       cleanup();
     }
-  }, [emitSignal, cleanup, user?.sub]);
+  }, [emitSignal, cleanup, resolveSignalConversationId, user?.sub]);
 
   const acceptCall = useCallback(async () => {
     if (callStateRef.current !== 'INCOMING' || !activeConfigRef.current) return;
 
     const config = activeConfigRef.current;
+    const signalConversationId = resolveSignalConversationId(config);
+    if (!signalConversationId) {
+      cleanup();
+      return;
+    }
+
     setLastEndedCall(null);
-    setCallState('CONNECTED');
 
-    const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
-
-    await emitSignal(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
-      conversationId: targetConvId,
+    const accepted = await emitSignal(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
+      conversationId: signalConversationId,
       calleeId: user?.sub,
     });
+    if (!accepted) {
+      return;
+    }
+
+    setCallState('CONNECTED');
     await setupPeerConnection(false, config);
-  }, [emitSignal, setupPeerConnection, user?.sub]);
+  }, [cleanup, emitSignal, resolveSignalConversationId, setupPeerConnection, user?.sub]);
 
   const rejectCall = useCallback(async () => {
     const config = activeConfigRef.current;
-    if (config?.conversationId) {
-      const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
+    const signalConversationId = resolveSignalConversationId(config);
+    if (signalConversationId) {
       await emitSignal(CHAT_SOCKET_EVENTS.CALL_REJECT, {
-        conversationId: targetConvId,
+        conversationId: signalConversationId,
         calleeId: user?.sub,
       });
     }
     cleanup();
-  }, [emitSignal, cleanup, user?.sub]);
+  }, [emitSignal, cleanup, resolveSignalConversationId, user?.sub]);
 
   // Các event hàm khác (accept, reject...) tương tự
   const endCall = useCallback(() => {
@@ -339,20 +466,17 @@ export function useWebRTC() {
     const durationSeconds = startedAt
       ? Math.max(0, Math.round((Date.now() - startedAt) / 1000))
       : 0;
+    const signalConversationId = resolveSignalConversationId(config);
 
-    if (config?.conversationId) {
-      const isCurrentUserCaller = config.callerId === user?.sub;
-      const targetConvId = isCurrentUserCaller
-        ? config.conversationId
-        : (config.callerId ? `dm:${config.callerId}` : config.conversationId);
-      emitSignal(CHAT_SOCKET_EVENTS.CALL_END as any, {
-        conversationId: targetConvId,
+    if (signalConversationId) {
+      void emitSignal(CHAT_SOCKET_EVENTS.CALL_END as any, {
+        conversationId: signalConversationId,
         userId: user?.sub,
         durationSeconds,
       });
     }
     cleanup();
-  }, [emitSignal, cleanup, user?.sub]);
+  }, [emitSignal, cleanup, resolveSignalConversationId, user?.sub]);
 
   const toggleMute = useCallback(() => {
     if (localStream) {
@@ -411,7 +535,7 @@ export function useWebRTC() {
           return;
         }
 
-        const targetMatches = config.targetUserId === data.calleeId || config.targetUserId === `dm:${data.calleeId}`;
+        const targetMatches = config.targetUserId === data.calleeId;
         const isMatch = config.conversationId === data.conversationId || targetMatches;
         if (!isMatch) {
           return;
@@ -435,9 +559,12 @@ export function useWebRTC() {
         await peerConnection.current.setLocalDescription(answer);
 
         const currentConfig = activeConfigRef.current;
-        const targetConvId = currentConfig?.callerId ? `dm:${currentConfig.callerId}` : data.conversationId;
+        const signalConversationId =
+          resolveSignalConversationId(currentConfig, data.conversationId) ||
+          data.conversationId;
+
         await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, {
-          conversationId: targetConvId,
+          conversationId: signalConversationId,
           answer,
         });
       };
@@ -499,7 +626,7 @@ export function useWebRTC() {
         removeListeners();
       }
     };
-  }, [cleanup, emitSignal, flushPendingIceCandidates, setupPeerConnection, user?.sub]);
+  }, [cleanup, emitSignal, flushPendingIceCandidates, resolveSignalConversationId, setupPeerConnection, user?.sub]);
 
   return {
     callState,

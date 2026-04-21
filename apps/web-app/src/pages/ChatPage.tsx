@@ -2,8 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile, SmilePlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useWebRTC } from "@/hooks/shared/useWebRTC";
-import { CallModal } from "@/components/CallModal";
+import { useWebRTCRuntime } from "@/providers/WebRTCProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useConversations, useMessages } from "@/hooks/shared/useChatData";
 import { format } from "date-fns";
@@ -246,6 +245,7 @@ export function ChatPage() {
   const location = useLocation();
   const chatState = (location.state ?? {}) as ChatNavigationState;
   const [activeChat, setActiveChat] = useState<string | null>(chatState.conversationId ?? null);
+  const failedPresenceUserIdsRef = useRef<Set<string>>(new Set());
   const [inputText, setInputText] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
   const [queuedAttachments, setQueuedAttachments] = useState<QueuedAttachment[]>([]);
@@ -331,11 +331,12 @@ export function ChatPage() {
   const isTypingRef = useRef(false);
   const requestedDmAvatarIdsRef = useRef<Set<string>>(new Set());
   const [friendAvatarByUserId, setFriendAvatarByUserId] = useState<Record<string, string>>({});
+  const [friendIds, setFriendIds] = useState<Set<string> | null>(null);
   const [dmAvatarMap, setDmAvatarMap] = useState<Record<string, string>>({});
   const [activeDmPresence, setActiveDmPresence] = useState<PresenceState | null>(null);
   const [dmPresenceByUserId, setDmPresenceByUserId] = useState<Record<string, PresenceState>>({});
   const [callSummaries, setCallSummaries] = useState<CallEndedSummary[]>(() => loadCallSummaries());
-  const rtc = useWebRTC();
+  const rtc = useWebRTCRuntime();
   const {
     startCall,
     lastEndedCall,
@@ -502,6 +503,7 @@ export function ChatPage() {
   const previousMessageCountRef = useRef(0);
   const loadingOlderMessagesRef = useRef(false);
   const previousScrollHeightRef = useRef(0);
+  const lastMarkedReadRef = useRef<{ id: string; count: number } | null>(null);
   const {
     data: activeGroupMembers = [],
     isLoading: isLoadingGroupMembers,
@@ -773,7 +775,9 @@ export function ChatPage() {
         }
 
         const nextMap: Record<string, string> = {};
+        const idSet = new Set<string>();
         friends.forEach((friend) => {
+          idSet.add(friend.userId);
           const avatarUrl = friend.avatarAsset?.resolvedUrl || friend.avatarUrl;
           if (avatarUrl) {
             nextMap[friend.userId] = avatarUrl;
@@ -782,6 +786,7 @@ export function ChatPage() {
 
         if (!cancelled) {
           setFriendAvatarByUserId(nextMap);
+          setFriendIds(idSet);
         }
       } catch {
         // Keep silent; other avatar sources still apply.
@@ -854,33 +859,57 @@ export function ChatPage() {
     );
   }, [mergedConversations, user?.sub]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const dmUserIds = Array.from(
+  const dmUserIdsString = useMemo(() => {
+    return Array.from(
       new Set(
         mergedConversations
           .filter((conversation) => !conversation.isGroup)
           .map((conversation) => extractDirectPeerUserId(conversation as ConversationAvatarLike, user?.sub))
           .filter((value): value is string => Boolean(value)),
       ),
-    );
+    ).slice(0, 30).sort().join(",");
+  }, [mergedConversations, user?.sub]);
 
-    if (dmUserIds.length === 0) {
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!dmUserIdsString || !friendIds) {
       return;
     }
 
+    const dmUserIds = dmUserIdsString.split(",").filter((id) => friendIds.has(id));
+    if (dmUserIds.length === 0) return;
+
     const loadDmPresence = async () => {
-      const results = await Promise.all(
-        dmUserIds.map(async (userId) => {
-          try {
-            const presence = await getUserPresence(userId);
-            return [userId, presence] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
+      const results: any[] = [];
+      
+      for (let i = 0; i < dmUserIds.length; i += 5) {
+        if (cancelled) return;
+        
+        const chunk = dmUserIds.slice(i, i + 5);
+        const chunkResults = await Promise.all(
+          chunk.map(async (userId) => {
+            if (failedPresenceUserIdsRef.current.has(userId)) {
+              return null;
+            }
+            try {
+              const presence = await getUserPresence(userId);
+              return [userId, presence] as const;
+            } catch (error: any) {
+              if (error?.status === 403 || error?.status === 404) {
+                failedPresenceUserIdsRef.current.add(userId);
+              }
+              return null;
+            }
+          }),
+        );
+        
+        results.push(...chunkResults);
+        
+        if (i + 5 < dmUserIds.length) {
+          await new Promise((resolve) => window.setTimeout(resolve, 300));
+        }
+      }
 
       if (cancelled) {
         return;
@@ -909,17 +938,21 @@ export function ChatPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [mergedConversations, user?.sub]);
+  }, [dmUserIdsString]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!activeDmUserId) {
+    if (!activeDmUserId || !friendIds || !friendIds.has(activeDmUserId)) {
       setActiveDmPresence(null);
       return;
     }
 
     const loadPresence = async () => {
+      if (failedPresenceUserIdsRef.current.has(activeDmUserId)) {
+        if (!cancelled) setActiveDmPresence(null);
+        return;
+      }
       try {
         const presence = await getUserPresence(activeDmUserId);
         if (!cancelled) {
@@ -929,7 +962,10 @@ export function ChatPage() {
             [activeDmUserId]: presence,
           }));
         }
-      } catch {
+      } catch (error: any) {
+        if (error?.status === 403 || error?.status === 404) {
+          failedPresenceUserIdsRef.current.add(activeDmUserId);
+        }
         if (!cancelled) {
           setActiveDmPresence(null);
         }
@@ -987,10 +1023,20 @@ export function ChatPage() {
       return;
     }
 
-    if ((activeContact?.unreadCount ?? 0) <= 0) {
+    const unreadCount = activeContact?.unreadCount ?? 0;
+    if (unreadCount <= 0) {
+      lastMarkedReadRef.current = null;
       return;
     }
 
+    if (
+      lastMarkedReadRef.current?.id === activeChat &&
+      lastMarkedReadRef.current?.count === unreadCount
+    ) {
+      return;
+    }
+
+    lastMarkedReadRef.current = { id: activeChat, count: unreadCount };
     markAsRead();
   }, [activeChat, activeContact?.unreadCount, markAsRead]);
 
@@ -1333,8 +1379,7 @@ export function ChatPage() {
     
     startCall({
       isVideo,
-      // Target User ID temporarily set to conversationId for group-based room joining
-      targetUserId: activeContact.conversationId,
+    targetUserId: activeDmUserId,
       callerId: user?.sub,
       callerName: callerDisplayName,
       callerAvatarUrl,
@@ -1534,24 +1579,23 @@ export function ChatPage() {
 
   const resolveCallSummary = (
     msg: MessageItem,
-    expectedDirection: CallEndedSummary["direction"],
     expectedIsVideo: boolean,
   ): CallEndedSummary | null => {
-    const candidates = callSummaries.filter((item) => item.conversationId === msg.conversationId);
+    const candidates = callSummaries.filter(
+      (item) => 
+        (item.conversationId === msg.conversationId || item.peerUserId === activeDmUserId) &&
+        item.peerUserId === activeDmUserId
+    );
+
     if (candidates.length === 0) {
       return null;
     }
 
-    const byDirectionAndType = candidates.filter(
-      (item) => item.direction === expectedDirection && item.isVideo === expectedIsVideo,
-    );
-    const byDirection = candidates.filter((item) => item.direction === expectedDirection);
-    const scopedCandidates = byDirectionAndType.length > 0
-      ? byDirectionAndType
-      : (byDirection.length > 0 ? byDirection : candidates);
+    const scopedCandidates = candidates.filter((item) => item.isVideo === expectedIsVideo);
+    const finalCandidates = scopedCandidates.length > 0 ? scopedCandidates : candidates;
 
     const messageTime = new Date(msg.sentAt).getTime();
-    const nearest = scopedCandidates
+    const nearest = finalCandidates
       .map((item) => ({
         item,
         diff: Math.abs(new Date(item.endedAt).getTime() - messageTime),
@@ -2065,7 +2109,6 @@ export function ChatPage() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <CallModal rtc={rtc} />
       {isDragOver ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-blue-600/10 border-2 border-dashed border-blue-400 pointer-events-none">
           <div className="rounded-xl bg-white dark:bg-slate-900 px-5 py-3 text-sm font-medium text-blue-700 dark:text-blue-300 shadow border border-slate-200 dark:border-slate-700">
@@ -2564,13 +2607,12 @@ export function ChatPage() {
                   );
                   const isCallMessage = msg.type === "SYSTEM" && /cuộc gọi|call/i.test(messageText);
                   const isVideoCallByMessage = /video/i.test(messageText);
-                  const callDirectionByMessage: CallEndedSummary["direction"] = isMe ? "outgoing" : "incoming";
                   const callSummary = isCallMessage
-                    ? resolveCallSummary(msg, callDirectionByMessage, isVideoCallByMessage)
+                    ? resolveCallSummary(msg, isVideoCallByMessage)
                     : null;
 
                   if (isCallMessage) {
-                    const summaryIsOutgoing = isMe;
+                    const summaryIsOutgoing = callSummary ? callSummary.direction === "outgoing" : isMe;
                     const summaryAlignClass = summaryIsOutgoing ? "self-end" : "self-start";
                     const summaryBubbleClass = summaryIsOutgoing
                       ? "border-blue-500/30 bg-blue-600 text-white"

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChatbotModal } from "@/components/ChatbotModal";
+import { WebRTCProvider } from "@/providers/WebRTCProvider";
 import { getProfile } from "@/services/user.api";
 import { useAuth } from "@/providers/AuthProvider";
 import { useConversations } from "@/hooks/shared/useChatData";
@@ -201,16 +202,18 @@ export function MainLayout() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground font-sans relative transition-colors duration-200">
-      <Sidebar
-        onOpenChatbot={() => setIsChatbotOpen(true)}
-        isDarkMode={isDarkMode}
-        onToggleTheme={handleToggleTheme}
-      />
-      <main className="flex-1 flex overflow-hidden">
-        <Outlet />
-      </main>
-      {isChatbotOpen ? <ChatbotModal onClose={() => setIsChatbotOpen(false)} /> : null}
-    </div>
+    <WebRTCProvider>
+      <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground font-sans relative transition-colors duration-200">
+        <Sidebar
+          onOpenChatbot={() => setIsChatbotOpen(true)}
+          isDarkMode={isDarkMode}
+          onToggleTheme={handleToggleTheme}
+        />
+        <main className="flex-1 flex overflow-hidden">
+          <Outlet />
+        </main>
+        {isChatbotOpen ? <ChatbotModal onClose={() => setIsChatbotOpen(false)} /> : null}
+      </div>
+    </WebRTCProvider>
   );
 }

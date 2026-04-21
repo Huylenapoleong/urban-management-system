@@ -21,6 +21,15 @@ export interface CursorPage<T> {
   nextCursor?: string;
 }
 
+type ConversationListCacheEntry = {
+  lastFetchedAt: number;
+  data: ConversationSummary[];
+  inFlight?: Promise<ConversationSummary[]>;
+};
+
+const CONVERSATION_LIST_MIN_FETCH_INTERVAL_MS = 1500;
+const conversationListCache = new Map<string, ConversationListCacheEntry>();
+
 function createClientMessageId(): string {
   // Use a deterministic prefix so backend logs can quickly identify web-app send attempts.
   return `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -102,8 +111,21 @@ function shouldRetryOnConversationId400(error: any): boolean {
 }
 
 export async function listConversations(searchTerm?: string): Promise<ConversationSummary[]> {
-  try {
-    const q = searchTerm?.trim();
+  const q = searchTerm?.trim() ?? "";
+  const cacheKey = q.toLowerCase();
+  const now = Date.now();
+  const cachedEntry = conversationListCache.get(cacheKey);
+
+  if (cachedEntry?.inFlight) {
+    return cachedEntry.inFlight;
+  }
+
+  if (cachedEntry && now - cachedEntry.lastFetchedAt < CONVERSATION_LIST_MIN_FETCH_INTERVAL_MS) {
+    return cachedEntry.data;
+  }
+
+  const requestPromise = (async () => {
+    try {
     const conversationsPath = q
       ? `/conversations?q=${encodeURIComponent(q)}`
       : "/conversations";
@@ -149,11 +171,33 @@ export async function listConversations(searchTerm?: string): Promise<Conversati
     // Sort by updatedAt desc
     result.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 
+    conversationListCache.set(cacheKey, {
+      lastFetchedAt: Date.now(),
+      data: result,
+    });
+
     return result;
-  } catch (error) {
-    console.error("Failed to list conversations", error);
-    return [];
-  }
+    } catch (error) {
+      console.error("Failed to list conversations", error);
+      return cachedEntry?.data ?? [];
+    } finally {
+      const latestEntry = conversationListCache.get(cacheKey);
+      if (latestEntry?.inFlight) {
+        conversationListCache.set(cacheKey, {
+          lastFetchedAt: latestEntry.lastFetchedAt,
+          data: latestEntry.data,
+        });
+      }
+    }
+  })();
+
+  conversationListCache.set(cacheKey, {
+    lastFetchedAt: cachedEntry?.lastFetchedAt ?? 0,
+    data: cachedEntry?.data ?? [],
+    inFlight: requestPromise,
+  });
+
+  return requestPromise;
 }
 
 export async function listMessages(conversationId: string): Promise<MessageItem[]> {
