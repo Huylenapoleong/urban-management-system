@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile } from "lucide-react";
+import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile, SmilePlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useWebRTC } from "@/hooks/shared/useWebRTC";
@@ -218,7 +218,9 @@ type MentionCandidate = {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?84|0)\d{9,10}$/;
 const GROUP_AVATAR_OVERRIDES_STORAGE_KEY = "web-app-group-avatar-overrides";
+const MESSAGE_REACTIONS_STORAGE_KEY = "web-app-message-reactions";
 const PRESENCE_POLL_INTERVAL_MS = 60_000;
+const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
 
 function extractGroupIdFromConversationId(conversationId?: string | null): string | undefined {
   if (!conversationId) {
@@ -276,6 +278,30 @@ export function ChatPage() {
   const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<string | null>(null);
   const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
+  const [messageReactionsByConversation, setMessageReactionsByConversation] = useState<
+    Record<string, Record<string, string[]>>
+  >(() => {
+    if (typeof window === "undefined") {
+      return {};
+    }
+
+    try {
+      const raw = window.localStorage.getItem(MESSAGE_REACTIONS_STORAGE_KEY);
+      if (!raw) {
+        return {};
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return {};
+      }
+
+      return parsed as Record<string, Record<string, string[]>>;
+    } catch {
+      return {};
+    }
+  });
   const [groupAvatarOverrides, setGroupAvatarOverrides] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined") {
       return {};
@@ -411,6 +437,10 @@ export function ChatPage() {
     return "Nhiều người đang soạn tin...";
   })();
   const normalizedForwardSearch = forwardSearch.trim().toLowerCase();
+  const activeMessageReactions = useMemo(
+    () => (activeChat ? messageReactionsByConversation[activeChat] || {} : {}),
+    [activeChat, messageReactionsByConversation],
+  );
   const forwardDestinationConversations = mergedConversations.filter((conversation) => {
     if (conversation.conversationId === activeChat) {
       return false;
@@ -984,6 +1014,25 @@ export function ChatPage() {
       // Ignore storage quota or privacy mode failures.
     }
   }, [groupAvatarOverrides]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        MESSAGE_REACTIONS_STORAGE_KEY,
+        JSON.stringify(messageReactionsByConversation),
+      );
+    } catch {
+      // Ignore persistence issues.
+    }
+  }, [messageReactionsByConversation]);
+
+  useEffect(() => {
+    setReactionPickerMessageId(null);
+  }, [activeChat]);
 
   useEffect(() => {
     setActiveMessageMenuId(null);
@@ -1789,6 +1838,33 @@ export function ChatPage() {
     enqueueAttachments(pastedFiles);
   };
 
+  const handleToggleMessageReaction = (messageId: string, emoji: string) => {
+    if (!activeChat) {
+      return;
+    }
+
+    setMessageReactionsByConversation((prev) => {
+      const currentConversation = prev[activeChat] || {};
+      const currentReactions = currentConversation[messageId] || [];
+      const hasReaction = currentReactions.includes(emoji);
+      const nextReactions = hasReaction
+        ? currentReactions.filter((item) => item !== emoji)
+        : [...currentReactions, emoji];
+
+      const nextConversation = { ...currentConversation };
+      if (nextReactions.length === 0) {
+        delete nextConversation[messageId];
+      } else {
+        nextConversation[messageId] = nextReactions;
+      }
+
+      return {
+        ...prev,
+        [activeChat]: nextConversation,
+      };
+    });
+  };
+
   const handleEmojiSelect = (emojiData: EmojiClickData) => {
     const emoji = emojiData.emoji;
     const input = composerInputRef.current;
@@ -2479,6 +2555,13 @@ export function ChatPage() {
                     ? `${msg.forwardedFromSenderName} đã chuyển tiếp`
                     : "Đã chuyển tiếp";
                   const messageText = extractMessageText(msg.content).trim();
+                  const messageReactions = activeMessageReactions[msg.id] || [];
+                  const reactionSummary = Array.from(
+                    messageReactions.reduce((acc, emoji) => {
+                      acc.set(emoji, (acc.get(emoji) || 0) + 1);
+                      return acc;
+                    }, new Map<string, number>()),
+                  );
                   const isCallMessage = msg.type === "SYSTEM" && /cuộc gọi|call/i.test(messageText);
                   const isVideoCallByMessage = /video/i.test(messageText);
                   const callDirectionByMessage: CallEndedSummary["direction"] = isMe ? "outgoing" : "incoming";
@@ -2548,6 +2631,39 @@ export function ChatPage() {
                           >
                             <Share2 size={14} />
                           </button>
+
+                          <div className="relative">
+                            <button
+                              type="button"
+                              className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                              title="Bày tỏ cảm xúc"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setReactionPickerMessageId((prev) => (prev === msg.id ? null : msg.id));
+                              }}
+                            >
+                              <SmilePlus size={14} />
+                            </button>
+
+                            {reactionPickerMessageId === msg.id ? (
+                              <div className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}>
+                                {QUICK_REACTION_EMOJIS.map((emoji) => (
+                                  <button
+                                    key={`${msg.id}-${emoji}`}
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleToggleMessageReaction(msg.id, emoji);
+                                      setReactionPickerMessageId(null);
+                                    }}
+                                    className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
 
                           <div className="relative">
                             <button
@@ -2732,6 +2848,22 @@ export function ChatPage() {
                         ) : null}
                         </div>
                       </div>
+                      {reactionSummary.length > 0 ? (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end" : "justify-start"} ${isGroupIncoming ? "pl-10" : ""}`}>
+                          {reactionSummary.map(([emoji, count]) => (
+                            <button
+                              key={`${msg.id}-reaction-${emoji}`}
+                              type="button"
+                              onClick={() => handleToggleMessageReaction(msg.id, emoji)}
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                              title="Bỏ cảm xúc"
+                            >
+                              <span>{emoji}</span>
+                              <span>{count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                       {endsSenderBlock ? (
                         <span className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"} ${isGroupIncoming ? "pl-10" : ""}`}>
                           {format(new Date(msg.sentAt), "HH:mm")}
