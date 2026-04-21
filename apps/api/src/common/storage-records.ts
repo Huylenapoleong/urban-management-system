@@ -1,6 +1,8 @@
 import type {
   AuditEventItem,
   ConversationSummary,
+  GroupBan,
+  GroupInviteLink,
   GroupMembership,
   GroupMetadata,
   MessageItem,
@@ -29,6 +31,9 @@ export type StorageEntityType =
   | 'PUSH_OUTBOX_EVENT'
   | 'GROUP_METADATA'
   | 'GROUP_MEMBERSHIP'
+  | 'GROUP_BAN'
+  | 'GROUP_INVITE_LINK'
+  | 'GROUP_INVITE_CODE_LOOKUP'
   | 'GROUP_DELETE_CLEANUP_TASK'
   | 'MESSAGE'
   | 'MESSAGE_REF'
@@ -37,6 +42,7 @@ export type StorageEntityType =
   | 'DIRECT_MESSAGE_REQUEST'
   | 'CHAT_OUTBOX_EVENT'
   | 'CONVERSATION_AUDIT_EVENT'
+  | 'GROUP_AUDIT_EVENT'
   | 'REPORT'
   | 'REPORT_AUDIT_EVENT'
   | 'REPORT_CONVERSATION_LINK';
@@ -213,6 +219,29 @@ export interface StoredMembership
   userId: string;
 }
 
+export interface StoredGroupBan
+  extends TableItemBase, Omit<GroupBan, 'groupId' | 'userId'> {
+  entityType: 'GROUP_BAN';
+  groupId: string;
+  userId: string;
+}
+
+export interface StoredGroupInviteLink
+  extends TableItemBase, Omit<GroupInviteLink, 'groupId' | 'inviteId'> {
+  entityType: 'GROUP_INVITE_LINK';
+  groupId: string;
+  inviteId: string;
+}
+
+export interface StoredGroupInviteCodeLookup extends TableItemBase {
+  entityType: 'GROUP_INVITE_CODE_LOOKUP';
+  code: string;
+  groupId: string;
+  inviteId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoredGroupDeleteCleanupTask extends TableItemBase {
   entityType: 'GROUP_DELETE_CLEANUP_TASK';
   groupId: string;
@@ -305,6 +334,15 @@ export interface StoredConversationAuditEvent
   eventId: string;
   conversationId: string;
   messageId?: string;
+}
+
+export interface StoredGroupAuditEvent
+  extends TableItemBase, Omit<AuditEventItem, 'id' | 'scope'> {
+  entityType: 'GROUP_AUDIT_EVENT';
+  eventId: string;
+  groupId: string;
+  targetUserId?: string;
+  inviteId?: string;
 }
 
 export interface StoredReport extends TableItemBase, Omit<ReportItem, 'id'> {

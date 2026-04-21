@@ -122,6 +122,22 @@ function makeMembershipSk(userId) {
   return `MEMBER#${userId}`;
 }
 
+function makeGroupBanSk(userId) {
+  return `BAN#${userId}`;
+}
+
+function makeGroupInviteLinkSk(inviteId) {
+  return `INVITE#${inviteId}`;
+}
+
+function makeGroupInviteCodeLookupPk(code) {
+  return `GROUP_INVITE_CODE#${code}`;
+}
+
+function makeGroupInviteCodeLookupSk() {
+  return "LOOKUP";
+}
+
 function makeUserGroupsKey(userId) {
   return `USER#${userId}`;
 }
@@ -135,6 +151,10 @@ function makeConversationPk(conversationId) {
 }
 
 function makeConversationAuditSk(createdAt, eventId) {
+  return `AUDIT#${createdAt}#${eventId}`;
+}
+
+function makeGroupAuditSk(createdAt, eventId) {
   return `AUDIT#${createdAt}#${eventId}`;
 }
 
@@ -216,6 +236,7 @@ module.exports = {
   isSameWard,
   makeConversationAuditSk,
   makeConversationPk,
+  makeGroupAuditSk,
   makeConversationReportLinkSk,
   makeConversationSummarySk,
   makeDmConversationId,
@@ -225,6 +246,10 @@ module.exports = {
   makeAuthRegisterDraftPk,
   makeAuthRegisterDraftSk,
   makeGroupMetadataSk,
+  makeGroupBanSk,
+  makeGroupInviteCodeLookupPk,
+  makeGroupInviteCodeLookupSk,
+  makeGroupInviteLinkSk,
   makeGroupPk,
   makeGroupTypeLocationKey,
   makeInboxPk,

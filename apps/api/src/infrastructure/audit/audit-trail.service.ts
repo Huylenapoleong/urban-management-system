@@ -4,6 +4,8 @@ import {
   createUlid,
   makeConversationAuditSk,
   makeConversationPk,
+  makeGroupAuditSk,
+  makeGroupPk,
   makeReportAuditSk,
   makeReportPk,
   nowIso,
@@ -15,6 +17,7 @@ import {
 import { toAuditEvent } from '../../common/mappers';
 import type {
   StoredConversationAuditEvent,
+  StoredGroupAuditEvent,
   StoredReportAuditEvent,
 } from '../../common/storage-records';
 import { parseLimit } from '../../common/validation';
@@ -35,6 +38,17 @@ interface ReportAuditInput {
   action: string;
   actorUserId: string;
   reportId: string;
+  occurredAt?: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface GroupAuditInput {
+  action: string;
+  actorUserId: string;
+  groupId: string;
+  targetUserId?: string;
+  inviteId?: string;
   occurredAt?: string;
   summary: string;
   metadata?: Record<string, unknown>;
@@ -78,6 +92,26 @@ export class AuditTrailService {
       entityType: 'REPORT_AUDIT_EVENT',
       eventId,
       reportId: input.reportId,
+      action: input.action,
+      actorUserId: input.actorUserId,
+      occurredAt,
+      summary: input.summary,
+      metadata: input.metadata,
+    };
+  }
+
+  buildGroupEvent(input: GroupAuditInput): StoredGroupAuditEvent {
+    const occurredAt = input.occurredAt ?? nowIso();
+    const eventId = createUlid();
+
+    return {
+      PK: makeGroupPk(input.groupId),
+      SK: makeGroupAuditSk(occurredAt, eventId),
+      entityType: 'GROUP_AUDIT_EVENT',
+      eventId,
+      groupId: input.groupId,
+      targetUserId: input.targetUserId,
+      inviteId: input.inviteId,
       action: input.action,
       actorUserId: input.actorUserId,
       occurredAt,
@@ -132,6 +166,31 @@ export class AuditTrailService {
 
     return buildPaginatedResponse(
       page.items.map((item) => toAuditEvent(item, 'REPORT')),
+      page.nextCursor,
+    );
+  }
+
+  async listGroupEvents(
+    groupId: string,
+    query: Record<string, unknown>,
+  ): Promise<
+    ApiSuccessResponse<ReturnType<typeof toAuditEvent>[], ApiResponseMeta>
+  > {
+    const items = await this.repository.queryByPk<StoredGroupAuditEvent>(
+      this.config.dynamodbGroupsTableName,
+      makeGroupPk(groupId),
+      { beginsWith: 'AUDIT#' },
+    );
+    const page = paginateSortedItems(
+      items.filter((item) => item.entityType === 'GROUP_AUDIT_EVENT'),
+      parseLimit(query.limit),
+      query.cursor,
+      (item) => item.occurredAt,
+      (item) => item.eventId,
+    );
+
+    return buildPaginatedResponse(
+      page.items.map((item) => toAuditEvent(item, 'GROUP')),
       page.nextCursor,
     );
   }
