@@ -2,6 +2,12 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { jwtDecode } from 'jwt-decode';
 import type { JwtClaims } from '@urban/shared-types';
 import { socketClient } from '../lib/socket-client';
+import {
+  readAccessToken,
+  refreshAccessToken,
+  clearStoredTokens,
+  writeAccessToken,
+} from '../lib/api-client';
 
 export const AUTH_TOKEN_KEY = 'auth_token';
 
@@ -15,15 +21,15 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 function readStoredToken(): string | null {
-  return localStorage.getItem(AUTH_TOKEN_KEY);
+  return readAccessToken();
 }
 
 function persistToken(token: string): void {
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
+  writeAccessToken(token);
 }
 
 function clearStoredToken(): void {
-  localStorage.removeItem(AUTH_TOKEN_KEY);
+  clearStoredTokens();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -33,23 +39,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const loadToken = () => {
-      try {
-        const token = readStoredToken();
-        if (token) {
-          const decoded = jwtDecode<JwtClaims>(token);
-          if (decoded.exp * 1000 < Date.now()) {
+      const tryLoad = async () => {
+        try {
+          const token = readStoredToken();
+          if (token) {
+            const decoded = jwtDecode<JwtClaims>(token);
+            if (decoded.exp * 1000 >= Date.now()) {
+              setUser(decoded);
+              return;
+            }
+          }
+
+          const refreshedToken = await refreshAccessToken();
+          if (!refreshedToken) {
             clearStoredToken();
             setUser(null);
-          } else {
-            setUser(decoded);
+            return;
           }
+
+          const refreshedClaims = jwtDecode<JwtClaims>(refreshedToken);
+          setUser(refreshedClaims);
+        } catch (e) {
+          console.error('Failed to load token', e);
+          clearStoredToken();
+          setUser(null);
+        } finally {
+          setIsLoading(false);
         }
-      } catch (e) {
-        console.error('Failed to load token', e);
-        clearStoredToken();
-      } finally {
-        setIsLoading(false);
-      }
+      };
+
+      void tryLoad();
     };
     loadToken();
   }, []);

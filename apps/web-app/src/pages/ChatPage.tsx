@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { Fragment, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile, SmilePlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -184,16 +184,16 @@ function formatLastSeenShort(presence?: PresenceState | null, fallbackLastSeenAt
 
   const diffMinutes = Math.max(1, Math.floor((Date.now() - lastSeenMs) / 60000));
   if (diffMinutes < 60) {
-    return `${diffMinutes}m`;
+    return `${diffMinutes} phút`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h`;
+    return `${diffHours} giờ`;
   }
 
   const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d`;
+  return `${diffDays} ngày`;
 }
 
 function formatPresenceText(presence: PresenceState | null, fallbackLastSeenAt?: string | null): string {
@@ -220,6 +220,8 @@ const GROUP_AVATAR_OVERRIDES_STORAGE_KEY = "web-app-group-avatar-overrides";
 const MESSAGE_REACTIONS_STORAGE_KEY = "web-app-message-reactions";
 const PRESENCE_POLL_INTERVAL_MS = 60_000;
 const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+const URL_PATTERN = /(https?:\/\/[^\s]+)/gi;
+const MESSAGE_BLOCK_GAP_MS = 10 * 60 * 1000;
 
 function extractGroupIdFromConversationId(conversationId?: string | null): string | undefined {
   if (!conversationId) {
@@ -239,6 +241,40 @@ function extractGroupIdFromConversationId(conversationId?: string | null): strin
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sanitizeUrlToken(rawUrl: string): string {
+  return rawUrl.replace(/[),.!?;:]+$/g, "");
+}
+
+function extractFirstUrl(text: string): string | undefined {
+  const match = text.match(URL_PATTERN);
+  if (!match || match.length === 0) {
+    return undefined;
+  }
+
+  const sanitized = sanitizeUrlToken(match[0]);
+  if (!sanitized) {
+    return undefined;
+  }
+
+  return sanitized;
+}
+
+function buildLinkPreview(url: string): { href: string; host: string; path: string; faviconUrl: string } | null {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, "");
+    const path = `${parsed.pathname}${parsed.search}` || "/";
+    return {
+      href: parsed.toString(),
+      host,
+      path: path.length > 72 ? `${path.slice(0, 69)}...` : path,
+      faviconUrl: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(parsed.hostname)}&sz=64`,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function ChatPage() {
@@ -276,6 +312,8 @@ export function ChatPage() {
   const [selectedInviteUserIds, setSelectedInviteUserIds] = useState<string[]>([]);
   const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<string | null>(null);
   const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<string | null>(null);
+  const [activeMemberActionUserId, setActiveMemberActionUserId] = useState<string | null>(null);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
@@ -500,6 +538,8 @@ export function ChatPage() {
   const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const messageFocusTimerRef = useRef<number | null>(null);
   const previousMessageCountRef = useRef(0);
   const loadingOlderMessagesRef = useRef(false);
   const previousScrollHeightRef = useRef(0);
@@ -1104,10 +1144,35 @@ export function ChatPage() {
     setInviteSearchText("");
     setSelectedInviteUserIds([]);
     setPendingRemoveMemberUserId(null);
+    setActiveMemberActionUserId(null);
+    setFocusedMessageId(null);
     previousMessageCountRef.current = 0;
     loadingOlderMessagesRef.current = false;
     previousScrollHeightRef.current = 0;
   }, [activeChat]);
+
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setActiveMemberActionUserId(null);
+    };
+
+    if (!activeMemberActionUserId) {
+      return;
+    }
+
+    window.addEventListener("click", handleClickOutside);
+    return () => {
+      window.removeEventListener("click", handleClickOutside);
+    };
+  }, [activeMemberActionUserId]);
+
+  useEffect(() => {
+    return () => {
+      if (messageFocusTimerRef.current !== null) {
+        window.clearTimeout(messageFocusTimerRef.current);
+      }
+    };
+  }, []);
 
   const toggleInviteSelection = (userId: string) => {
     setSelectedInviteUserIds((prev) =>
@@ -1505,6 +1570,55 @@ export function ChatPage() {
     return Array.from(uniqueNames);
   };
 
+  const renderMessageTextWithLinks = (text: string, isMe: boolean, keyPrefix: string): ReactNode => {
+    const urlMatches = Array.from(text.matchAll(URL_PATTERN));
+    if (urlMatches.length === 0) {
+      return text;
+    }
+
+    const nodes: ReactNode[] = [];
+    let cursor = 0;
+
+    urlMatches.forEach((match, urlIndex) => {
+      const matched = match[0];
+      const start = match.index ?? 0;
+      const end = start + matched.length;
+
+      if (start > cursor) {
+        nodes.push(
+          <span key={`${keyPrefix}-plain-${urlIndex}`}>{text.slice(cursor, start)}</span>,
+        );
+      }
+
+      const sanitized = sanitizeUrlToken(matched);
+      const trailing = matched.slice(sanitized.length);
+
+      nodes.push(
+        <a
+          key={`${keyPrefix}-url-${urlIndex}`}
+          href={sanitized}
+          target="_blank"
+          rel="noreferrer"
+          className={isMe ? "font-medium underline break-all text-blue-100" : "font-medium underline break-all text-blue-600 dark:text-blue-400"}
+        >
+          {sanitized}
+        </a>,
+      );
+
+      if (trailing) {
+        nodes.push(<span key={`${keyPrefix}-tail-${urlIndex}`}>{trailing}</span>);
+      }
+
+      cursor = end;
+    });
+
+    if (cursor < text.length) {
+      nodes.push(<span key={`${keyPrefix}-rest`}>{text.slice(cursor)}</span>);
+    }
+
+    return nodes;
+  };
+
   const renderMessageTextWithMentions = (content: string, isMe: boolean) => {
     let parsedMentionPayload: unknown;
     let textValue = content;
@@ -1527,7 +1641,7 @@ export function ChatPage() {
       .sort((left, right) => right.length - left.length);
 
     if (mentionTokens.length === 0) {
-      return normalizedText;
+      return renderMessageTextWithLinks(normalizedText, isMe, "no-mention");
     }
 
     const mentionPattern = new RegExp(
@@ -1538,18 +1652,18 @@ export function ChatPage() {
     const mentionTokenSet = new Set(mentionTokens);
 
     return parts.map((part, index) => {
-      if (!mentionTokenSet.has(part)) {
-        return <span key={`plain-${index}`}>{part}</span>;
+      if (mentionTokenSet.has(part)) {
+        return (
+          <span
+            key={`mention-${index}`}
+            className={isMe ? "font-bold text-blue-100" : "font-bold text-blue-600 dark:text-blue-400"}
+          >
+            {part}
+          </span>
+        );
       }
 
-      return (
-        <span
-          key={`mention-${index}`}
-          className={isMe ? "font-bold text-blue-100" : "font-bold text-blue-600 dark:text-blue-400"}
-        >
-          {part}
-        </span>
-      );
+      return <Fragment key={`mixed-${index}`}>{renderMessageTextWithLinks(part, isMe, `mention-part-${index}`)}</Fragment>;
     });
   };
 
@@ -1662,6 +1776,30 @@ export function ChatPage() {
     setReplyingMessage(normalizeQuotedMessage(message));
     setActiveMessageMenuId(null);
     setMessageActionError("");
+  };
+
+  const handleFocusMessageById = (messageId?: string) => {
+    if (!messageId) {
+      return;
+    }
+
+    const target = messageItemRefs.current[messageId];
+    if (!target) {
+      toast("Tin nhắn gốc chưa được tải. Hãy kéo lên để tải thêm.");
+      return;
+    }
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFocusedMessageId(messageId);
+
+    if (messageFocusTimerRef.current !== null) {
+      window.clearTimeout(messageFocusTimerRef.current);
+    }
+
+    messageFocusTimerRef.current = window.setTimeout(() => {
+      setFocusedMessageId(null);
+      messageFocusTimerRef.current = null;
+    }, 1800);
   };
 
   const handleCancelReplyMessage = () => {
@@ -2402,7 +2540,7 @@ export function ChatPage() {
                             activeGroupMembers.map((member, index) => (
                               <div
                                 key={member.userId}
-                                className="flex items-center justify-between rounded-md px-2 py-1 text-xs text-slate-700 dark:text-slate-200"
+                                className="flex items-start justify-between rounded-lg border border-slate-200 bg-white/80 px-2.5 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200"
                               >
                                 <div className="min-w-0">
                                   {(() => {
@@ -2425,38 +2563,64 @@ export function ChatPage() {
                                   <p className="text-[11px] text-slate-500 dark:text-slate-400">Vai trò: {member.roleInGroup}</p>
                                 </div>
                                 {member.userId !== user?.sub ? (
-                                  <div className="ml-2 flex flex-col items-end gap-1">
+                                  <div className="ml-2 flex flex-col items-end gap-1.5">
                                     {canManageGroupMembers ? (
-                                      <div className="flex items-center gap-1">
-                                        {member.roleInGroup !== "OWNER" ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => void handleToggleMemberRole(member.userId, member.roleInGroup)}
-                                            className="rounded px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-50"
-                                          >
-                                            {member.roleInGroup === "OFFICER" ? "Hạ quyền" : "Nâng quyền"}
-                                          </button>
-                                        ) : null}
+                                      <div className="relative">
                                         <button
                                           type="button"
-                                          onClick={() => void handleRemoveGroupMember(member.userId)}
-                                          className="rounded px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setActiveMemberActionUserId((prev) => prev === member.userId ? null : member.userId);
+                                          }}
+                                          className="rounded-full p-1.5 text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700"
+                                          title="Tùy chọn thành viên"
                                         >
-                                          Xóa
+                                          <MoreHorizontal size={14} />
                                         </button>
+
+                                        {activeMemberActionUserId === member.userId ? (
+                                          <div
+                                            className="absolute right-0 top-7 z-20 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+                                            onClick={(event) => event.stopPropagation()}
+                                          >
+                                            {member.roleInGroup !== "OWNER" ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setActiveMemberActionUserId(null);
+                                                  void handleToggleMemberRole(member.userId, member.roleInGroup);
+                                                }}
+                                                className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800"
+                                              >
+                                                {member.roleInGroup === "OFFICER" ? "Hạ quyền" : "Nâng quyền"}
+                                              </button>
+                                            ) : null}
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setActiveMemberActionUserId(null);
+                                                void handleRemoveGroupMember(member.userId);
+                                              }}
+                                              className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-red-600 hover:bg-red-50 dark:hover:bg-slate-800"
+                                            >
+                                              Xóa thành viên
+                                            </button>
+                                            <div className="px-3 py-1.5 text-[10px] text-slate-500 dark:text-slate-400">Sẽ thêm chức năng mới</div>
+                                          </div>
+                                        ) : null}
                                       </div>
                                     ) : null}
 
                                     {friendUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                                      <span className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
                                         Bạn bè
                                       </span>
                                     ) : outgoingFriendRequestUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
+                                      <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
                                         Đã gửi lời mời
                                       </span>
                                     ) : incomingFriendRequestUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+                                      <span className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
                                         Đã nhận lời mời
                                       </span>
                                     ) : (
@@ -2577,8 +2741,21 @@ export function ChatPage() {
                   const previousMessage = orderedMessages[index - 1];
                   const nextMessage = orderedMessages[index + 1];
                   const isGroupIncoming = Boolean(activeContact?.isGroup && !isMe);
-                  const startsSenderBlock = !previousMessage || previousMessage.senderId !== msg.senderId;
-                  const endsSenderBlock = !nextMessage || nextMessage.senderId !== msg.senderId;
+                  const messageSentAtMs = new Date(msg.sentAt).getTime();
+                  const previousSentAtMs = previousMessage ? new Date(previousMessage.sentAt).getTime() : Number.NaN;
+                  const nextSentAtMs = nextMessage ? new Date(nextMessage.sentAt).getTime() : Number.NaN;
+                  const startsSenderBlock =
+                    !previousMessage ||
+                    previousMessage.senderId !== msg.senderId ||
+                    Number.isNaN(previousSentAtMs) ||
+                    Number.isNaN(messageSentAtMs) ||
+                    messageSentAtMs - previousSentAtMs > MESSAGE_BLOCK_GAP_MS;
+                  const endsSenderBlock =
+                    !nextMessage ||
+                    nextMessage.senderId !== msg.senderId ||
+                    Number.isNaN(nextSentAtMs) ||
+                    Number.isNaN(messageSentAtMs) ||
+                    nextSentAtMs - messageSentAtMs > MESSAGE_BLOCK_GAP_MS;
                   const shouldShowSenderMeta = isGroupIncoming && startsSenderBlock;
                   const senderProfile = msg.senderId ? memberProfilesById[msg.senderId] : undefined;
                   const senderAvatarUrl =
@@ -2594,10 +2771,12 @@ export function ChatPage() {
                   const canRecallEveryone = isMe;
                   const replyPreview = msg.replyMessage;
                   const isForwardedMessage = Boolean(msg.forwardedFromMessageId);
-                  const forwardedLabel = msg.forwardedFromSenderName
-                    ? `${msg.forwardedFromSenderName} đã chuyển tiếp`
-                    : "Đã chuyển tiếp";
+                  const forwardedLabel = isMe
+                    ? "Bạn đã chuyển tiếp"
+                    : `${senderDisplayName} đã chuyển tiếp`;
                   const messageText = extractMessageText(msg.content).trim();
+                  const firstUrl = extractFirstUrl(messageText);
+                  const linkPreview = firstUrl ? buildLinkPreview(firstUrl) : null;
                   const messageReactions = activeMessageReactions[msg.id] || [];
                   const reactionSummary = Array.from(
                     messageReactions.reduce((acc, emoji) => {
@@ -2644,7 +2823,13 @@ export function ChatPage() {
                   }
 
                   return (
-                    <div key={msg.id} className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col`}>
+                    <div
+                      key={msg.id}
+                      ref={(element) => {
+                        messageItemRefs.current[msg.id] = element;
+                      }}
+                      className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col rounded-2xl transition-all ${focusedMessageId === msg.id ? "ring-2 ring-amber-300/80 ring-offset-2 ring-offset-slate-100 dark:ring-amber-400/70 dark:ring-offset-slate-950" : ""}`}
+                    >
                       {!isEditing ? (
                         <div
                           className={`absolute ${isMe ? "-left-24" : "-right-24"} bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${
@@ -2809,12 +2994,16 @@ export function ChatPage() {
                             </div>
                           ) : null}
                           {replyPreview ? (
-                            <div className={`mb-2 rounded-lg border-l-2 px-3 py-2 text-xs ${isMe ? "border-white/50 bg-white/10 text-white/90" : "border-blue-500 bg-blue-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
+                            <button
+                              type="button"
+                              onClick={() => handleFocusMessageById(replyPreview.id)}
+                              className={`mb-2 w-full rounded-lg border-l-2 px-3 py-2 text-left text-xs transition ${isMe ? "border-white/50 bg-white/10 text-white/90 hover:bg-white/15" : "border-blue-500 bg-blue-50 text-slate-600 hover:bg-blue-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+                            >
                               <p className="font-medium">Trả lời {replyPreview.senderName}</p>
                               <p className="mt-0.5 line-clamp-2 break-words opacity-90">
                                 {getReplyPreviewText(replyPreview)}
                               </p>
-                            </div>
+                            </button>
                           ) : null}
                           {isEditing ? (
                             <div className="space-y-2">
@@ -2855,7 +3044,7 @@ export function ChatPage() {
                               </div>
                             </div>
                           ) : (
-                            <p className="text-[15px]">{renderMessageTextWithMentions(msg.content, isMe)}</p>
+                            <p className="text-[15px] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{renderMessageTextWithMentions(msg.content, isMe)}</p>
                           )}
                         </div>
                         {msg.attachmentUrl ? (
@@ -2887,6 +3076,34 @@ export function ChatPage() {
                               Tệp đính kèm
                             </a>
                           )
+                        ) : null}
+                        {linkPreview ? (
+                          <a
+                            href={linkPreview.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`mt-2 block rounded-xl border px-3 py-2 text-left transition ${
+                              isMe
+                                ? "border-white/25 bg-white/10 hover:bg-white/15"
+                                : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <img
+                                src={linkPreview.faviconUrl}
+                                alt="favicon"
+                                className="mt-0.5 h-4 w-4 rounded-sm"
+                              />
+                              <div className="min-w-0">
+                                <p className={`truncate text-xs font-semibold ${isMe ? "text-white" : "text-slate-800 dark:text-slate-100"}`}>
+                                  {linkPreview.host}
+                                </p>
+                                <p className={`truncate text-[11px] ${isMe ? "text-white/85" : "text-slate-500 dark:text-slate-400"}`}>
+                                  {linkPreview.path}
+                                </p>
+                              </div>
+                            </div>
+                          </a>
                         ) : null}
                         </div>
                       </div>

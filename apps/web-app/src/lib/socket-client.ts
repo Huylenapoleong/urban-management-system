@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { CHAT_SOCKET_EVENTS, CHAT_SOCKET_NAMESPACE } from '@urban/shared-constants';
+import { readAccessToken } from './api-client';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 
@@ -13,8 +14,7 @@ class SocketClient {
 
     this.connectPromise = new Promise((resolve, reject) => {
       try {
-        // Lưu ý: Đối với web-app, thường token lưu ở localStorage hoặc sessionStorage
-        const token = localStorage.getItem('auth_token');
+        const token = readAccessToken();
 
         if (this.socket?.connected && this.authToken === token) {
           this.connectPromise = null;
@@ -57,13 +57,13 @@ class SocketClient {
         this.authToken = token;
 
         this.socket.on('connect', () => {
-          console.log('[Web Socket] Connected:', this.socket?.id);
+          console.log('[Web Socket] Connected');
           this.connectPromise = null;
           resolve();
         });
 
-        this.socket.on(CHAT_SOCKET_EVENTS.READY, (payload: any) => {
-          console.log('[Web Socket] Chat Socket Ready:', payload);
+        this.socket.on(CHAT_SOCKET_EVENTS.READY, () => {
+          console.log('[Web Socket] Chat Socket Ready');
         });
 
         this.socket.on('disconnect', (reason) => {

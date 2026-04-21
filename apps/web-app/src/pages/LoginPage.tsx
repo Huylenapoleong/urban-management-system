@@ -18,7 +18,6 @@ export function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: login,
     onSuccess: (data) => {
-      console.log("Logged in successfully", data)
       if (data.tokens?.accessToken) {
         authenticate(data.tokens.accessToken)
         navigate("/")
