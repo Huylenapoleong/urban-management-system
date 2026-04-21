@@ -2379,7 +2379,82 @@
           ]
         },
         {
-          "name": "Manage Group Member",
+          "name": "Add Group Member",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"roleInGroup\": \"MEMBER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Group Member Role",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{userId}}/role",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleInGroup\": \"DEPUTY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove Group Member",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{userId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Manage Group Member (Deprecated)",
           "request": {
             "method": "PATCH",
             "header": [],

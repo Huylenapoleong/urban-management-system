@@ -136,8 +136,13 @@ The backend currently enforces these product rules and FE should align UI/UX wit
   - only active members or admin can read messages, join realtime rooms, or access audit
 - Group management is membership-based:
   - `ADMIN` can manage any group
-  - `OWNER` and `OFFICER` members can manage their group
+  - `OWNER` and `DEPUTY` members can manage their group
   - staff outside the group cannot manage a non-private group just because it is in scope
+  - use explicit member-management routes for new FE flows:
+    - `POST /groups/:groupId/members`
+    - `PATCH /groups/:groupId/members/:userId/role`
+    - `DELETE /groups/:groupId/members/:userId`
+  - legacy route `PATCH /groups/:groupId/members/:userId` is deprecated and should only be kept for temporary backward compatibility
 - Report status uses a state machine, not free-form transitions:
   - FE must render actions from the current status, not from a global list
   - citizen is only expected to close their own resolved report
