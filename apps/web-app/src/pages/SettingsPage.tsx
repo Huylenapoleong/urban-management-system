@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getProfile, updateProfile } from "@/services/user.api";
 import { changePasswordWithOtp, requestChangePasswordOtp } from "@/services/auth.api";
-import { uploadMedia } from "@/services/upload.api";
+import { listAvatarUploads, uploadMedia } from "@/services/upload.api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +14,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^(\+?84|0)\d{9,10}$/;
+
+function normalizePhone(value: string): string {
+  return value.replace(/[\s.-]/g, "");
+}
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
@@ -40,9 +47,16 @@ export function SettingsPage() {
     confirmPassword: "",
   });
 
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [profileMessage, setProfileMessage] = useState({ text: "", type: "" });
   const [passwordMessage, setPasswordMessage] = useState({ text: "", type: "" });
+
+  const { data: avatarHistory = [], isLoading: isLoadingAvatarHistory } = useQuery({
+    queryKey: ["avatar-history"],
+    queryFn: listAvatarUploads,
+    enabled: avatarModalOpen,
+  });
 
   useEffect(() => {
     if (profile) {
@@ -100,16 +114,27 @@ export function SettingsPage() {
   });
 
   const avatarMutation = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async (input: { file?: File; avatarKey?: string }) => {
       setAvatarUploading(true);
-      const res = await uploadMedia({ file, target: "AVATAR" });
-      if (!res.key) throw new Error("Không nhận được khóa avatar sau khi upload");
-      return updateProfile({ avatarKey: res.key });
+      const nextAvatarKey = input.avatarKey
+        ? input.avatarKey
+        : input.file
+          ? (await uploadMedia({ file: input.file, target: "AVATAR" })).key
+          : undefined;
+
+      if (!nextAvatarKey) {
+        throw new Error("Không nhận được khóa avatar sau khi upload");
+      }
+
+      return await updateProfile({ avatarKey: nextAvatarKey });
     },
     onSuccess: (updatedContext) => {
       queryClient.setQueryData(["profile"], updatedContext);
       queryClient.setQueryData(["profile", "me"], updatedContext);
+      queryClient.invalidateQueries({ queryKey: ["avatar-history"] });
       setAvatarUploading(false);
+      setAvatarModalOpen(false);
+      setProfileMessage({ text: "Cập nhật ảnh đại diện thành công", type: "success" });
     },
     onError: (err: { message?: string }) => {
       setAvatarUploading(false);
@@ -120,7 +145,31 @@ export function SettingsPage() {
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setProfileMessage({ text: "", type: "" });
-    profileMutation.mutate(formData);
+
+    const normalizedFullName = formData.fullName.trim();
+    const normalizedEmail = formData.email.trim();
+    const normalizedPhone = normalizePhone(formData.phone.trim());
+
+    if (normalizedFullName.length < 2) {
+      setProfileMessage({ text: "Họ và tên cần ít nhất 2 ký tự.", type: "error" });
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      setProfileMessage({ text: "Email không đúng định dạng.", type: "error" });
+      return;
+    }
+
+    if (!PHONE_REGEX.test(normalizedPhone)) {
+      setProfileMessage({ text: "Số điện thoại không hợp lệ.", type: "error" });
+      return;
+    }
+
+    profileMutation.mutate({
+      fullName: normalizedFullName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
+    });
   };
 
   const handleOpenPasswordModal = () => {
@@ -131,8 +180,13 @@ export function SettingsPage() {
   const handleOtpStepSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordMessage({ text: "", type: "" });
-    if (!otpCode.trim()) {
+    const otp = otpCode.trim();
+    if (!otp) {
       setPasswordMessage({ text: "Vui lòng nhập mã OTP", type: "error" });
+      return;
+    }
+    if (!/^\d{6}$/.test(otp)) {
+      setPasswordMessage({ text: "Mã OTP phải gồm đúng 6 chữ số.", type: "error" });
       return;
     }
     setPasswordStep("password");
@@ -144,6 +198,18 @@ export function SettingsPage() {
     if (!otpCode.trim()) {
       setPasswordMessage({ text: "Thiếu mã OTP, vui lòng nhập lại", type: "error" });
       setPasswordStep("otp");
+      return;
+    }
+    if (passwordData.currentPassword.trim().length < 8) {
+      setPasswordMessage({ text: "Mật khẩu hiện tại phải có ít nhất 8 ký tự.", type: "error" });
+      return;
+    }
+    if (passwordData.newPassword.trim().length < 8) {
+      setPasswordMessage({ text: "Mật khẩu mới phải có ít nhất 8 ký tự.", type: "error" });
+      return;
+    }
+    if (passwordData.newPassword === passwordData.currentPassword) {
+      setPasswordMessage({ text: "Mật khẩu mới phải khác mật khẩu hiện tại.", type: "error" });
       return;
     }
     if (passwordData.newPassword !== passwordData.confirmPassword) {
@@ -161,8 +227,13 @@ export function SettingsPage() {
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      avatarMutation.mutate(file);
+      avatarMutation.mutate({ file });
+      e.currentTarget.value = "";
     }
+  };
+
+  const handleSelectAvatar = (avatarKey: string) => {
+    avatarMutation.mutate({ avatarKey });
   };
 
   if (isLoading) return <div className="p-8 text-slate-700 dark:text-slate-300">Đang tải hồ sơ...</div>;
@@ -181,22 +252,17 @@ export function SettingsPage() {
           <div className="flex flex-col md:flex-row gap-8">
             <div className="flex flex-col items-center gap-4">
               <Avatar className="w-32 h-32 border-4 border-white dark:border-slate-700 shadow-lg">
-                {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} />}
+                {profile?.avatarAsset?.resolvedUrl || profile?.avatarUrl ? (
+                  <AvatarImage src={profile.avatarAsset?.resolvedUrl || profile.avatarUrl} />
+                ) : null}
                 <AvatarFallback className="bg-blue-100 text-blue-700 text-3xl font-semibold">
                   {profile?.fullName?.charAt(0).toUpperCase() || "U"}
                 </AvatarFallback>
               </Avatar>
-              <input 
-                type="file" 
-                ref={fileInputRef}
-                className="hidden" 
-                accept="image/*"
-                onChange={handleAvatarChange}
-              />
               <Button 
                 variant="outline" 
                 size="sm"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => setAvatarModalOpen(true)}
                 disabled={avatarUploading}
               >
                 {avatarUploading ? "Đang xử lý..." : "Đổi ảnh đại diện"}
@@ -372,6 +438,100 @@ export function SettingsPage() {
               </DialogFooter>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={avatarModalOpen} onOpenChange={setAvatarModalOpen}>
+        <DialogContent className="sm:max-w-3xl dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100">
+          <DialogHeader>
+            <DialogTitle>Chọn ảnh đại diện</DialogTitle>
+            <DialogDescription>
+              Chọn một ảnh đã tải lên trước đó hoặc tải lên ảnh mới để dùng làm avatar.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-slate-600 dark:text-slate-300">
+                {avatarHistory.length} ảnh đã lưu
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={avatarUploading}
+              >
+                {avatarUploading ? "Đang tải ảnh..." : "Tải ảnh mới"}
+              </Button>
+            </div>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept="image/*"
+              onChange={handleAvatarChange}
+            />
+
+            {isLoadingAvatarHistory ? (
+              <div className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+                Đang tải danh sách ảnh...
+              </div>
+            ) : avatarHistory.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                Chưa có ảnh avatar nào. Hãy tải lên ảnh mới để bắt đầu.
+              </div>
+            ) : (
+              <div className="grid max-h-[60vh] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
+                {avatarHistory.map((item) => {
+                  const isCurrent = profile?.avatarAsset?.key === item.key;
+
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => handleSelectAvatar(item.key)}
+                      disabled={avatarUploading}
+                      className={`group overflow-hidden rounded-xl border bg-slate-50 text-left transition hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-800 ${
+                        isCurrent
+                          ? "border-blue-500 ring-2 ring-blue-500/20"
+                          : "border-slate-200 dark:border-slate-700"
+                      }`}
+                    >
+                      <div className="aspect-square bg-slate-100 dark:bg-slate-700">
+                        <img
+                          src={item.url}
+                          alt={item.fileName || item.key}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                      <div className="space-y-1 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                            {item.fileName || "Ảnh đã lưu"}
+                          </span>
+                          {isCurrent ? (
+                            <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-500/20 dark:text-blue-200">
+                              Đang dùng
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {item.isInUse ? "Ảnh hiện có thể đang được dùng" : "Nhấn để dùng ảnh này"}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAvatarModalOpen(false)}>
+              Hủy
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

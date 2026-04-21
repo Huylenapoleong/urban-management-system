@@ -12,6 +12,57 @@ type ChatItem = {
   text: string;
 };
 
+type BotMessageLine = {
+  kind: "paragraph" | "bullet" | "numbered";
+  text: string;
+  marker?: string;
+};
+
+function formatBotMessage(text: string): BotMessageLine[] {
+  const normalized = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/(\d+)\.\s*\n+\s*/g, "$1. ")
+    .replace(/[-*•]\s*\n+\s*/g, "- ")
+    .trim();
+
+  const rawLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const lines =
+    rawLines.length === 1 && /\s-\s/.test(rawLines[0])
+      ? rawLines[0]
+          .split(/\s-\s/)
+          .map((part, index) => (index === 0 ? part.trim() : `- ${part.trim()}`))
+      : rawLines;
+
+  return lines.map((line) => {
+    const numbered = line.match(/^(\d+)\.\s+(.*)$/);
+    if (numbered) {
+      return {
+        kind: "numbered",
+        marker: `${numbered[1]}.`,
+        text: numbered[2],
+      } satisfies BotMessageLine;
+    }
+
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    if (bullet) {
+      return {
+        kind: "bullet",
+        text: bullet[1],
+      } satisfies BotMessageLine;
+    }
+
+    return {
+      kind: "paragraph",
+      text: line,
+    } satisfies BotMessageLine;
+  });
+}
+
 export function ChatbotModal({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<ChatItem[]>([
     {
@@ -22,17 +73,94 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
   ]);
   const [inputText, setInputText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [position, setPosition] = useState(() => {
+    if (typeof window === "undefined") {
+      return { x: 16, y: 16 };
+    }
+
+    const initialWidth = Math.min(window.innerWidth * 0.92, 520);
+    const initialHeight = Math.min(window.innerHeight * 0.78, 620);
+
+    return {
+      x: Math.max(16, window.innerWidth - initialWidth - 24),
+      y: Math.max(16, window.innerHeight - initialHeight - 24),
+    };
+  });
+
+  const clampPosition = (x: number, y: number) => {
+    const width =
+      modalRef.current?.offsetWidth ??
+      (typeof window === "undefined" ? 520 : Math.min(window.innerWidth * 0.92, 520));
+    const height =
+      modalRef.current?.offsetHeight ??
+      (typeof window === "undefined" ? 620 : Math.min(window.innerHeight * 0.78, 620));
+
+    const maxX = Math.max(16, window.innerWidth - width - 16);
+    const maxY = Math.max(16, window.innerHeight - height - 16);
+
+    return {
+      x: Math.min(Math.max(16, x), maxX),
+      y: Math.min(Math.max(16, y), maxY),
+    };
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition((prev) => clampPosition(prev.x, prev.y));
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) {
+        return;
+      }
+
+      const nextX = drag.originX + (event.clientX - drag.startX);
+      const nextY = drag.originY + (event.clientY - drag.startY);
+      setPosition(clampPosition(nextX, nextY));
+    };
+
+    const stopDragging = () => {
+      dragRef.current = null;
+      setIsDragging(false);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopDragging);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopDragging);
+    };
+  }, [isDragging]);
 
   const chatbotMutation = useMutation({
     mutationFn: sendMessageToChatbot,
     onSuccess: (data) => {
       setMessages((prev) => [
         ...prev,
-        { id: Date.now().toString(), sender: "bot", text: data.response },
+        { id: Date.now().toString(), sender: "bot", text: data.answer },
       ]);
     },
     onError: () => {
@@ -55,17 +183,50 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
       ...prev,
       { id: Date.now().toString(), sender: "user", text: inputText },
     ]);
-    chatbotMutation.mutate({ message: inputText });
+    chatbotMutation.mutate({ question: inputText });
     setInputText("");
   };
 
+  const handleHeaderPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button")) {
+      return;
+    }
+
+    const modal = modalRef.current;
+    if (!modal) {
+      return;
+    }
+
+    const rect = modal.getBoundingClientRect();
+    dragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: rect.left,
+      originY: rect.top,
+    };
+    setIsDragging(true);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 bg-black/35"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
-        className="w-full max-w-3xl h-[80vh] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        ref={modalRef}
+        className="absolute w-[min(92vw,520px)] h-[min(78vh,620px)] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col overflow-hidden"
+        style={{ left: position.x, top: position.y }}
       >
-        <div className="bg-blue-600 p-4 flex items-center justify-between text-white shrink-0">
+        <div
+          className={`bg-blue-600 p-4 flex items-center justify-between text-white shrink-0 cursor-move select-none touch-none ${
+            isDragging ? "opacity-90" : ""
+          }`}
+          onPointerDown={handleHeaderPointerDown}
+        >
           <div className="flex items-center gap-3">
             <div className="bg-white/20 p-2 rounded-full">
               <Bot size={20} />
@@ -88,6 +249,7 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
           <div className="flex flex-col gap-4">
             {messages.map((msg) => {
               const isUser = msg.sender === "user";
+              const formattedBotLines = isUser ? [] : formatBotMessage(msg.text);
               return (
                 <div
                   key={msg.id}
@@ -110,7 +272,37 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
                         : "bg-white dark:bg-slate-800 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 rounded-tl-sm"
                     }`}
                   >
-                    {msg.text}
+                    {isUser ? (
+                      <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {formattedBotLines.map((line, index) => {
+                          if (line.kind === "numbered") {
+                            return (
+                              <p key={`${msg.id}-${index}`} className="leading-relaxed break-words flex gap-2">
+                                <span className="font-semibold text-slate-700 dark:text-slate-200">{line.marker}</span>
+                                <span className="whitespace-pre-wrap">{line.text}</span>
+                              </p>
+                            );
+                          }
+
+                          if (line.kind === "bullet") {
+                            return (
+                              <p key={`${msg.id}-${index}`} className="leading-relaxed break-words flex gap-2">
+                                <span className="font-semibold">•</span>
+                                <span className="whitespace-pre-wrap">{line.text}</span>
+                              </p>
+                            );
+                          }
+
+                          return (
+                            <p key={`${msg.id}-${index}`} className="leading-relaxed whitespace-pre-wrap break-words">
+                              {line.text}
+                            </p>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

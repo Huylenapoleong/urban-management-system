@@ -9,7 +9,7 @@ interface CallModalProps {
 }
 
 export function CallModal({ rtc }: CallModalProps) {
-  const { callState, activeConfig, isMicOn, isVideoOn, localStream, remoteStream, toggleMute, toggleVideo, endCall, acceptCall, rejectCall, callError, setCallError } = rtc;
+  const { callState, activeConfig, isMicOn, isVideoOn, localStream, remoteStream, toggleMute, toggleVideo, endCall, acceptCall, rejectCall, callError, setCallError, callDurationSeconds } = rtc;
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
@@ -163,6 +163,13 @@ export function CallModal({ rtc }: CallModalProps) {
     : callState === "INCOMING"
       ? "Đang đổ chuông"
       : "Đã kết nối";
+  const formatCallDuration = (totalSeconds: number): string => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = safeSeconds % 60;
+
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  };
   const waitingLabel = callState === "CONNECTED" && !activeConfig?.isVideo
     ? "Đã kết nối thoại"
     : "Chờ kết nối...";
@@ -182,29 +189,33 @@ export function CallModal({ rtc }: CallModalProps) {
   return (
     <div
       ref={panelRef}
-      className="absolute z-50 flex w-[380px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-950 text-white shadow-[0_24px_60px_rgba(2,6,23,0.6)]"
+      className="absolute z-50 flex w-[350px] max-w-[calc(100vw-20px)] flex-col overflow-hidden rounded-2xl border border-slate-600/70 bg-slate-950/95 text-white shadow-[0_24px_60px_rgba(2,6,23,0.55)] backdrop-blur-xl sm:w-[380px]"
       style={
         dragPosition
           ? { left: dragPosition.x, top: dragPosition.y }
-          : { top: 16, right: 16 }
+          : { top: 72, right: 16 }
       }
     >
       <div
         onPointerDown={handleDragStart}
-        className="cursor-grab select-none bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-3 active:cursor-grabbing"
+        className="cursor-grab select-none border-b border-slate-700/80 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-2.5 active:cursor-grabbing"
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-slate-100">{title} với {peerName}</p>
-            <p className="text-xs text-slate-300">Kéo thanh này để di chuyển cửa sổ gọi</p>
+            <p className="text-xs text-slate-300">
+              {callState === "CONNECTED"
+                ? `Đang gọi ${formatCallDuration(callDurationSeconds)}`
+                : "Kéo thanh này để di chuyển cửa sổ gọi"}
+            </p>
           </div>
-          <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+          <span className="shrink-0 whitespace-nowrap rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
             {badgeLabel}
           </span>
         </div>
       </div>
 
-      <div className="relative h-[248px] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+      <div className="relative h-[228px] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 sm:h-[248px]">
         <audio ref={remoteAudioRef} autoPlay playsInline />
         {/* Remote Stream Video */}
         {canRenderRemoteVideo && (
@@ -248,12 +259,12 @@ export function CallModal({ rtc }: CallModalProps) {
         )}
       </div>
 
-      <div className="flex items-center justify-center gap-3 border-t border-slate-700/80 bg-slate-900/95 p-4">
+      <div className="flex items-center justify-center gap-3 border-t border-slate-700/80 bg-slate-900/95 p-3.5">
         {callState === "INCOMING" ? (
           <>
             <Button
               variant="secondary"
-              className="h-11 rounded-full border border-slate-600 bg-slate-700/60 px-4 text-white hover:bg-slate-600"
+              className="h-10 rounded-full border border-slate-600 bg-slate-700/60 px-4 text-white hover:bg-slate-600"
               onClick={rejectCall}
             >
               <X size={16} className="mr-2" />
@@ -261,7 +272,7 @@ export function CallModal({ rtc }: CallModalProps) {
             </Button>
             <Button
               variant="default"
-              className="h-11 rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700"
+              className="h-10 rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700"
               onClick={acceptCall}
             >
               <Phone size={16} className="mr-2" />
@@ -273,7 +284,7 @@ export function CallModal({ rtc }: CallModalProps) {
         <Button 
           variant={isMicOn ? "secondary" : "destructive"}
           size="icon" 
-          className="h-11 w-11 rounded-full border border-slate-600 bg-slate-700/60 text-white hover:bg-slate-600"
+          className="h-10 w-10 rounded-full border border-slate-600 bg-slate-700/60 text-white hover:bg-slate-600"
           onClick={toggleMute}
         >
           {isMicOn ? <Mic size={20} /> : <MicOff size={20} />}
@@ -282,7 +293,7 @@ export function CallModal({ rtc }: CallModalProps) {
           <Button 
             variant={isVideoOn ? "secondary" : "destructive"}
             size="icon" 
-            className="h-11 w-11 rounded-full border border-slate-600 bg-slate-700/60 text-white hover:bg-slate-600"
+            className="h-10 w-10 rounded-full border border-slate-600 bg-slate-700/60 text-white hover:bg-slate-600"
             onClick={toggleVideo}
           >
             {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
@@ -291,7 +302,7 @@ export function CallModal({ rtc }: CallModalProps) {
         <Button 
           variant="destructive" 
           size="icon" 
-          className="mx-1 h-12 w-12 rounded-full bg-red-600 text-white hover:bg-red-700"
+          className="mx-1 h-11 w-11 rounded-full bg-red-600 text-white hover:bg-red-700"
           onClick={endCall}
         >
           <PhoneOff size={24} />

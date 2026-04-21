@@ -41,8 +41,28 @@ async function main(): Promise<void> {
   let generateEmbedding: ((text: string) => Promise<number[]>) | null = null;
   try {
     console.log('[INFO] Loading embedding model (all-MiniLM-L6-v2)...');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { pipeline } = require('@xenova/transformers') as { pipeline: (...args: unknown[]) => Promise<any> };
+    let pipelineFn: ((...args: unknown[]) => Promise<any>) | null = null;
+
+    try {
+      // Use runtime dynamic import to support ESM-only package in CommonJS ts-node runs.
+      const dynamicImport = new Function(
+        'modulePath',
+        'return import(modulePath);',
+      ) as (modulePath: string) => Promise<{ pipeline: (...args: unknown[]) => Promise<any> }>;
+
+      const transformers = await dynamicImport('@xenova/transformers');
+      pipelineFn = transformers.pipeline;
+    } catch {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const transformers = require('@xenova/transformers') as { pipeline: (...args: unknown[]) => Promise<any> };
+      pipelineFn = transformers.pipeline;
+    }
+
+    if (!pipelineFn) {
+      throw new Error('Embedding pipeline is unavailable');
+    }
+
+    const pipeline = pipelineFn;
     const extractor = await pipeline('feature-extraction' as any, 'Xenova/all-MiniLM-L6-v2' as any);
     generateEmbedding = async (text: string) => {
       const output = await extractor(text, { pooling: 'mean', normalize: true });

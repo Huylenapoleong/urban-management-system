@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listConversations,
@@ -13,7 +13,7 @@ import {
 } from "@/services/conversation.api";
 import { socketClient } from "@/lib/socket-client";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
-import type { MessageItem } from "@urban/shared-types";
+import type { ChatTypingStateEvent, MessageItem } from "@urban/shared-types";
 
 export function useConversations(searchTerm?: string) {
   const queryClient = useQueryClient();
@@ -84,6 +84,7 @@ export function useConversations(searchTerm?: string) {
 
 export function useMessages(conversationId?: string) {
   const queryClient = useQueryClient();
+  const [typingUsers, setTypingUsers] = useState<Record<string, ChatTypingStateEvent>>({});
 
   const query = useQuery({
     queryKey: ["messages", conversationId],
@@ -93,6 +94,8 @@ export function useMessages(conversationId?: string) {
 
   useEffect(() => {
     if (!conversationId) return;
+
+    setTypingUsers({});
     
     const joinRoom = async () => {
       try {
@@ -104,6 +107,25 @@ export function useMessages(conversationId?: string) {
       }
     };
     joinRoom();
+
+    const handleTypingState = (payload: ChatTypingStateEvent) => {
+      if (!payload?.userId) {
+        return;
+      }
+
+      setTypingUsers((prev) => {
+        if (!payload.isTyping) {
+          const next = { ...prev };
+          delete next[payload.userId];
+          return next;
+        }
+
+        return {
+          ...prev,
+          [payload.userId]: payload,
+        };
+      });
+    };
 
     const handleMessageCreated = (payload: any) => {
       // payload could be a ChatMessageCreatedEvent
@@ -124,12 +146,34 @@ export function useMessages(conversationId?: string) {
     };
 
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
 
     return () => {
       socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE, { conversationId }).catch(() => {});
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
+      socketClient.socket?.off(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
     };
   }, [conversationId, queryClient]);
+
+  const sendTyping = useCallback(
+    async (isTyping: boolean) => {
+      if (!conversationId) return;
+
+      try {
+        await socketClient.safeEmitValidated(isTyping ? CHAT_SOCKET_EVENTS.TYPING_START : CHAT_SOCKET_EVENTS.TYPING_STOP, {
+          conversationId,
+          clientTimestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error("Failed to send typing state", {
+          conversationId,
+          isTyping,
+          error,
+        });
+      }
+    },
+    [conversationId],
+  );
 
   const sendMutation = useMutation({
     mutationFn: (payload: SendMessageInput) => sendMessage(conversationId!, payload),
@@ -181,6 +225,7 @@ export function useMessages(conversationId?: string) {
 
   return {
     ...query,
+    typingUsers,
     sendMessage: sendMutation.mutate,
     sendMessageAsync: sendMutation.mutateAsync,
     isSending: sendMutation.isPending,
@@ -191,5 +236,6 @@ export function useMessages(conversationId?: string) {
     isUpdatingMessage: updateMutation.isPending,
     isDeletingMessage: deleteMutation.isPending,
     isForwardingMessage: forwardMutation.isPending,
+    sendTyping,
   };
 }

@@ -1,11 +1,24 @@
 import ApiClient from "@/lib/api-client";
 import type { UserProfile } from "@urban/shared-types";
 
+export interface PresenceState {
+  userId: string;
+  isActive: boolean;
+  activeSocketCount: number;
+  lastSeenAt?: string;
+  occurredAt: string;
+}
+
 export async function getProfile(): Promise<UserProfile> {
   return await ApiClient.get("/users/me");
 }
 
-export type UpdateProfilePayload = Partial<UserProfile> & {
+export type UpdateProfilePayload = {
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  locationCode?: string;
+  unit?: string;
   avatarKey?: string;
 };
 
@@ -17,7 +30,6 @@ export async function updateProfile(payload: UpdateProfilePayload): Promise<User
     locationCode,
     unit,
     avatarKey,
-    avatarUrl,
   } = payload;
 
   const body: UpdateProfilePayload = {
@@ -26,12 +38,8 @@ export async function updateProfile(payload: UpdateProfilePayload): Promise<User
     ...(email !== undefined ? { email } : {}),
     ...(locationCode !== undefined ? { locationCode } : {}),
     ...(unit !== undefined ? { unit } : {}),
-    ...(avatarKey ? { avatarKey } : avatarUrl ? { avatarUrl } : {}),
+    ...(avatarKey ? { avatarKey } : {}),
   };
-
-  if (import.meta.env.DEV) {
-    console.debug('[updateProfile] /users/me payload', body);
-  }
 
   return await ApiClient.patch("/users/me", body);
 }
@@ -42,4 +50,12 @@ export async function changePassword(payload: { currentPassword?: string, newPas
 
 export async function getUserById(userId: string): Promise<UserProfile> {
   return await ApiClient.get(`/users/${encodeURIComponent(userId)}`);
+}
+
+export async function getUserPresence(userId: string): Promise<PresenceState> {
+  return await ApiClient.get(`/users/${encodeURIComponent(userId)}/presence`);
+}
+
+export async function searchUserExactByContact(query: string): Promise<UserProfile> {
+  return await ApiClient.get(`/users/search?q=${encodeURIComponent(query.trim())}`);
 }

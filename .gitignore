@@ -10,7 +10,7 @@ coverage
 .DS_Store
 /.claude
 /.gitnexus
-/.claude/skills/gitnexus/gitnexus-cli
+>>>>>>>>> Temporary merge branch 2
 AGENTS.md
 api-log.txt
 apps/api/seed-output.txt

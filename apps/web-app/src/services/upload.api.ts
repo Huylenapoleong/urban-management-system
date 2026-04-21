@@ -9,6 +9,20 @@ type UploadMediaParams = {
   onProgress?: (progressPercent: number, event: AxiosProgressEvent) => void;
 };
 
+type DeleteUploadParams = {
+  target: "REPORT" | "MESSAGE" | "AVATAR" | "GENERAL";
+  key: string;
+  entityId?: string;
+};
+
+export interface UploadHistoryItem {
+  key: string;
+  url: string;
+  fileName?: string;
+  uploadedAt?: string;
+  isInUse?: boolean;
+}
+
 export async function uploadMedia({
   file,
   target,
@@ -39,4 +53,22 @@ export async function uploadMedia({
       onProgress(percent, event);
     },
   });
+}
+
+export async function deleteUpload({
+  target,
+  key,
+  entityId,
+}: DeleteUploadParams): Promise<void> {
+  await ApiClient.delete("/uploads/media", {
+    data: {
+      target,
+      key,
+      ...(entityId ? { entityId } : {}),
+    },
+  });
+}
+
+export async function listAvatarUploads(): Promise<UploadHistoryItem[]> {
+  return await ApiClient.get("/uploads/media?target=AVATAR&limit=50");
 }

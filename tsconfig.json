@@ -1,12 +1,4 @@
 {
-  "compilerOptions": {
-    "ignoreDeprecations": "6.0"
-  },
-  "extends": "expo/tsconfig.base",
-  "exclude": [
-    "node_modules",
-    "**/node_modules",
-    "dist",
-    "build"
-  ]
+  "compilerOptions": {},
+  "extends": "expo/tsconfig.base"
 }
