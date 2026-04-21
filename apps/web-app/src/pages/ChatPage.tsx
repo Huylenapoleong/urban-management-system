@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus } from "lucide-react";
+import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useWebRTC } from "@/hooks/shared/useWebRTC";
@@ -14,11 +14,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { leaveGroup, listGroupMembers, manageGroupMember } from "@/services/group.api";
 import { listMyFriendRequests, listMyFriends, sendFriendRequest } from "@/services/friends.api";
 import { toast } from "react-hot-toast";
+import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
 import type { MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
 import type { GroupMemberRole } from "@urban/shared-constants";
 import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
-import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
-import { socketClient } from "@/lib/socket-client";
 
 type ChatMessageType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
 
@@ -169,28 +168,17 @@ function resolveDmAvatarFromFriendMap(
   return friendAvatarByUserId[peerUserId];
 }
 
-function formatPresenceText(presence: PresenceState | null): string {
-  if (!presence) {
-    return "Không hoạt động";
-  }
-
-  if (presence.isActive) {
-    return "Đang hoạt động";
-  }
-
-  if (presence.lastSeenAt) {
-    return `Hoạt động lúc ${format(new Date(presence.lastSeenAt), "HH:mm dd/MM")}`;
-  }
-
-  return "Không hoạt động";
-}
-
-function formatLastSeenShort(presence?: PresenceState | null): string | null {
-  if (!presence || presence.isActive || !presence.lastSeenAt) {
+function formatLastSeenShort(presence?: PresenceState | null, fallbackLastSeenAt?: string | null): string | null {
+  if (presence?.isActive) {
     return null;
   }
 
-  const lastSeenMs = new Date(presence.lastSeenAt).getTime();
+  const lastSeenSource = presence?.lastSeenAt || fallbackLastSeenAt;
+  if (!lastSeenSource) {
+    return null;
+  }
+
+  const lastSeenMs = new Date(lastSeenSource).getTime();
   if (Number.isNaN(lastSeenMs)) {
     return null;
   }
@@ -209,6 +197,19 @@ function formatLastSeenShort(presence?: PresenceState | null): string | null {
   return `${diffDays}d`;
 }
 
+function formatPresenceText(presence: PresenceState | null, fallbackLastSeenAt?: string | null): string {
+  if (presence?.isActive) {
+    return "Đang hoạt động";
+  }
+
+  const relative = formatLastSeenShort(presence, fallbackLastSeenAt);
+  if (relative) {
+    return `Hoạt động ${relative} trước`;
+  }
+
+  return "Hoạt động vài phút trước";
+}
+
 type MentionCandidate = {
   userId: string;
   displayName: string;
@@ -217,6 +218,7 @@ type MentionCandidate = {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?84|0)\d{9,10}$/;
 const GROUP_AVATAR_OVERRIDES_STORAGE_KEY = "web-app-group-avatar-overrides";
+const PRESENCE_POLL_INTERVAL_MS = 60_000;
 
 function extractGroupIdFromConversationId(conversationId?: string | null): string | undefined {
   if (!conversationId) {
@@ -273,6 +275,7 @@ export function ChatPage() {
   const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<string | null>(null);
   const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<string | null>(null);
   const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [groupAvatarOverrides, setGroupAvatarOverrides] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined") {
       return {};
@@ -297,6 +300,7 @@ export function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const groupAvatarInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLInputElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
   const typingStopTimerRef = useRef<number | null>(null);
   const isTypingRef = useRef(false);
   const requestedDmAvatarIdsRef = useRef<Set<string>>(new Set());
@@ -429,11 +433,21 @@ export function ChatPage() {
     return haystack.includes(normalizedForwardSearch);
   });
   const cachedProfile = queryClient.getQueryData<UserProfile>(["profile"]);
+  const activeContactAvatarFromConversation = resolveConversationAvatarUrl(activeContact as ConversationAvatarLike | undefined);
+  const activeContactAvatarFromFriendMap = resolveDmAvatarFromFriendMap(
+    activeContact as ConversationAvatarLike | undefined,
+    friendAvatarByUserId,
+    user?.sub,
+  );
+  const activeContactAvatarFromDmMap = activeChat ? dmAvatarMap[activeChat] : undefined;
   const activeContactBaseAvatarUrl =
     (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarAsset?.resolvedUrl ||
     (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarUrl;
   const activeContactAvatarUrl =
     (activeGroupId ? groupAvatarOverrides[activeGroupId] : undefined) ||
+    activeContactAvatarFromConversation ||
+    activeContactAvatarFromFriendMap ||
+    activeContactAvatarFromDmMap ||
     activeContactBaseAvatarUrl ||
     chatState.avatarUrl;
   const activeDmUserId = extractDirectPeerUserId(activeContact as ConversationAvatarLike | undefined, user?.sub);
@@ -447,10 +461,10 @@ export function ChatPage() {
       return "Nhóm trò chuyện";
     }
 
-    return formatPresenceText(activePresence);
+    return formatPresenceText(activePresence, activeContact?.updatedAt);
   })();
   const activeStatusToneClass = activePresence?.isActive ? "text-green-600" : "text-gray-500 dark:text-slate-400";
-  const activeLastSeenBadge = formatLastSeenShort(activePresence);
+  const activeLastSeenBadge = formatLastSeenShort(activePresence, activeContact?.updatedAt);
   const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
   const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -859,7 +873,7 @@ export function ChatPage() {
     void loadDmPresence();
     const intervalId = window.setInterval(() => {
       void loadDmPresence();
-    }, 30000);
+    }, PRESENCE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
@@ -895,48 +909,11 @@ export function ChatPage() {
     void loadPresence();
     const intervalId = window.setInterval(() => {
       void loadPresence();
-    }, 30000);
+    }, PRESENCE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
-    };
-  }, [activeDmUserId]);
-
-  useEffect(() => {
-    const socket = socketClient.socket;
-    if (!socket || !activeDmUserId) {
-      return;
-    }
-
-    const handlePresenceSnapshot = (payload: { participants?: PresenceState[] }) => {
-      const participant = payload?.participants?.find((entry) => entry.userId === activeDmUserId);
-      if (participant) {
-        setActiveDmPresence(participant);
-        setDmPresenceByUserId((prev) => ({
-          ...prev,
-          [participant.userId]: participant,
-        }));
-      }
-    };
-
-    const handlePresenceUpdated = (payload: { presence?: PresenceState }) => {
-      const updatedPresence = payload?.presence;
-      if (updatedPresence?.userId === activeDmUserId) {
-        setActiveDmPresence(updatedPresence);
-        setDmPresenceByUserId((prev) => ({
-          ...prev,
-          [updatedPresence.userId]: updatedPresence,
-        }));
-      }
-    };
-
-    socket.on(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
-    socket.on(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
-
-    return () => {
-      socket.off(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
-      socket.off(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
     };
   }, [activeDmUserId]);
 
@@ -1812,6 +1789,69 @@ export function ChatPage() {
     enqueueAttachments(pastedFiles);
   };
 
+  const handleEmojiSelect = (emojiData: EmojiClickData) => {
+    const emoji = emojiData.emoji;
+    const input = composerInputRef.current;
+
+    if (!input) {
+      const nextText = `${inputText}${emoji}`;
+      handleComposerInputChange(nextText, nextText.length);
+      return;
+    }
+
+    const cursorStart = input.selectionStart ?? inputText.length;
+    const cursorEnd = input.selectionEnd ?? cursorStart;
+    const nextText = `${inputText.slice(0, cursorStart)}${emoji}${inputText.slice(cursorEnd)}`;
+    const nextCursor = cursorStart + emoji.length;
+
+    handleComposerInputChange(nextText, nextCursor);
+
+    window.requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(nextCursor, nextCursor);
+    });
+
+    if (!activeChat) {
+      return;
+    }
+
+    if (!nextText.trim()) {
+      stopTyping();
+      return;
+    }
+
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      void sendTyping(true);
+    }
+
+    scheduleTypingStop();
+  };
+
+  useEffect(() => {
+    if (!isEmojiPickerOpen) {
+      return;
+    }
+
+    const handleOutsideEmojiPicker = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+
+      if (emojiPickerRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsEmojiPickerOpen(false);
+    };
+
+    document.addEventListener("mousedown", handleOutsideEmojiPicker);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideEmojiPicker);
+    };
+  }, [isEmojiPickerOpen]);
+
   useEffect(() => {
     return () => {
       stopTyping();
@@ -1989,7 +2029,7 @@ export function ChatPage() {
                 ? undefined
                 : extractDirectPeerUserId(chat as ConversationAvatarLike, user?.sub);
               const chatPresence = chatDmUserId ? dmPresenceByUserId[chatDmUserId] : undefined;
-              const chatLastSeenBadge = formatLastSeenShort(chatPresence);
+              const chatLastSeenBadge = formatLastSeenShort(chatPresence, chat.updatedAt);
               const chatGroupId = extractGroupIdFromConversationId(chat.conversationId);
               const chatAvatarFromConversation = resolveConversationAvatarUrl(chat as ConversationAvatarLike);
               const chatAvatarFromFriendMap = resolveDmAvatarFromFriendMap(
@@ -2024,7 +2064,7 @@ export function ChatPage() {
                 ) : null}
                 {!chat.isGroup && !chatPresence?.isActive ? (
                   <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
-                    {chatLastSeenBadge || "off"}
+                    {chatLastSeenBadge || "1m"}
                   </span>
                 ) : null}
               </div>
@@ -2085,7 +2125,7 @@ export function ChatPage() {
                   ) : null}
                   {!activeContact?.isGroup && !activePresence?.isActive ? (
                     <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
-                      {activeLastSeenBadge || "off"}
+                      {activeLastSeenBadge || "1m"}
                     </span>
                   ) : null}
                 </div>
@@ -2413,8 +2453,23 @@ export function ChatPage() {
                   </div>
                 ) : null}
                 {/* Đảo ngược array nếu API trả về tin mới nhất trước (thường thấy nếu limit offset) */}
-                {[...messages].reverse().map((msg) => {
+                {[...messages].reverse().map((msg, index, orderedMessages) => {
                   const isMe = msg.senderId === user?.sub;
+                  const previousMessage = orderedMessages[index - 1];
+                  const nextMessage = orderedMessages[index + 1];
+                  const isGroupIncoming = Boolean(activeContact?.isGroup && !isMe);
+                  const startsSenderBlock = !previousMessage || previousMessage.senderId !== msg.senderId;
+                  const endsSenderBlock = !nextMessage || nextMessage.senderId !== msg.senderId;
+                  const shouldShowSenderMeta = isGroupIncoming && startsSenderBlock;
+                  const senderProfile = msg.senderId ? memberProfilesById[msg.senderId] : undefined;
+                  const senderAvatarUrl =
+                    senderProfile?.avatarAsset?.resolvedUrl ||
+                    senderProfile?.avatarUrl ||
+                    (msg.senderId ? friendAvatarByUserId[msg.senderId] : undefined);
+                  const senderDisplayName =
+                    (msg.senderId ? mentionNameByUserId.get(msg.senderId) : undefined) ||
+                    msg.senderName ||
+                    "Thành viên";
                   const isEditing = editingMessageId === msg.id;
                   const canEditMessage = msg.type === "TEXT" || msg.type === "EMOJI" || msg.type === "SYSTEM";
                   const canRecallEveryone = isMe;
@@ -2561,14 +2616,34 @@ export function ChatPage() {
                         </div>
                       ) : null}
 
-                      <div
-                        onClick={(event) => event.stopPropagation()}
-                        className={`px-4 py-2 rounded-2xl shadow-sm ${
-                          isMe 
-                            ? "bg-blue-600 text-white rounded-br-sm" 
-                            : "bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 rounded-bl-sm"
-                        }`}
-                      >
+                      {shouldShowSenderMeta ? (
+                        <p className="mb-1 ml-10 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                          {senderDisplayName}
+                        </p>
+                      ) : null}
+
+                      <div className={`flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
+                        {isGroupIncoming ? (
+                          shouldShowSenderMeta ? (
+                            <Avatar className="h-8 w-8 shrink-0 border border-slate-200 dark:border-slate-700">
+                              {senderAvatarUrl ? <AvatarImage src={senderAvatarUrl} alt={senderDisplayName} /> : null}
+                              <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
+                                {senderDisplayName.charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                          ) : (
+                            <div className="h-8 w-8 shrink-0" />
+                          )
+                        ) : null}
+
+                        <div
+                          onClick={(event) => event.stopPropagation()}
+                          className={`px-4 py-2 rounded-2xl shadow-sm ${
+                            isMe 
+                              ? "bg-blue-600 text-white rounded-br-sm" 
+                              : "bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 rounded-bl-sm"
+                          }`}
+                        >
                         <div className="relative">
                           {isForwardedMessage ? (
                             <div className={`mb-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isMe ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
@@ -2655,10 +2730,13 @@ export function ChatPage() {
                             </a>
                           )
                         ) : null}
+                        </div>
                       </div>
-                      <span className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"}`}>
-                        {format(new Date(msg.sentAt), "HH:mm")}
-                      </span>
+                      {endsSenderBlock ? (
+                        <span className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"} ${isGroupIncoming ? "pl-10" : ""}`}>
+                          {format(new Date(msg.sentAt), "HH:mm")}
+                        </span>
+                      ) : null}
                       {messageActionError && (editingMessageId === msg.id || activeMessageMenuId === msg.id) ? (
                         <span className="mt-1 text-[11px] text-red-500">{messageActionError}</span>
                       ) : null}
@@ -2973,6 +3051,26 @@ export function ChatPage() {
               >
                 <Paperclip size={18} />
               </button>
+              <div className="relative" ref={emojiPickerRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
+                  className="h-11 w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
+                  title="Chọn emoji"
+                >
+                  <Smile size={18} />
+                </button>
+                {isEmojiPickerOpen ? (
+                  <div className="absolute bottom-12 left-0 z-50 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                    <EmojiPicker
+                      onEmojiClick={handleEmojiSelect}
+                      theme={document.documentElement.classList.contains("dark") ? Theme.DARK : Theme.LIGHT}
+                      autoFocusSearch={false}
+                      lazyLoadEmojis
+                    />
+                  </div>
+                ) : null}
+              </div>
               <div className="relative flex-1">
                 <Input 
                   type="text" 
