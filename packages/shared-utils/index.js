@@ -1,3 +1,4 @@
+const { createHash } = require("crypto");
 const { monotonicFactory } = require("ulid");
 
 let createMonotonicUlid;
@@ -80,6 +81,15 @@ function makeUserSessionSlotSk(sessionScope) {
 
 function makeUserPushDeviceSk(deviceId) {
   return `PUSH_DEVICE#${deviceId}`;
+}
+
+function makePushTokenLookupPk(pushToken) {
+  const digest = createHash("sha256").update(pushToken).digest("hex");
+  return `PUSH_TOKEN#${digest}`;
+}
+
+function makePushTokenLookupSk() {
+  return "LOOKUP";
 }
 
 function makeAuthEmailOtpPk(email) {
@@ -257,6 +267,8 @@ module.exports = {
   makeMembershipSk,
   makeMessageSk,
   makePhoneLookupKey,
+  makePushTokenLookupPk,
+  makePushTokenLookupSk,
   makePushOutboxPk,
   makePushOutboxSk,
   makeReportAuditSk,

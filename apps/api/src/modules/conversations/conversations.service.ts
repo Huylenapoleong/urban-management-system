@@ -2766,6 +2766,7 @@ export class ConversationsService {
     eventName: StoredChatOutboxEvent['eventName'],
     error: unknown,
   ): void {
+    this.chatOutboxService.requestDrain(eventName);
     const message = error instanceof Error ? error.message : 'Unknown error.';
     this.logger.warn(
       `Deferred ${eventName} replay to chat outbox for ${eventId}: ${message}`,

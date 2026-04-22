@@ -126,6 +126,19 @@ export function optionalBoolean(
   return value;
 }
 
+export function requiredBoolean(
+  body: Record<string, unknown>,
+  field: string,
+): boolean {
+  const value = body[field];
+
+  if (typeof value !== 'boolean') {
+    throw new BadRequestException(`${field} must be a boolean.`);
+  }
+
+  return value;
+}
+
 export function optionalStringArray(
   body: Record<string, unknown>,
   field: string,

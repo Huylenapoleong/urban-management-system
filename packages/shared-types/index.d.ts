@@ -399,6 +399,7 @@ export interface ChatCallRejectPayload extends ChatConversationCommandPayload {
 
 export interface ChatCallEndPayload extends ChatConversationCommandPayload {
   userId: string;
+  endedByUserId?: string;
 }
 
 export interface ChatWebRTCOfferPayload extends ChatConversationCommandPayload {

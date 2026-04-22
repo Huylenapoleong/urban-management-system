@@ -1,4 +1,8 @@
 import type { StoredPushDevice } from '../../common/storage-records';
+import {
+  makePushTokenLookupPk,
+  makePushTokenLookupSk,
+} from '@urban/shared-utils';
 import { PushNotificationService } from './push-notification.service';
 
 describe('PushNotificationService', () => {
@@ -8,6 +12,7 @@ describe('PushNotificationService', () => {
     put: jest.fn(),
     queryByPk: jest.fn(),
     scanAll: jest.fn(),
+    transactWrite: jest.fn(),
   };
   const chatPresenceService = {
     getPresence: jest.fn(),
@@ -34,6 +39,7 @@ describe('PushNotificationService', () => {
     repository.get.mockResolvedValue(undefined);
     repository.put.mockResolvedValue(undefined);
     repository.delete.mockResolvedValue(undefined);
+    repository.transactWrite.mockResolvedValue(undefined);
     repository.scanAll.mockResolvedValue([]);
   });
 
@@ -54,7 +60,15 @@ describe('PushNotificationService', () => {
       updatedAt: '2026-03-20T00:00:00.000Z',
     };
 
-    repository.scanAll.mockResolvedValue([conflictingDevice]);
+    repository.get.mockResolvedValueOnce(undefined).mockResolvedValueOnce({
+      PK: makePushTokenLookupPk('shared-token'),
+      SK: makePushTokenLookupSk(),
+      entityType: 'USER_PUSH_TOKEN_LOOKUP',
+      userId: conflictingDevice.userId,
+      deviceId: conflictingDevice.deviceId,
+      createdAt: conflictingDevice.createdAt,
+      updatedAt: conflictingDevice.updatedAt,
+    });
 
     await service.registerDevice('user-1', {
       deviceId: 'device-new',
@@ -64,18 +78,26 @@ describe('PushNotificationService', () => {
       appVariant: 'admin-web',
     });
 
-    expect(repository.delete).toHaveBeenCalledWith(
-      'Users',
-      conflictingDevice.PK,
-      conflictingDevice.SK,
-    );
-    expect(repository.put).toHaveBeenCalledWith(
-      'Users',
-      expect.objectContaining({
-        userId: 'user-1',
-        deviceId: 'device-new',
-        pushToken: 'shared-token',
-      }),
+    expect(repository.transactWrite).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Users',
+          item: expect.objectContaining({
+            userId: 'user-1',
+            deviceId: 'device-new',
+            pushToken: 'shared-token',
+          }),
+        }),
+        expect.objectContaining({
+          kind: 'delete',
+          tableName: 'Users',
+          key: {
+            PK: conflictingDevice.PK,
+            SK: conflictingDevice.SK,
+          },
+        }),
+      ]),
     );
   });
 });

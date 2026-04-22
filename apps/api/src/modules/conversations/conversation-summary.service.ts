@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   getConversationKind,
-  isDmConversationId,
   isGroupConversationId,
   makeGroupMetadataSk,
   makeGroupPk,
@@ -409,21 +408,10 @@ export class ConversationSummaryService {
     };
   }
 
-  private async resolveConversationSummaryParticipants(
+  private resolveConversationSummaryParticipants(
     access: ConversationSummaryAccess,
   ): Promise<string[]> {
-    if (isDmConversationId(access.conversationKey)) {
-      return Array.from(new Set(access.participants));
-    }
-
-    const storedSummaries = await this.repository.scanAll<StoredConversation>(
-      this.config.dynamodbConversationsTableName,
-    );
-    const summaryUserIds = storedSummaries
-      .filter((summary) => summary.conversationId === access.conversationKey)
-      .map((summary) => summary.userId);
-
-    return Array.from(new Set([...access.participants, ...summaryUserIds]));
+    return Promise.resolve(Array.from(new Set(access.participants)));
   }
 
   private async buildConversationLabelMap(

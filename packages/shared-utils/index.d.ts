@@ -18,6 +18,8 @@ export function makeUserProfileSk(): string;
 export function makeUserRefreshSessionSk(sessionId: string): string;
 export function makeUserSessionSlotSk(sessionScope: string): string;
 export function makeUserPushDeviceSk(deviceId: string): string;
+export function makePushTokenLookupPk(pushToken: string): string;
+export function makePushTokenLookupSk(): string;
 export function makeAuthEmailOtpPk(email: string): string;
 export function makeAuthEmailOtpSk(purpose: string): string;
 export function makeAuthRegisterDraftPk(email: string): string;

@@ -28,6 +28,7 @@ export type StorageEntityType =
   | 'AUTH_EMAIL_OTP'
   | 'AUTH_REGISTER_DRAFT'
   | 'USER_PUSH_DEVICE'
+  | 'USER_PUSH_TOKEN_LOOKUP'
   | 'PUSH_OUTBOX_EVENT'
   | 'GROUP_METADATA'
   | 'GROUP_MEMBERSHIP'
@@ -186,6 +187,14 @@ export interface StoredPushDevice
   userId: string;
   deviceId: string;
   pushToken: string;
+}
+
+export interface StoredPushTokenLookup extends TableItemBase {
+  entityType: 'USER_PUSH_TOKEN_LOOKUP';
+  userId: string;
+  deviceId: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StoredPushOutboxEvent extends TableItemBase {

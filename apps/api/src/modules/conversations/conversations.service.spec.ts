@@ -53,6 +53,7 @@ describe('ConversationsService', () => {
   const chatOutboxService = {
     buildChatOutboxEvent: jest.fn(),
     deleteChatOutboxEvent: jest.fn(),
+    requestDrain: jest.fn(),
   };
   const auditTrailService = {
     buildConversationEvent: jest.fn(),
@@ -280,6 +281,7 @@ describe('ConversationsService', () => {
       }),
     );
     chatOutboxService.deleteChatOutboxEvent.mockResolvedValue(undefined);
+    chatOutboxService.requestDrain.mockImplementation(() => undefined);
     conversationDispatchService.emitConversationRead.mockResolvedValue(
       undefined,
     );
@@ -1134,6 +1136,28 @@ describe('ConversationsService', () => {
       }),
     );
     expect(repository.transactPut).toHaveBeenCalled();
+  });
+
+  it('requests an eager outbox drain when direct dispatch fails after persisting a new message', async () => {
+    conversationDispatchService.emitMessageCreated.mockRejectedValueOnce(
+      new Error('socket dispatch failed'),
+    );
+
+    const result = await service.sendMessage(actor, `dm:${otherUser.userId}`, {
+      content: '{"text":"Fallback qua outbox ngay.","mention":[]}',
+      type: 'TEXT',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        senderId: actor.id,
+        type: 'TEXT',
+      }),
+    );
+    expect(chatOutboxService.requestDrain).toHaveBeenCalledWith(
+      'message.created',
+    );
   });
 
   it('blocks direct messages when the user pair is blocked', async () => {

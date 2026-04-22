@@ -165,4 +165,87 @@ describe('ConversationSummaryService', () => {
 
     expect(repository.scanAll).not.toHaveBeenCalled();
   });
+
+  it('does not scan all conversation summaries when syncing a group mutation', async () => {
+    const conversationId = 'GRP#group-1';
+    const latestMessage: StoredMessage = {
+      PK: makeConversationPk(conversationId),
+      SK: 'MSG#2026-03-18T10:05:00.000Z#01MESSAGE',
+      entityType: 'MESSAGE',
+      messageId: '01MESSAGE',
+      conversationId,
+      senderId: 'user-2',
+      senderName: 'Citizen Two',
+      type: 'TEXT',
+      content: '{"text":"Xin chao ca nhom","mention":[]}',
+      deletedAt: null,
+      sentAt: '2026-03-18T10:05:00.000Z',
+      updatedAt: '2026-03-18T10:05:00.000Z',
+    };
+    const summaryOne: StoredConversation = {
+      PK: makeInboxPk('user-1'),
+      SK: makeConversationSummarySk(conversationId, latestMessage.sentAt),
+      entityType: 'CONVERSATION',
+      GSI1PK: 'USER#user-1#TYPE#GRP',
+      userId: 'user-1',
+      conversationId,
+      groupName: 'Area Group 1',
+      lastMessagePreview: 'Xin chao ca nhom',
+      lastSenderName: 'Citizen Two',
+      unreadCount: 1,
+      isGroup: true,
+      deletedAt: null,
+      updatedAt: latestMessage.sentAt,
+      lastReadAt: null,
+    };
+    const summaryTwo: StoredConversation = {
+      ...summaryOne,
+      PK: makeInboxPk('user-2'),
+      GSI1PK: 'USER#user-2#TYPE#GRP',
+      userId: 'user-2',
+      unreadCount: 0,
+    };
+
+    repository.get.mockResolvedValue({
+      groupId: 'group-1',
+      groupName: 'Area Group 1',
+      deletedAt: null,
+    });
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [latestMessage];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === summaryOne.PK &&
+          options?.beginsWith === `CONV#${conversationId}#LAST#`
+        ) {
+          return [summaryOne];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === summaryTwo.PK &&
+          options?.beginsWith === `CONV#${conversationId}#LAST#`
+        ) {
+          return [summaryTwo];
+        }
+
+        return [];
+      },
+    );
+
+    await service.syncConversationSummariesAfterMessageMutation({
+      conversationKey: conversationId,
+      participants: ['user-1', 'user-2'],
+    });
+
+    expect(repository.scanAll).not.toHaveBeenCalled();
+  });
 });
