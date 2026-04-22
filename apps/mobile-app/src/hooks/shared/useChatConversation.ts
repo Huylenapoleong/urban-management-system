@@ -19,8 +19,8 @@ import type {
 } from '@urban/shared-types';
 
 const PRESENCE_OFFLINE_GRACE_MS = 120000;
-const INITIAL_MESSAGES_LIMIT = 20;
-const OLDER_MESSAGES_BATCH_LIMIT = 20;
+const INITIAL_MESSAGES_LIMIT = 7;
+const OLDER_MESSAGES_BATCH_LIMIT = 7;
 const RECALL_FALLBACK_TEXT = 'Tin nhắn đã bị thu hồi';
 const QUICK_REACTION_EMOJIS = new Set(['👍', '❤️', '😂', '😮', '😢', '😡']);
 
@@ -288,6 +288,11 @@ export const useChatConversation = (
     [conversationId, isDmConversation],
   );
 
+  const optionsRef = useRef(options);
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+
   useEffect(() => {
     accessDeniedHandledRef.current = false;
   }, [conversationId]);
@@ -302,11 +307,11 @@ export const useChatConversation = (
     }
 
     accessDeniedHandledRef.current = true;
-    options?.onConversationAccessDenied?.({
+    optionsRef.current?.onConversationAccessDenied?.({
       conversationId,
       error,
     });
-  }, [conversationId, options, shouldRetryDmForbidden]);
+  }, [conversationId, shouldRetryDmForbidden]);
 
   const wait = useCallback(async (ms: number) => {
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -768,6 +773,11 @@ export const useChatConversation = (
     }
   }, [conversationId, isReady, currentUser, normalizeRecalledMessage]);
 
+  const createClientMessageId = useCallback(
+    () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    [],
+  );
+
   // Fetch only once when opening conversation if realtime socket is not ready.
   useEffect(() => {
     if (!conversationId || isReady) {
@@ -851,13 +861,13 @@ export const useChatConversation = (
       const attachmentUrl = uploadResponse.url || uploadResponse.key;
       const attachmentKey = uploadResponse.key || undefined;
 
-      await sendMessage(fileName, Date.now().toString(), type, attachmentUrl, replyTo, attachmentKey);
+      await sendMessage(fileName, createClientMessageId(), type, attachmentUrl, replyTo, attachmentKey);
       
     } catch (e) {
       console.error('[useChatConversation] Media send failed:', e);
       throw e;
     }
-  }, [conversationId, sendMessage]);
+  }, [conversationId, sendMessage, createClientMessageId]);
 
   // ── 4. Typing indicator ───────────────────────────────────────────────────
   const sendTyping = useCallback((isTyping: boolean) => {
@@ -945,17 +955,39 @@ export const useChatConversation = (
   const deleteMessage = recallMessage;
 
   const updateMessage = useCallback(async (messageId: string, content?: string, attachmentUrl?: string) => {
-    if (!isReady || !conversationId) return;
-    try {
-      const ack = await socketClient.emitWithAck<ChatMessageUpdatedAccepted>(
-        CHAT_SOCKET_EVENTS.MESSAGE_UPDATE,
-        { conversationId, messageId, content, attachmentUrl }
-      );
-      if (__DEV__) {
-        console.log('[useChatConversation] Message update ack:', ack);
+    if (!conversationId) return;
+
+    const payload = { messageId, content, attachmentUrl };
+
+    if (isReady) {
+      try {
+        const ack = await socketClient.emitWithAck<ChatMessageUpdatedAccepted>(
+          CHAT_SOCKET_EVENTS.MESSAGE_UPDATE,
+          { conversationId, ...payload }
+        );
+        if (__DEV__) {
+          console.log('[useChatConversation] Message update ack:', ack);
+        }
+        return;
+      } catch (socketError) {
+        if (__DEV__) {
+          console.log('[ChatFallback] socket update failed, fallback to REST', {
+            conversationId,
+            messageId,
+            error: String((socketError as any)?.message || socketError || 'unknown'),
+          });
+        }
       }
+    }
+
+    try {
+      await ApiClient.patch(
+        `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+        { content, attachmentUrl },
+      );
     } catch (e) {
       console.error('[useChatConversation] Update message failed:', e);
+      throw e;
     }
   }, [conversationId, isReady]);
 

@@ -13,12 +13,26 @@ import { useAuth } from '../../providers/AuthProvider';
 
 export type CallState = 'IDLE' | 'CALLING' | 'INCOMING' | 'CONNECTED';
 
-interface CallConfig {
+export interface CallConfig {
   isVideo: boolean;
   targetUserId?: string;
   callerId?: string;
   callerName?: string;
+  callerAvatarUrl?: string;
+  peerName?: string;
+  peerAvatarUrl?: string;
   conversationId?: string;
+}
+
+export interface CallEndedSummary {
+  conversationId: string;
+  peerUserId?: string;
+  peerName: string;
+  peerAvatarUrl?: string;
+  isVideo: boolean;
+  durationSeconds: number;
+  endedAt: string;
+  direction: "incoming" | "outgoing";
 }
 
 export const useWebRTC = (conversationId?: string) => {
@@ -36,9 +50,48 @@ export const useWebRTC = (conversationId?: string) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMicOn, setIsMicOn] = useState(true);
+  const [isVideoOn, setIsVideoOn] = useState(true);
+  const [lastEndedCall, setLastEndedCall] = useState<CallEndedSummary | null>(null);
+  const [callDurationSeconds, setCallDurationSeconds] = useState(0);
+  const [callError, setCallError] = useState<string | null>(null);
   
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const pendingIceCandidatesRef = useRef<any[]>([]);
+  const activeConfigRef = useRef<CallConfig | null>(null);
+  const callStateRef = useRef<CallState>('IDLE');
+  const callStartedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    activeConfigRef.current = activeConfig;
+  }, [activeConfig]);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+
+    if (callState === 'CONNECTED' && !callStartedAtRef.current) {
+      callStartedAtRef.current = Date.now();
+    }
+
+    if (callState === 'IDLE') {
+      callStartedAtRef.current = null;
+      setCallDurationSeconds(0);
+    }
+  }, [callState]);
+
+  useEffect(() => {
+    if (callState !== 'CONNECTED' || !callStartedAtRef.current) {
+      setCallDurationSeconds(0);
+      return;
+    }
+
+    const tick = () => {
+      setCallDurationSeconds(Math.max(0, Math.floor((Date.now() - callStartedAtRef.current!) / 1000)));
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [callState]);
 
   const flushPendingIceCandidates = useCallback(async () => {
     const pc = peerConnection.current;
@@ -92,7 +145,41 @@ export const useWebRTC = (conversationId?: string) => {
     };
   };
 
-  const cleanup = useCallback(() => {
+  const cleanup = useCallback((options?: { remoteDurationSeconds?: number }) => {
+    const currentConfig = activeConfigRef.current;
+    const isConnectedCall = callStateRef.current === 'CONNECTED' && Boolean(currentConfig);
+
+    if (isConnectedCall && callStartedAtRef.current) {
+      const endedAt = Date.now();
+      const computedDuration = Math.max(0, Math.round((endedAt - callStartedAtRef.current) / 1000));
+      const durationSeconds = typeof options?.remoteDurationSeconds === 'number'
+        ? Math.max(0, Math.round(options.remoteDurationSeconds))
+        : computedDuration;
+      setLastEndedCall({
+        conversationId: currentConfig!.conversationId || '',
+        peerUserId: currentConfig?.callerId === user?.sub ? currentConfig?.targetUserId : currentConfig?.callerId,
+        peerName: currentConfig?.peerName || currentConfig?.callerName || 'Người dùng',
+        peerAvatarUrl: currentConfig?.peerAvatarUrl || currentConfig?.callerAvatarUrl,
+        isVideo: Boolean(currentConfig?.isVideo),
+        durationSeconds,
+        endedAt: new Date(endedAt).toISOString(),
+        direction: currentConfig?.callerId === user?.sub ? 'outgoing' : 'incoming',
+      });
+    } else if (currentConfig) {
+      // Missed/Rejected call with 0s duration
+      setLastEndedCall({
+        conversationId: currentConfig!.conversationId || '',
+        peerUserId: currentConfig?.callerId === user?.sub ? currentConfig?.targetUserId : currentConfig?.callerId,
+        peerName: currentConfig?.peerName || currentConfig?.callerName || 'Người dùng',
+        peerAvatarUrl: currentConfig?.peerAvatarUrl || currentConfig?.callerAvatarUrl,
+        isVideo: Boolean(currentConfig?.isVideo),
+        durationSeconds: 0,
+        endedAt: new Date().toISOString(),
+        direction: currentConfig?.callerId === user?.sub ? 'outgoing' : 'incoming',
+      });
+    }
+
+    callStartedAtRef.current = null;
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
@@ -108,7 +195,8 @@ export const useWebRTC = (conversationId?: string) => {
     pendingIceCandidatesRef.current = [];
     setCallState('IDLE');
     setActiveConfig(null);
-  }, [localStream, remoteStream]);
+    setCallError(null);
+  }, [localStream, remoteStream, user?.sub]);
 
   const setupPeerConnection = useCallback(async (isCaller: boolean, config: CallConfig) => {
     console.log('[useWebRTC] Setting up PeerConnection');
@@ -237,11 +325,17 @@ export const useWebRTC = (conversationId?: string) => {
 
   // End an Active Call
   const endCall = () => {
-    if (activeConfig?.conversationId) {
-      const targetConvId = activeConfig.callerId ? `dm:${activeConfig.callerId}` : activeConfig.conversationId;
+    const config = activeConfigRef.current;
+    if (config?.conversationId) {
+      const startedAt = callStartedAtRef.current;
+      const durationSeconds = startedAt
+        ? Math.max(0, Math.round((Date.now() - startedAt) / 1000))
+        : 0;
+      const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
       safeEmit(CHAT_SOCKET_EVENTS.CALL_END, {
         conversationId: targetConvId,
         userId: user?.sub,
+        durationSeconds,
       });
     }
     cleanup();
@@ -317,7 +411,7 @@ export const useWebRTC = (conversationId?: string) => {
     };
 
     const onCallEnd = (data: any) => {
-      cleanup();
+      cleanup({ remoteDurationSeconds: data?.durationSeconds });
     };
 
     const onOffer = async (data: any) => {
@@ -381,11 +475,16 @@ export const useWebRTC = (conversationId?: string) => {
     localStream,
     remoteStream,
     isMicOn,
+    isVideoOn,
+    callError,
     startCall,
     acceptCall,
     rejectCall,
     endCall,
     toggleMute,
     toggleVideo,
+    lastEndedCall,
+    callDurationSeconds,
+    clearLastEndedCall: () => setLastEndedCall(null),
   };
 };

@@ -16,7 +16,7 @@ import { ReportGeneratorService } from './services/report-generator.service';
  *   - UrbanTableRepository, AppConfigService, CircuitBreakerService
  *
  * Rate Limiting:
- *   - ThrottlerModule cấu hình global default 10 requests / phút
+ *   - ThrottlerModule cấu hình default 70 requests / phút
  *   - Controller override được qua @Throttle()
  *
  * New services:
@@ -30,7 +30,7 @@ import { ReportGeneratorService } from './services/report-generator.service';
       {
         name: 'default',
         ttl: 60000,  // 60 giây
-        limit: 10,   // 10 requests per window
+        limit: 70,   // 70 requests per window
       },
     ]),
   ],
@@ -42,10 +42,6 @@ import { ReportGeneratorService } from './services/report-generator.service';
     ChatbotPrivacyService,
     GroupChatSummaryService,
     ReportGeneratorService,
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
   ],
 })
 export class ChatbotModule {}

@@ -17,7 +17,7 @@ export const useConversations = (query: { q?: string; unreadOnly?: boolean } = {
   return useQuery<ConversationSummaryItem[]>({
     queryKey: ['conversations', query],
     queryFn: async ({ signal }) => {
-      const params: any = {};
+      const params: any = { limit: 20 };
       if (query.q) params.q = query.q;
       if (query.unreadOnly) params.unreadOnly = query.unreadOnly;
       try {

@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, Image, ScrollView, Alert, Share } from 'react-native';
 import { Text, TextInput, IconButton, Appbar, ActivityIndicator, Avatar, Portal, Modal, Button } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, useSegments } from 'expo-router';
@@ -11,9 +11,14 @@ import { useWebRTCContext } from '../../../providers/WebRTCContext';
 import { ApiClient } from '../../../lib/api-client';
 import { ENV_CONFIG } from '../../../constants/env';
 import { convertToS3Url } from '../../../constants/s3';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { CallEndedSummary } from '../../../hooks/shared/useWebRTC';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { ChatDetailHeader } from './_components/ChatDetailHeader';
 import { ChatMediaPanels } from './_components/ChatMediaPanels';
+import { GroupInfoModal } from './_components/GroupInfoModal';
+import { InviteFriendsModal } from './_components/InviteFriendsModal';
+import { uploadMedia } from '../../../services/api/upload.api';
 
 const OFFICIAL_CHAT_PRIMARY = '#1f3e68';
 const OFFICIAL_CHAT_TEXT = '#ffffff';
@@ -144,6 +149,23 @@ const resolveAttachmentType = (
   return 'DOC';
 };
 
+const MemoMessageWrapper = React.memo(
+  ({ item, renderMessageBubble }: any) => {
+    return renderMessageBubble(item);
+  },
+  (prev, next) => {
+    return (
+      prev.item.id === next.item.id &&
+      prev.item.content === next.item.content &&
+      prev.item.isOptimistic === next.item.isOptimistic &&
+      prev.item.deletedAt === next.item.deletedAt &&
+      prev.highlightedMessageId === next.highlightedMessageId &&
+      prev.knownUsersLength === next.knownUsersLength &&
+      prev.isMe === next.isMe
+    );
+  }
+);
+
 export default function OfficialChatScreen() {
   const { id: conversationId } = useLocalSearchParams<{ id: string }>();
   const segments = useSegments();
@@ -152,6 +174,13 @@ export default function OfficialChatScreen() {
     const dec = decodeURIComponent(conversationId);
     return dec.startsWith('dm-') ? `dm:${dec.slice(3)}` : dec;
   }, [conversationId]);
+
+  const isGroup = useMemo(() => decodedId?.startsWith('GRP#') || decodedId?.startsWith('group:'), [decodedId]);
+  const groupId = useMemo(() => {
+    if (decodedId?.startsWith('GRP#')) return decodedId.slice(4);
+    if (decodedId?.startsWith('group:')) return decodedId.slice('group:'.length);
+    return '';
+  }, [decodedId]);
 
   const router = useRouter();
   const chatListPath = segments[0] === '(citizen)' ? '/(citizen)/chat' : '/(official)/chat';
@@ -167,18 +196,96 @@ export default function OfficialChatScreen() {
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [typingDots, setTypingDots] = useState('.');
   
+  const [callSummaries, setCallSummaries] = useState<CallEndedSummary[]>([]);
+  const { lastEndedCall, clearLastEndedCall } = useWebRTCContext();
+
+  useEffect(() => {
+    if (!lastEndedCall) return;
+
+    setCallSummaries((prev) => {
+      const next = [...prev];
+      const nextKey = [
+        lastEndedCall.conversationId,
+        lastEndedCall.endedAt,
+        lastEndedCall.peerUserId || '',
+        lastEndedCall.direction,
+        String(lastEndedCall.durationSeconds),
+      ].join('|');
+
+      const hasDuplicate = next.some(
+        (item) =>
+          [
+            item.conversationId,
+            item.endedAt,
+            item.peerUserId || '',
+            item.direction,
+            String(item.durationSeconds),
+          ].join('|') === nextKey,
+      );
+
+      if (!hasDuplicate) {
+        next.push(lastEndedCall);
+      }
+      return next;
+    });
+  }, [lastEndedCall]);
+
+  const resolveCallSummary = useCallback(
+    (msg: any, expectedDirection: 'INCOMING' | 'OUTGOING', expectedIsVideo: boolean) => {
+      const candidates = callSummaries.filter((item) => item.conversationId === decodedId);
+      if (candidates.length === 0) return null;
+
+      const byDirectionAndType = candidates.filter(
+        (item) => item.direction.toUpperCase() === expectedDirection && item.isVideo === expectedIsVideo,
+      );
+      const byDirection = candidates.filter((item) => item.direction.toUpperCase() === expectedDirection);
+      const scopedCandidates = byDirectionAndType.length > 0 ? byDirectionAndType : (byDirection.length > 0 ? byDirection : candidates);
+
+      const messageTime = new Date(msg.sentAt).getTime();
+      const nearest = scopedCandidates
+        .map((item) => ({
+          item,
+          diff: Math.abs(new Date(item.endedAt).getTime() - messageTime),
+        }))
+        .sort((left, right) => left.diff - right.diff)[0];
+
+      if (!nearest || nearest.diff > 10 * 60 * 1000) return null;
+      return nearest.item;
+    },
+    [callSummaries, decodedId],
+  );
+
+  const formatCallDuration = (totalSeconds: number): string => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = safeSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   const flatListRef = useRef<FlatList>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
+  const [editingMessage, setEditingMessage] = useState<any>(null);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [forwardDialogVisible, setForwardDialogVisible] = useState(false);
+  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwardTargetIds, setForwardTargetIds] = useState<string[]>([]);
+  const [isForwarding, setIsForwarding] = useState(false);
   const [convInfo, setConvInfo] = useState<any>(null);
+  const [allConversations, setAllConversations] = useState<any[]>([]);
   const [accessDeniedDialogVisible, setAccessDeniedDialogVisible] = useState(false);
   const [isDeletingDeniedConversation, setIsDeletingDeniedConversation] = useState(false);
 
   // States for @mention functionality
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
+
+  // Group Info Dialog states
+  const [groupInfoDialogVisible, setGroupInfoDialogVisible] = useState(false);
+  const [addMemberDialogVisible, setAddMemberDialogVisible] = useState(false);
+  const [isAddingMember, setIsAddingMember] = useState(false);
+  const [isUpdatingAvatar, setIsUpdatingAvatar] = useState(false);
 
   const handleConversationAccessDenied = useCallback(() => {
     setAccessDeniedDialogVisible(true);
@@ -212,10 +319,15 @@ export default function OfficialChatScreen() {
     })();
   }, [chatListPath, decodedId, isDeletingDeniedConversation, router]);
 
+  const chatOptions = useMemo(() => ({
+    onConversationAccessDenied: handleConversationAccessDenied,
+  }), [handleConversationAccessDenied]);
+
   const {
     messages,
     isLoadingHistory,
     isReady,
+    presenceByUser,
     sendMessage,
     sendMedia,
     sendTyping,
@@ -223,17 +335,157 @@ export default function OfficialChatScreen() {
     markRead,
     deleteMessage,
     updateMessage,
-  } = useChatConversation(decodedId, currentUser, {
-    onConversationAccessDenied: handleConversationAccessDenied,
-  });
+    forwardMessage,
+  } = useChatConversation(decodedId, currentUser, chatOptions);
 
-  const isGroup = useMemo(() => decodedId?.startsWith('GRP#') || decodedId?.startsWith('group:'), [decodedId]);
-  const groupId = useMemo(() => {
-    if (decodedId?.startsWith('GRP#')) return decodedId.slice(4);
-    if (decodedId?.startsWith('group:')) return decodedId.slice('group:'.length);
-    return '';
-  }, [decodedId]);
+  const getPresenceSubtitle = useCallback(() => {
+    if (decodedId?.startsWith('GRP#') || decodedId?.startsWith('group:')) {
+      if (!groupMembers || groupMembers.length === 0) return 'Đang cập nhật...';
+      return `${groupMembers.length} thành viên`;
+    }
+    
+    if (!isReady) return 'Đang kết nối...';
+    
+    const peerId = decodedId?.startsWith('dm:') ? decodedId.replace('dm:', '') : decodedId;
+    const presence = presenceByUser[String(peerId)];
+    
+    if (!presence) return 'Ngoại tuyến';
+    if (presence.isActive) return 'Vừa mới truy cập';
+    
+    if (presence.lastSeenAt) {
+        const diffMs = Date.now() - new Date(presence.lastSeenAt).getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        if (diffMins < 1) return 'Vừa mới truy cập';
+        if (diffMins < 60) return `Hoạt động ${diffMins} phút trước`;
+        const diffHours = Math.floor(diffMins / 60);
+        if (diffHours < 24) return `Hoạt động ${diffHours} giờ trước`;
+        return `Hoạt động ${Math.floor(diffHours / 24)} ngày trước`;
+    }
+    
+    return 'Ngoại tuyến';
+  }, [groupMembers.length, isReady, decodedId, presenceByUser]);
+
+  const handleLeaveGroup = useCallback(async (currentGroupId: string) => {
+    if (!currentGroupId) return;
+    try {
+      await ApiClient.post(`/groups/${currentGroupId}/leave`);
+      setGroupInfoDialogVisible(false);
+      router.replace(chatListPath as any);
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.message || 'Không thể rời nhóm. (Chủ nhóm không thể tự rời)');
+    }
+  }, [router, chatListPath]);
+
+  const handleRemoveMember = useCallback(async (currentGroupId: string, userId: string) => {
+    if (!currentGroupId) return;
+    try {
+      await ApiClient.patch(`/groups/${currentGroupId}/members/${userId}`, { action: 'remove' });
+      setGroupMembers(prev => prev.filter(m => m.userId !== userId));
+      Alert.alert('Thành công', 'Đã xóa thành viên khỏi nhóm.');
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.message || 'Không thể xóa thành viên.');
+    }
+  }, []);
+
+  const handleUpdateMemberRole = useCallback(async (currentGroupId: string, targetUserId: string, currentRole: string) => {
+    const newRole = currentRole === 'OFFICER' ? 'MEMBER' : 'OFFICER';
+    try {
+      const res = await ApiClient.patch(`/groups/${currentGroupId}/members/${targetUserId}`, { action: 'update', roleInGroup: newRole });
+      setGroupMembers(prev => prev.map(m => m.userId === targetUserId ? res : m));
+      Alert.alert('Thành công', `Đã đổi quyền thành ${newRole === 'OFFICER' ? 'Phó nhóm' : 'Thành viên'}.`);
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.message || 'Không thể đổi quyền.');
+    }
+  }, []);
+
+  const handleUpdateGroupAvatar = useCallback(async () => {
+    if (!groupId) return;
+    
+    // Check permission
+    const isOwner = convInfo?.ownerId === currentUser?.sub;
+    if (!isOwner) {
+      Alert.alert('Chỉ Quản trị viên mới được đổi ảnh nhóm.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets?.[0]) {
+      setIsUpdatingAvatar(true);
+      try {
+        const uploaded = await uploadMedia({
+          uri: result.assets[0].uri,
+          fileName: `group-${groupId}-avatar.jpg`,
+          mimeType: 'image/jpeg',
+          target: 'AVATAR',
+        });
+        
+        await ApiClient.patch(`/groups/${groupId}`, { avatarUrl: uploaded.url });
+        
+        setConvInfo((prev: any) => ({ ...prev, avatarUrl: uploaded.url }));
+        Alert.alert('Thành công', 'Đã cập nhật ảnh đại diện nhóm.');
+      } catch (error: any) {
+        Alert.alert('Lỗi', error?.message || 'Không thể cập nhật ảnh đại diện.');
+      } finally {
+        setIsUpdatingAvatar(false);
+      }
+    }
+  }, [groupId, convInfo?.ownerId, currentUser?.sub]);
+
+  const handleAddMemberSubmit = useCallback(async (currentGroupId: string, targetUserId: string) => {
+    if (!currentGroupId || !targetUserId.trim()) return;
+    try {
+      setIsAddingMember(true);
+      const res = await ApiClient.patch(`/groups/${currentGroupId}/members/${targetUserId.trim()}`, { action: 'add' });
+      setGroupMembers(prev => [...prev, res]);
+      setAddMemberDialogVisible(false);
+      Alert.alert('Thành công', 'Đã thêm thành viên.');
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.message || 'Không thể thêm thành viên. (Bạn không có quyền hoặc người dùng đã có trong nhóm)');
+    } finally {
+      setIsAddingMember(false);
+    }
+  }, []);
+
+
+
+
   const messagesById = useMemo(() => new Map(messages.map((item: any) => [item.id, item])), [messages]);
+  const dedupedMessages = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const item of messages) {
+      if (!item?.id) continue;
+      map.set(String(item.id), item);
+    }
+    return Array.from(map.values()).reverse();
+  }, [messages]);
+
+  const filteredForwardConversations = useMemo(() => {
+    const normalized = forwardSearch.trim().toLowerCase();
+
+    return allConversations
+      .filter((conversation) => conversation?.conversationId && conversation.conversationId !== decodedId)
+      .filter((conversation) => {
+        if (!normalized) return true;
+
+        const haystack = [
+          conversation.groupName,
+          conversation.lastMessagePreview,
+          conversation.lastSenderName,
+          conversation.conversationId,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        return haystack.includes(normalized);
+      });
+  }, [allConversations, decodedId, forwardSearch]);
 
   // Build a dictionary of known names from messages and active typers
   const knownUsers = useMemo(() => {
@@ -253,6 +505,7 @@ export default function OfficialChatScreen() {
     
     ApiClient.get('/conversations')
       .then((convs) => {
+        setAllConversations(convs || []);
         const found = convs.find((c: any) => c.conversationId === decodedId);
         if (found) setConvInfo(found);
       })
@@ -298,12 +551,81 @@ export default function OfficialChatScreen() {
     return () => clearInterval(interval);
   }, [typingUsers]);
 
+  const createClientMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
   const handleSend = () => {
-    if (!text.trim()) return;
-    sendMessage(text.trim(), Date.now().toString(), 'TEXT', undefined, replyToMessage?.id);
+    const trimmedText = text.trim();
+    if (!trimmedText) return;
+
+    if (editingMessage) {
+      let nextContent = trimmedText;
+      try {
+        const parsed = JSON.parse(editingMessage.content);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          nextContent = JSON.stringify({
+            ...parsed,
+            text: trimmedText,
+            content: trimmedText,
+          });
+        }
+      } catch {
+        nextContent = trimmedText;
+      }
+
+      updateMessage(editingMessage.id, nextContent);
+      setEditingMessage(null);
+      setText('');
+      sendTyping(false);
+      return;
+    }
+
+    sendMessage(trimmedText, createClientMessageId(), 'TEXT', undefined, replyToMessage?.id);
     setText('');
     setReplyToMessage(null);
     sendTyping(false);
+  };
+
+  const handleQuickLike = () => {
+    sendMessage('👍', createClientMessageId(), 'TEXT', undefined, replyToMessage?.id);
+    setReplyToMessage(null);
+    sendTyping(false);
+  };
+
+  const handleToggleForwardTarget = (conversationId: string) => {
+    setForwardTargetIds((prev) =>
+      prev.includes(conversationId) ? prev.filter((id) => id !== conversationId) : [...prev, conversationId],
+    );
+  };
+
+  const openForwardDialog = () => {
+    if (!selectedMessage?.id) {
+      return;
+    }
+
+    setMenuVisible(false);
+    setForwardTargetIds([]);
+    setForwardSearch('');
+    setForwardDialogVisible(true);
+  };
+
+  const submitForward = async () => {
+    if (!selectedMessage?.id || !forwardTargetIds.length) {
+      Alert.alert('Thông báo', 'Vui lòng chọn ít nhất một cuộc trò chuyện.');
+      return;
+    }
+
+    try {
+      setIsForwarding(true);
+      await forwardMessage(selectedMessage.id, forwardTargetIds);
+      setForwardDialogVisible(false);
+      setForwardTargetIds([]);
+      setForwardSearch('');
+      Alert.alert('Thành công', 'Đã chuyển tiếp tin nhắn.');
+    } catch (error: any) {
+      Alert.alert('Lỗi', error?.message || 'Không thể chuyển tiếp tin nhắn lúc này.');
+    } finally {
+      setIsForwarding(false);
+    }
   };
 
   const handleStartAudioCall = () => {
@@ -478,7 +800,7 @@ export default function OfficialChatScreen() {
         const mapUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
         sendMessage(
           `Vị trí hiện tại: ${mapUrl}`,
-          Date.now().toString(),
+          createClientMessageId(),
           'TEXT',
           undefined,
           replyToMessage?.id,
@@ -752,6 +1074,38 @@ export default function OfficialChatScreen() {
       );
     }
 
+    if (item.type === 'SYSTEM') {
+      const content = typeof item.content === 'string' ? item.content : String(item.content || '');
+      if (content.startsWith('CALL_ENDED|')) {
+        const parts = content.split('|');
+        const direction = parts[1] as 'INCOMING' | 'OUTGOING';
+        const isVideo = parts[2] === 'true';
+        const summary = resolveCallSummary(item, direction, isVideo);
+        const isMissed = summary ? summary.durationSeconds === 0 : true;
+
+        return (
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isMe ? OFFICIAL_CHAT_COLORS.primarySoftStrong : '#f0f0f0', padding: 8, borderRadius: 8, marginVertical: 4 }}>
+             <MaterialCommunityIcons name={isVideo ? 'video' : 'phone'} size={20} color={isMissed ? '#d32f2f' : '#388e3c'} style={{ marginRight: 8 }} />
+             <View>
+               <Text style={{ fontWeight: 'bold', color: isMissed ? '#d32f2f' : (isMe ? OFFICIAL_CHAT_COLORS.textOnPrimary : '#333') }}>
+                 {direction === 'INCOMING' 
+                    ? (isMissed ? 'Cuộc gọi nhỡ' : 'Cuộc gọi đến') 
+                    : (isMissed ? 'Cuộc gọi đi chưa được trả lời' : 'Cuộc gọi đi')}
+               </Text>
+               {!isMissed && summary && (
+                 <Text style={{ fontSize: 12, color: isMe ? OFFICIAL_CHAT_COLORS.mutedTextOnPrimary : '#666' }}>{formatCallDuration(summary.durationSeconds)}</Text>
+               )}
+             </View>
+          </View>
+        );
+      }
+      return (
+        <Text style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface, fontStyle: 'italic', textAlign: 'center', marginVertical: 4 }}>
+          {parseMessageContent(item.content)}
+        </Text>
+      );
+    }
+
     return (
       <Text style={{ color: OFFICIAL_CHAT_COLORS.messageText, fontSize: 16 }}>
         {parseMessageContent(item.content)}
@@ -759,21 +1113,16 @@ export default function OfficialChatScreen() {
     );
   };
 
-  const MessageBubble = React.memo(function MessageBubble({ item }: { item: any }) {
+  const renderMessageBubble = (item: any) => {
     const isMe = currentUser?.sub === item.senderId;
 
-    const reactions = useMemo(() => {
-      try {
-        const parsed = JSON.parse(item.content);
-        return parsed.reactions || {};
-      } catch {
-        return {};
-      }
-    }, [item.content]);
-
-    const thumbUpUsers: string[] = Array.isArray(reactions['👍']) ? reactions['👍'] : [];
-    const likeCount = thumbUpUsers.length;
-    const likedByMe = !!currentUser?.sub && thumbUpUsers.includes(currentUser.sub);
+    let reactions = {};
+    try {
+      const parsed = JSON.parse(item.content);
+      reactions = parsed.reactions || {};
+    } catch {
+      // ignore
+    }
 
     return (
       <View style={[styles.messageWrapper, isMe ? styles.messageWrapperRight : styles.messageWrapperLeft]}>
@@ -805,15 +1154,6 @@ export default function OfficialChatScreen() {
             {renderMessageContent(item)}
             
             <View style={styles.bubbleFooter}>
-              <TouchableOpacity
-                style={styles.quickLikeButton}
-                onPress={() => handleReaction(item, '👍')}
-                activeOpacity={0.75}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              >
-                <Text style={[styles.quickLikeIcon, likedByMe && styles.quickLikeIconActive]}>👍</Text>
-                {likeCount > 0 && <Text style={styles.quickLikeCount}>{likeCount}</Text>}
-              </TouchableOpacity>
               <Text variant="labelSmall" style={[styles.timeText, { color: OFFICIAL_CHAT_COLORS.mutedTextOnPrimary }]}>
                 {item.isOptimistic ? 'Đang gửi...' : new Date(item.sentAt || Date.now()).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
               </Text>
@@ -834,7 +1174,7 @@ export default function OfficialChatScreen() {
         </View>
       </View>
     );
-  });
+  };
 
   const pinnedMessages = useMemo(() => {
     return messages.filter(m => {
@@ -873,6 +1213,22 @@ export default function OfficialChatScreen() {
       Alert.alert('Đã sao chép (Tạm thời)', textToCopy);
       setMenuVisible(false);
     }
+  };
+
+  const handleEdit = () => {
+    if (!selectedMessage) {
+      return;
+    }
+
+    if (currentUser?.sub !== selectedMessage.senderId) {
+      setMenuVisible(false);
+      return;
+    }
+
+    setEditingMessage(selectedMessage);
+    setReplyToMessage(null);
+    setText(parseMessageContent(selectedMessage.content));
+    setMenuVisible(false);
   };
 
   const handleRecall = () => {
@@ -939,9 +1295,18 @@ export default function OfficialChatScreen() {
     updateMessage(item.id, newContent);
   };
 
-  const renderMessage = ({ item }: { item: any }) => (
-    <MessageBubble item={item} />
-  );
+    const knownUsersLength = Object.keys(knownUsers).length;
+    const isMeFunc = (item: any) => currentUser?.sub === item?.senderId;
+  
+    const renderMessage = ({ item }: { item: any }) => (
+      <MemoMessageWrapper
+        item={item}
+        renderMessageBubble={renderMessageBubble}
+        highlightedMessageId={highlightedMessageId}
+        knownUsersLength={knownUsersLength}
+        isMe={isMeFunc(item)}
+      />
+    );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: OFFICIAL_CHAT_COLORS.surface }]}>
@@ -949,10 +1314,10 @@ export default function OfficialChatScreen() {
         styles={styles}
         colors={OFFICIAL_CHAT_COLORS}
         isGroup={isGroup}
-        headerAvatarUrl={null}
-        conversationDisplayName={convInfo?.groupName || 'Phong Trao Doi'}
-        subtitleText={isReady ? 'Dang hoat dong' : 'Dang ket noi...'}
-        isPeerOnline={isReady}
+        headerAvatarUrl={convInfo?.avatarUrl || null}
+        conversationDisplayName={convInfo?.groupName || (isGroup ? 'Nhóm Trò Chuyện' : (knownUsers[decodedId?.replace('dm:', '') || ''] || 'Tin nhắn'))}
+        subtitleText={getPresenceSubtitle()}
+        isPeerOnline={!isGroup && presenceByUser[String(decodedId?.replace('dm:', ''))]?.isActive}
         onBack={() => {
           if (Platform.OS === 'web' && typeof window !== 'undefined') {
             window.location.replace('/chat');
@@ -963,7 +1328,9 @@ export default function OfficialChatScreen() {
         }}
         onStartAudioCall={handleStartAudioCall}
         onStartVideoCall={handleStartVideoCall}
-        onOpenInfo={() => {}}
+        onOpenInfo={() => setGroupInfoDialogVisible(true)}
+        onUpdateAvatar={isGroup && convInfo?.ownerId === currentUser?.sub ? handleUpdateGroupAvatar : undefined}
+        isUpdatingAvatar={isUpdatingAvatar}
       />
 
       {pinnedMessages.length > 0 && (
@@ -996,29 +1363,23 @@ export default function OfficialChatScreen() {
         ) : (
           <FlatList
             ref={flatListRef}
-            data={messages}
-            keyExtractor={item => item.id}
+            data={dedupedMessages}
+            inverted={true}
+            initialNumToRender={15}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            keyExtractor={(item) => String(item.id)}
             renderItem={renderMessage}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             contentContainerStyle={styles.listContent}
             ListEmptyComponent={
-              <View style={styles.emptyContainer}>
+              <View style={[styles.emptyContainer, { transform: [{ scaleY: -1 }] }]}>
                 <Text variant="bodyMedium" style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface, textAlign: 'center' }}>
                   Chưa có tin nhắn nào.{'\n'}Hãy bắt đầu cuộc trò chuyện!
                 </Text>
               </View>
             }
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            onScrollToIndexFailed={({ index }) => {
-              setTimeout(() => {
-                flatListRef.current?.scrollToIndex({
-                  index: Math.max(0, Math.min(index, messages.length - 1)),
-                  animated: true,
-                  viewPosition: 0.5,
-                });
-              }, 250);
-            }}
           />
         )}
 
@@ -1075,6 +1436,20 @@ export default function OfficialChatScreen() {
           </View>
         )}
 
+        {editingMessage && (
+          <View style={styles.replyPreviewBox}>
+            <View style={{ flex: 1 }}>
+              <Text variant="labelSmall" style={{ color: OFFICIAL_CHAT_COLORS.primary, fontWeight: '700' }}>
+                Đang sửa tin nhắn
+              </Text>
+              <Text variant="bodySmall" numberOfLines={1} style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface }}>
+                {parseMessageContent(editingMessage.content) || 'Tin nhắn đính kèm'}
+              </Text>
+            </View>
+            <IconButton icon="close" size={18} onPress={() => { setEditingMessage(null); setText(''); }} />
+          </View>
+        )}
+
         <View style={styles.inputArea}>
           <IconButton
             icon="plus-circle"
@@ -1082,23 +1457,13 @@ export default function OfficialChatScreen() {
             size={26}
             onPress={() => setShowMediaMenu(!showMediaMenu)}
           />
-          <IconButton
-            icon="camera"
-            iconColor={OFFICIAL_CHAT_COLORS.primary}
-            size={26}
-            onPress={takePhoto}
-          />
-          <IconButton
-            icon="image"
-            iconColor={OFFICIAL_CHAT_COLORS.primary}
-            size={26}
-            onPress={pickImage}
-          />
           <TextInput
             style={styles.input}
             placeholder="Nhập tin nhắn..."
             value={text}
-            onFocus={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onFocus={() => {
+              // With inverted we don't need scrollToEnd, it handles layout naturally.
+            }}
             onChangeText={(val) => {
               setText(val);
               sendTyping(val.length > 0);
@@ -1120,24 +1485,32 @@ export default function OfficialChatScreen() {
             mode="flat"
             contentStyle={{ backgroundColor: OFFICIAL_CHAT_COLORS.primarySoft, borderRadius: 20, paddingHorizontal: 12 }}
           />
-          {text.trim() ? (
+          <View style={styles.rightComposerActions}>
+            {!text.trim() && !editingMessage && (
+              <View style={styles.emptyComposerActions}>
+                <IconButton
+                  icon="thumb-up"
+                  iconColor={OFFICIAL_CHAT_COLORS.primary}
+                  size={24}
+                  onPress={handleQuickLike}
+                />
+                <IconButton
+                  icon={isRecording ? "stop-circle" : "microphone"}
+                  iconColor={OFFICIAL_CHAT_COLORS.primary}
+                  size={24}
+                  onPressIn={startRecording}
+                  onPressOut={stopRecording}
+                />
+              </View>
+            )}
             <IconButton
               icon="send"
               iconColor={OFFICIAL_CHAT_COLORS.primary}
               size={26}
               onPress={handleSend}
-              disabled={!isReady}
+              disabled={!text.trim()}
             />
-          ) : (
-            <IconButton
-              icon={isRecording ? "stop-circle" : "microphone"}
-              iconColor={isRecording ? OFFICIAL_CHAT_COLORS.primary : OFFICIAL_CHAT_COLORS.primary}
-              size={26}
-              onPressIn={startRecording}
-              onPressOut={stopRecording}
-              disabled={!isReady}
-            />
-          )}
+          </View>
         </View>
 
         {showMediaMenu && (
@@ -1190,6 +1563,13 @@ export default function OfficialChatScreen() {
                 <View style={styles.actionGridIcon}><IconButton icon="content-copy" size={24} iconColor={OFFICIAL_CHAT_COLORS.primary} /></View>
                 <Text variant="labelSmall" style={styles.actionGridText}>Sao chép</Text>
               </TouchableOpacity>
+
+              {currentUser?.sub === selectedMessage?.senderId && (
+                <TouchableOpacity style={styles.actionGridItem} onPress={handleEdit}>
+                  <View style={styles.actionGridIcon}><IconButton icon="pencil" size={24} iconColor={OFFICIAL_CHAT_COLORS.primary} /></View>
+                  <Text variant="labelSmall" style={styles.actionGridText}>Sửa</Text>
+                </TouchableOpacity>
+              )}
               
               {currentUser?.sub === selectedMessage?.senderId ? (
                 <TouchableOpacity style={styles.actionGridItem} onPress={handleRecall}>
@@ -1226,14 +1606,67 @@ export default function OfficialChatScreen() {
                 <Button 
                   icon="share-outline" 
                   mode="text" 
-                  onPress={() => { handleShare(selectedMessage); setMenuVisible(false); }}
+                  onPress={openForwardDialog}
                   style={styles.modalButton}
                   contentStyle={styles.modalButtonContent}
                 >
                   Chuyển tiếp
                 </Button>
+
+                <Button 
+                  icon="export-variant" 
+                  mode="text" 
+                  onPress={() => { handleShare(selectedMessage); setMenuVisible(false); }}
+                  style={styles.modalButton}
+                  contentStyle={styles.modalButtonContent}
+                >
+                  Chia sẻ ngoài
+                </Button>
               </View>
             )}
+          </View>
+        </Modal>
+
+        <Modal
+          visible={forwardDialogVisible}
+          onDismiss={() => setForwardDialogVisible(false)}
+          contentContainerStyle={styles.forwardModalContainer}
+        >
+          <Text variant="titleMedium" style={styles.forwardTitle}>Chuyển tiếp tin nhắn</Text>
+          <TextInput
+            mode="outlined"
+            value={forwardSearch}
+            onChangeText={setForwardSearch}
+            placeholder="Tìm cuộc trò chuyện"
+            style={styles.forwardSearchInput}
+          />
+          <ScrollView style={styles.forwardList} keyboardShouldPersistTaps="handled">
+            {filteredForwardConversations.map((conversation) => {
+              const conversationId = String(conversation.conversationId);
+              const selected = forwardTargetIds.includes(conversationId);
+
+              return (
+                <TouchableOpacity
+                  key={conversationId}
+                  style={[styles.forwardItem, selected && styles.forwardItemSelected]}
+                  onPress={() => handleToggleForwardTarget(conversationId)}
+                  activeOpacity={0.8}
+                >
+                  <Text variant="bodyMedium" style={styles.forwardItemTitle} numberOfLines={1}>
+                    {conversation.groupName || conversation.lastSenderName || conversationId}
+                  </Text>
+                  <Text variant="labelSmall" style={styles.forwardItemMeta} numberOfLines={1}>
+                    {conversation.lastMessagePreview || conversationId}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <View style={styles.forwardActions}>
+            <Button mode="text" onPress={() => setForwardDialogVisible(false)} disabled={isForwarding}>Hủy</Button>
+            <Button mode="contained" onPress={submitForward} loading={isForwarding} disabled={isForwarding || !forwardTargetIds.length}>
+              Gửi
+            </Button>
           </View>
         </Modal>
       </Portal>
@@ -1257,6 +1690,36 @@ export default function OfficialChatScreen() {
         onSaveFullscreenMedia={handleSaveFullscreenMedia}
         downloadingMedia={downloadingMedia}
       />
+
+      <Portal>
+        <GroupInfoModal
+          visible={groupInfoDialogVisible}
+          onDismiss={() => setGroupInfoDialogVisible(false)}
+          isGroup={isGroup}
+          groupMembers={groupMembers}
+          currentUser={currentUser}
+          convInfo={convInfo}
+          knownUsers={knownUsers}
+          decodedId={decodedId}
+          presenceSubtitle={getPresenceSubtitle()}
+          groupId={groupId}
+          onAddMemberClick={() => setAddMemberDialogVisible(true)}
+          onLeaveGroup={handleLeaveGroup}
+          onUpdateMemberRole={handleUpdateMemberRole}
+          onRemoveMember={handleRemoveMember}
+          colors={OFFICIAL_CHAT_COLORS}
+        />
+
+        <InviteFriendsModal
+          visible={addMemberDialogVisible}
+          onDismiss={() => setAddMemberDialogVisible(false)}
+          groupId={groupId}
+          groupMembers={groupMembers}
+          isAddingMember={isAddingMember}
+          onAddMemberSubmit={handleAddMemberSubmit}
+          colors={OFFICIAL_CHAT_COLORS}
+        />
+      </Portal>
     </SafeAreaView>
   );
 }
@@ -1334,11 +1797,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 6,
     alignItems: 'center',
+    justifyContent: 'space-between',
     borderTopWidth: 0.5,
     borderTopColor: OFFICIAL_CHAT_COLORS.border,
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
   },
-  input: { flex: 1, marginHorizontal: 4, maxHeight: 120, backgroundColor: 'transparent' },
+  input: { flex: 1, minWidth: 0, marginHorizontal: 4, maxHeight: 120, backgroundColor: 'transparent' },
   mediaImage: { width: 220, height: 200, borderRadius: 12, marginBottom: 4 },
   mediaFallback: { width: 190, minHeight: 90, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   mediaVideo: { width: 220, height: 180, borderRadius: 12, overflow: 'hidden', marginBottom: 4, backgroundColor: OFFICIAL_CHAT_COLORS.primary },
@@ -1388,29 +1852,19 @@ const styles = StyleSheet.create({
   bubbleFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     marginTop: 4,
   },
-  quickLikeButton: {
+  emptyComposerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    backgroundColor: OFFICIAL_CHAT_COLORS.primarySoftStrong,
+    flexShrink: 0,
+    marginLeft: 2,
   },
-  quickLikeIcon: {
-    fontSize: 12,
-    color: OFFICIAL_CHAT_COLORS.textOnPrimary,
-  },
-  quickLikeIconActive: {
-    transform: [{ scale: 1.1 }],
-  },
-  quickLikeCount: {
-    marginLeft: 4,
-    fontSize: 10,
-    fontWeight: '700',
-    color: OFFICIAL_CHAT_COLORS.textOnPrimary,
+  rightComposerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   reactionContainer: {
     flexDirection: 'row',
@@ -1501,6 +1955,53 @@ const styles = StyleSheet.create({
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
     borderRadius: 16,
     padding: 8,
+  },
+  forwardModalContainer: {
+    backgroundColor: OFFICIAL_CHAT_COLORS.surface,
+    margin: 16,
+    borderRadius: 16,
+    padding: 16,
+    maxHeight: '78%',
+  },
+  forwardTitle: {
+    color: OFFICIAL_CHAT_COLORS.primary,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  forwardSearchInput: {
+    marginBottom: 10,
+    backgroundColor: OFFICIAL_CHAT_COLORS.surface,
+  },
+  forwardList: {
+    maxHeight: 320,
+    marginBottom: 10,
+  },
+  forwardItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: OFFICIAL_CHAT_COLORS.border,
+    marginBottom: 8,
+    backgroundColor: OFFICIAL_CHAT_COLORS.primarySoft,
+  },
+  forwardItemSelected: {
+    borderColor: OFFICIAL_CHAT_COLORS.primary,
+    backgroundColor: OFFICIAL_CHAT_COLORS.primarySoftStrong,
+  },
+  forwardItemTitle: {
+    color: OFFICIAL_CHAT_COLORS.primary,
+    fontWeight: '600',
+  },
+  forwardItemMeta: {
+    color: OFFICIAL_CHAT_COLORS.mutedOnSurface,
+    marginTop: 2,
+  },
+  forwardActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
   },
   fullscreenOverlay: {
     flex: 1,

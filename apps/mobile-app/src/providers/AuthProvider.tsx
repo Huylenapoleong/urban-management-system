@@ -39,6 +39,8 @@ interface AuthContextType {
   deleteAccount: (otpCode: string) => Promise<void>;
   listSessions: (options?: { signal?: AbortSignal }) => Promise<any[]>;
   revokeSession: (sessionId: string) => Promise<void>;
+  requestUnlockAccountOtp: (login: string, password: string) => Promise<void>;
+  confirmUnlockAccount: (login: string, password: string, otpCode: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -176,7 +178,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Đăng nhập thất bại.');
       }
     } catch (e: any) {
-      throw new Error(e.message || 'Lỗi kết nối.');
+      const error: any = new Error(e.message || 'Lỗi kết nối.');
+      if (e.response?.data?.errorCode) {
+        error.errorCode = e.response.data.errorCode;
+      } else if (e.errorCode) {
+        error.errorCode = e.errorCode;
+      }
+      throw error;
     }
   }, []);
 
@@ -287,6 +295,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await ApiClient.delete(`/auth/sessions/${sessionId}`);
   }, []);
 
+  const requestUnlockAccountOtp = useCallback(async (login: string, password: string) => {
+    await ApiClient.post('/auth/unlock/request-otp', { login, password });
+  }, []);
+
+  const confirmUnlockAccount = useCallback(async (login: string, password: string, otpCode: string) => {
+    const response = await ApiClient.post<{ tokens: { accessToken: string } }>('/auth/unlock/confirm', { login, password, otpCode });
+    if (response?.tokens?.accessToken) {
+      const token = response.tokens.accessToken;
+      socketClient.disconnect();
+      disconnectChatSocket();
+      await persistToken(token);
+      setUser(jwtDecode<JwtClaims>(token));
+    }
+  }, []);
+
   const contextValue = useMemo(() => ({
     user,
     isLoading,
@@ -308,6 +331,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     deleteAccount,
     listSessions,
     revokeSession,
+    requestUnlockAccountOtp,
+    confirmUnlockAccount,
   }), [
     user, 
     isLoading, 
@@ -328,7 +353,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     requestDeleteAccountOtp,
     deleteAccount,
     listSessions,
-    revokeSession
+    revokeSession,
+    requestUnlockAccountOtp,
+    confirmUnlockAccount,
   ]);
 
   return (

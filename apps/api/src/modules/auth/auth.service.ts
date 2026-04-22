@@ -222,7 +222,7 @@ export class AuthService {
       ? await this.usersService.findByEmail(normalizeEmail(login))
       : await this.usersService.findByPhone(normalizePhone(login));
 
-    if (!user || user.deletedAt || user.status !== 'ACTIVE') {
+    if (!user || user.deletedAt || (user.status !== 'ACTIVE' && user.status !== 'LOCKED')) {
       await this.recordAuthAttemptFailure('LOGIN', identity);
       throw new UnauthorizedException('Invalid credentials.');
     }
@@ -235,6 +235,14 @@ export class AuthService {
     if (!validPassword) {
       await this.recordAuthAttemptFailure('LOGIN', identity);
       throw new UnauthorizedException('Invalid credentials.');
+    }
+
+    if (user.status === 'LOCKED') {
+      throw new HttpException({
+        statusCode: HttpStatus.FORBIDDEN,
+        errorCode: 'ACCOUNT_LOCKED',
+        message: 'Tài khoản của bạn đã bị khóa.',
+      }, HttpStatus.FORBIDDEN);
     }
 
     await this.clearAuthAttempts('LOGIN', identity);
@@ -1150,6 +1158,116 @@ export class AuthService {
     role: StoredUser['role'],
   ): PasswordPolicyProfile {
     return role === 'CITIZEN' ? 'standard' : 'privileged';
+  }
+
+  async requestUnlockAccountOtp(payload: unknown) {
+    const body = ensureObject(payload);
+    const login = requiredString(body, 'login', {
+      minLength: 3,
+      maxLength: 150,
+    });
+    const password = requiredString(body, 'password', {
+      minLength: 10,
+      maxLength: 100,
+    });
+    this.passwordPolicyService.validateOrThrow(password, {}, 'standard');
+    const identity = this.resolveIdentityFromLogin(login);
+    await this.assertLoginAttemptsAllowed(identity);
+    const user = await this.resolveUserByLogin(login);
+
+    if (!user || user.deletedAt || user.status !== 'LOCKED') {
+      await this.recordAuthAttemptFailure('LOGIN', identity);
+      throw new UnauthorizedException('Invalid credentials.');
+    }
+
+    const validPassword = await this.passwordService.verifyPassword(
+      password,
+      user.passwordHash,
+    );
+
+    if (!validPassword) {
+      await this.recordAuthAttemptFailure('LOGIN', identity);
+      throw new UnauthorizedException('Invalid credentials.');
+    }
+
+    if (!user.email) {
+      throw new BadRequestException(
+        'This account does not have an email for OTP delivery.',
+      );
+    }
+
+    const challenge = await this.authOtpService.requestOtp({
+      purpose: 'UNLOCK_ACCOUNT',
+      email: user.email,
+      userId: user.userId,
+    });
+
+    await this.clearAuthAttempts('LOGIN', identity);
+    return this.toOtpChallengeResponse(challenge);
+  }
+
+  async confirmUnlockAccount(
+    payload: unknown,
+    metadata?: SessionClientMetadata,
+  ) {
+    const body = ensureObject(payload);
+    const login = requiredString(body, 'login', {
+      minLength: 3,
+      maxLength: 150,
+    });
+    const password = requiredString(body, 'password', {
+      minLength: 10,
+      maxLength: 100,
+    });
+    const otpCode = requiredString(body, 'otpCode', {
+      minLength: 4,
+      maxLength: 12,
+    });
+    this.passwordPolicyService.validateOrThrow(password, {}, 'standard');
+    const user = await this.resolveUserByLogin(login);
+
+    if (!user || user.deletedAt || user.status !== 'LOCKED') {
+      throw new UnauthorizedException('Invalid credentials.');
+    }
+
+    const validPassword = await this.passwordService.verifyPassword(
+      password,
+      user.passwordHash,
+    );
+
+    if (!validPassword) {
+      throw new UnauthorizedException('Invalid credentials.');
+    }
+
+    if (!user.email) {
+      throw new BadRequestException(
+        'This account does not have an email for OTP delivery.',
+      );
+    }
+
+    await this.authOtpService.verifyOtp(
+      {
+        purpose: 'UNLOCK_ACCOUNT',
+        email: user.email,
+        otpCode,
+        userId: user.userId,
+      },
+      { consumeOnSuccess: false },
+    );
+
+    const unlockedUser = await this.usersService.unlockOwnAccount(
+      user.userId,
+    );
+    await this.consumeOtpBestEffort({
+      purpose: 'UNLOCK_ACCOUNT',
+      email: user.email,
+      userId: user.userId,
+    });
+
+    return {
+      tokens: await this.issueTokenPairForUser(unlockedUser, metadata),
+      user: await this.serializeUserProfile(unlockedUser),
+    };
   }
 
   private resolveIdentityFromLogin(login: string): {

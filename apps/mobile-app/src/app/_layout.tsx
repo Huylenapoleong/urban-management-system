@@ -329,8 +329,7 @@ function SocketLifecycleManager() {
 
 function WebRuntimeSafetyManager() {
   React.useEffect(() => {
-    // Disabled: fallback guard was masking navigation behavior and causing noisy logs.
-    // Keep native/browser default runtime behavior.
+    installWebRuntimeGuards();
   }, []);
 
   return null;

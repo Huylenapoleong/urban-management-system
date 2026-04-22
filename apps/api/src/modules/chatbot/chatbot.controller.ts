@@ -8,7 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 import type { AuthenticatedUser, JwtClaims } from '@urban/shared-types';
 import { Public } from '../../common/decorators/public.decorator';
@@ -32,10 +32,11 @@ import { ReportGeneratorService } from './services/report-generator.service';
  *   3. POST /chatbot/officer/summarize-group (JWT) — Tóm tắt group chat
  *   4. POST /chatbot/officer/generate-report (JWT) — Phân tích reports
  *
- * Rate Limiting: 10 requests / 60 giây / IP (áp dụng cho /ask endpoint)
+ * Rate Limiting: 70 requests / 60 giây / IP (áp dụng cho /ask endpoint)
  */
 @ApiTags('chatbot')
 @Controller('chatbot')
+@UseGuards(ThrottlerGuard)
 export class ChatbotController {
   constructor(
     private readonly chatbotService: ChatbotService,
@@ -48,13 +49,13 @@ export class ChatbotController {
   @Post('ask')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 70, ttl: 60000 } })
   @ApiOperation({
     summary: 'Gửi câu hỏi đến AI Chatbot pháp luật đô thị',
     description:
       'Nhận câu hỏi bằng tiếng Việt, tìm kiếm điều luật liên quan từ DynamoDB (Vector Search / Keyword), ' +
       'và trả về câu trả lời được tổng hợp bởi Llama (Groq). ' +
-      'Rate limited: 10 req/phút/IP. Endpoint public, không cần đăng nhập.',
+      'Rate limited: 70 req/phút/IP. Endpoint public, không cần đăng nhập.',
   })
   async ask(@Body() dto: ChatbotAskDto): Promise<ChatbotAnswerDto> {
     return this.chatbotService.ask(dto.question);
@@ -71,14 +72,14 @@ export class ChatbotController {
   @Post('ask/stream')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 70, ttl: 60000 } })
   @SkipResponseEnvelope()
   @ApiOperation({
     summary: 'Gửi câu hỏi và nhận phản hồi streaming (SSE)',
     description:
       'Giống /ask nhưng trả về từng chunk text qua Server-Sent Events. ' +
       'Phù hợp cho giao diện chat real-time hiển thị từng từ. ' +
-      'Rate limited: 10 req/phút/IP.',
+      'Rate limited: 70 req/phút/IP.',
   })
   async askStream(
     @Body() dto: ChatbotAskDto,

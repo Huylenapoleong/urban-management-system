@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, ImageBackground, StatusBar, Pressable } from 'react-native';
-import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
+import { Text, TextInput, Button, Surface, HelperText, Portal, Modal } from 'react-native-paper';
 import { useAuth } from '../providers/AuthProvider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { login, requestUnlockAccountOtp, confirmUnlockAccount } = useAuth();
   const router = useRouter();
   
   const [loginVal, setLoginVal] = useState('');
@@ -14,6 +14,12 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [unlockOtp, setUnlockOtp] = useState('');
+  const [unlockLoading, setUnlockLoading] = useState(false);
+  const [unlockStep, setUnlockStep] = useState<'PROMPT' | 'OTP'>('PROMPT');
+  const [unlockError, setUnlockError] = useState('');
 
   const handleLogin = async () => {
     setErrorMsg('');
@@ -26,9 +32,46 @@ export default function LoginScreen() {
       setLoading(true);
       await login(loginVal, password);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Đăng nhập không thành công');
+      if (err.errorCode === 'ACCOUNT_LOCKED') {
+        setShowUnlockModal(true);
+        setUnlockStep('PROMPT');
+        setUnlockOtp('');
+        setUnlockError('');
+      } else {
+        setErrorMsg(err.message || 'Đăng nhập không thành công');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRequestUnlock = async () => {
+    try {
+      setUnlockLoading(true);
+      setUnlockError('');
+      await requestUnlockAccountOtp(loginVal, password);
+      setUnlockStep('OTP');
+    } catch (e: any) {
+      setUnlockError(e.message || 'Lỗi gửi mã OTP');
+    } finally {
+      setUnlockLoading(false);
+    }
+  };
+
+  const handleConfirmUnlock = async () => {
+    if (!unlockOtp || unlockOtp.trim().length < 4) {
+      setUnlockError('Vui lòng nhập mã OTP hợp lệ');
+      return;
+    }
+    try {
+      setUnlockLoading(true);
+      setUnlockError('');
+      await confirmUnlockAccount(loginVal, password, unlockOtp);
+      setShowUnlockModal(false);
+    } catch (e: any) {
+      setUnlockError(e.message || 'Mã OTP không đúng hoặc đã hết hạn');
+    } finally {
+      setUnlockLoading(false);
     }
   };
 
@@ -139,6 +182,104 @@ export default function LoginScreen() {
           </View>
         </Surface>
       </KeyboardAvoidingView>
+
+      <Portal>
+        <Modal 
+          visible={showUnlockModal} 
+          onDismiss={() => {
+            if (!unlockLoading) setShowUnlockModal(false);
+          }}
+          contentContainerStyle={styles.unlockModal}
+          dismissable={!unlockLoading}
+        >
+          {unlockStep === 'PROMPT' ? (
+            <View style={styles.unlockContainer}>
+              <View style={styles.unlockIconWrapper}>
+                <MaterialCommunityIcons name="lock-alert" size={48} color="#ef4444" />
+              </View>
+              <Text style={styles.unlockTitle}>Tài khoản bị khóa</Text>
+              <Text style={styles.unlockDescription}>
+                Tài khoản của bạn hiện đang bị khóa. Bạn có muốn sử dụng email đăng ký để nhận mã OTP và mở khóa tài khoản ngay không?
+              </Text>
+              
+              {!!unlockError && (
+                <Text style={styles.unlockErrorText}>{unlockError}</Text>
+              )}
+
+              <Button 
+                mode="contained" 
+                onPress={handleRequestUnlock} 
+                loading={unlockLoading}
+                disabled={unlockLoading}
+                buttonColor="#1976D2"
+                style={styles.unlockBtn}
+                contentStyle={styles.unlockBtnContent}
+              >
+                GỬI MÃ OTP MỞ KHÓA
+              </Button>
+              <Button 
+                mode="text" 
+                onPress={() => setShowUnlockModal(false)}
+                disabled={unlockLoading}
+                style={styles.unlockCancelBtn}
+                textColor="#64748b"
+              >
+                HỦY
+              </Button>
+            </View>
+          ) : (
+            <View style={styles.unlockContainer}>
+              <View style={styles.unlockIconWrapperSuccess}>
+                <MaterialCommunityIcons name="email-fast" size={48} color="#10b981" />
+              </View>
+              <Text style={styles.unlockTitle}>Nhập mã OTP</Text>
+              <Text style={styles.unlockDescription}>
+                Mã xác thực đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư đến.
+              </Text>
+
+              <TextInput
+                mode="outlined"
+                label="Mã OTP"
+                value={unlockOtp}
+                onChangeText={setUnlockOtp}
+                keyboardType="number-pad"
+                style={styles.otpInput}
+                disabled={unlockLoading}
+                activeOutlineColor="#1976D2"
+                maxLength={6}
+              />
+
+              {!!unlockError && (
+                <Text style={styles.unlockErrorText}>{unlockError}</Text>
+              )}
+
+              <Button 
+                mode="contained" 
+                onPress={handleConfirmUnlock} 
+                loading={unlockLoading}
+                disabled={unlockLoading}
+                buttonColor="#1976D2"
+                style={styles.unlockBtn}
+                contentStyle={styles.unlockBtnContent}
+              >
+                XÁC NHẬN MỞ KHÓA
+              </Button>
+              <Button 
+                mode="text" 
+                onPress={() => {
+                  setUnlockStep('PROMPT');
+                  setUnlockError('');
+                }}
+                disabled={unlockLoading}
+                style={styles.unlockCancelBtn}
+                textColor="#64748b"
+              >
+                QUAY LẠI
+              </Button>
+            </View>
+          )}
+        </Modal>
+      </Portal>
     </View>
   );
 }
@@ -190,5 +331,76 @@ const styles = StyleSheet.create({
   
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
   footerText: { color: '#334155', fontSize: 14, fontWeight: '700' },
-  footerLink: { color: '#1976D2', fontSize: 14, fontWeight: '900' }
+  footerLink: { color: '#1976D2', fontSize: 14, fontWeight: '900' },
+  
+  unlockModal: {
+    backgroundColor: 'white',
+    margin: 20,
+    borderRadius: 24,
+    padding: 0,
+    overflow: 'hidden'
+  },
+  unlockContainer: {
+    padding: 24,
+    alignItems: 'center',
+  },
+  unlockIconWrapper: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#fef2f2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16
+  },
+  unlockIconWrapperSuccess: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#ecfdf5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16
+  },
+  unlockTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#0f172a',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  unlockDescription: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 22
+  },
+  unlockErrorText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 16,
+    textAlign: 'center'
+  },
+  unlockBtn: {
+    width: '100%',
+    borderRadius: 12,
+  },
+  unlockBtnContent: {
+    height: 48,
+  },
+  unlockCancelBtn: {
+    width: '100%',
+    marginTop: 8,
+  },
+  otpInput: {
+    width: '100%',
+    marginBottom: 16,
+    backgroundColor: '#fafafa',
+    textAlign: 'center',
+    fontSize: 20,
+    letterSpacing: 8,
+    fontWeight: '800'
+  }
 });

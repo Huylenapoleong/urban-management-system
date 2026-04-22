@@ -38,7 +38,7 @@ export function OtpVerificationModal({
   }, [visible]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (visible && timer > 0) {
       interval = setInterval(() => {
         setTimer((prev) => prev - 1);
