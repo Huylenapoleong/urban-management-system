@@ -21,6 +21,7 @@ export type StorageEntityType =
   | 'USER_FRIEND_EDGE'
   | 'USER_FRIEND_REQUEST'
   | 'USER_BLOCK_EDGE'
+  | 'USER_CONTACT_ALIAS'
   | 'USER_REFRESH_SESSION'
   | 'USER_SESSION_SLOT'
   | 'USER_REFRESH_TOKEN_REVOCATION'
@@ -95,6 +96,15 @@ export interface StoredUserBlockEdge extends TableItemBase {
   blockerUserId: string;
   blockedUserId: string;
   direction: 'OUTGOING' | 'INCOMING';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredUserContactAlias extends TableItemBase {
+  entityType: 'USER_CONTACT_ALIAS';
+  ownerUserId: string;
+  targetUserId: string;
+  alias: string;
   createdAt: string;
   updatedAt: string;
 }

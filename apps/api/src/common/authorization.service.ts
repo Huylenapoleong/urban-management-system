@@ -177,6 +177,13 @@ export class AuthorizationService {
     );
   }
 
+  canRenameGroup(
+    _actor: AuthenticatedUser,
+    roleInGroup?: GroupMemberRole | 'OFFICER',
+  ): boolean {
+    return normalizeGroupMemberRole(roleInGroup) === 'OWNER';
+  }
+
   canSendGroupMessage(
     actor: AuthenticatedUser,
     roleInGroup: GroupMemberRole | 'OFFICER' | undefined,

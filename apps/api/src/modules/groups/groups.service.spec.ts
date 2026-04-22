@@ -28,6 +28,7 @@ describe('GroupsService', () => {
     canDeleteGroup: jest.fn(),
     canJoinGroup: jest.fn(),
     canManageGroup: jest.fn(),
+    canRenameGroup: jest.fn(),
     canReadGroup: jest.fn(),
   };
   const usersService = {
@@ -222,6 +223,7 @@ describe('GroupsService', () => {
     );
     groupCleanupService.processTask.mockResolvedValue(undefined);
     authorizationService.canChangeGroupMessagePolicy.mockReturnValue(true);
+    authorizationService.canRenameGroup.mockReturnValue(true);
     conversationsService.sendGroupSystemMessage.mockResolvedValue({
       id: 'msg-system',
     });
@@ -753,6 +755,96 @@ describe('GroupsService', () => {
       ),
     );
     expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('blocks non-owners from renaming the group', async () => {
+    authorizationService.canManageGroup.mockReturnValue(true);
+    authorizationService.canCreateGroup.mockReturnValue(true);
+    authorizationService.canRenameGroup.mockReturnValue(false);
+    currentActorMembership = {
+      ...currentActorMembership,
+      roleInGroup: 'DEPUTY',
+    };
+
+    await expect(
+      service.updateGroup(actor, group.groupId, {
+        groupName: 'Renamed group',
+      }),
+    ).rejects.toThrow(
+      new ForbiddenException('Only the owner can rename the group.'),
+    );
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('propagates a renamed group name to existing conversation summaries', async () => {
+    authorizationService.canManageGroup.mockReturnValue(true);
+    authorizationService.canCreateGroup.mockReturnValue(true);
+    authorizationService.canRenameGroup.mockReturnValue(true);
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (tableName === 'Memberships') {
+          return [currentActorMembership, currentMemberTwo];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          options?.beginsWith === 'CONV#GRP#group-1#LAST#'
+        ) {
+          return [
+            {
+              PK: pk,
+              SK: 'CONV#GRP#group-1#LAST#2026-03-18T10:31:00.000Z',
+              entityType: 'CONVERSATION',
+              GSI1PK: `${pk}#TYPE#GRP`,
+              userId: pk.replace('USER#', ''),
+              conversationId: 'GRP#group-1',
+              groupName: 'Area 1',
+              lastMessagePreview: 'Hello',
+              lastSenderName: 'Ward Officer',
+              unreadCount: 0,
+              isGroup: true,
+              deletedAt: null,
+              updatedAt: '2026-03-18T10:31:00.000Z',
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.updateGroup(actor, group.groupId, {
+      groupName: 'Area 1 Renamed',
+    });
+
+    expect(result.groupName).toBe('Area 1 Renamed');
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        conversationId: 'GRP#group-1',
+        groupName: 'Area 1 Renamed',
+      }),
+    );
+    expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
+      'user-2',
+      'conversation.updated',
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        conversationKey: 'GRP#group-1',
+        reason: 'conversation.metadata.updated',
+        summary: expect.objectContaining({
+          conversationId: 'group:group-1',
+          groupName: 'Area 1 Renamed',
+        }),
+      }),
+    );
+    expect(conversationsService.sendGroupSystemMessage).toHaveBeenCalledWith(
+      actor,
+      group.groupId,
+      expect.arrayContaining(['user-1', 'user-2']),
+      expect.stringContaining('renamed the group to Area 1 Renamed'),
+    );
   });
 
   it('bans an active member and removes their group chat access immediately', async () => {

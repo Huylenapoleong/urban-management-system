@@ -188,6 +188,12 @@ export class GroupsController {
         message: 'Updated group scope is invalid.',
         path: '/api/groups/01JPCY1000AREAGROUP0000000',
       },
+      {
+        name: 'groupRenameOwnerOnly',
+        summary: 'Only owner can rename group',
+        message: 'Only the owner can rename the group.',
+        path: '/api/groups/01JPCY1000AREAGROUP0000000',
+      },
     ],
   )
   @ApiConflictExamples('The group changed while update was processed.', [

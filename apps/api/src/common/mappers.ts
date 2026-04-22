@@ -67,6 +67,7 @@ export function toUserFriendItem(
   return {
     userId: user.userId,
     fullName: user.fullName,
+    displayName: user.fullName,
     role: user.role,
     locationCode: user.locationCode,
     avatarAsset: user.avatarAsset,
@@ -84,6 +85,7 @@ export function toUserFriendRequestItem(
   return {
     userId: user.userId,
     fullName: user.fullName,
+    displayName: user.fullName,
     role: user.role,
     locationCode: user.locationCode,
     avatarAsset: user.avatarAsset,
@@ -101,6 +103,7 @@ export function toUserBlockedItem(
   return {
     userId: user.userId,
     fullName: user.fullName,
+    displayName: user.fullName,
     role: user.role,
     locationCode: user.locationCode,
     avatarAsset: user.avatarAsset,

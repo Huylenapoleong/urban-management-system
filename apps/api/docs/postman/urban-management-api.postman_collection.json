@@ -2100,6 +2100,55 @@
           ]
         },
         {
+          "name": "Set Contact Alias",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/contacts/{{friendUserId}}/alias",
+            "description": "Stores a private alias for a friend or existing DM counterpart. FE should render `displayName` from API payloads instead of recomputing it locally.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alias\": \"Postman Alias {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clear Contact Alias",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/contacts/{{friendUserId}}/alias",
+            "description": "Removes the private alias so API payloads fall back to the target full name in `displayName`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Remove Friend",
           "request": {
             "method": "DELETE",
@@ -2318,6 +2367,7 @@
             "method": "PATCH",
             "header": [],
             "url": "{{baseUrl}}/groups/{{groupId}}",
+            "description": "Only the current OWNER can rename a group by changing `groupName`. Other editable metadata still follows the standard group-management rules.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"groupName\": \"Postman Group Updated\",\n  \"description\": \"Updated from Postman\"\n}",

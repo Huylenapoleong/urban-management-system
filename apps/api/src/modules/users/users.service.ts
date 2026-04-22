@@ -10,8 +10,10 @@ import type {
   ApiResponseMeta,
   ApiSuccessResponse,
   AuthenticatedUser,
+  ChatConversationUpdatedEvent,
   MediaAsset,
   PushDevice,
+  UserContactAlias,
   UserBlockedItem,
   UserDirectoryItem,
   UserFriendItem,
@@ -24,6 +26,7 @@ import {
   makeDmConversationId,
   makeInboxPk,
   makeInboxStatsKey,
+  makeUserContactAliasSk,
   makeUserPk,
   makeUserProfileSk,
   nowIso,
@@ -34,6 +37,7 @@ import {
   paginateSortedItems,
 } from '../../common/pagination';
 import {
+  toConversationSummary,
   toUserFriendItem,
   toUserFriendRequestItem,
   toUserBlockedItem,
@@ -42,6 +46,7 @@ import {
 import type {
   StoredConversation,
   StoredUserBlockEdge,
+  StoredUserContactAlias,
   StoredUserFriendEdge,
   StoredUserFriendRequest,
   StoredDirectMessageRequest,
@@ -817,6 +822,10 @@ export class UsersService {
       page.items.map((item) => item.friendUserId),
     );
     const friendMap = new Map(friends.map((friend) => [friend.userId, friend]));
+    const aliasMap = await this.getContactAliasMap(
+      actor.id,
+      page.items.map((item) => item.friendUserId),
+    );
     const data = (
       await Promise.all(
         page.items.map(async (item) => {
@@ -831,7 +840,11 @@ export class UsersService {
             return undefined;
           }
 
-          return this.serializeUserFriendItem(friend, item.createdAt);
+          return this.serializeUserFriendItem(
+            friend,
+            item.createdAt,
+            aliasMap.get(item.friendUserId)?.alias,
+          );
         }),
       )
     ).filter((item): item is UserFriendItem => item !== undefined);
@@ -869,6 +882,10 @@ export class UsersService {
       page.items.map((item) => item.blockedUserId),
     );
     const userMap = new Map(users.map((user) => [user.userId, user]));
+    const aliasMap = await this.getContactAliasMap(
+      actor.id,
+      page.items.map((item) => item.blockedUserId),
+    );
     const data = (
       await Promise.all(
         page.items.map(async (item) => {
@@ -883,7 +900,11 @@ export class UsersService {
             return undefined;
           }
 
-          return this.serializeUserBlockedItem(blockedUser, item.createdAt);
+          return this.serializeUserBlockedItem(
+            blockedUser,
+            item.createdAt,
+            aliasMap.get(item.blockedUserId)?.alias,
+          );
         }),
       )
     ).filter((item): item is UserBlockedItem => item !== undefined);
@@ -941,6 +962,7 @@ export class UsersService {
     );
     const users = await this.getUsersByIds(counterpartIds);
     const userMap = new Map(users.map((user) => [user.userId, user]));
+    const aliasMap = await this.getContactAliasMap(actor.id, counterpartIds);
     const data = (
       await Promise.all(
         page.items.map(async (request) => {
@@ -963,6 +985,7 @@ export class UsersService {
             user,
             request.direction,
             request.createdAt,
+            aliasMap.get(otherUserId)?.alias,
           );
         }),
       )
@@ -1167,6 +1190,10 @@ export class UsersService {
       (item) => item.updatedAt,
       (item) => item.userId,
     );
+    const aliasMap = await this.getContactAliasMap(
+      actor.id,
+      page.items.map((item) => item.userId),
+    );
 
     return buildPaginatedResponse(
       await Promise.all(
@@ -1174,6 +1201,7 @@ export class UsersService {
           this.serializeUserDirectoryItem({
             userId: item.userId,
             fullName: item.fullName,
+            displayName: item.fullName,
             role: item.role,
             locationCode: item.locationCode,
             avatarAsset: item.avatarAsset,
@@ -1183,6 +1211,7 @@ export class UsersService {
             canMessage: item.canMessage,
             canSendFriendRequest: item.canSendFriendRequest,
             canSendMessageRequest: item.canSendMessageRequest,
+            contactAlias: aliasMap.get(item.userId)?.alias,
           }),
         ),
       ),
@@ -1698,6 +1727,96 @@ export class UsersService {
     return {
       userId: targetUserId,
       unblockedAt: nowIso(),
+    };
+  }
+
+  async setContactAlias(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+    payload: unknown,
+  ): Promise<UserContactAlias> {
+    await this.getActiveByIdOrThrow(actor.id);
+    const target = await this.getActiveByIdOrThrow(targetUserId);
+
+    if (actor.id === target.userId) {
+      throw new BadRequestException('Cannot set an alias for yourself.');
+    }
+
+    const body = ensureObject(payload);
+    const alias = requiredString(body, 'alias', {
+      minLength: 1,
+      maxLength: 100,
+    });
+    const existingAlias = await this.getContactAlias(actor.id, target.userId);
+    const directSummary = await this.getDirectConversationSummary(
+      actor.id,
+      target.userId,
+    );
+    const friends = await this.areFriends(actor.id, target.userId);
+
+    if (!friends && !directSummary) {
+      throw new ForbiddenException(
+        'You can only set an alias for friends or existing direct conversations.',
+      );
+    }
+
+    const occurredAt = nowIso();
+    const nextAlias: StoredUserContactAlias = {
+      PK: makeUserPk(actor.id),
+      SK: makeUserContactAliasSk(target.userId),
+      entityType: 'USER_CONTACT_ALIAS',
+      ownerUserId: actor.id,
+      targetUserId: target.userId,
+      alias,
+      createdAt: existingAlias?.createdAt ?? occurredAt,
+      updatedAt: occurredAt,
+    };
+
+    await this.repository.put(this.config.dynamodbUsersTableName, nextAlias);
+    await this.syncDirectConversationAlias(
+      actor.id,
+      target.userId,
+      alias,
+      target.fullName,
+      occurredAt,
+    );
+
+    return {
+      userId: target.userId,
+      alias,
+      updatedAt: occurredAt,
+    };
+  }
+
+  async clearContactAlias(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+  ): Promise<{ userId: string; clearedAt: string }> {
+    await this.getActiveByIdOrThrow(actor.id);
+    const existingAlias = await this.getContactAlias(actor.id, targetUserId);
+
+    if (!existingAlias) {
+      throw new NotFoundException('Contact alias not found.');
+    }
+
+    const clearedAt = nowIso();
+    const target = await this.findById(targetUserId);
+    await this.repository.delete(
+      this.config.dynamodbUsersTableName,
+      existingAlias.PK,
+      existingAlias.SK,
+    );
+    await this.syncDirectConversationAlias(
+      actor.id,
+      targetUserId,
+      undefined,
+      target?.fullName ?? targetUserId,
+      clearedAt,
+    );
+
+    return {
+      userId: targetUserId,
+      clearedAt,
     };
   }
 
@@ -2298,6 +2417,7 @@ export class UsersService {
   private async serializeUserFriendItem(
     user: StoredUser,
     friendsSince: string,
+    contactAlias?: string,
   ): Promise<UserFriendItem> {
     const item = toUserFriendItem(user, friendsSince);
     const { asset, url } =
@@ -2308,6 +2428,8 @@ export class UsersService {
 
     return {
       ...item,
+      contactAlias,
+      displayName: contactAlias ?? item.fullName,
       avatarAsset: asset,
       avatarUrl: url,
     };
@@ -2317,6 +2439,7 @@ export class UsersService {
     user: StoredUser,
     direction: 'INCOMING' | 'OUTGOING',
     requestedAt: string,
+    contactAlias?: string,
   ): Promise<UserFriendRequestItem> {
     const item = toUserFriendRequestItem(user, direction, requestedAt);
     const { asset, url } =
@@ -2327,6 +2450,8 @@ export class UsersService {
 
     return {
       ...item,
+      contactAlias,
+      displayName: contactAlias ?? item.fullName,
       avatarAsset: asset,
       avatarUrl: url,
     };
@@ -2335,6 +2460,7 @@ export class UsersService {
   private async serializeUserBlockedItem(
     user: StoredUser,
     blockedAt: string,
+    contactAlias?: string,
   ): Promise<UserBlockedItem> {
     const item = toUserBlockedItem(user, blockedAt);
     const { asset, url } =
@@ -2345,6 +2471,8 @@ export class UsersService {
 
     return {
       ...item,
+      contactAlias,
+      displayName: contactAlias ?? item.fullName,
       avatarAsset: asset,
       avatarUrl: url,
     };
@@ -2361,9 +2489,133 @@ export class UsersService {
 
     return {
       ...item,
+      displayName: item.contactAlias ?? item.fullName,
       avatarAsset: asset,
       avatarUrl: url,
     };
+  }
+
+  async resolveContactDisplayName(
+    ownerUserId: string,
+    targetUserId: string,
+    fallbackFullName: string,
+  ): Promise<string> {
+    const alias = await this.getContactAlias(ownerUserId, targetUserId);
+    return alias?.alias ?? fallbackFullName;
+  }
+
+  private async getContactAlias(
+    ownerUserId: string,
+    targetUserId: string,
+  ): Promise<StoredUserContactAlias | undefined> {
+    const alias = await this.repository.get<StoredUserContactAlias>(
+      this.config.dynamodbUsersTableName,
+      makeUserPk(ownerUserId),
+      makeUserContactAliasSk(targetUserId),
+    );
+
+    if (!alias || alias.entityType !== 'USER_CONTACT_ALIAS') {
+      return undefined;
+    }
+
+    return alias;
+  }
+
+  private async getContactAliasMap(
+    ownerUserId: string,
+    targetUserIds: string[],
+  ): Promise<Map<string, StoredUserContactAlias>> {
+    const uniqueTargetIds = Array.from(new Set(targetUserIds));
+
+    if (uniqueTargetIds.length === 0) {
+      return new Map();
+    }
+
+    const aliases = await this.repository.batchGet<StoredUserContactAlias>(
+      this.config.dynamodbUsersTableName,
+      uniqueTargetIds.map((targetUserId) => ({
+        PK: makeUserPk(ownerUserId),
+        SK: makeUserContactAliasSk(targetUserId),
+      })),
+    );
+
+    return new Map(
+      aliases
+        .filter(
+          (alias): alias is StoredUserContactAlias =>
+            alias.entityType === 'USER_CONTACT_ALIAS',
+        )
+        .map((alias) => [alias.targetUserId, alias]),
+    );
+  }
+
+  private async getDirectConversationSummary(
+    ownerUserId: string,
+    targetUserId: string,
+  ): Promise<StoredConversation | undefined> {
+    const conversationId = makeDmConversationId(ownerUserId, targetUserId);
+    const summaries = await this.repository.queryByPk<StoredConversation>(
+      this.config.dynamodbConversationsTableName,
+      makeInboxPk(ownerUserId),
+      {
+        beginsWith: `CONV#${conversationId}#LAST#`,
+        limit: 1,
+      },
+    );
+
+    return summaries.find(
+      (summary) => summary.entityType === 'CONVERSATION' && !summary.deletedAt,
+    );
+  }
+
+  private async syncDirectConversationAlias(
+    ownerUserId: string,
+    targetUserId: string,
+    contactAlias: string | undefined,
+    fallbackFullName: string,
+    occurredAt: string,
+  ): Promise<void> {
+    const existingConversation = await this.getDirectConversationSummary(
+      ownerUserId,
+      targetUserId,
+    );
+
+    if (!existingConversation) {
+      return;
+    }
+
+    const displayName = contactAlias ?? fallbackFullName;
+
+    if (existingConversation.groupName === displayName) {
+      return;
+    }
+
+    const nextConversation: StoredConversation = {
+      ...existingConversation,
+      groupName: displayName,
+    };
+    const conversationId = makeDmConversationId(ownerUserId, targetUserId);
+    const payload: ChatConversationUpdatedEvent = {
+      eventId: createUlid(),
+      conversationId: `dm:${targetUserId}`,
+      conversationKey: conversationId,
+      summary: {
+        ...toConversationSummary(nextConversation),
+        conversationId: `dm:${targetUserId}`,
+      },
+      reason: 'conversation.metadata.updated',
+      occurredAt,
+    };
+
+    await this.repository.put(
+      this.config.dynamodbConversationsTableName,
+      nextConversation,
+    );
+    this.chatRealtimeService.emitToUser(
+      ownerUserId,
+      'conversation.updated',
+      payload,
+    );
   }
 
   private async persistUserWithIdentityClaims(input: {

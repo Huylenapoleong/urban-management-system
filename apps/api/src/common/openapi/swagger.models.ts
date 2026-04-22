@@ -281,6 +281,20 @@ export class FriendUserItemDto {
   @ApiProperty({ example: 'Tran Van Citizen B' })
   fullName!: string;
 
+  @ApiProperty({
+    example: 'Anh Hai',
+    description:
+      'Display name FE should show for this contact. Equals contactAlias when present, otherwise falls back to fullName.',
+  })
+  displayName!: string;
+
+  @ApiPropertyOptional({
+    example: 'Anh Hai',
+    description:
+      'Private alias set by the authenticated user for this contact.',
+  })
+  contactAlias?: string;
+
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
 
@@ -306,6 +320,20 @@ export class FriendRequestItemDto {
 
   @ApiProperty({ example: 'Tran Van Citizen B' })
   fullName!: string;
+
+  @ApiProperty({
+    example: 'Chi Hang',
+    description:
+      'Display name FE should show for this contact. Equals contactAlias when present, otherwise falls back to fullName.',
+  })
+  displayName!: string;
+
+  @ApiPropertyOptional({
+    example: 'Chi Hang',
+    description:
+      'Private alias set by the authenticated user for this contact.',
+  })
+  contactAlias?: string;
 
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
@@ -338,6 +366,20 @@ export class BlockedUserItemDto {
 
   @ApiProperty({ example: 'Tran Van Citizen B' })
   fullName!: string;
+
+  @ApiProperty({
+    example: 'Nguoi cu khu pho',
+    description:
+      'Display name FE should show for this contact. Equals contactAlias when present, otherwise falls back to fullName.',
+  })
+  displayName!: string;
+
+  @ApiPropertyOptional({
+    example: 'Nguoi cu khu pho',
+    description:
+      'Private alias set by the authenticated user for this contact.',
+  })
+  contactAlias?: string;
 
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
@@ -390,6 +432,20 @@ export class UserDirectoryItemDto {
   @ApiProperty({ example: 'Tran Van Citizen B' })
   fullName!: string;
 
+  @ApiProperty({
+    example: 'Chi Hang',
+    description:
+      'Display name FE should show for this contact. Equals contactAlias when present, otherwise falls back to fullName.',
+  })
+  displayName!: string;
+
+  @ApiPropertyOptional({
+    example: 'Chi Hang',
+    description:
+      'Private alias set by the authenticated user for this contact.',
+  })
+  contactAlias?: string;
+
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
 
@@ -432,6 +488,36 @@ export class UserDirectoryItemDto {
       'When true, FE can create a same-scope stranger direct message request instead of a direct DM.',
   })
   canSendMessageRequest!: boolean;
+}
+
+export class SetUserContactAliasRequestDto {
+  @ApiProperty({
+    example: 'Anh Hai',
+    description: 'Private alias for this contact. Maximum 100 characters.',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  alias!: string;
+}
+
+export class UserContactAliasDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Anh Hai' })
+  alias!: string;
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class UserContactAliasRemovalResultDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: '2026-03-20T06:05:00.000Z' })
+  clearedAt!: string;
 }
 
 export class PushDeviceDto {
@@ -1513,7 +1599,10 @@ export class CreateGroupRequestDto {
 }
 
 export class UpdateGroupRequestDto {
-  @ApiPropertyOptional({ example: 'Phuong 1 Q1 - Moi truong' })
+  @ApiPropertyOptional({
+    example: 'Phuong 1 Q1 - Moi truong',
+    description: 'Only the group owner can rename the group.',
+  })
   @IsOptional()
   @IsString()
   @MinLength(1)

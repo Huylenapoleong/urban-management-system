@@ -83,6 +83,10 @@ function makeUserPushDeviceSk(deviceId) {
   return `PUSH_DEVICE#${deviceId}`;
 }
 
+function makeUserContactAliasSk(targetUserId) {
+  return `CONTACT_ALIAS#${targetUserId}`;
+}
+
 function makePushTokenLookupPk(pushToken) {
   const digest = createHash("sha256").update(pushToken).digest("hex");
   return `PUSH_TOKEN#${digest}`;
@@ -281,6 +285,7 @@ module.exports = {
   makeUserGroupsSk,
   makeUserPk,
   makeUserProfileSk,
+  makeUserContactAliasSk,
   makeUserPushDeviceSk,
   makeUserRefreshSessionSk,
   makeUserSessionSlotSk,

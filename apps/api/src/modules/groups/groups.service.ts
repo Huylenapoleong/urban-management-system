@@ -22,6 +22,7 @@ import type {
   ApiSuccessResponse,
   AuthenticatedUser,
   AuditEventItem,
+  ChatConversationUpdatedEvent,
   GroupBan,
   GroupInviteLink,
   GroupMembership,
@@ -53,6 +54,7 @@ import {
   paginateSortedItems,
 } from '../../common/pagination';
 import {
+  toConversationSummary,
   toGroupBan,
   toGroupInviteLink,
   toGroupMetadata,
@@ -396,14 +398,9 @@ export class GroupsService {
     const body = ensureObject(payload);
     const group = await this.getGroupOrThrow(groupId);
     const membership = await this.getMembership(groupId, actor.id);
+    const roleInGroup = this.getMembershipRole(membership);
 
-    if (
-      !this.authorizationService.canManageGroup(
-        actor,
-        group,
-        this.getMembershipRole(membership),
-      )
-    ) {
+    if (!this.authorizationService.canManageGroup(actor, group, roleInGroup)) {
       throw new ForbiddenException('You cannot update this group.');
     }
 
@@ -429,14 +426,20 @@ export class GroupsService {
       group.messagePolicy ?? 'ALL_MEMBERS';
     const nextMessagePolicy: GroupMessagePolicy =
       messagePolicyInput ?? currentMessagePolicy;
+    const isRenamingGroup =
+      typeof groupName === 'string' && groupName !== group.groupName;
+
+    if (
+      isRenamingGroup &&
+      !this.authorizationService.canRenameGroup(actor, roleInGroup)
+    ) {
+      throw new ForbiddenException('Only the owner can rename the group.');
+    }
 
     if (
       messagePolicyInput &&
       nextMessagePolicy !== currentMessagePolicy &&
-      !this.authorizationService.canChangeGroupMessagePolicy(
-        actor,
-        this.getMembershipRole(membership),
-      )
+      !this.authorizationService.canChangeGroupMessagePolicy(actor, roleInGroup)
     ) {
       throw new ForbiddenException(
         'Only the owner can change the group message policy.',
@@ -502,6 +505,19 @@ export class GroupsService {
       }
 
       throw error;
+    }
+
+    if (isRenamingGroup) {
+      await this.syncGroupConversationNames(
+        group.groupId,
+        nextGroup.groupName,
+        nextGroup.updatedAt,
+      );
+      await this.emitGroupLifecycleSystemMessage(
+        actor,
+        groupId,
+        `${actor.fullName} renamed the group to ${nextGroup.groupName}.`,
+      );
     }
 
     if (messagePolicyInput && nextMessagePolicy !== currentMessagePolicy) {
@@ -2116,6 +2132,68 @@ export class GroupsService {
     }
 
     return maxUses;
+  }
+
+  private async syncGroupConversationNames(
+    groupId: string,
+    groupName: string,
+    occurredAt: string,
+  ): Promise<void> {
+    const conversationKey = `GRP#${groupId}`;
+    const eventId = createUlid();
+    const activeMemberships = (
+      await this.queryGroupMemberships(groupId)
+    ).filter((membership) => !membership.deletedAt);
+
+    for (const membership of activeMemberships) {
+      const summaries = await this.repository.queryByPk<StoredConversation>(
+        this.config.dynamodbConversationsTableName,
+        makeInboxPk(membership.userId),
+        {
+          beginsWith: `CONV#${conversationKey}#LAST#`,
+          limit: 1,
+        },
+      );
+      const existingConversation = summaries.find(
+        (summary) =>
+          summary.entityType === 'CONVERSATION' && !summary.deletedAt,
+      );
+
+      if (
+        !existingConversation ||
+        existingConversation.groupName === groupName
+      ) {
+        continue;
+      }
+
+      const nextConversation: StoredConversation = {
+        ...existingConversation,
+        groupName,
+      };
+
+      await this.repository.put(
+        this.config.dynamodbConversationsTableName,
+        nextConversation,
+      );
+
+      const payload: ChatConversationUpdatedEvent = {
+        eventId,
+        conversationId: `group:${groupId}`,
+        conversationKey,
+        summary: {
+          ...toConversationSummary(nextConversation),
+          conversationId: `group:${groupId}`,
+        },
+        reason: 'conversation.metadata.updated',
+        occurredAt,
+      };
+
+      this.chatRealtimeService.emitToUser(
+        membership.userId,
+        CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
+        payload,
+      );
+    }
   }
 
   private async removeGroupConversationAccess(

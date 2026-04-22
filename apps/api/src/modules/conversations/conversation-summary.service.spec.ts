@@ -20,6 +20,7 @@ describe('ConversationSummaryService', () => {
   };
   const usersService = {
     getByIdOrThrow: jest.fn(),
+    resolveContactDisplayName: jest.fn(),
   };
   const config = {
     dynamodbConversationsTableName: 'Conversations',
@@ -42,6 +43,10 @@ describe('ConversationSummaryService', () => {
     repository.put.mockResolvedValue(undefined);
     repository.queryByPk.mockResolvedValue([]);
     repository.scanAll.mockResolvedValue([]);
+    usersService.resolveContactDisplayName.mockImplementation(
+      (_ownerUserId: string, _targetUserId: string, fallbackFullName: string) =>
+        fallbackFullName,
+    );
   });
 
   it('reuses one group lookup for all participant labels in group conversations', async () => {
@@ -68,6 +73,26 @@ describe('ConversationSummaryService', () => {
       ['user-2', 'Area Group 1'],
       ['user-3', 'Area Group 1'],
     ]);
+  });
+
+  it('prefers a saved contact alias for DM labels', async () => {
+    usersService.getByIdOrThrow.mockImplementation((userId: string) => ({
+      userId,
+      fullName: userId === 'user-2' ? 'Citizen Two' : 'Citizen One',
+    }));
+    usersService.resolveContactDisplayName.mockResolvedValueOnce('Anh Hai');
+
+    const result = await service.getConversationLabelMap('DM#user-1#user-2', [
+      'user-1',
+      'user-2',
+    ]);
+
+    expect(usersService.resolveContactDisplayName).toHaveBeenCalledWith(
+      'user-1',
+      'user-2',
+      'Citizen Two',
+    );
+    expect(result.get('user-1')).toBe('Anh Hai');
   });
 
   it('does not scan all conversation summaries when syncing a DM mutation', async () => {

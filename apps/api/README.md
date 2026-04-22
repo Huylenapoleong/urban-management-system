@@ -328,6 +328,28 @@ Notes:
 - Search on `users`, `groups`, `reports`, `conversations`, and `messages-in-one-conversation` is currently filter-based rather than full-text indexed search.
 - Message search is intentionally scoped to one conversation; there is still no global full-text search across all messages.
 
+## User Discovery And Contact Aliases
+
+- `GET /api/users/discover` returns `displayName` and optional `contactAlias` for each result.
+- FE should render `displayName` directly instead of reconstructing it from `fullName`.
+- `displayName` already applies the private alias precedence rule:
+  - `contactAlias` when present
+  - otherwise the target user's `fullName`
+- Private contact aliases are managed through:
+  - `PUT /api/users/me/contacts/:userId/alias`
+  - `DELETE /api/users/me/contacts/:userId/alias`
+- Aliases are private to the authenticated user, sync across devices, and are currently allowed only for:
+  - existing friends
+  - or users with an existing direct conversation
+
+## Group Governance Notes
+
+- Group rename is stricter than general group management:
+  - `OWNER` can rename the group
+  - `DEPUTY` can still manage other allowed metadata and membership flows, but cannot rename
+  - `ADMIN` can still manage groups globally, but rename itself remains owner-only under the current policy
+- When a group name changes, the API now propagates the new name into existing inbox summaries and emits `conversation.updated` with `reason = "conversation.metadata.updated"` so FE can refresh open chat headers and chat-list rows immediately.
+
 ## App Runtime
 
 - Every route is protected by Bearer JWT unless marked public.
@@ -465,6 +487,7 @@ Server push events:
 - `message.updated`: edited message payload for open conversation views
 - `message.deleted`: deleted message tombstone for open conversation views
 - `conversation.updated`: inbox summary change after new message, edit of the latest message, delete of the latest message, or read action
+- `conversation.updated` with `reason = "conversation.metadata.updated"`: metadata-only summary refresh, for example group rename or direct-message alias change
 - `conversation.removed`: emitted when deleting the last visible message removes the conversation from inbox state, or when a user deletes that conversation from their own inbox
 - `conversation.read`: read receipt with `readByUserId` and `readAt`
 - `presence.snapshot`: emitted to the joining socket after `conversation.join`

@@ -106,6 +106,8 @@ export interface AuthenticatedUser {
 export interface UserFriendItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -117,6 +119,8 @@ export interface UserFriendItem {
 export interface UserFriendRequestItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -129,6 +133,8 @@ export interface UserFriendRequestItem {
 export interface UserBlockedItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -140,6 +146,8 @@ export interface UserBlockedItem {
 export interface UserDirectoryItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -149,6 +157,12 @@ export interface UserDirectoryItem {
   canMessage: boolean;
   canSendFriendRequest: boolean;
   canSendMessageRequest: boolean;
+}
+
+export interface UserContactAlias {
+  userId: string;
+  alias: string;
+  updatedAt: string;
 }
 
 export interface GroupMetadata {
@@ -402,8 +416,7 @@ export interface ChatCallEndPayload extends ChatConversationCommandPayload {
   endedByUserId?: string;
 }
 
-export interface ChatCallHeartbeatPayload
-  extends ChatConversationCommandPayload {
+export interface ChatCallHeartbeatPayload extends ChatConversationCommandPayload {
   userId: string;
 }
 
@@ -543,6 +556,7 @@ export interface ChatConversationUpdatedEvent {
     | "message.created"
     | "message.updated"
     | "message.deleted"
+    | "conversation.metadata.updated"
     | "conversation.read"
     | "conversation.preferences.updated"
     | "conversation.request.updated";

@@ -137,6 +137,10 @@ The backend currently enforces these product rules and FE should align UI/UX wit
 - Group management is membership-based:
   - `ADMIN` can manage any group
   - `OWNER` and `DEPUTY` members can manage their group
+  - group rename is stricter than other management actions:
+    - only `OWNER` can change `groupName`
+    - `DEPUTY` can still manage the other allowed group/member flows
+    - `ADMIN` does not bypass the owner-only rename rule under the current product policy
   - staff outside the group cannot manage a non-private group just because it is in scope
   - use explicit member-management routes for new FE flows:
     - `POST /groups/:groupId/members`
@@ -147,6 +151,34 @@ The backend currently enforces these product rules and FE should align UI/UX wit
   - FE must render actions from the current status, not from a global list
   - citizen is only expected to close their own resolved report
   - invalid transitions will be rejected by the API
+
+## Contact Display Names And Private Aliases
+
+FE should prefer the server-provided `displayName` when rendering:
+
+- friend list items
+- incoming/outgoing friend requests
+- blocked-user list
+- user discovery results
+
+Rules:
+
+- `displayName = contactAlias ?? fullName`
+- `contactAlias` is private to the authenticated user
+- aliases sync across devices because they are persisted server-side
+
+Alias APIs:
+
+- `PUT /users/me/contacts/:userId/alias`
+- `DELETE /users/me/contacts/:userId/alias`
+
+Current policy:
+
+- alias can be set only for:
+  - an existing friend
+  - or a user that already has a direct conversation with the actor
+- actor cannot alias themself
+- after alias create/update/clear, backend emits `conversation.updated` with `reason = "conversation.metadata.updated"` for the actor inbox/DM summary when an existing direct conversation summary is present
 
 ## Chat Rules
 
@@ -248,6 +280,7 @@ Client rules:
 - deduplicate send retries by `clientMessageId`
 - rejoin active conversations after reconnect
 - do not assume every socket event is unique; outbox replay can redeliver safely
+- when `conversation.updated.reason === "conversation.metadata.updated"`, refresh only the visible conversation header/list label instead of treating it like a new-message event
 - do not send `callerId`, `calleeId`, or `userId` in call command payloads; backend canonicalizes actor identity from the authenticated socket
 - treat `call.end` server payload as `{ conversationId, userId, endedByUserId }` and prefer `endedByUserId` when present
 - send `call.heartbeat` every `30-60s` while a long-running call remains active

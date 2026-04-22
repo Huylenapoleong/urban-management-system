@@ -27,6 +27,7 @@ describe('ConversationsService', () => {
     canStartCitizenDm: jest.fn(),
     getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
+    resolveContactDisplayName: jest.fn(),
   };
   const groupsService = {
     getActiveBan: jest.fn(),
@@ -255,6 +256,10 @@ describe('ConversationsService', () => {
     });
     usersService.canStartCitizenDm.mockResolvedValue(true);
     usersService.isInteractionBlocked.mockResolvedValue(false);
+    usersService.resolveContactDisplayName.mockImplementation(
+      (_ownerUserId: string, _targetUserId: string, fallbackFullName: string) =>
+        fallbackFullName,
+    );
     repository.delete.mockResolvedValue(undefined);
     repository.scanAll.mockResolvedValue([]);
     repository.put.mockResolvedValue(undefined);

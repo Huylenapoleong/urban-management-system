@@ -190,9 +190,13 @@ export class ConversationSummaryService {
         userId: participantId,
         conversationId: access.conversationKey,
         groupName:
-          existingConversation.groupName ??
-          labelMap.get(participantId) ??
-          participantId,
+          kind === 'GRP'
+            ? (labelMap.get(participantId) ??
+              existingConversation.groupName ??
+              participantId)
+            : (existingConversation.groupName ??
+              labelMap.get(participantId) ??
+              participantId),
         lastMessagePreview:
           this.conversationStateService.buildPreview(latestMessage),
         lastSenderName: latestMessage.senderName,
@@ -361,9 +365,13 @@ export class ConversationSummaryService {
           {
             ...existingConversation,
             groupName:
-              existingConversation.groupName ??
-              labelMap.get(participantId) ??
-              participantId,
+              kind === 'GRP'
+                ? (labelMap.get(participantId) ??
+                  existingConversation.groupName ??
+                  participantId)
+                : (existingConversation.groupName ??
+                  labelMap.get(participantId) ??
+                  participantId),
           },
           visibleMessages,
         )
@@ -448,7 +456,7 @@ export class ConversationSummaryService {
     for (const participantId of participants) {
       labelMap.set(
         participantId,
-        this.getDmConversationLabel(participantId, participants, userMap),
+        await this.getDmConversationLabel(participantId, participants, userMap),
       );
     }
 
@@ -459,7 +467,7 @@ export class ConversationSummaryService {
     participantId: string,
     participants: string[],
     userMap: Map<string, Awaited<ReturnType<UsersService['getByIdOrThrow']>>>,
-  ): string {
+  ): Promise<string> {
     const otherParticipantId = participants.find(
       (userId) => userId !== participantId,
     );
@@ -468,6 +476,10 @@ export class ConversationSummaryService {
       throw new NotFoundException('Conversation participant not found.');
     }
 
-    return userMap.get(otherParticipantId)?.fullName ?? otherParticipantId;
+    return this.usersService.resolveContactDisplayName(
+      participantId,
+      otherParticipantId,
+      userMap.get(otherParticipantId)?.fullName ?? otherParticipantId,
+    );
   }
 }

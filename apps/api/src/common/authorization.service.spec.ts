@@ -143,6 +143,11 @@ describe('AuthorizationService', () => {
     );
   });
 
+  it('allows only the owner to rename a group', () => {
+    expect(service.canRenameGroup(wardOfficerActor, 'OWNER')).toBe(true);
+    expect(service.canRenameGroup(wardOfficerActor, 'DEPUTY')).toBe(false);
+  });
+
   it('allows all active members to send messages when the policy is ALL_MEMBERS', () => {
     expect(
       service.canSendGroupMessage(citizenActor, 'MEMBER', 'ALL_MEMBERS'),

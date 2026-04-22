@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import {
@@ -48,6 +49,9 @@ import {
   PushDeviceDto,
   PushDeviceRemovalResultDto,
   RegisterPushDeviceRequestDto,
+  SetUserContactAliasRequestDto,
+  UserContactAliasDto,
+  UserContactAliasRemovalResultDto,
   UserDirectoryItemDto,
   UpdateProfileRequestDto,
   UpdateUserStatusRequestDto,
@@ -445,6 +449,81 @@ export class UsersController {
     @Param('userId') userId: string,
   ) {
     return this.usersService.unblockUser(user, userId);
+  }
+
+  @Put('me/contacts/:userId/alias')
+  @ApiOperation({
+    summary: 'Set or replace a private contact alias',
+    description:
+      'Stores a private alias for a friend or an existing direct-message counterpart. The alias becomes the display name for that contact in supported friend/chat responses and direct-message conversation summaries.',
+  })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiBody({ type: SetUserContactAliasRequestDto })
+  @ApiOkEnvelopeResponse(UserContactAliasDto, {
+    description: 'Returns the saved alias and its updated timestamp.',
+  })
+  @ApiBadRequestExamples('The alias input is invalid.', [
+    {
+      name: 'aliasSelf',
+      summary: 'Cannot alias yourself',
+      message: 'Cannot set an alias for yourself.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENA00000000/alias',
+    },
+    {
+      name: 'aliasMissingValue',
+      summary: 'Alias is required',
+      message: 'alias is required.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENB00000000/alias',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot alias this user yet.', [
+    {
+      name: 'aliasForbidden',
+      summary: 'Alias not allowed for unrelated user',
+      message:
+        'You can only set an alias for friends or existing direct conversations.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENB00000000/alias',
+    },
+  ])
+  @ApiNotFoundExamples('The target user does not exist.', [
+    {
+      name: 'aliasMissingUser',
+      summary: 'Target user not found',
+      message: 'User not found.',
+      path: '/api/users/me/contacts/01JPCY0000UNKNOWNUSER000000/alias',
+    },
+  ])
+  setContactAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+    @Body() body: SetUserContactAliasRequestDto,
+  ) {
+    return this.usersService.setContactAlias(user, userId, body);
+  }
+
+  @Delete('me/contacts/:userId/alias')
+  @ApiOperation({
+    summary: 'Clear a private contact alias',
+    description:
+      'Removes the saved alias for a contact. After clearing, FE should fall back to the target user full name in supported friend/chat responses and direct-message conversation summaries.',
+  })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(UserContactAliasRemovalResultDto, {
+    description: 'Returns the cleared user id and clear timestamp.',
+  })
+  @ApiNotFoundExamples('The alias does not exist.', [
+    {
+      name: 'aliasMissing',
+      summary: 'Alias not found',
+      message: 'Contact alias not found.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENB00000000/alias',
+    },
+  ])
+  clearContactAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.clearContactAlias(user, userId);
   }
 
   @Get('discover')
