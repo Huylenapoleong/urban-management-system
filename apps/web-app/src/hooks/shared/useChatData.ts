@@ -130,6 +130,51 @@ export function useMessages(conversationId?: string) {
   const queryClient = useQueryClient();
   const [typingUsers, setTypingUsers] = useState<Record<string, ChatTypingStateEvent>>({});
   const messageQueryKey = useMemo(() => ["messages", conversationId] as const, [conversationId]);
+  const messageRefreshTimerRef = useRef<number | null>(null);
+  const conversationRefreshTimerRef = useRef<number | null>(null);
+
+  const upsertMessageInCache = useCallback((message: MessageItem) => {
+    queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(messageQueryKey, (oldData) => {
+      if (!oldData || oldData.pages.length === 0) {
+        return {
+          pages: [{ items: [message], nextCursor: undefined }],
+          pageParams: [undefined],
+        };
+      }
+
+      if (oldData.pages.some((page) => page.items.some((msg) => msg.id === message.id))) {
+        return oldData;
+      }
+
+      const [firstPage, ...restPages] = oldData.pages;
+      return {
+        ...oldData,
+        pages: [{ ...firstPage, items: [message, ...firstPage.items] }, ...restPages],
+      };
+    });
+  }, [messageQueryKey, queryClient]);
+
+  const scheduleMessageRefresh = useCallback(() => {
+    if (messageRefreshTimerRef.current !== null) {
+      window.clearTimeout(messageRefreshTimerRef.current);
+    }
+
+    messageRefreshTimerRef.current = window.setTimeout(() => {
+      messageRefreshTimerRef.current = null;
+      queryClient.invalidateQueries({ queryKey: messageQueryKey });
+    }, 500);
+  }, [messageQueryKey, queryClient]);
+
+  const scheduleConversationsRefresh = useCallback(() => {
+    if (conversationRefreshTimerRef.current !== null) {
+      window.clearTimeout(conversationRefreshTimerRef.current);
+    }
+
+    conversationRefreshTimerRef.current = window.setTimeout(() => {
+      conversationRefreshTimerRef.current = null;
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }, 700);
+  }, [queryClient]);
 
   const query = useInfiniteQuery({
     queryKey: messageQueryKey,
@@ -141,6 +186,9 @@ export function useMessages(conversationId?: string) {
       }),
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     enabled: !!conversationId,
+    staleTime: 15 * 1000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   const messages = query.data?.pages.flatMap((page) => page.items) ?? [];
@@ -184,25 +232,7 @@ export function useMessages(conversationId?: string) {
       // payload could be a ChatMessageCreatedEvent
       const newMsg = payload.message || payload;
       if (newMsg?.conversationId === conversationId) {
-        // Keep newest page fresh while preserving older pages.
-        queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(messageQueryKey, (oldData) => {
-          if (!oldData || oldData.pages.length === 0) {
-            return {
-              pages: [{ items: [newMsg], nextCursor: undefined }],
-              pageParams: [undefined],
-            };
-          }
-
-          if (oldData.pages.some((page) => page.items.some((msg) => msg.id === newMsg.id))) {
-            return oldData;
-          }
-
-          const [firstPage, ...restPages] = oldData.pages;
-          return {
-            ...oldData,
-            pages: [{ ...firstPage, items: [newMsg, ...firstPage.items] }, ...restPages],
-          };
-        });
+        upsertMessageInCache(newMsg as MessageItem);
       }
     };
 
@@ -227,7 +257,7 @@ export function useMessages(conversationId?: string) {
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
       socketClient.socket?.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
     };
-  }, [conversationId, messageQueryKey, queryClient]);
+  }, [conversationId, queryClient, upsertMessageInCache]);
 
   const sendTyping = useCallback(
     async (isTyping: boolean) => {
@@ -251,9 +281,11 @@ export function useMessages(conversationId?: string) {
 
   const sendMutation = useMutation({
     mutationFn: (payload: SendMessageInput) => sendMessage(conversationId!, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKey });
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    onSuccess: (createdMessage) => {
+      if (createdMessage) {
+        upsertMessageInCache(createdMessage);
+      }
+      scheduleConversationsRefresh();
     },
     onError: (error) => {
       console.error("Failed to send message", {
@@ -266,7 +298,22 @@ export function useMessages(conversationId?: string) {
   const readMutation = useMutation({
     mutationFn: () => markConversationAsRead(conversationId!),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: unknown) => {
+        if (!Array.isArray(oldData)) {
+          return oldData;
+        }
+
+        return oldData.map((item: any) => {
+          if (!item || item.conversationId !== conversationId) {
+            return item;
+          }
+
+          return {
+            ...item,
+            unreadCount: 0,
+          };
+        });
+      });
     },
   });
 
@@ -274,8 +321,8 @@ export function useMessages(conversationId?: string) {
     mutationFn: ({ messageId, text }: { messageId: string; text: string }) =>
       updateMessage(conversationId!, messageId, text),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKey });
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      scheduleMessageRefresh();
+      scheduleConversationsRefresh();
     },
   });
 
@@ -283,8 +330,8 @@ export function useMessages(conversationId?: string) {
     mutationFn: ({ messageId, scope }: { messageId: string; scope?: RecallScope }) =>
       deleteMessage(conversationId!, messageId, scope),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKey });
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      scheduleMessageRefresh();
+      scheduleConversationsRefresh();
     },
   });
 
@@ -292,10 +339,22 @@ export function useMessages(conversationId?: string) {
     mutationFn: ({ messageId, conversationIds }: { messageId: string; conversationIds: string[] }) =>
       forwardMessage(conversationId!, messageId, conversationIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKey });
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      scheduleMessageRefresh();
+      scheduleConversationsRefresh();
     },
   });
+
+  useEffect(() => {
+    return () => {
+      if (messageRefreshTimerRef.current !== null) {
+        window.clearTimeout(messageRefreshTimerRef.current);
+      }
+
+      if (conversationRefreshTimerRef.current !== null) {
+        window.clearTimeout(conversationRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   return {
     ...query,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Users, Plus, ShieldCheck, MessageCircle, LogOut, X } from "lucide-react";
-import { createGroup, getGroups, joinGroup, leaveGroup } from "@/services/group.api";
+import { createGroup, getGroups, joinGroup, joinGroupByInvite, leaveGroup } from "@/services/group.api";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/providers/AuthProvider";
@@ -19,11 +19,23 @@ export default function GroupsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const accountLocationCode = user?.locationCode?.trim() ?? "";
-  const canCreateOfficialGroup = user?.role === "OFFICIAL" || user?.role === "ADMIN";
+  const canCreateOfficialGroup = user?.role === "PROVINCE_OFFICER" || user?.role === "ADMIN";
+  const allowedCreateGroupTypes = useMemo(() => {
+    if (user?.role === "CITIZEN") {
+      return ["PRIVATE"] as GroupType[];
+    }
+
+    const next: GroupType[] = ["AREA", "TOPIC", "PRIVATE"];
+    if (canCreateOfficialGroup) {
+      next.push("OFFICIAL");
+    }
+    return next;
+  }, [canCreateOfficialGroup, user?.role]);
 
   const [isJoining, setIsJoining] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [inviteCodeInput, setInviteCodeInput] = useState("");
   const [formState, setFormState] = useState<GroupFormState>({
     groupName: "",
     description: "",
@@ -94,11 +106,24 @@ export default function GroupsPage() {
     },
   });
 
+  const joinByInviteMutation = useMutation({
+    mutationFn: (code: string) => joinGroupByInvite(code),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast.success("Đã tham gia nhóm bằng link mời");
+      setInviteCodeInput("");
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || "Link hoặc mã mời không hợp lệ.");
+    },
+  });
+
   const handleOpenCreate = () => {
     setFormState({
       groupName: "",
       description: "",
-      groupType: "AREA",
+      groupType: allowedCreateGroupTypes[0] ?? "PRIVATE",
       locationCode: user?.locationCode ?? "",
     });
     setIsCreateOpen(true);
@@ -139,6 +164,11 @@ export default function GroupsPage() {
       return;
     }
 
+    if (!allowedCreateGroupTypes.includes(formState.groupType)) {
+      toast.error("Loại nhóm hiện tại không phù hợp với quyền tài khoản.");
+      return;
+    }
+
     createGroupMutation.mutate({
       groupName: formState.groupName.trim(),
       description: formState.description.trim() || undefined,
@@ -154,6 +184,33 @@ export default function GroupsPage() {
         displayName: groupName,
       },
     });
+  };
+
+  const handleJoinByInvite = (event: React.FormEvent) => {
+    event.preventDefault();
+
+    const raw = inviteCodeInput.trim();
+    if (!raw) {
+      toast.error("Vui lòng nhập link hoặc mã mời.");
+      return;
+    }
+
+    const parsedCode = (() => {
+      if (/^https?:\/\//i.test(raw)) {
+        try {
+          const url = new URL(raw);
+          const parts = url.pathname.split("/").filter(Boolean);
+          const maybeCode = parts[parts.length - 1];
+          return maybeCode || raw;
+        } catch {
+          return raw;
+        }
+      }
+
+      return raw;
+    })();
+
+    joinByInviteMutation.mutate(parsedCode);
   };
 
   if (isLoading) {
@@ -216,10 +273,9 @@ export default function GroupsPage() {
                 }
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               >
-                <option value="AREA">AREA</option>
-                <option value="TOPIC">TOPIC</option>
-                {canCreateOfficialGroup ? <option value="OFFICIAL">OFFICIAL</option> : null}
-                <option value="PRIVATE">PRIVATE</option>
+                {allowedCreateGroupTypes.map((groupType) => (
+                  <option key={groupType} value={groupType}>{groupType}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -262,6 +318,28 @@ export default function GroupsPage() {
           </form>
         </div>
       ) : null}
+
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Tham gia bằng link mời</h2>
+        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+          Dán link mời hoặc nhập mã mời để tham gia nhóm nhanh.
+        </p>
+        <form onSubmit={handleJoinByInvite} className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <input
+            value={inviteCodeInput}
+            onChange={(event) => setInviteCodeInput(event.target.value)}
+            placeholder="Ví dụ: https://app.example.com/groups/invite/ABC123 hoặc ABC123"
+            className="h-10 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-800"
+          />
+          <button
+            type="submit"
+            disabled={joinByInviteMutation.isPending}
+            className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {joinByInviteMutation.isPending ? "Đang tham gia..." : "Tham gia"}
+          </button>
+        </form>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {groups.map((group) => (

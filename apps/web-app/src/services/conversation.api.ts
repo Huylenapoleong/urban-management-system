@@ -284,7 +284,7 @@ export async function markConversationAsRead(conversationId: string): Promise<vo
 export async function sendMessage(
   conversationId: string,
   input: SendMessageInput,
-): Promise<void> {
+): Promise<MessageItem | undefined> {
   const trimmedText = input.text?.trim() ?? "";
   const attachmentKey = input.attachmentKey?.trim();
 
@@ -316,10 +316,22 @@ export async function sendMessage(
     payload.replyTo = input.replyTo.trim();
   }
 
-  await socketClient.safeEmitValidated(
+  const response = await socketClient.safeEmitValidated(
     CHAT_SOCKET_EVENTS.MESSAGE_SEND,
     payload,
-  );
+  ) as any;
+
+  const candidate =
+    response?.message ||
+    response?.data?.message ||
+    response?.data ||
+    undefined;
+
+  if (candidate && typeof candidate === "object" && typeof candidate.id === "string") {
+    return candidate as MessageItem;
+  }
+
+  return undefined;
 }
 
 export async function updateMessage(

@@ -1,5 +1,5 @@
 import { Fragment, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile, SmilePlus } from "lucide-react";
+import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile, SmilePlus, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useWebRTCRuntime } from "@/providers/WebRTCProvider";
@@ -10,11 +10,21 @@ import { useLocation } from "react-router-dom";
 import { uploadMedia } from "@/services/upload.api";
 import { getUserById, searchUserExactByContact, getUserPresence, type PresenceState } from "@/services/user.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { leaveGroup, listGroupMembers, manageGroupMember } from "@/services/group.api";
+import {
+  addGroupMember,
+  createGroupInviteLink,
+  leaveGroupWithPayload,
+  listGroupInviteLinks,
+  listGroupMembers,
+  removeGroupMember,
+  revokeGroupInviteLink,
+  updateGroup,
+  updateGroupMemberRole,
+} from "@/services/group.api";
 import { listMyFriendRequests, listMyFriends, sendFriendRequest } from "@/services/friends.api";
 import { toast } from "react-hot-toast";
 import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
-import type { MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
+import type { GroupInviteLink, MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
 import type { GroupMemberRole } from "@urban/shared-constants";
 import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
 
@@ -222,6 +232,7 @@ const PRESENCE_POLL_INTERVAL_MS = 60_000;
 const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
 const URL_PATTERN = /(https?:\/\/[^\s]+)/gi;
 const MESSAGE_BLOCK_GAP_MS = 10 * 60 * 1000;
+const USER_ID_PATTERN = /\b[0-9A-Z]{20,32}\b/g;
 
 function extractGroupIdFromConversationId(conversationId?: string | null): string | undefined {
   if (!conversationId) {
@@ -307,9 +318,12 @@ export function ChatPage() {
   const [selectedMentions, setSelectedMentions] = useState<MentionCandidate[]>([]);
   const [leaveGroupError, setLeaveGroupError] = useState("");
   const [isLeaveGroupDialogOpen, setIsLeaveGroupDialogOpen] = useState(false);
+  const [leaveSuccessorUserId, setLeaveSuccessorUserId] = useState("");
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [inviteSearchText, setInviteSearchText] = useState("");
   const [selectedInviteUserIds, setSelectedInviteUserIds] = useState<string[]>([]);
+  const [renameGroupName, setRenameGroupName] = useState("");
+  const [inviteLinkError, setInviteLinkError] = useState("");
   const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<string | null>(null);
   const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<string | null>(null);
   const [activeMemberActionUserId, setActiveMemberActionUserId] = useState<string | null>(null);
@@ -580,6 +594,12 @@ export function ChatPage() {
     queryFn: () => listMyFriends({ limit: 200 }),
     staleTime: 30 * 1000,
   });
+  const { data: activeGroupInviteLinks = [] } = useQuery({
+    queryKey: ["group-invite-links", activeGroupId],
+    queryFn: () => listGroupInviteLinks(activeGroupId!),
+    enabled: Boolean(activeGroupId && isInfoOpen),
+    staleTime: 30 * 1000,
+  });
   const { data: outgoingFriendRequests = [] } = useQuery({
     queryKey: ["friends", "requests", "outgoing", "for-group-member-picker"],
     queryFn: () => listMyFriendRequests({ direction: "OUTGOING", limit: 200 }),
@@ -631,6 +651,47 @@ export function ChatPage() {
     cachedProfile?.fullName,
     memberProfilesById,
     messageSenderNameByUserId,
+    myFriends,
+    user?.sub,
+  ]);
+  const displayNameByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+
+    myFriends.forEach((friend) => {
+      if (friend.userId && friend.fullName?.trim()) {
+        map.set(friend.userId, friend.fullName.trim());
+      }
+    });
+
+    activeGroupMembers.forEach((member, index) => {
+      const profile = memberProfilesById[member.userId];
+      const displayName =
+        profile?.fullName ||
+        mentionNameByUserId.get(member.userId) ||
+        messageSenderNameByUserId.get(member.userId) ||
+        `Thành viên ${index + 1}`;
+
+      map.set(member.userId, displayName);
+    });
+
+    messages.forEach((message) => {
+      if (message.senderId && message.senderName?.trim() && !map.has(message.senderId)) {
+        map.set(message.senderId, message.senderName.trim());
+      }
+    });
+
+    if (user?.sub) {
+      map.set(user.sub, cachedProfile?.fullName || "Bạn");
+    }
+
+    return map;
+  }, [
+    activeGroupMembers,
+    cachedProfile?.fullName,
+    memberProfilesById,
+    mentionNameByUserId,
+    messageSenderNameByUserId,
+    messages,
     myFriends,
     user?.sub,
   ]);
@@ -702,21 +763,83 @@ export function ChatPage() {
   const isMentionMenuOpen = mentionStartIndex !== null && mentionCandidates.length > 0;
   const canManageGroupMembers =
     currentUserMembership?.roleInGroup === "OWNER" ||
-    currentUserMembership?.roleInGroup === "OFFICER";
+    currentUserMembership?.roleInGroup === "DEPUTY";
+  const isCurrentUserOwner = currentUserMembership?.roleInGroup === "OWNER";
   const canShowAddMemberSection =
     user?.role !== "CITIZEN" &&
     (canManageGroupMembers || user?.role === "ADMIN");
   const canViewGroupMemberList = Boolean(user?.sub);
   const canViewConversationCode = user?.role === "ADMIN";
+  const canViewSensitiveUserIds = user?.role === "ADMIN";
   const canInviteGroupFriends = Boolean(activeGroupId && user?.sub);
   const canUpdateGroupAvatar = Boolean(activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"));
+  const canRenameGroup = Boolean(activeGroupId && (isCurrentUserOwner || user?.role === "ADMIN"));
+  const canManageInviteLinks = Boolean(activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"));
+  const pendingRemoveMemberDisplayName = pendingRemoveMemberUserId
+    ? displayNameByUserId.get(pendingRemoveMemberUserId) || "Thành viên"
+    : "";
+
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ groupId, groupName }: { groupId: string; groupName: string }) =>
+      updateGroup(groupId, { groupName }),
+    onSuccess: (updatedGroup) => {
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      setRenameGroupName(updatedGroup.groupName || "");
+      toast.success("Đã đổi tên nhóm");
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || "Không thể đổi tên nhóm lúc này.");
+    },
+  });
+
+  const createInviteLinkMutation = useMutation({
+    mutationFn: ({ groupId }: { groupId: string }) => createGroupInviteLink(groupId),
+    onSuccess: () => {
+      setInviteLinkError("");
+      queryClient.invalidateQueries({ queryKey: ["group-invite-links", activeGroupId] });
+      toast.success("Đã tạo link tham gia nhóm");
+    },
+    onError: (error: any) => {
+      const message = error?.message || "Không thể tạo link tham gia.";
+      setInviteLinkError(message);
+      toast.error(message);
+    },
+  });
+
+  const revokeInviteLinkMutation = useMutation({
+    mutationFn: ({ groupId, inviteId }: { groupId: string; inviteId: string }) =>
+      revokeGroupInviteLink(groupId, inviteId),
+    onSuccess: () => {
+      setInviteLinkError("");
+      queryClient.invalidateQueries({ queryKey: ["group-invite-links", activeGroupId] });
+      toast.success("Đã vô hiệu hóa link mời");
+    },
+    onError: (error: any) => {
+      const message = error?.message || "Không thể vô hiệu hóa link mời.";
+      setInviteLinkError(message);
+      toast.error(message);
+    },
+  });
 
   const manageGroupMemberMutation = useMutation({
     mutationFn: ({ groupId, userId, action, roleInGroup }: { groupId: string; userId: string; action: "add" | "update" | "remove"; roleInGroup?: GroupMemberRole }) =>
-      manageGroupMember(groupId, userId, {
-        action,
-        roleInGroup,
-      }),
+      (async () => {
+        if (action === "add") {
+          return addGroupMember(groupId, {
+            userId,
+            roleInGroup: roleInGroup === "DEPUTY" ? "DEPUTY" : "MEMBER",
+          });
+        }
+
+        if (action === "update") {
+          return updateGroupMemberRole(groupId, userId, {
+            roleInGroup: roleInGroup === "DEPUTY" ? "DEPUTY" : "MEMBER",
+          });
+        }
+
+        return removeGroupMember(groupId, userId);
+      })(),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["group-members", variables.groupId] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
@@ -756,12 +879,14 @@ export function ChatPage() {
     },
   });
   const leaveGroupMutation = useMutation({
-    mutationFn: (groupId: string) => leaveGroup(groupId),
+    mutationFn: ({ groupId, successorUserId }: { groupId: string; successorUserId?: string }) =>
+      leaveGroupWithPayload(groupId, successorUserId ? { successorUserId } : undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       queryClient.invalidateQueries({ queryKey: ["group-members"] });
       setLeaveGroupError("");
+      setLeaveSuccessorUserId("");
       setIsInfoOpen(false);
       setIsLeaveGroupDialogOpen(false);
       setActiveChat(null);
@@ -1087,6 +1212,15 @@ export function ChatPage() {
   }, [activeChat]);
 
   useEffect(() => {
+    if (!activeContact?.isGroup) {
+      setRenameGroupName("");
+      return;
+    }
+
+    setRenameGroupName(activeContact.groupName || "");
+  }, [activeContact?.groupName, activeContact?.isGroup]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -1139,10 +1273,13 @@ export function ChatPage() {
     setMentionStartIndex(null);
     setSelectedMentions([]);
     setLeaveGroupError("");
+    setLeaveSuccessorUserId("");
     setIsLeaveGroupDialogOpen(false);
     setIsInviteDialogOpen(false);
     setInviteSearchText("");
     setSelectedInviteUserIds([]);
+    setRenameGroupName("");
+    setInviteLinkError("");
     setPendingRemoveMemberUserId(null);
     setActiveMemberActionUserId(null);
     setFocusedMessageId(null);
@@ -1178,6 +1315,60 @@ export function ChatPage() {
     setSelectedInviteUserIds((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
     );
+  };
+
+  const buildInviteJoinUrl = (invite: GroupInviteLink): string => {
+    if (typeof window === "undefined") {
+      return invite.code;
+    }
+
+    return `${window.location.origin}/groups/invite/${invite.code}`;
+  };
+
+  const handleCopyInviteLink = async (invite: GroupInviteLink) => {
+    const inviteUrl = buildInviteJoinUrl(invite);
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(inviteUrl);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = inviteUrl;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
+      toast.success("Đã sao chép link tham gia");
+    } catch {
+      toast.error("Không thể sao chép link tham gia.");
+    }
+  };
+
+  const handleRenameGroup = async () => {
+    if (!activeGroupId) {
+      return;
+    }
+
+    const nextName = renameGroupName.trim();
+    if (!nextName) {
+      toast.error("Tên nhóm không được để trống.");
+      return;
+    }
+
+    if (nextName === (activeContact?.groupName || "").trim()) {
+      toast("Tên nhóm chưa thay đổi.");
+      return;
+    }
+
+    await renameGroupMutation.mutateAsync({
+      groupId: activeGroupId,
+      groupName: nextName,
+    });
   };
 
   const handleConfirmInviteMembers = async () => {
@@ -1299,7 +1490,7 @@ export function ChatPage() {
       return;
     }
 
-    const nextRole: GroupMemberRole = currentRole === "OFFICER" ? "MEMBER" : "OFFICER";
+    const nextRole: GroupMemberRole = currentRole === "DEPUTY" ? "MEMBER" : "DEPUTY";
 
     await manageGroupMemberMutation.mutateAsync({
       groupId: activeGroupId,
@@ -1314,7 +1505,15 @@ export function ChatPage() {
       return;
     }
 
-    await leaveGroupMutation.mutateAsync(activeGroupId);
+    if (isCurrentUserOwner && !leaveSuccessorUserId.trim()) {
+      setLeaveGroupError("Bạn là chủ nhóm, vui lòng chọn người kế nhiệm trước khi rời nhóm.");
+      return;
+    }
+
+    await leaveGroupMutation.mutateAsync({
+      groupId: activeGroupId,
+      successorUserId: isCurrentUserOwner ? leaveSuccessorUserId.trim() : undefined,
+    });
   };
 
   const handleSendFriendRequest = async (targetUserId: string) => {
@@ -1667,19 +1866,42 @@ export function ChatPage() {
     });
   };
 
-  const extractMessageText = (content: string): string => {
+  const formatSystemMessageText = (text: string): string => {
+    if (!text.trim()) {
+      return text;
+    }
+
+    return text.replace(USER_ID_PATTERN, (token) => {
+      const displayName = displayNameByUserId.get(token);
+      if (displayName) {
+        return canViewSensitiveUserIds ? `${displayName} (${token})` : displayName;
+      }
+
+      return canViewSensitiveUserIds ? token : "một thành viên";
+    });
+  };
+
+  const extractMessageText = (content: string, messageType?: ChatMessageType): string => {
+    const normalizeText = (value: string) => {
+      if (messageType === "SYSTEM") {
+        return formatSystemMessageText(value);
+      }
+
+      return value;
+    };
+
     try {
       const parsed = JSON.parse(content);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const text = typeof (parsed as { text?: unknown }).text === "string"
           ? (parsed as { text: string }).text
           : content;
-        return replaceMentionIdsWithNames(text, (parsed as { mention?: unknown }).mention);
+        return normalizeText(replaceMentionIdsWithNames(text, (parsed as { mention?: unknown }).mention));
       }
 
-      return content;
+      return normalizeText(content);
     } catch {
-      return content;
+      return normalizeText(content);
     }
   };
 
@@ -1728,7 +1950,7 @@ export function ChatPage() {
       return "Tin nhắn đã được thu hồi";
     }
 
-    const text = extractMessageText(message.content).trim();
+    const text = extractMessageText(message.content, message.type).trim();
     if (text) {
       return text;
     }
@@ -2161,10 +2383,15 @@ export function ChatPage() {
       )];
       let sentAny = false;
       const replyTo = replyingMessage?.id;
-      setIsUploading(true);
       closeMentionMenu();
 
       if (queuedAttachments.length === 0) {
+        setInputText("");
+        setSelectedMentions([]);
+        setReplyingMessage(null);
+        stopTyping();
+        focusComposer();
+
         await sendMessageAsync({
           text: pendingText,
           type: "TEXT",
@@ -2175,6 +2402,7 @@ export function ChatPage() {
         pendingMentions = [];
         sentAny = true;
       } else {
+        setIsUploading(true);
         for (const item of queuedAttachments) {
           setQueuedAttachments((prev) =>
             prev.map((entry) =>
@@ -2236,7 +2464,9 @@ export function ChatPage() {
         fileInputRef.current.value = "";
       }
     } finally {
-      setIsUploading(false);
+      if (queuedAttachments.length > 0) {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -2444,6 +2674,25 @@ export function ChatPage() {
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Tên hiển thị</p>
                   <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{activeContact?.groupName || "Không rõ tên"}</p>
+                  {activeGroupId && canRenameGroup ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        value={renameGroupName}
+                        onChange={(event) => setRenameGroupName(event.target.value)}
+                        placeholder="Nhập tên nhóm mới"
+                        className="h-8 flex-1 rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900"
+                        maxLength={100}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleRenameGroup()}
+                        disabled={renameGroupMutation.isPending}
+                        className="rounded bg-blue-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {renameGroupMutation.isPending ? "Đang lưu..." : "Đổi tên"}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 {activeGroupId ? (
                   <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -2592,7 +2841,7 @@ export function ChatPage() {
                                                 }}
                                                 className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800"
                                               >
-                                                {member.roleInGroup === "OFFICER" ? "Hạ quyền" : "Nâng quyền"}
+                                                {member.roleInGroup === "DEPUTY" ? "Hạ quyền" : "Nâng quyền"}
                                               </button>
                                             ) : null}
                                             <button
@@ -2662,7 +2911,7 @@ export function ChatPage() {
                           className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         >
                           <option value="MEMBER">MEMBER</option>
-                          <option value="OFFICER">OFFICER</option>
+                          <option value="DEPUTY">DEPUTY</option>
                         </select>
                         <button
                           type="submit"
@@ -2695,14 +2944,91 @@ export function ChatPage() {
                       )}
                     </div>
 
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Link tham gia nhóm</p>
+                        {canManageInviteLinks ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!activeGroupId) return;
+                              void createInviteLinkMutation.mutateAsync({ groupId: activeGroupId });
+                            }}
+                            disabled={createInviteLinkMutation.isPending}
+                            className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                          >
+                            {createInviteLinkMutation.isPending ? "Đang tạo..." : "Tạo link"}
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {activeGroupInviteLinks.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Chưa có link tham gia nào.</p>
+                      ) : (
+                        <div className="max-h-36 space-y-1 overflow-y-auto rounded border border-slate-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
+                          {activeGroupInviteLinks
+                            .filter((invite) => !invite.disabledAt)
+                            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                            .slice(0, 5)
+                            .map((invite) => (
+                              <div
+                                key={invite.inviteId}
+                                className="rounded border border-slate-200 px-2 py-1.5 text-[11px] dark:border-slate-700"
+                              >
+                                <p className="truncate font-medium text-slate-700 dark:text-slate-200">
+                                  {buildInviteJoinUrl(invite)}
+                                </p>
+                                <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                                  Đã dùng: {invite.usedCount}{invite.maxUses ? `/${invite.maxUses}` : ""}
+                                </p>
+                                <div className="mt-1 flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCopyInviteLink(invite)}
+                                    className="inline-flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                                  >
+                                    <Copy size={10} />
+                                    Sao chép
+                                  </button>
+                                  {canManageInviteLinks ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!activeGroupId) return;
+                                        void revokeInviteLinkMutation.mutateAsync({
+                                          groupId: activeGroupId,
+                                          inviteId: invite.inviteId,
+                                        });
+                                      }}
+                                      disabled={revokeInviteLinkMutation.isPending}
+                                      className="rounded border border-red-300 px-1.5 py-0.5 text-[10px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                                    >
+                                      Thu hồi
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+
                     {memberActionError ? (
                       <p className="text-xs text-red-500">{memberActionError}</p>
+                    ) : null}
+
+                    {inviteLinkError ? (
+                      <p className="text-xs text-red-500">{inviteLinkError}</p>
                     ) : null}
 
                     <div className="pt-1">
                       <button
                         type="button"
-                        onClick={() => setIsLeaveGroupDialogOpen(true)}
+                        onClick={() => {
+                          setLeaveGroupError("");
+                          setLeaveSuccessorUserId("");
+                          setIsLeaveGroupDialogOpen(true);
+                        }}
                         disabled={leaveGroupMutation.isPending}
                         className="w-full rounded bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
                       >
@@ -2774,7 +3100,7 @@ export function ChatPage() {
                   const forwardedLabel = isMe
                     ? "Bạn đã chuyển tiếp"
                     : `${senderDisplayName} đã chuyển tiếp`;
-                  const messageText = extractMessageText(msg.content).trim();
+                  const messageText = extractMessageText(msg.content, msg.type).trim();
                   const firstUrl = extractFirstUrl(messageText);
                   const linkPreview = firstUrl ? buildLinkPreview(firstUrl) : null;
                   const messageReactions = activeMessageReactions[msg.id] || [];
@@ -3282,7 +3608,9 @@ export function ChatPage() {
                                     <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
                                       {friend.fullName || "Không rõ tên"}
                                     </p>
-                                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{friend.userId}</p>
+                                    {canViewSensitiveUserIds ? (
+                                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">{friend.userId}</p>
+                                    ) : null}
                                   </div>
                                 </label>
                               </li>
@@ -3339,6 +3667,39 @@ export function ChatPage() {
                     <p className="text-sm text-slate-600 dark:text-slate-300">
                       Bạn sẽ không còn nhận tin nhắn mới từ nhóm này. Bạn có chắc muốn tiếp tục?
                     </p>
+                    {isCurrentUserOwner ? (
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                          Bạn là chủ nhóm, cần chọn người kế nhiệm trước khi rời nhóm.
+                        </p>
+                        <select
+                          value={leaveSuccessorUserId}
+                          onChange={(event) => {
+                            setLeaveSuccessorUserId(event.target.value);
+                            setLeaveGroupError("");
+                          }}
+                          className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                        >
+                          <option value="">Chọn thành viên kế nhiệm</option>
+                          {activeGroupMembers
+                            .filter((member) => member.userId !== user?.sub && !member.deletedAt)
+                            .map((member, index) => {
+                              const profile = memberProfilesById[member.userId];
+                              const displayName =
+                                profile?.fullName ||
+                                myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
+                                messageSenderNameByUserId.get(member.userId) ||
+                                `Thành viên ${index + 1}`;
+
+                              return (
+                                <option key={`successor-${member.userId}`} value={member.userId}>
+                                  {displayName} ({member.roleInGroup})
+                                </option>
+                              );
+                            })}
+                        </select>
+                      </div>
+                    ) : null}
                     {leaveGroupError ? (
                       <p className="text-xs text-red-500">{leaveGroupError}</p>
                     ) : null}
@@ -3496,7 +3857,7 @@ export function ChatPage() {
                     syncMentionContext(inputText, event.currentTarget.selectionStart)
                   }
                   onKeyDown={handleComposerKeyDown}
-                  disabled={isSending || isUploading}
+                  disabled={isUploading}
                   onPaste={handleComposerPaste}
                 />
                 {isMentionMenuOpen ? (
@@ -3516,7 +3877,7 @@ export function ChatPage() {
               </div>
               <button 
                 type="submit" 
-                disabled={isSending || isUploading || (!inputText.trim() && queuedAttachments.length === 0)}
+                disabled={isUploading || (!inputText.trim() && queuedAttachments.length === 0)}
                 className="h-11 w-11 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
                 title="Gửi"
               >
@@ -3552,7 +3913,10 @@ export function ChatPage() {
 
                   <div className="space-y-2 p-4 text-sm text-slate-700 dark:text-slate-300">
                     <p>Bạn có chắc muốn xóa thành viên này khỏi nhóm?</p>
-                    <p className="break-all text-xs text-slate-500 dark:text-slate-400">{pendingRemoveMemberUserId}</p>
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{pendingRemoveMemberDisplayName}</p>
+                    {canViewSensitiveUserIds ? (
+                      <p className="break-all text-xs text-slate-500 dark:text-slate-400">{pendingRemoveMemberUserId}</p>
+                    ) : null}
                   </div>
 
                   <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">
