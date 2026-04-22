@@ -27,6 +27,7 @@ import type {
   GroupInviteLink,
   GroupMembership,
   GroupMetadata,
+  GroupOwnershipTransferResult,
 } from '@urban/shared-types';
 import {
   createUlid,
@@ -858,6 +859,142 @@ export class GroupsService {
     );
 
     return toMembership(nextMembership);
+  }
+
+  async transferOwnership(
+    actor: AuthenticatedUser,
+    groupId: string,
+    payload: unknown,
+  ): Promise<GroupOwnershipTransferResult> {
+    const body = ensureObject(payload);
+    const targetUserId = requiredString(body, 'targetUserId', {
+      minLength: 5,
+      maxLength: 50,
+    });
+    const group = await this.getGroupOrThrow(groupId);
+    const actorMembership = await this.getMembership(groupId, actor.id);
+
+    if (
+      !this.authorizationService.canTransferGroupOwnership(
+        actor,
+        this.getMembershipRole(actorMembership),
+      )
+    ) {
+      throw new ForbiddenException('You cannot transfer group ownership.');
+    }
+
+    const currentOwnerMembership = await this.getOwnerMembershipOrThrow(
+      groupId,
+      actorMembership,
+    );
+
+    if (targetUserId === currentOwnerMembership.userId) {
+      throw new BadRequestException(
+        'Choose another active member as the new owner.',
+      );
+    }
+
+    const targetMembership = await this.getMembership(groupId, targetUserId);
+
+    if (!targetMembership || targetMembership.deletedAt) {
+      throw new NotFoundException('Membership not found.');
+    }
+
+    const targetUser =
+      await this.usersService.getActiveByIdOrThrow(targetUserId);
+    const previousOwnerUser = await this.usersService.getByIdOrThrow(
+      currentOwnerMembership.userId,
+    );
+    const occurredAt = nowIso();
+    const nextOwnerMembership: StoredMembership = {
+      ...currentOwnerMembership,
+      roleInGroup: 'DEPUTY',
+      updatedAt: occurredAt,
+    };
+    const nextTargetMembership: StoredMembership = {
+      ...targetMembership,
+      roleInGroup: 'OWNER',
+      updatedAt: occurredAt,
+    };
+    const nextGroup: StoredGroup = {
+      ...group,
+      updatedAt: occurredAt,
+    };
+    const auditRecord = this.auditTrailService.buildGroupEvent({
+      action: 'GROUP_OWNERSHIP_TRANSFERRED',
+      actorUserId: actor.id,
+      groupId,
+      targetUserId,
+      summary: `${actor.fullName} transferred ownership.`,
+      metadata: {
+        previousOwnerUserId: currentOwnerMembership.userId,
+        successorUserId: targetUserId,
+      },
+    });
+
+    try {
+      await this.repository.transactWrite([
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbMembershipsTableName,
+          item: nextOwnerMembership,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': currentOwnerMembership.updatedAt,
+            ':expectedDeletedAt': null,
+          },
+        },
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbMembershipsTableName,
+          item: nextTargetMembership,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': targetMembership.updatedAt,
+            ':expectedDeletedAt': null,
+          },
+        },
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbGroupsTableName,
+          item: nextGroup,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': group.updatedAt,
+          },
+        },
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbGroupsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Group ownership changed. Please retry.');
+      }
+
+      throw error;
+    }
+
+    await this.emitGroupLifecycleSystemMessage(
+      actor,
+      groupId,
+      `Ownership was transferred from ${this.getUserDisplayName(previousOwnerUser, currentOwnerMembership.userId)} to ${this.getUserDisplayName(targetUser, targetUserId)}.`,
+    );
+
+    return {
+      groupId,
+      previousOwnerUserId: currentOwnerMembership.userId,
+      previousOwnerRoleInGroup: 'DEPUTY',
+      ownerUserId: targetUserId,
+      transferredAt: occurredAt,
+    };
   }
 
   async listMembers(
@@ -2005,6 +2142,30 @@ export class GroupsService {
         beginsWith: 'MEMBER#',
       },
     );
+  }
+
+  private async getOwnerMembershipOrThrow(
+    groupId: string,
+    actorMembership?: StoredMembership,
+  ): Promise<StoredMembership> {
+    if (
+      actorMembership &&
+      !actorMembership.deletedAt &&
+      this.getMembershipRole(actorMembership) === 'OWNER'
+    ) {
+      return actorMembership;
+    }
+
+    const ownerMembership = (await this.queryGroupMemberships(groupId)).find(
+      (membership) =>
+        !membership.deletedAt && this.getMembershipRole(membership) === 'OWNER',
+    );
+
+    if (!ownerMembership) {
+      throw new NotFoundException('Membership not found.');
+    }
+
+    return ownerMembership;
   }
 
   private async queryGroupBans(groupId: string): Promise<StoredGroupBan[]> {

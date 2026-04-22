@@ -791,12 +791,25 @@ export class ConversationsGateway
           access,
           user.id,
         );
+        const recipientUserIds =
+          await this.chatCallSessionService.listMediaRecipientUserIds(
+            access.conversationKey,
+            user.id,
+          );
         const signalPayload = this.buildWebRtcPayload(
           access.conversationId,
           body,
           field,
+          user,
         );
-        this.emitSignal(access, event, signalPayload, client.id, user.id);
+        this.emitSignal(
+          access,
+          event,
+          signalPayload,
+          client.id,
+          user.id,
+          recipientUserIds,
+        );
         return { success: true };
       },
       errorCode,
@@ -938,6 +951,7 @@ export class ConversationsGateway
     conversationId: string,
     body: Record<string, unknown>,
     field: 'offer' | 'answer' | 'candidate',
+    user: AuthenticatedUser,
   ):
     | ChatWebRTCOfferPayload
     | ChatWebRTCAnswerPayload
@@ -948,6 +962,7 @@ export class ConversationsGateway
 
     return {
       conversationId,
+      senderId: user.id,
       [field]: body[field],
     } as unknown as
       | ChatWebRTCOfferPayload
@@ -977,24 +992,21 @@ export class ConversationsGateway
     access: ResolvedConversationAccess,
     event: string,
     payload: object,
-    exceptSocketId: string,
+    _exceptSocketId: string,
     actorUserId: string,
+    recipientUserIds?: string[],
   ): void {
-    if (!access.isGroup) {
-      const recipientUserIds = access.participants.filter(
+    const recipients =
+      recipientUserIds ??
+      access.participants.filter(
         (participantId) => participantId !== actorUserId,
       );
 
-      this.chatRealtimeService.emitToUsers(recipientUserIds, event, payload);
+    if (recipients.length === 0) {
       return;
     }
 
-    this.chatRealtimeService.emitToConversation(
-      access.conversationKey,
-      event,
-      payload,
-      exceptSocketId,
-    );
+    this.chatRealtimeService.emitToUsers(recipients, event, payload);
   }
 
   private async emitPresenceSnapshot(

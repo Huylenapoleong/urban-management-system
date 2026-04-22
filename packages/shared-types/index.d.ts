@@ -212,6 +212,14 @@ export interface GroupInviteLink {
   updatedAt: string;
 }
 
+export interface GroupOwnershipTransferResult {
+  groupId: string;
+  previousOwnerUserId: string;
+  previousOwnerRoleInGroup: GroupMemberRole;
+  ownerUserId: string;
+  transferredAt: string;
+}
+
 export interface MessageReplyReference {
   id: string;
   senderId: string;
@@ -270,8 +278,14 @@ export interface ConversationSummary {
   requestRequestedAt?: string | null;
   requestRespondedAt?: string | null;
   requestRespondedByUserId?: string | null;
+  historyClearedAt?: string | null;
   deletedAt: string | null;
   updatedAt: string;
+}
+
+export interface ConversationHistoryClearedResult {
+  conversationId: string;
+  clearedAt: string;
 }
 
 export interface ReportItem {
@@ -421,14 +435,17 @@ export interface ChatCallHeartbeatPayload extends ChatConversationCommandPayload
 }
 
 export interface ChatWebRTCOfferPayload extends ChatConversationCommandPayload {
+  senderId?: string;
   offer: any;
 }
 
 export interface ChatWebRTCAnswerPayload extends ChatConversationCommandPayload {
+  senderId?: string;
   answer: any;
 }
 
 export interface ChatWebRTCIceCandidatePayload extends ChatConversationCommandPayload {
+  senderId?: string;
   candidate: any;
 }
 
@@ -557,6 +574,7 @@ export interface ChatConversationUpdatedEvent {
     | "message.updated"
     | "message.deleted"
     | "conversation.metadata.updated"
+    | "conversation.history.cleared"
     | "conversation.read"
     | "conversation.preferences.updated"
     | "conversation.request.updated";

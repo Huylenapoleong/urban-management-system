@@ -184,6 +184,16 @@ export class AuthorizationService {
     return normalizeGroupMemberRole(roleInGroup) === 'OWNER';
   }
 
+  canTransferGroupOwnership(
+    actor: AuthenticatedUser,
+    roleInGroup?: GroupMemberRole | 'OFFICER',
+  ): boolean {
+    return (
+      actor.role === 'ADMIN' ||
+      normalizeGroupMemberRole(roleInGroup) === 'OWNER'
+    );
+  }
+
   canSendGroupMessage(
     actor: AuthenticatedUser,
     roleInGroup: GroupMemberRole | 'OFFICER' | undefined,

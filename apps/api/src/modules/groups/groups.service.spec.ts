@@ -30,6 +30,7 @@ describe('GroupsService', () => {
     canManageGroup: jest.fn(),
     canRenameGroup: jest.fn(),
     canReadGroup: jest.fn(),
+    canTransferGroupOwnership: jest.fn(),
   };
   const usersService = {
     areFriends: jest.fn(),
@@ -224,6 +225,7 @@ describe('GroupsService', () => {
     groupCleanupService.processTask.mockResolvedValue(undefined);
     authorizationService.canChangeGroupMessagePolicy.mockReturnValue(true);
     authorizationService.canRenameGroup.mockReturnValue(true);
+    authorizationService.canTransferGroupOwnership.mockReturnValue(true);
     conversationsService.sendGroupSystemMessage.mockResolvedValue({
       id: 'msg-system',
     });
@@ -549,6 +551,76 @@ describe('GroupsService', () => {
       actor,
       group.groupId,
       expect.arrayContaining(['user-2']),
+      expect.stringContaining(
+        'Ownership was transferred from Ward Officer to Member Two.',
+      ),
+    );
+  });
+
+  it('transfers ownership independently while keeping the previous owner in the group as deputy', async () => {
+    repository.transactWrite.mockImplementationOnce((items: unknown) => {
+      type TransactionPut = {
+        kind: 'put';
+        tableName: string;
+        item: Record<string, unknown>;
+      };
+
+      const transactionItems = items as TransactionPut[];
+      const previousOwnerPut = transactionItems.find(
+        (item) =>
+          item.kind === 'put' &&
+          item.tableName === 'Memberships' &&
+          'userId' in item.item &&
+          item.item.userId === 'user-1',
+      );
+      const nextOwnerPut = transactionItems.find(
+        (item) =>
+          item.kind === 'put' &&
+          item.tableName === 'Memberships' &&
+          'userId' in item.item &&
+          item.item.userId === 'user-2',
+      );
+      const groupPut = transactionItems.find(
+        (item) =>
+          item.kind === 'put' &&
+          item.tableName === 'Groups' &&
+          item.item.entityType === 'GROUP_METADATA',
+      );
+
+      if (previousOwnerPut) {
+        currentActorMembership =
+          previousOwnerPut.item as unknown as StoredMembership;
+      }
+
+      if (nextOwnerPut) {
+        currentMemberTwo = nextOwnerPut.item as unknown as StoredMembership;
+      }
+
+      if (groupPut) {
+        currentGroup = groupPut.item as unknown as StoredGroup;
+      }
+    });
+
+    const result = await service.transferOwnership(actor, group.groupId, {
+      targetUserId: 'user-2',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        groupId: group.groupId,
+        previousOwnerUserId: 'user-1',
+        previousOwnerRoleInGroup: 'DEPUTY',
+        ownerUserId: 'user-2',
+        transferredAt: expect.any(String),
+      }),
+    );
+    expect(currentActorMembership.roleInGroup).toBe('DEPUTY');
+    expect(currentActorMembership.deletedAt).toBeNull();
+    expect(currentMemberTwo.roleInGroup).toBe('OWNER');
+    expect(conversationsService.sendGroupSystemMessage).toHaveBeenCalledWith(
+      actor,
+      group.groupId,
+      expect.arrayContaining(['user-1', 'user-2']),
       expect.stringContaining(
         'Ownership was transferred from Ward Officer to Member Two.',
       ),

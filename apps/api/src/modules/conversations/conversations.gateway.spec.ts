@@ -31,6 +31,7 @@ describe('ConversationsGateway', () => {
     endCall: jest.fn(),
     getDirectSessionAccess: jest.fn(),
     initiateCall: jest.fn(),
+    listMediaRecipientUserIds: jest.fn(),
     rejectCall: jest.fn(),
     touchSignalingSession: jest.fn(),
   };
@@ -320,7 +321,7 @@ describe('ConversationsGateway', () => {
     expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalled();
   });
 
-  it('keeps group call signals on the conversation room', async () => {
+  it('routes group call signals directly to participant user rooms', async () => {
     const { client, disconnect } = createSocketClient();
 
     chatSocketAuthService.authenticate.mockResolvedValue({
@@ -349,16 +350,15 @@ describe('ConversationsGateway', () => {
       success: true,
       data: { success: true },
     });
-    expect(chatRealtimeService.emitToConversation).toHaveBeenCalledWith(
-      'GRP#group-1',
+    expect(chatRealtimeService.emitToUsers).toHaveBeenCalledWith(
+      ['user-2', 'user-3'],
       'call.accept',
       {
         conversationId: 'group:group-1',
         calleeId: actor.id,
       },
-      client.id,
     );
-    expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalled();
+    expect(chatRealtimeService.emitToConversation).not.toHaveBeenCalled();
     expect(disconnect).not.toHaveBeenCalled();
   });
 
@@ -470,6 +470,9 @@ describe('ConversationsGateway', () => {
     chatCallSessionService.touchSignalingSession.mockResolvedValue({
       status: 'ACTIVE',
     });
+    chatCallSessionService.listMediaRecipientUserIds.mockResolvedValue([
+      'user-2',
+    ]);
 
     const result = await gateway.handleWebRTCOffer(client, {
       conversationId: 'dm:user-2',
@@ -492,6 +495,7 @@ describe('ConversationsGateway', () => {
       'webrtc.offer',
       {
         conversationId: 'dm:user-2',
+        senderId: actor.id,
         offer: { sdp: 'offer-sdp', type: 'offer' },
       },
     );

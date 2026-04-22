@@ -810,6 +810,23 @@ export class GroupInviteLinkDto {
   updatedAt!: string;
 }
 
+export class GroupOwnershipTransferResultDto {
+  @ApiProperty({ example: '01JPCY1000AREAGROUP0000000' })
+  groupId!: string;
+
+  @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
+  previousOwnerUserId!: string;
+
+  @ApiProperty({ enum: GROUP_MEMBER_ROLES, example: 'DEPUTY' })
+  previousOwnerRoleInGroup!: (typeof GROUP_MEMBER_ROLES)[number];
+
+  @ApiProperty({ example: '01JPCY0000DEPUTY0000000000000' })
+  ownerUserId!: string;
+
+  @ApiProperty({ example: '2026-03-18T10:20:00.000Z' })
+  transferredAt!: string;
+}
+
 export class MessageReplyReferenceDto {
   @ApiProperty({ example: '01JPCY3000GROUPMSG00000001' })
   id!: string;
@@ -999,6 +1016,14 @@ export class ConversationSummaryDto {
   })
   requestRespondedByUserId?: string | null;
 
+  @ApiPropertyOptional({
+    example: null,
+    nullable: true,
+    description:
+      'Per-user cutoff timestamp for messages hidden after a clear-history action. Older messages at or before this timestamp are not shown again to the current user.',
+  })
+  historyClearedAt?: string | null;
+
   @ApiPropertyOptional({ example: null, nullable: true })
   deletedAt!: string | null;
 
@@ -1012,6 +1037,14 @@ export class ConversationDeletedResultDto {
 
   @ApiProperty({ example: '2026-03-18T09:15:00.000Z' })
   removedAt!: string;
+}
+
+export class ConversationHistoryClearedResultDto {
+  @ApiProperty({ example: 'group:01JPCY1000AREAGROUP0000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '2026-03-18T09:20:00.000Z' })
+  clearedAt!: string;
 }
 
 export class RecallMessageResultDto {
@@ -1736,6 +1769,18 @@ export class LeaveGroupRequestDto {
   @MinLength(5)
   @MaxLength(50)
   successorUserId?: string;
+}
+
+export class TransferGroupOwnershipRequestDto {
+  @ApiProperty({
+    example: '01JPCY0000DEPUTY0000000000000',
+    description:
+      'Active member that should become the new owner. The previous owner stays in the group as deputy.',
+  })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(50)
+  targetUserId!: string;
 }
 
 export class SendDirectMessageRequestDto {

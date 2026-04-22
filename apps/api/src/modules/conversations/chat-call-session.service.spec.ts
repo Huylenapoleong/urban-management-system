@@ -23,6 +23,12 @@ describe('ChatCallSessionService', () => {
     isGroup: false,
     participants: ['user-1', 'user-2'],
   };
+  const groupAccess: ResolvedConversationAccess = {
+    conversationId: 'group:group-1',
+    conversationKey: 'GRP#group-1',
+    isGroup: true,
+    participants: ['user-1', 'user-2', 'user-3'],
+  };
 
   let service: ChatCallSessionService;
 
@@ -73,5 +79,30 @@ describe('ChatCallSessionService', () => {
 
     expect(firstEnd.shouldEmit).toBe(true);
     expect(secondEnd.shouldEmit).toBe(false);
+  });
+
+  it('keeps a group call active when one accepted participant leaves', async () => {
+    await service.initiateCall(groupAccess, 'user-1', true);
+    await service.acceptCall(groupAccess, 'user-2');
+    await service.acceptCall(groupAccess, 'user-3');
+
+    const endResult = await service.endCall(groupAccess, 'user-2');
+
+    expect(endResult.shouldEmit).toBe(true);
+    await expect(
+      service.touchSignalingSession(groupAccess, 'user-1'),
+    ).resolves.toMatchObject({
+      status: 'ACTIVE',
+    });
+    await expect(
+      service.touchSignalingSession(groupAccess, 'user-3'),
+    ).resolves.toMatchObject({
+      status: 'ACTIVE',
+    });
+    await expect(
+      service.touchSignalingSession(groupAccess, 'user-2'),
+    ).rejects.toThrow(
+      'Only accepted participants can exchange media for this call.',
+    );
   });
 });

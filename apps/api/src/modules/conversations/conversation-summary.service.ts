@@ -92,6 +92,7 @@ export class ConversationSummaryService {
         isPinned: existingConversation?.isPinned ?? false,
         archivedAt: null,
         mutedUntil: existingConversation?.mutedUntil ?? null,
+        historyClearedAt: existingConversation?.historyClearedAt ?? null,
         deletedAt: null,
         updatedAt: message.sentAt,
         lastReadAt,
@@ -163,6 +164,7 @@ export class ConversationSummaryService {
       access.participants,
     );
     const summariesByUser = new Map<string, StoredConversation>();
+    const removedUserIds: string[] = [];
     const changedUserIds: string[] = [];
 
     for (const participantId of participantIds) {
@@ -170,14 +172,58 @@ export class ConversationSummaryService {
         participantId,
         access.conversationKey,
       );
+      const visibleMessages =
+        this.conversationStateService.filterVisibleMessagesForUser(
+          activeMessages,
+          participantId,
+          existingConversation?.historyClearedAt ?? null,
+        );
 
       if (!existingConversation || existingConversation.deletedAt) {
         continue;
       }
 
+      if (visibleMessages.length === 0) {
+        if (!existingConversation.historyClearedAt) {
+          await this.repository.delete(
+            this.config.dynamodbConversationsTableName,
+            existingConversation.PK,
+            existingConversation.SK,
+          );
+          removedUserIds.push(participantId);
+          continue;
+        }
+
+        const nextConversation: StoredConversation = {
+          ...existingConversation,
+          lastMessagePreview: '',
+          lastSenderName: '',
+          unreadCount: 0,
+          deletedAt: null,
+        };
+
+        if (
+          this.conversationStateService.hasConversationSummaryChanged(
+            existingConversation,
+            nextConversation,
+          )
+        ) {
+          await this.repository.put(
+            this.config.dynamodbConversationsTableName,
+            nextConversation,
+          );
+          summariesByUser.set(participantId, nextConversation);
+          changedUserIds.push(participantId);
+        } else {
+          summariesByUser.set(participantId, existingConversation);
+        }
+
+        continue;
+      }
+
       const lastReadAt = this.conversationStateService.resolveStoredLastReadAt(
         existingConversation,
-        latestMessage.sentAt,
+        visibleMessages[0].sentAt,
       );
       const nextConversation: StoredConversation = {
         PK: makeInboxPk(participantId),
@@ -197,20 +243,23 @@ export class ConversationSummaryService {
             : (existingConversation.groupName ??
               labelMap.get(participantId) ??
               participantId),
-        lastMessagePreview:
-          this.conversationStateService.buildPreview(latestMessage),
-        lastSenderName: latestMessage.senderName,
+        lastMessagePreview: this.conversationStateService.buildPreview(
+          visibleMessages[0],
+        ),
+        lastSenderName: visibleMessages[0].senderName,
         unreadCount: this.conversationStateService.computeUnreadCount(
           participantId,
-          activeMessages,
+          visibleMessages,
           lastReadAt,
+          existingConversation.historyClearedAt ?? null,
         ),
         isGroup: kind === 'GRP',
         isPinned: existingConversation.isPinned ?? false,
         archivedAt: existingConversation.archivedAt ?? null,
         mutedUntil: existingConversation.mutedUntil ?? null,
+        historyClearedAt: existingConversation.historyClearedAt ?? null,
         deletedAt: null,
-        updatedAt: latestMessage.sentAt,
+        updatedAt: visibleMessages[0].sentAt,
         lastReadAt,
       };
 
@@ -288,29 +337,72 @@ export class ConversationSummaryService {
   async listVisibleMessagesForUser(
     conversationId: string,
     userId: string,
+    historyClearedAt?: string | null,
   ): Promise<StoredMessage[]> {
     const activeMessages = await this.listActiveMessages(conversationId);
 
     return this.conversationStateService.filterVisibleMessagesForUser(
       activeMessages,
       userId,
+      historyClearedAt,
     );
   }
 
   async syncConversationSummaryForUser(
     access: ConversationSummaryAccess,
     participantId: string,
+    visibleMessagesOverride?: StoredMessage[],
+    existingConversationOverride?: StoredConversation,
   ): Promise<SingleConversationSyncResult> {
-    const existingConversation = await this.getConversationSummary(
-      participantId,
-      access.conversationKey,
-    );
-    const visibleMessages = await this.listVisibleMessagesForUser(
-      access.conversationKey,
-      participantId,
-    );
+    const existingConversation =
+      existingConversationOverride ??
+      (await this.getConversationSummary(
+        participantId,
+        access.conversationKey,
+      ));
+    const visibleMessages =
+      visibleMessagesOverride ??
+      (await this.listVisibleMessagesForUser(
+        access.conversationKey,
+        participantId,
+        existingConversation?.historyClearedAt ?? null,
+      ));
 
     if (visibleMessages.length === 0) {
+      if (existingConversation?.historyClearedAt) {
+        const nextConversation: StoredConversation = {
+          ...existingConversation,
+          lastMessagePreview: '',
+          lastSenderName: '',
+          unreadCount: 0,
+          deletedAt: null,
+        };
+
+        if (
+          this.conversationStateService.hasConversationSummaryChanged(
+            existingConversation,
+            nextConversation,
+          )
+        ) {
+          await this.repository.put(
+            this.config.dynamodbConversationsTableName,
+            nextConversation,
+          );
+
+          return {
+            removed: false,
+            changed: true,
+            summary: nextConversation,
+          };
+        }
+
+        return {
+          removed: false,
+          changed: false,
+          summary: existingConversation,
+        };
+      }
+
       if (existingConversation) {
         await this.repository.delete(
           this.config.dynamodbConversationsTableName,
@@ -357,6 +449,7 @@ export class ConversationSummaryService {
         isPinned: false,
         archivedAt: null,
         mutedUntil: null,
+        historyClearedAt: null,
         deletedAt: null,
         updatedAt: latestMessage.sentAt,
         lastReadAt: latestMessage.sentAt,

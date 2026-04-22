@@ -792,14 +792,14 @@ describe('ConversationsService', () => {
     });
   });
 
-  it('hides messages recalled with SELF for the current actor', async () => {
-    const hiddenForActorMessage: StoredMessage = {
+  it('hides legacy empty-body messages from message listing', async () => {
+    const ghostMessage: StoredMessage = {
       ...latestMessage,
-      SK: 'MSG#2026-03-18T10:04:00.000Z#01MESSAGE0000000000000002',
-      messageId: '01MESSAGE0000000000000002',
-      deletedForUserAt: {
-        [actor.id]: '2026-03-18T10:10:00.000Z',
-      },
+      SK: 'MSG#2026-03-18T10:04:30.000Z#01MESSAGE0000000000000009',
+      messageId: '01MESSAGE0000000000000009',
+      content: '{"text":"","mention":[]}',
+      sentAt: '2026-03-18T10:04:30.000Z',
+      updatedAt: '2026-03-18T10:04:30.000Z',
     };
 
     repository.queryByPk.mockImplementation(
@@ -809,20 +809,196 @@ describe('ConversationsService', () => {
           pk === latestMessage.PK &&
           options?.beginsWith === 'MSG#'
         ) {
-          return [hiddenForActorMessage, latestMessage];
+          return [latestMessage, ghostMessage];
         }
 
         return [];
       },
     );
 
-    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {});
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      limit: '20',
+    });
 
     expect(result.data).toHaveLength(1);
-    expect(result.data[0]).toEqual(
+    expect(result.data[0]?.id).toBe(latestMessage.messageId);
+  });
+
+  it('reconciles a stale unread summary when opening the conversation', async () => {
+    const staleSummary: StoredConversation = {
+      ...actorSummary,
+      unreadCount: 10,
+      updatedAt: '2026-03-18T10:06:00.000Z',
+    };
+    const ghostMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:04:30.000Z#01MESSAGE0000000000000010',
+      messageId: '01MESSAGE0000000000000010',
+      content: '{"text":"","mention":[]}',
+      sentAt: '2026-03-18T10:04:30.000Z',
+      updatedAt: '2026-03-18T10:04:30.000Z',
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [staleSummary];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === otherSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [otherSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [latestMessage, ghostMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      limit: '20',
+    });
+    const messageQueries = repository.queryByPk.mock.calls.filter(
+      ([tableName, pk, options]: [string, string, { beginsWith?: string }]) =>
+        tableName === 'Messages' &&
+        pk === latestMessage.PK &&
+        options?.beginsWith === 'MSG#',
+    );
+
+    expect(result.data).toHaveLength(1);
+    expect(messageQueries).toHaveLength(1);
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
       expect.objectContaining({
-        id: latestMessage.messageId,
+        PK: actorSummary.PK,
+        conversationId: conversationKey,
+        unreadCount: 1,
       }),
+    );
+    expect(
+      conversationDispatchService.emitConversationSummaryUpdated,
+    ).toHaveBeenCalledWith(
+      expect.any(String),
+      actor.id,
+      conversationKey,
+      expect.objectContaining({
+        unreadCount: 1,
+      }),
+      'conversation.metadata.updated',
+      expect.any(String),
+    );
+  });
+
+  it('clears conversation history for the current user without deleting shared messages', async () => {
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.clearConversationHistory(
+      actor,
+      `dm:${otherUser.userId}`,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        clearedAt: expect.any(String),
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith([
+      expect.objectContaining({
+        tableName: 'Conversations',
+        item: expect.objectContaining({
+          PK: actorSummary.PK,
+          conversationId: conversationKey,
+          lastMessagePreview: '',
+          lastSenderName: '',
+          unreadCount: 0,
+          historyClearedAt: expect.any(String),
+        }),
+      }),
+    ]);
+    expect(
+      conversationDispatchService.emitConversationSummaryUpdated,
+    ).toHaveBeenCalledWith(
+      expect.any(String),
+      actor.id,
+      conversationKey,
+      expect.objectContaining({
+        historyClearedAt: expect.any(String),
+        unreadCount: 0,
+      }),
+      'conversation.history.cleared',
+      expect.any(String),
+    );
+    expect(repository.delete).not.toHaveBeenCalledWith(
+      'Messages',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('hides messages sent before the user cleared the conversation history', async () => {
+    const clearedSummary: StoredConversation = {
+      ...actorSummary,
+      historyClearedAt: '2026-03-18T10:06:00.000Z',
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [clearedSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [latestMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      limit: '20',
+    });
+
+    expect(result.data).toHaveLength(0);
+    expect(repository.delete).not.toHaveBeenCalledWith(
+      'Conversations',
+      actorSummary.PK,
+      actorSummary.SK,
     );
   });
 
@@ -851,6 +1027,17 @@ describe('ConversationsService', () => {
     ).rejects.toThrow(
       'Citizens can only send direct messages to friends or accepted direct message requests.',
     );
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty structured content when creating a direct message', async () => {
+    await expect(
+      service.sendDirectMessage(actor, {
+        targetUserId: otherUser.userId,
+        content: '{"text":"","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow('content, attachmentKey or attachmentUrl is required.');
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
@@ -1460,9 +1647,11 @@ describe('ConversationsService', () => {
     );
   });
 
-  it('recalls a message for SELF even when the message was sent by another participant', async () => {
+  it('recalls a message only for the sender and emits a local delete event', async () => {
     const actorMessage: StoredMessage = {
       ...latestMessage,
+      senderId: actor.id,
+      senderName: actor.fullName,
     };
 
     repository.get.mockImplementation(
@@ -1526,19 +1715,6 @@ describe('ConversationsService', () => {
     );
 
     expect(result.scope).toBe('SELF');
-    expect(repository.transactPut).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          tableName: 'Messages',
-          item: expect.objectContaining({
-            messageId: actorMessage.messageId,
-            deletedForUserAt: expect.objectContaining({
-              [actor.id]: expect.any(String),
-            }),
-          }),
-        }),
-      ]),
-    );
     expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
       actor.id,
       'message.deleted',
