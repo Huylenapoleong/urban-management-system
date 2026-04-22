@@ -791,6 +791,39 @@ describe('ConversationsService', () => {
       },
     });
   });
+
+  it('hides legacy empty-body messages from message listing', async () => {
+    const ghostMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:04:30.000Z#01MESSAGE0000000000000009',
+      messageId: '01MESSAGE0000000000000009',
+      content: '{"text":"","mention":[]}',
+      sentAt: '2026-03-18T10:04:30.000Z',
+      updatedAt: '2026-03-18T10:04:30.000Z',
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [latestMessage, ghostMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      limit: '20',
+    });
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.id).toBe(latestMessage.messageId);
+  });
+
   it('rejects direct messages when policy denies access to the target user', async () => {
     authorizationService.canAccessDirectConversation.mockReturnValueOnce(false);
 
@@ -816,6 +849,17 @@ describe('ConversationsService', () => {
     ).rejects.toThrow(
       'Citizens can only send direct messages to friends or accepted direct message requests.',
     );
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty structured content when creating a direct message', async () => {
+    await expect(
+      service.sendDirectMessage(actor, {
+        targetUserId: otherUser.userId,
+        content: '{"text":"","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow('content, attachmentKey or attachmentUrl is required.');
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 

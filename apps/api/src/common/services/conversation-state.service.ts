@@ -38,7 +38,7 @@ export class ConversationStateService {
     const grouped = new Map<string, StoredMessage[]>();
 
     for (const message of messages) {
-      if (message.deletedAt) {
+      if (message.deletedAt || !this.isRenderableMessage(message)) {
         continue;
       }
 
@@ -107,6 +107,7 @@ export class ConversationStateService {
   ): number {
     return messages.filter(
       (message) =>
+        this.isRenderableMessage(message) &&
         message.senderId !== participantId &&
         (!lastReadAt || message.sentAt > lastReadAt),
     ).length;
@@ -272,7 +273,11 @@ export class ConversationStateService {
     const previewText = this.extractPreviewText(message.content);
 
     if (!previewText) {
-      return '[Attachment]';
+      if (message.attachmentAsset?.key || message.attachmentUrl) {
+        return '[Attachment]';
+      }
+
+      return '';
     }
 
     return previewText.slice(0, 100);
@@ -299,6 +304,21 @@ export class ConversationStateService {
     return content.trim().length > 0;
   }
 
+  isRenderableMessage(message: StoredMessage): boolean {
+    if (message.recalledAt) {
+      return true;
+    }
+
+    const messageType = message.type as SupportedMessageType;
+
+    return this.hasMeaningfulMessageBody(
+      messageType,
+      message.content,
+      message.attachmentAsset,
+      message.attachmentUrl,
+    );
+  }
+
   isMessageVisibleToUser(message: StoredMessage, userId: string): boolean {
     if (message.deletedAt) {
       return false;
@@ -308,7 +328,7 @@ export class ConversationStateService {
       return false;
     }
 
-    return true;
+    return this.isRenderableMessage(message);
   }
 
   filterVisibleMessagesForUser(

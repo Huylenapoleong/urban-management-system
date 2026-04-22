@@ -1429,6 +1429,20 @@ export class ConversationsService {
       this.buildForwardedMessageMetadata(options.forwardedFrom);
 
     const content = this.normalizeStoredContent(type, rawContent);
+
+    if (
+      !this.hasMeaningfulMessageBody(
+        type,
+        content,
+        attachment.asset,
+        attachment.url,
+      )
+    ) {
+      throw new BadRequestException(
+        'content, attachmentKey or attachmentUrl is required.',
+      );
+    }
+
     const sentAt = nowIso();
     const messageId = createUlid();
     const message: StoredMessage = {
