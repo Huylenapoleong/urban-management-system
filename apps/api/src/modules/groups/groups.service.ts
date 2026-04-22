@@ -2152,6 +2152,7 @@ export class GroupsService {
         {
           beginsWith: `CONV#${conversationKey}#LAST#`,
           limit: 1,
+          scanForward: false,
         },
       );
       const existingConversation = summaries.find(

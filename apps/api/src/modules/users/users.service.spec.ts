@@ -1093,6 +1093,15 @@ describe('UsersService', () => {
         groupName: 'Anh Hai',
       }),
     );
+    expect(repository.queryByPk).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-1',
+      expect.objectContaining({
+        beginsWith: 'CONV#DM#user-1#user-2#LAST#',
+        limit: 1,
+        scanForward: false,
+      }),
+    );
     expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
       actor.id,
       'conversation.updated',
@@ -1180,6 +1189,15 @@ describe('UsersService', () => {
       'Users',
       currentUser.PK,
       `CONTACT_ALIAS#${otherCitizen.userId}`,
+    );
+    expect(repository.queryByPk).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-1',
+      expect.objectContaining({
+        beginsWith: 'CONV#DM#user-1#user-2#LAST#',
+        limit: 1,
+        scanForward: false,
+      }),
     );
     expect(repository.put).toHaveBeenCalledWith(
       'Conversations',

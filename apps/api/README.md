@@ -67,8 +67,10 @@ Important variables:
 - `CHAT_CALL_ACTIVE_TTL_SECONDS=14400`
 - `PUSH_PROVIDER=log`
 - `PUSH_WEBHOOK_URL` optional bridge endpoint when `PUSH_PROVIDER=webhook`
+- `PUSH_WEBHOOK_TIMEOUT_MS=5000`
 - `AUTH_OTP_PROVIDER=log`
 - `AUTH_OTP_WEBHOOK_URL` optional bridge endpoint when `AUTH_OTP_PROVIDER=webhook`
+- `AUTH_OTP_WEBHOOK_TIMEOUT_MS=5000`
 - `AUTH_OTP_SMTP_HOST=smtp.gmail.com`
 - `AUTH_OTP_SMTP_PORT=465`
 - `AUTH_OTP_SMTP_SECURE=true`

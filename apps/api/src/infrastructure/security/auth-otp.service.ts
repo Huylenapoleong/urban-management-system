@@ -611,20 +611,39 @@ export class AuthOtpService implements OnModuleInit, OnApplicationShutdown {
           );
         }
 
-        const response = await fetch(this.config.authOtpWebhookUrl, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
-            template: 'auth-otp',
-            purpose: input.purpose,
-            to: input.email,
-            otpCode: input.otpCode,
-            expiresAt: input.expiresAt,
-            requestedAt: nowIso(),
-          }),
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+          controller.abort();
+        }, this.config.authOtpWebhookTimeoutMs);
+        let response: Response;
+
+        try {
+          response = await fetch(this.config.authOtpWebhookUrl, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              template: 'auth-otp',
+              purpose: input.purpose,
+              to: input.email,
+              otpCode: input.otpCode,
+              expiresAt: input.expiresAt,
+              requestedAt: nowIso(),
+            }),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted) {
+            throw new Error(
+              `OTP webhook timed out after ${this.config.authOtpWebhookTimeoutMs}ms.`,
+            );
+          }
+
+          throw error;
+        } finally {
+          clearTimeout(timeout);
+        }
 
         if (!response.ok) {
           throw new Error(`OTP webhook failed with status ${response.status}.`);

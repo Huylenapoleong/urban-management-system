@@ -95,6 +95,47 @@ describe('ConversationSummaryService', () => {
     expect(result.get('user-1')).toBe('Anh Hai');
   });
 
+  it('reads the latest stored summary when duplicate legacy rows exist', async () => {
+    repository.queryByPk.mockResolvedValue([
+      {
+        PK: makeInboxPk('user-1'),
+        SK: makeConversationSummarySk(
+          'DM#user-1#user-2',
+          '2026-03-18T10:00:00.000Z',
+        ),
+        entityType: 'CONVERSATION',
+        conversationId: 'DM#user-1#user-2',
+        groupName: 'Old Label',
+        lastMessagePreview: 'Old message',
+        lastSenderName: 'Citizen Two',
+        unreadCount: 0,
+        isGroup: false,
+        deletedAt: null,
+        updatedAt: '2026-03-18T10:00:00.000Z',
+      },
+    ]);
+
+    const result = await service.getConversationSummary(
+      'user-1',
+      'DM#user-1#user-2',
+    );
+
+    expect(repository.queryByPk).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-1',
+      expect.objectContaining({
+        beginsWith: 'CONV#DM#user-1#user-2#LAST#',
+        limit: 1,
+        scanForward: false,
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        groupName: 'Old Label',
+      }),
+    );
+  });
+
   it('does not scan all conversation summaries when syncing a DM mutation', async () => {
     const conversationId = 'DM#user-1#user-2';
     const latestMessage: StoredMessage = {

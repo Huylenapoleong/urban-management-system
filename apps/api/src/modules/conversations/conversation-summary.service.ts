@@ -259,6 +259,7 @@ export class ConversationSummaryService {
       {
         beginsWith: `CONV#${conversationId}#LAST#`,
         limit: 1,
+        scanForward: false,
       },
     );
 
