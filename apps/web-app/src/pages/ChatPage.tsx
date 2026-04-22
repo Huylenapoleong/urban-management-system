@@ -3082,7 +3082,7 @@ export function ChatPage() {
                     Number.isNaN(nextSentAtMs) ||
                     Number.isNaN(messageSentAtMs) ||
                     nextSentAtMs - messageSentAtMs > MESSAGE_BLOCK_GAP_MS;
-                  const shouldShowSenderMeta = isGroupIncoming && startsSenderBlock;
+                  const shouldShowSenderMeta = msg.type !== "SYSTEM" && isGroupIncoming && startsSenderBlock;
                   const senderProfile = msg.senderId ? memberProfilesById[msg.senderId] : undefined;
                   const senderAvatarUrl =
                     senderProfile?.avatarAsset?.resolvedUrl ||
@@ -3115,8 +3115,31 @@ export function ChatPage() {
                   const callSummary = isCallMessage
                     ? resolveCallSummary(msg, isVideoCallByMessage)
                     : null;
+                  const isSystemNotificationMessage = msg.type === "SYSTEM" && !isCallMessage;
 
                   if (isCallMessage) {
+                    if (activeContact?.isGroup) {
+                      const isVideoCall = callSummary?.isVideo ?? isVideoCallByMessage;
+                      
+                      return (
+                        <div key={msg.id} className="flex w-full justify-center py-3 flex-col items-center">
+                          <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-100/80 border border-slate-200 px-5 py-3 shadow-sm dark:bg-slate-800/80 dark:border-slate-700">
+                            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-slate-900 shadow-sm">
+                                {isVideoCall ? <Video size={14} className="text-blue-500" /> : <Phone size={14} className="text-blue-500" />}
+                              </div>
+                              <p className="text-sm font-medium">
+                                Cuộc gọi nhóm kết thúc ({formatCallDuration(callSummary?.durationSeconds ?? 0)})
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-gray-400 dark:text-slate-500 mt-1">
+                            {format(new Date(msg.sentAt), "HH:mm")}
+                          </span>
+                        </div>
+                      );
+                    }
+
                     const summaryIsOutgoing = callSummary ? callSummary.direction === "outgoing" : isMe;
                     const summaryAlignClass = summaryIsOutgoing ? "self-end" : "self-start";
                     const summaryBubbleClass = summaryIsOutgoing
@@ -3136,13 +3159,25 @@ export function ChatPage() {
                         <div className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${summaryBubbleClass}`}>
                           <div className="flex items-start gap-3">
                             <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${summaryIconClass}`}>
-                              <Phone size={18} />
+                              {isVideoCall ? <Video size={18} /> : <Phone size={18} />}
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-semibold">{titleText}</p>
                               <p className={`mt-0.5 text-xs ${summaryMetaClass}`}>{durationText}</p>
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (isSystemNotificationMessage) {
+                    return (
+                      <div key={msg.id} className="flex w-full justify-center py-2">
+                        <div className="rounded-full bg-slate-100 px-4 py-2 dark:bg-slate-800">
+                          <p className="text-center text-sm text-slate-600 dark:text-slate-300">
+                            {renderMessageTextWithMentions(msg.content, false)}
+                          </p>
                         </div>
                       </div>
                     );
@@ -3463,6 +3498,44 @@ export function ChatPage() {
                     </div>
                   );
                 })}
+
+                {activeContact?.isGroup && activeChat && (rtc.activeGroupCalls.has(activeChat) || (rtc.callState !== "IDLE" && rtc.activeConfig?.conversationId === activeChat)) ? (
+                  <div className="flex w-full justify-center py-3">
+                    <div className="flex flex-col items-center gap-2 rounded-xl bg-blue-50/80 border border-blue-200 px-5 py-3 shadow-sm dark:bg-blue-900/20 dark:border-blue-800">
+                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-blue-950 shadow-sm relative">
+                          {(rtc.activeConfig?.conversationId === activeChat && rtc.activeConfig.isVideo) ? <Video size={14} className="text-blue-500" /> : <Phone size={14} className="text-blue-500" />}
+                          <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium">
+                          Cuộc gọi nhóm đang diễn ra
+                        </p>
+                      </div>
+                      {rtc.callState !== "CONNECTED" && (
+                        <div className="mt-1 flex w-full gap-2">
+                          <button 
+                            type="button"
+                            onClick={() => handleStartCall(false)}
+                            className="flex-1 rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-slate-300 transition dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+                          >
+                            Tham gia thoại
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleStartCall(true)}
+                            className="flex-1 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700 transition"
+                          >
+                            Tham gia video
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div ref={messagesEndRef} />
               </div>
             </div>
