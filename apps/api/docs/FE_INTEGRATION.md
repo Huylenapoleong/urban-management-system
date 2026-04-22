@@ -181,6 +181,8 @@ For recall vs delete:
 
 Namespace: `/chat`
 
+OpenAPI/Swagger covers the HTTP APIs. Treat this section as the source of truth for Socket.IO chat, call, and WebRTC command payloads.
+
 Handshake auth:
 
 - `auth.token` or `auth.accessToken` with Bearer token
@@ -198,6 +200,25 @@ Client command events:
 - `message.recall`
 - `typing.start`
 - `typing.stop`
+- `call.init`
+- `call.accept`
+- `call.reject`
+- `call.end`
+- `call.heartbeat`
+- `webrtc.offer`
+- `webrtc.answer`
+- `webrtc.ice-candidate`
+
+Recommended client payloads:
+
+- `call.init`: `{ "conversationId": "dm:<userId>", "isVideo": true }`
+- `call.accept`: `{ "conversationId": "dm:<userId>" }`
+- `call.reject`: `{ "conversationId": "dm:<userId>" }`
+- `call.end`: `{ "conversationId": "dm:<userId>" }`
+- `call.heartbeat`: `{ "conversationId": "dm:<userId>" }`
+- `webrtc.offer`: `{ "conversationId": "dm:<userId>", "offer": { ... } }`
+- `webrtc.answer`: `{ "conversationId": "dm:<userId>", "answer": { ... } }`
+- `webrtc.ice-candidate`: `{ "conversationId": "dm:<userId>", "candidate": { ... } }`
 
 Server push events:
 
@@ -212,6 +233,14 @@ Server push events:
 - `presence.updated`
 - `typing.state`
 - `chat.error`
+- `call.init`
+- `call.accept`
+- `call.reject`
+- `call.end`
+- `call.heartbeat`
+- `webrtc.offer`
+- `webrtc.answer`
+- `webrtc.ice-candidate`
 
 Client rules:
 
@@ -219,6 +248,10 @@ Client rules:
 - deduplicate send retries by `clientMessageId`
 - rejoin active conversations after reconnect
 - do not assume every socket event is unique; outbox replay can redeliver safely
+- do not send `callerId`, `calleeId`, or `userId` in call command payloads; backend canonicalizes actor identity from the authenticated socket
+- treat `call.end` server payload as `{ conversationId, userId, endedByUserId }` and prefer `endedByUserId` when present
+- send `call.heartbeat` every `30-60s` while a long-running call remains active
+- for DM calls, `call.heartbeat` refreshes server state only and is not broadcast to the peer
 
 ## Upload Flow
 

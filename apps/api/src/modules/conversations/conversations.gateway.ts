@@ -23,6 +23,7 @@ import type {
   AuthenticatedUser,
   ChatCallAcceptPayload,
   ChatCallEndPayload,
+  ChatCallHeartbeatPayload,
   ChatCallInitPayload,
   ChatCallRejectPayload,
   ChatConversationCommandPayload,
@@ -692,6 +693,44 @@ export class ConversationsGateway
     );
   }
 
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT)
+  async handleCallHeartbeat(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+          true,
+        );
+        await this.chatCallSessionService.touchSignalingSession(
+          access,
+          user.id,
+        );
+        const heartbeatPayload = this.buildCallHeartbeatPayload(
+          access.conversationId,
+          user,
+        );
+
+        if (access.isGroup) {
+          this.emitSignal(
+            access,
+            CHAT_SOCKET_EVENTS.CALL_HEARTBEAT,
+            heartbeatPayload,
+            client.id,
+            user.id,
+          );
+        }
+
+        return { success: true };
+      },
+      'CHAT_CALL_HEARTBEAT_FAILED',
+      CHAT_SOCKET_EVENTS.CALL_HEARTBEAT,
+    );
+  }
+
   @SubscribeMessage(CHAT_SOCKET_EVENTS.WEBRTC_OFFER)
   async handleWebRTCOffer(
     @ConnectedSocket() client: AuthenticatedSocket,
@@ -882,6 +921,16 @@ export class ConversationsGateway
       conversationId,
       userId: user.id,
       endedByUserId: user.id,
+    };
+  }
+
+  private buildCallHeartbeatPayload(
+    conversationId: string,
+    user: AuthenticatedUser,
+  ): ChatCallHeartbeatPayload {
+    return {
+      conversationId,
+      userId: user.id,
     };
   }
 

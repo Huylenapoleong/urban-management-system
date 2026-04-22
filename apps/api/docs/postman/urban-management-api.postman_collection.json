@@ -2,7 +2,7 @@
   "info": {
     "name": "Urban Management API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Smoke and integration test collection for the SmartCity Urban Management API. Updated to match the current apps/api contract."
+    "description": "Smoke and integration test collection for the SmartCity Urban Management API. Updated to match the current apps/api contract. This collection covers HTTP APIs only; Socket.IO chat/call payloads such as call.end and call.heartbeat are documented in apps/api/docs/FE_INTEGRATION.md and apps/api/docs/CHAT_REALTIME_OPERATIONS.md."
   },
   "auth": {
     "type": "bearer",

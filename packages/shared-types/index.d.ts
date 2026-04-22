@@ -402,6 +402,11 @@ export interface ChatCallEndPayload extends ChatConversationCommandPayload {
   endedByUserId?: string;
 }
 
+export interface ChatCallHeartbeatPayload
+  extends ChatConversationCommandPayload {
+  userId: string;
+}
+
 export interface ChatWebRTCOfferPayload extends ChatConversationCommandPayload {
   offer: any;
 }

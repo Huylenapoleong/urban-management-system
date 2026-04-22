@@ -496,6 +496,54 @@ describe('ConversationsGateway', () => {
       },
     );
   });
+
+  it('refreshes active call sessions through call-heartbeat without reloading DM access from storage', async () => {
+    const { client } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    chatCallSessionService.getDirectSessionAccess.mockResolvedValue({
+      conversationId: 'dm:user-2',
+      conversationKey: 'DM#user-1#user-2',
+      participants: ['user-1', 'user-2'],
+      isGroup: false,
+    });
+    chatCallSessionService.touchSignalingSession.mockResolvedValue({
+      status: 'ACTIVE',
+    });
+
+    const result = await gateway.handleCallHeartbeat(client, {
+      conversationId: 'dm:user-2',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatCallSessionService.getDirectSessionAccess).toHaveBeenCalledWith(
+      'DM#user-1#user-2',
+      actor.id,
+    );
+    expect(
+      conversationsService.resolveConversationAccess,
+    ).not.toHaveBeenCalled();
+    expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalledWith(
+      ['user-2'],
+      'call.heartbeat',
+      expect.anything(),
+    );
+    expect(observabilityService.recordRealtimeAck).toHaveBeenCalledWith(
+      'call.heartbeat',
+      expect.any(Number),
+      'success',
+    );
+  });
 });
 
 function createSocketClient(): {

@@ -392,11 +392,15 @@ describe('GroupsService', () => {
     expect(repository.transactWrite).not.toHaveBeenCalled();
   });
 
-  it('ignores cleanup task records when listing groups via scan path', async () => {
+  it('ignores cleanup task records when listing groups via fallback scan path', async () => {
     authorizationService.canReadGroup.mockReturnValue(true);
     repository.scanAll.mockResolvedValue([group, cleanupTask]);
+    const provinceActor = {
+      ...actor,
+      role: 'PROVINCE_OFFICER' as const,
+    };
 
-    const result = await service.listGroups(actor, {});
+    const result = await service.listGroups(provinceActor, {});
 
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toEqual(
@@ -404,6 +408,54 @@ describe('GroupsService', () => {
         id: group.groupId,
       }),
     );
+  });
+
+  it('uses the location/type index instead of scanAll for ward-scope group browse', async () => {
+    authorizationService.canReadGroup.mockReturnValue(true);
+    repository.queryByIndex.mockResolvedValue([
+      {
+        PK: group.PK,
+        SK: group.SK,
+      },
+    ]);
+    repository.batchGet.mockResolvedValue([group]);
+
+    const result = await service.listGroups(actor, {});
+
+    expect(repository.scanAll).not.toHaveBeenCalled();
+    expect(repository.queryByIndex).toHaveBeenCalledTimes(3);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        id: group.groupId,
+      }),
+    );
+  });
+
+  it('uses the location/type index when a concrete location filter is provided', async () => {
+    authorizationService.canReadGroup.mockReturnValue(true);
+    repository.queryByIndex.mockResolvedValue([
+      {
+        PK: group.PK,
+        SK: group.SK,
+      },
+    ]);
+    repository.batchGet.mockResolvedValue([group]);
+
+    const result = await service.listGroups(actor, {
+      locationCode: group.locationCode,
+      groupType: 'AREA',
+    });
+
+    expect(repository.scanAll).not.toHaveBeenCalled();
+    expect(repository.queryByIndex).toHaveBeenCalledWith(
+      'Groups',
+      'GSI1-Type-Loc',
+      'GSI1PK',
+      'createdAt',
+      `TYPE#AREA#LOC#${group.locationCode}`,
+    );
+    expect(result.data).toHaveLength(1);
   });
 
   it('transfers ownership to another active member and allows the previous owner to leave afterwards', async () => {

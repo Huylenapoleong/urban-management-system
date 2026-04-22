@@ -223,28 +223,23 @@ export class GroupsService {
 
     if (mine) {
       groups = await this.getGroupsFromMemberships(actorMemberships);
-    } else if (groupType && locationCode) {
-      const items = await this.repository.queryByIndex<{
-        PK: string;
-        SK: string;
-      }>(
-        this.config.dynamodbGroupsTableName,
-        this.config.dynamodbGroupsTypeLocationIndexName,
-        'GSI1PK',
-        'createdAt',
-        makeGroupTypeLocationKey(
-          groupType as (typeof GROUP_TYPES)[number],
-          locationCode,
-        ),
-      );
-      groups = await this.repository.batchGet<StoredGroup>(
-        this.config.dynamodbGroupsTableName,
-        items,
-      );
     } else {
-      groups = await this.repository.scanAll<StoredGroup>(
-        this.config.dynamodbGroupsTableName,
+      const indexedGroups = await this.tryListGroupsViaLocationIndex(
+        actor,
+        groupType as GroupType | undefined,
+        locationCode,
       );
+
+      if (indexedGroups) {
+        groups = this.mergeGroupsById([
+          ...(await this.getGroupsFromMemberships(actorMemberships)),
+          ...indexedGroups,
+        ]);
+      } else {
+        groups = await this.repository.scanAll<StoredGroup>(
+          this.config.dynamodbGroupsTableName,
+        );
+      }
     }
 
     const filtered = groups
@@ -286,6 +281,90 @@ export class GroupsService {
     return buildPaginatedResponse(
       page.items.map(toGroupMetadata),
       page.nextCursor,
+    );
+  }
+
+  private async tryListGroupsViaLocationIndex(
+    actor: AuthenticatedUser,
+    groupType: GroupType | undefined,
+    locationCode: string | undefined,
+  ): Promise<StoredGroup[] | undefined> {
+    const indexedGroupTypes = this.getIndexedBrowseGroupTypes(actor, groupType);
+
+    if (locationCode) {
+      return this.listGroupsByLocationIndex(indexedGroupTypes, locationCode);
+    }
+
+    if (actor.role === 'CITIZEN' || actor.role === 'WARD_OFFICER') {
+      return this.listGroupsByLocationIndex(
+        indexedGroupTypes,
+        actor.locationCode,
+      );
+    }
+
+    return undefined;
+  }
+
+  private getIndexedBrowseGroupTypes(
+    actor: AuthenticatedUser,
+    groupType: GroupType | undefined,
+  ): GroupType[] {
+    if (groupType) {
+      if (groupType === 'PRIVATE' && actor.role !== 'ADMIN') {
+        return [];
+      }
+
+      return [groupType];
+    }
+
+    if (actor.role === 'ADMIN') {
+      return [...GROUP_TYPES];
+    }
+
+    return GROUP_TYPES.filter(
+      (candidateType): candidateType is GroupType =>
+        candidateType !== 'PRIVATE',
+    );
+  }
+
+  private async listGroupsByLocationIndex(
+    groupTypes: GroupType[],
+    locationCode: string,
+  ): Promise<StoredGroup[]> {
+    if (groupTypes.length === 0) {
+      return [];
+    }
+
+    const keys = (
+      await Promise.all(
+        groupTypes.map((candidateType) =>
+          this.repository.queryByIndex<{
+            PK: string;
+            SK: string;
+          }>(
+            this.config.dynamodbGroupsTableName,
+            this.config.dynamodbGroupsTypeLocationIndexName,
+            'GSI1PK',
+            'createdAt',
+            makeGroupTypeLocationKey(candidateType, locationCode),
+          ),
+        ),
+      )
+    ).flat();
+
+    if (keys.length === 0) {
+      return [];
+    }
+
+    return this.repository.batchGet<StoredGroup>(
+      this.config.dynamodbGroupsTableName,
+      keys,
+    );
+  }
+
+  private mergeGroupsById(groups: StoredGroup[]): StoredGroup[] {
+    return Array.from(
+      new Map(groups.map((group) => [group.groupId, group])).values(),
     );
   }
 

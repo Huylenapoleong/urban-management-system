@@ -8,6 +8,7 @@ NestJS backend for SmartCity OTT using six DynamoDB tables on AWS.
 - Integration guide: `apps/api/docs/FE_INTEGRATION.md`
 - Postman collection: `apps/api/docs/postman/urban-management-api.postman_collection.json`
 - Postman environment: `apps/api/docs/postman/urban-management-api.postman_environment.json`
+- Realtime ops guide: `apps/api/docs/CHAT_REALTIME_OPERATIONS.md`
 - Release checklist: `apps/api/docs/RELEASE_CHECKLIST.md`
 
 ## Modules
@@ -62,6 +63,8 @@ Important variables:
 - `CHAT_OUTBOX_POLL_INTERVAL_MS=3000`
 - `CHAT_OUTBOX_BATCH_SIZE=100`
 - `CHAT_OUTBOX_SHARD_COUNT=8`
+- `CHAT_CALL_INVITE_TTL_SECONDS=90`
+- `CHAT_CALL_ACTIVE_TTL_SECONDS=14400`
 - `PUSH_PROVIDER=log`
 - `PUSH_WEBHOOK_URL` optional bridge endpoint when `PUSH_PROVIDER=webhook`
 - `AUTH_OTP_PROVIDER=log`
@@ -422,6 +425,7 @@ Response fields:
 ## Chat Realtime
 
 Socket transport uses Socket.IO with namespace `/chat`.
+OpenAPI documents the HTTP APIs. The Socket.IO command and payload contract is documented in this section and in `apps/api/docs/FE_INTEGRATION.md`.
 
 Handshake authentication:
 
@@ -446,6 +450,14 @@ Client command events:
 - `conversation.read`: `{ "conversationId": "dm:<userId>" }`
 - `typing.start`: `{ "conversationId": "group:<groupId>", "clientTimestamp": "2026-03-17T11:00:00.000Z" }`
 - `typing.stop`: same payload as `typing.start`
+- `call.init`: `{ "conversationId": "dm:<userId>", "isVideo": true }`
+- `call.accept`: `{ "conversationId": "dm:<userId>" }`
+- `call.reject`: `{ "conversationId": "dm:<userId>" }`
+- `call.end`: `{ "conversationId": "dm:<userId>" }`
+- `call.heartbeat`: `{ "conversationId": "dm:<userId>" }`; send this every `30-60s` while a long-running call stays active
+- `webrtc.offer`: `{ "conversationId": "dm:<userId>", "offer": { ... } }`
+- `webrtc.answer`: `{ "conversationId": "dm:<userId>", "answer": { ... } }`
+- `webrtc.ice-candidate`: `{ "conversationId": "dm:<userId>", "candidate": { ... } }`
 
 Server push events:
 
@@ -459,6 +471,12 @@ Server push events:
 - `presence.updated`: emitted to conversation room members when a participant connects or disconnects
 - `typing.state`: ephemeral typing state for sockets that joined the conversation room
 - `chat.error`: emitted on connection auth failure before disconnect
+- `call.init`: emitted with canonical caller identity from the authenticated actor, for example `{ "conversationId": "dm:<userId>", "callerId": "01...", "callerName": "Citizen A", "isVideo": true }`
+- `call.accept`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01..." }`
+- `call.reject`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01..." }`
+- `call.end`: emitted with `{ "conversationId": "dm:<userId>", "userId": "01...", "endedByUserId": "01..." }`
+- `call.heartbeat`: group-only keepalive event emitted with `{ "conversationId": "group:<groupId>", "userId": "01..." }`
+- `webrtc.offer`, `webrtc.answer`, `webrtc.ice-candidate`: forwarded with the original SDP/candidate payload after active-call validation
 
 Socket ack format:
 
@@ -496,6 +514,10 @@ Notes:
 - `replyTo` must reference a message in the same conversation.
 - Typing events are only broadcast to sockets that explicitly joined the conversation room via `conversation.join`.
 - Outbox replay can re-emit the same logical event during recovery; clients should deduplicate by `eventId`.
+- FE should not send or trust `callerId`, `calleeId`, or `userId` in command payloads; backend canonicalizes actor identity from the authenticated socket.
+- `call.end` keeps both `userId` and `endedByUserId` in the server payload for backward compatibility; FE should prefer `endedByUserId` when present.
+- `call.heartbeat` refreshes long-running call sessions so they do not expire mid-call; DM heartbeat refreshes server state without broadcasting a new signal to the peer.
+- Realtime latency and replay metrics are documented in `apps/api/docs/CHAT_REALTIME_OPERATIONS.md`.
 
 ## Push Notifications
 

@@ -123,6 +123,7 @@ export const CHAT_SOCKET_EVENTS: {
   readonly CALL_ACCEPT: "call.accept";
   readonly CALL_REJECT: "call.reject";
   readonly CALL_END: "call.end";
+  readonly CALL_HEARTBEAT: "call.heartbeat";
   readonly WEBRTC_OFFER: "webrtc.offer";
   readonly WEBRTC_ANSWER: "webrtc.answer";
   readonly WEBRTC_ICE_CANDIDATE: "webrtc.ice-candidate";
