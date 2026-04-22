@@ -621,7 +621,8 @@ export class GroupsService {
         );
       }
 
-      await this.usersService.getActiveByIdOrThrow(successorUserId);
+      const successorUser =
+        await this.usersService.getActiveByIdOrThrow(successorUserId);
       const successorMembership = await this.getMembership(
         groupId,
         successorUserId,
@@ -711,7 +712,7 @@ export class GroupsService {
       await this.emitGroupLifecycleSystemMessage(
         actor,
         groupId,
-        `Ownership was transferred from ${actor.fullName} to ${successorUserId}.`,
+        `Ownership was transferred from ${actor.fullName} to ${this.getUserDisplayName(successorUser, successorUserId)}.`,
       );
 
       await this.removeGroupConversationAccess(actor.id, groupId, occurredAt);
@@ -829,7 +830,7 @@ export class GroupsService {
       throw new BadRequestException('You cannot ban yourself from the group.');
     }
 
-    await this.usersService.getByIdOrThrow(userId);
+    const targetUser = await this.usersService.getByIdOrThrow(userId);
 
     const existingBan = await this.getActiveBan(groupId, userId);
 
@@ -951,7 +952,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       groupId,
-      `${actor.fullName} banned ${userId} from the group.`,
+      `${actor.fullName} banned ${this.getUserDisplayName(targetUser, userId)} from the group.`,
     );
 
     return toGroupBan(nextBan);
@@ -964,6 +965,7 @@ export class GroupsService {
   ): Promise<GroupBan> {
     await this.getManageGroupContext(actor, groupId);
     const existingBan = await this.getActiveBan(groupId, userId);
+    const targetUserName = await this.resolveUserDisplayName(userId);
 
     if (!existingBan) {
       throw new NotFoundException('Group ban not found.');
@@ -998,7 +1000,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       groupId,
-      `${actor.fullName} unbanned ${userId}.`,
+      `${actor.fullName} unbanned ${targetUserName}.`,
     );
 
     return toGroupBan(existingBan);
@@ -1184,15 +1186,6 @@ export class GroupsService {
       throw new ForbiddenException('You are banned from this group.');
     }
 
-    const existingMembership = await this.getMembership(
-      group.groupId,
-      actor.id,
-    );
-
-    if (existingMembership && !existingMembership.deletedAt) {
-      return toMembership(existingMembership);
-    }
-
     const inviteLink = await this.getInviteLink(
       inviteLookup.groupId,
       inviteLookup.inviteId,
@@ -1215,6 +1208,15 @@ export class GroupsService {
       inviteLink.usedCount >= inviteLink.maxUses
     ) {
       throw new ForbiddenException('Invite link has reached its usage limit.');
+    }
+
+    const existingMembership = await this.getMembership(
+      group.groupId,
+      actor.id,
+    );
+
+    if (existingMembership && !existingMembership.deletedAt) {
+      return toMembership(existingMembership);
     }
 
     const occurredAt = nowIso();
@@ -1459,7 +1461,7 @@ export class GroupsService {
   ): Promise<GroupMembership> {
     const existingMembership = await this.getMembership(group.groupId, userId);
     const activeBan = await this.getActiveBan(group.groupId, userId);
-    await this.usersService.getActiveByIdOrThrow(userId);
+    const targetUser = await this.usersService.getActiveByIdOrThrow(userId);
 
     if (activeBan) {
       throw new ForbiddenException('This user is banned from the group.');
@@ -1538,7 +1540,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       group.groupId,
-      `${actor.fullName} added ${userId} to the group.`,
+      `${actor.fullName} added ${this.getUserDisplayName(targetUser, userId)} to the group.`,
     );
 
     return toMembership(membership);
@@ -1553,7 +1555,7 @@ export class GroupsService {
   ): Promise<GroupMembership> {
     const existingMembership = await this.getMembership(group.groupId, userId);
 
-    await this.usersService.getActiveByIdOrThrow(userId);
+    const targetUser = await this.usersService.getActiveByIdOrThrow(userId);
     if (!existingMembership || existingMembership.deletedAt) {
       throw new NotFoundException('Membership not found.');
     }
@@ -1607,7 +1609,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       group.groupId,
-      `${actor.fullName} changed ${userId}'s role to ${roleInGroup}.`,
+      `${actor.fullName} changed ${this.getUserDisplayName(targetUser, userId)}'s role to ${roleInGroup}.`,
     );
 
     return toMembership(nextMembership);
@@ -1621,7 +1623,7 @@ export class GroupsService {
   ): Promise<GroupMembership> {
     const existingMembership = await this.getMembership(group.groupId, userId);
 
-    await this.usersService.getByIdOrThrow(userId);
+    const targetUser = await this.usersService.getByIdOrThrow(userId);
     if (!existingMembership || existingMembership.deletedAt) {
       throw new NotFoundException('Membership not found.');
     }
@@ -1670,7 +1672,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       group.groupId,
-      `${actor.fullName} removed ${userId} from the group.`,
+      `${actor.fullName} removed ${this.getUserDisplayName(targetUser, userId)} from the group.`,
     );
 
     return toMembership(nextMembership);
@@ -1701,6 +1703,33 @@ export class GroupsService {
       this.logger.warn(
         `Failed to persist group lifecycle system message for group ${groupId}: ${message}`,
       );
+    }
+  }
+
+  private getUserDisplayName(user: unknown, fallbackUserId: string): string {
+    if (
+      user &&
+      typeof user === 'object' &&
+      'fullName' in user &&
+      typeof user.fullName === 'string'
+    ) {
+      const trimmedName = user.fullName.trim();
+      if (trimmedName.length > 0) {
+        return trimmedName;
+      }
+    }
+
+    return fallbackUserId;
+  }
+
+  private async resolveUserDisplayName(userId: string): Promise<string> {
+    try {
+      return this.getUserDisplayName(
+        await this.usersService.getByIdOrThrow(userId),
+        userId,
+      );
+    } catch {
+      return userId;
     }
   }
 

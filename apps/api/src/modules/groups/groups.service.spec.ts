@@ -116,6 +116,20 @@ describe('GroupsService', () => {
     userId: 'user-2',
     roleInGroup: 'MEMBER',
   };
+  const knownUsers = {
+    'user-1': {
+      id: 'user-1',
+      fullName: 'Ward Officer',
+    },
+    'user-2': {
+      id: 'user-2',
+      fullName: 'Member Two',
+    },
+    'user-3': {
+      id: 'user-3',
+      fullName: 'Member Three',
+    },
+  } as const;
 
   const cleanupTask: StoredGroupDeleteCleanupTask = {
     PK: 'GROUP_DELETE_CLEANUP',
@@ -187,8 +201,21 @@ describe('GroupsService', () => {
     repository.queryByGsi1.mockResolvedValue([]);
     repository.transactPut.mockResolvedValue(undefined);
     repository.transactWrite.mockResolvedValue(undefined);
-    usersService.getActiveByIdOrThrow.mockResolvedValue(undefined);
-    usersService.getByIdOrThrow.mockResolvedValue(undefined);
+    usersService.getActiveByIdOrThrow.mockImplementation(
+      (userId: string) =>
+        knownUsers[userId as keyof typeof knownUsers] ?? {
+          id: userId,
+          fullName: userId,
+        },
+    );
+    usersService.getByIdOrThrow.mockImplementation((userId: string) => {
+      return (
+        knownUsers[userId as keyof typeof knownUsers] ?? {
+          id: userId,
+          fullName: userId,
+        }
+      );
+    });
     usersService.areFriends.mockResolvedValue(true);
     groupCleanupService.buildGroupDeleteCleanupTask.mockReturnValue(
       cleanupTask,
@@ -468,7 +495,9 @@ describe('GroupsService', () => {
       actor,
       group.groupId,
       expect.arrayContaining(['user-2']),
-      expect.stringContaining('Ownership was transferred'),
+      expect.stringContaining(
+        'Ownership was transferred from Ward Officer to Member Two.',
+      ),
     );
   });
 
@@ -566,7 +595,7 @@ describe('GroupsService', () => {
       actor,
       group.groupId,
       expect.arrayContaining(['user-1', 'user-2']),
-      expect.stringContaining('added user-3 to the group'),
+      expect.stringContaining('added Member Three to the group'),
     );
   });
 
@@ -863,17 +892,17 @@ describe('GroupsService', () => {
         }),
       ]),
     );
+    expect(conversationsService.sendGroupSystemMessage).toHaveBeenCalledWith(
+      actor,
+      group.groupId,
+      expect.arrayContaining(['user-1', 'user-2']),
+      expect.stringContaining('unbanned Member Two'),
+    );
     expect(result).toEqual(
       expect.objectContaining({
         groupId: 'group-1',
         userId: 'user-2',
       }),
-    );
-    expect(conversationsService.sendGroupSystemMessage).toHaveBeenCalledWith(
-      actor,
-      group.groupId,
-      expect.arrayContaining(['user-1', 'user-2']),
-      expect.stringContaining('unbanned user-2'),
     );
   });
 
@@ -1015,6 +1044,38 @@ describe('GroupsService', () => {
       deletedAt: '2026-03-18T10:21:00.000Z',
       updatedAt: '2026-03-18T10:21:00.000Z',
     };
+    currentInviteLookup = {
+      PK: 'GROUP_INVITE_CODE#invite-code',
+      SK: 'LOOKUP',
+      entityType: 'GROUP_INVITE_CODE_LOOKUP',
+      code: 'invite-code',
+      groupId: 'group-1',
+      inviteId: 'invite-1',
+      createdAt: '2026-03-18T10:20:00.000Z',
+      updatedAt: '2026-03-18T10:20:00.000Z',
+    };
+    currentInviteLink = {
+      PK: 'GROUP#group-1',
+      SK: 'INVITE#invite-1',
+      entityType: 'GROUP_INVITE_LINK',
+      groupId: 'group-1',
+      inviteId: 'invite-1',
+      code: 'invite-code',
+      createdByUserId: 'user-1',
+      expiresAt: '2026-03-18T10:00:00.000Z',
+      maxUses: 10,
+      usedCount: 0,
+      disabledAt: null,
+      createdAt: '2026-03-18T09:20:00.000Z',
+      updatedAt: '2026-03-18T09:20:00.000Z',
+    };
+
+    await expect(
+      service.joinGroupByInvite(actor, 'invite-code'),
+    ).rejects.toThrow(new ForbiddenException('Invite link has expired.'));
+  });
+
+  it('rejects expired invite links even when the actor is already an active member', async () => {
     currentInviteLookup = {
       PK: 'GROUP_INVITE_CODE#invite-code',
       SK: 'LOOKUP',
