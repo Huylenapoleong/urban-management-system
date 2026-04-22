@@ -13,8 +13,19 @@ import {
   CHAT_SOCKET_EVENTS,
   CHAT_SOCKET_NAMESPACE,
 } from '@urban/shared-constants';
+import {
+  isDmConversationId,
+  isGroupConversationId,
+  makeDmConversationId,
+  nowIso,
+} from '@urban/shared-utils';
 import type {
   AuthenticatedUser,
+  ChatCallAcceptPayload,
+  ChatCallEndPayload,
+  ChatCallHeartbeatPayload,
+  ChatCallInitPayload,
+  ChatCallRejectPayload,
   ChatConversationCommandPayload,
   ChatConversationDeletedAccepted,
   ChatConversationSubscription,
@@ -36,16 +47,21 @@ import type {
   ChatTypingAccepted,
   ChatTypingCommandPayload,
   ChatTypingStateEvent,
+  ChatWebRTCAnswerPayload,
+  ChatWebRTCIceCandidatePayload,
+  ChatWebRTCOfferPayload,
 } from '@urban/shared-types';
-import { nowIso } from '@urban/shared-utils';
 import type { Server, Socket } from 'socket.io';
 import { Public } from '../../common/decorators/public.decorator';
 import {
   ensureObject,
+  requiredBoolean,
   optionalString,
   requiredString,
 } from '../../common/validation';
 import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
+import { ObservabilityService } from '../../infrastructure/observability/observability.service';
+import { ChatCallSessionService } from './chat-call-session.service';
 import { ChatRealtimeService } from './chat-realtime.service';
 import { ChatSocketAuthService } from './chat-socket-auth.service';
 import {
@@ -86,6 +102,8 @@ export class ConversationsGateway
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly chatPresenceService: ChatPresenceService,
     private readonly conversationsService: ConversationsService,
+    private readonly chatCallSessionService: ChatCallSessionService,
+    private readonly observabilityService: ObservabilityService,
   ) {}
 
   afterInit(server: Server): void {
@@ -143,37 +161,42 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatConversationCommandPayload,
   ): Promise<ChatSocketAck<ChatConversationSubscription>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const conversationId = this.extractConversationId(payload);
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
-        conversationId,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const conversationId = this.extractConversationId(payload);
+        const access =
+          await this.conversationsService.resolveConversationAccess(
+            user,
+            conversationId,
+          );
 
-      await this.chatRealtimeService.joinConversation(
-        client,
-        access.conversationKey,
-      );
-      await this.emitPresenceSnapshot(
-        client,
-        access.conversationKey,
-        access.participants,
-      );
-      await this.broadcastPresenceUpdate(
-        access.conversationKey,
-        user.id,
-        client.id,
-      );
+        await this.chatRealtimeService.joinConversation(
+          client,
+          access.conversationKey,
+        );
+        await this.emitPresenceSnapshot(
+          client,
+          access.conversationKey,
+          access.participants,
+        );
+        await this.broadcastPresenceUpdate(
+          access.conversationKey,
+          user.id,
+          client.id,
+        );
 
-      return {
-        conversationId: access.conversationId,
-        conversationKey: access.conversationKey,
-        isGroup: access.isGroup,
-        participantCount: access.participants.length,
-        joinedAt: nowIso(),
-      };
-    }, 'CHAT_CONVERSATION_JOIN_FAILED');
+        return {
+          conversationId: access.conversationId,
+          conversationKey: access.conversationKey,
+          isGroup: access.isGroup,
+          participantCount: access.participants.length,
+          joinedAt: nowIso(),
+        };
+      },
+      'CHAT_CONVERSATION_JOIN_FAILED',
+      CHAT_SOCKET_EVENTS.CONVERSATION_JOIN,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE)
@@ -181,25 +204,30 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatConversationCommandPayload,
   ): Promise<ChatSocketAck<ChatConversationUnsubscription>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const conversationId = this.extractConversationId(payload);
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
-        conversationId,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const conversationId = this.extractConversationId(payload);
+        const access =
+          await this.conversationsService.resolveConversationAccess(
+            user,
+            conversationId,
+          );
 
-      await this.chatRealtimeService.leaveConversation(
-        client,
-        access.conversationKey,
-      );
+        await this.chatRealtimeService.leaveConversation(
+          client,
+          access.conversationKey,
+        );
 
-      return {
-        conversationId: access.conversationId,
-        conversationKey: access.conversationKey,
-        leftAt: nowIso(),
-      };
-    }, 'CHAT_CONVERSATION_LEAVE_FAILED');
+        return {
+          conversationId: access.conversationId,
+          conversationKey: access.conversationKey,
+          leftAt: nowIso(),
+        };
+      },
+      'CHAT_CONVERSATION_LEAVE_FAILED',
+      CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CONVERSATION_DELETE)
@@ -207,19 +235,23 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatConversationCommandPayload,
   ): Promise<ChatSocketAck<ChatConversationDeletedAccepted>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const conversationId = this.extractConversationId(payload);
-      const result = await this.conversationsService.deleteConversation(
-        user,
-        conversationId,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const conversationId = this.extractConversationId(payload);
+        const result = await this.conversationsService.deleteConversation(
+          user,
+          conversationId,
+        );
 
-      return {
-        conversationId: result.conversationId,
-        removedAt: result.removedAt,
-      };
-    }, 'CHAT_CONVERSATION_DELETE_FAILED');
+        return {
+          conversationId: result.conversationId,
+          removedAt: result.removedAt,
+        };
+      },
+      'CHAT_CONVERSATION_DELETE_FAILED',
+      CHAT_SOCKET_EVENTS.CONVERSATION_DELETE,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_SEND)
@@ -227,41 +259,46 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatMessageSendPayload,
   ): Promise<ChatSocketAck<ChatMessageAccepted>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const body = ensureObject(payload as unknown);
-      const conversationId = requiredString(body, 'conversationId', {
-        minLength: 1,
-        maxLength: 200,
-      });
-      const clientMessageId = optionalString(body, 'clientMessageId', {
-        maxLength: 100,
-      });
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
-        conversationId,
-        true,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const body = ensureObject(payload as unknown);
+        const conversationId = requiredString(body, 'conversationId', {
+          minLength: 1,
+          maxLength: 200,
+        });
+        const clientMessageId = optionalString(body, 'clientMessageId', {
+          maxLength: 100,
+        });
+        const access =
+          await this.conversationsService.resolveConversationAccess(
+            user,
+            conversationId,
+            true,
+          );
 
-      await this.chatRealtimeService.joinConversation(
-        client,
-        access.conversationKey,
-      );
+        await this.chatRealtimeService.joinConversation(
+          client,
+          access.conversationKey,
+        );
 
-      const message = await this.conversationsService.sendMessage(
-        user,
-        access.conversationKey,
-        body,
-      );
+        const message = await this.conversationsService.sendMessage(
+          user,
+          access.conversationKey,
+          body,
+        );
 
-      return {
-        conversationId: access.conversationId,
-        conversationKey: access.conversationKey,
-        messageId: message.id,
-        clientMessageId,
-        acceptedAt: message.sentAt,
-      };
-    }, 'CHAT_MESSAGE_SEND_FAILED');
+        return {
+          conversationId: access.conversationId,
+          conversationKey: access.conversationKey,
+          messageId: message.id,
+          clientMessageId,
+          acceptedAt: message.sentAt,
+        };
+      },
+      'CHAT_MESSAGE_SEND_FAILED',
+      CHAT_SOCKET_EVENTS.MESSAGE_SEND,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_UPDATE)
@@ -269,42 +306,47 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatMessageUpdatePayload,
   ): Promise<ChatSocketAck<ChatMessageUpdatedAccepted>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const body = ensureObject(payload as unknown);
-      const conversationId = requiredString(body, 'conversationId', {
-        minLength: 1,
-        maxLength: 200,
-      });
-      const messageId = requiredString(body, 'messageId', {
-        minLength: 5,
-        maxLength: 50,
-      });
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
-        conversationId,
-        true,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const body = ensureObject(payload as unknown);
+        const conversationId = requiredString(body, 'conversationId', {
+          minLength: 1,
+          maxLength: 200,
+        });
+        const messageId = requiredString(body, 'messageId', {
+          minLength: 5,
+          maxLength: 50,
+        });
+        const access =
+          await this.conversationsService.resolveConversationAccess(
+            user,
+            conversationId,
+            true,
+          );
 
-      await this.chatRealtimeService.joinConversation(
-        client,
-        access.conversationKey,
-      );
+        await this.chatRealtimeService.joinConversation(
+          client,
+          access.conversationKey,
+        );
 
-      const message = await this.conversationsService.updateMessage(
-        user,
-        access.conversationKey,
-        messageId,
-        body,
-      );
+        const message = await this.conversationsService.updateMessage(
+          user,
+          access.conversationKey,
+          messageId,
+          body,
+        );
 
-      return {
-        conversationId: access.conversationId,
-        conversationKey: access.conversationKey,
-        messageId: message.id,
-        updatedAt: message.updatedAt,
-      };
-    }, 'CHAT_MESSAGE_UPDATE_FAILED');
+        return {
+          conversationId: access.conversationId,
+          conversationKey: access.conversationKey,
+          messageId: message.id,
+          updatedAt: message.updatedAt,
+        };
+      },
+      'CHAT_MESSAGE_UPDATE_FAILED',
+      CHAT_SOCKET_EVENTS.MESSAGE_UPDATE,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_DELETE)
@@ -312,41 +354,46 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatMessageDeletePayload,
   ): Promise<ChatSocketAck<ChatMessageDeletedAccepted>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const body = ensureObject(payload as unknown);
-      const conversationId = requiredString(body, 'conversationId', {
-        minLength: 1,
-        maxLength: 200,
-      });
-      const messageId = requiredString(body, 'messageId', {
-        minLength: 5,
-        maxLength: 50,
-      });
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
-        conversationId,
-        true,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const body = ensureObject(payload as unknown);
+        const conversationId = requiredString(body, 'conversationId', {
+          minLength: 1,
+          maxLength: 200,
+        });
+        const messageId = requiredString(body, 'messageId', {
+          minLength: 5,
+          maxLength: 50,
+        });
+        const access =
+          await this.conversationsService.resolveConversationAccess(
+            user,
+            conversationId,
+            true,
+          );
 
-      await this.chatRealtimeService.joinConversation(
-        client,
-        access.conversationKey,
-      );
+        await this.chatRealtimeService.joinConversation(
+          client,
+          access.conversationKey,
+        );
 
-      const message = await this.conversationsService.deleteMessage(
-        user,
-        access.conversationKey,
-        messageId,
-      );
+        const message = await this.conversationsService.deleteMessage(
+          user,
+          access.conversationKey,
+          messageId,
+        );
 
-      return {
-        conversationId: access.conversationId,
-        conversationKey: access.conversationKey,
-        messageId: message.id,
-        deletedAt: message.deletedAt ?? message.updatedAt,
-      };
-    }, 'CHAT_MESSAGE_DELETE_FAILED');
+        return {
+          conversationId: access.conversationId,
+          conversationKey: access.conversationKey,
+          messageId: message.id,
+          deletedAt: message.deletedAt ?? message.updatedAt,
+        };
+      },
+      'CHAT_MESSAGE_DELETE_FAILED',
+      CHAT_SOCKET_EVENTS.MESSAGE_DELETE,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_RECALL)
@@ -354,25 +401,29 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatMessageRecallPayload,
   ): Promise<ChatSocketAck<RecallMessageResult>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const body = ensureObject(payload as unknown);
-      const conversationId = requiredString(body, 'conversationId', {
-        minLength: 1,
-        maxLength: 200,
-      });
-      const messageId = requiredString(body, 'messageId', {
-        minLength: 5,
-        maxLength: 50,
-      });
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const body = ensureObject(payload as unknown);
+        const conversationId = requiredString(body, 'conversationId', {
+          minLength: 1,
+          maxLength: 200,
+        });
+        const messageId = requiredString(body, 'messageId', {
+          minLength: 5,
+          maxLength: 50,
+        });
 
-      return this.conversationsService.recallMessage(
-        user,
-        conversationId,
-        messageId,
-        body,
-      );
-    }, 'CHAT_MESSAGE_RECALL_FAILED');
+        return this.conversationsService.recallMessage(
+          user,
+          conversationId,
+          messageId,
+          body,
+        );
+      },
+      'CHAT_MESSAGE_RECALL_FAILED',
+      CHAT_SOCKET_EVENTS.MESSAGE_RECALL,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CONVERSATION_READ)
@@ -380,24 +431,29 @@ export class ConversationsGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatConversationCommandPayload,
   ): Promise<ChatSocketAck<ChatReadAccepted>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const conversationId = this.extractConversationId(payload);
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
-        conversationId,
-      );
-      const summary = await this.conversationsService.markAsRead(
-        user,
-        access.conversationKey,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const conversationId = this.extractConversationId(payload);
+        const access =
+          await this.conversationsService.resolveConversationAccess(
+            user,
+            conversationId,
+          );
+        const summary = await this.conversationsService.markAsRead(
+          user,
+          access.conversationKey,
+        );
 
-      return {
-        conversationId: summary.conversationId,
-        conversationKey: access.conversationKey,
-        readAt: summary.updatedAt,
-      };
-    }, 'CHAT_CONVERSATION_READ_FAILED');
+        return {
+          conversationId: summary.conversationId,
+          conversationKey: access.conversationKey,
+          readAt: summary.updatedAt,
+        };
+      },
+      'CHAT_CONVERSATION_READ_FAILED',
+      CHAT_SOCKET_EVENTS.CONVERSATION_READ,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.TYPING_START)
@@ -421,190 +477,506 @@ export class ConversationsGateway
     payload: ChatTypingCommandPayload,
     isTyping: boolean,
   ): Promise<ChatSocketAck<ChatTypingAccepted>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const body = ensureObject(payload as unknown);
-      const conversationId = requiredString(body, 'conversationId', {
-        minLength: 1,
-        maxLength: 200,
-      });
-      const clientTimestamp = optionalString(body, 'clientTimestamp', {
-        maxLength: 100,
-      });
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
-        conversationId,
-        true,
-      );
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const body = ensureObject(payload as unknown);
+        const conversationId = requiredString(body, 'conversationId', {
+          minLength: 1,
+          maxLength: 200,
+        });
+        const clientTimestamp = optionalString(body, 'clientTimestamp', {
+          maxLength: 100,
+        });
+        const access =
+          await this.conversationsService.resolveConversationAccess(
+            user,
+            conversationId,
+            true,
+          );
 
-      await this.chatRealtimeService.joinConversation(
-        client,
-        access.conversationKey,
-      );
+        await this.chatRealtimeService.joinConversation(
+          client,
+          access.conversationKey,
+        );
 
-      const typingPayload: ChatTypingStateEvent = {
-        conversationKey: access.conversationKey,
-        userId: user.id,
-        fullName: user.fullName,
-        avatarAsset: user.avatarAsset,
-        avatarUrl: user.avatarUrl,
-        isTyping,
-        occurredAt: nowIso(),
-        clientTimestamp,
-      };
+        const typingPayload: ChatTypingStateEvent = {
+          conversationKey: access.conversationKey,
+          userId: user.id,
+          fullName: user.fullName,
+          avatarAsset: user.avatarAsset,
+          avatarUrl: user.avatarUrl,
+          isTyping,
+          occurredAt: nowIso(),
+          clientTimestamp,
+        };
 
-      this.chatRealtimeService.emitTypingState(
-        access.conversationKey,
-        typingPayload,
-        client.id,
-      );
+        this.chatRealtimeService.emitTypingState(
+          access.conversationKey,
+          typingPayload,
+          client.id,
+        );
 
-      return {
-        conversationId: access.conversationId,
-        conversationKey: access.conversationKey,
-        isTyping,
-        acceptedAt: typingPayload.occurredAt,
-      };
-    }, 'CHAT_TYPING_STATE_FAILED');
+        return {
+          conversationId: access.conversationId,
+          conversationKey: access.conversationKey,
+          isTyping,
+          acceptedAt: typingPayload.occurredAt,
+        };
+      },
+      'CHAT_TYPING_STATE_FAILED',
+      isTyping
+        ? CHAT_SOCKET_EVENTS.TYPING_START
+        : CHAT_SOCKET_EVENTS.TYPING_STOP,
+    );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_INIT)
   async handleCallInit(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: any,
-  ): Promise<ChatSocketAck<any>> {
-    return this.forwardSignal(
-      client,
-      CHAT_SOCKET_EVENTS.CALL_INIT,
-      payload,
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, body, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+        );
+        const signalPayload = this.buildCallInitPayload(
+          access.conversationId,
+          body,
+          user,
+        );
+        const result = await this.chatCallSessionService.initiateCall(
+          access,
+          user.id,
+          signalPayload.isVideo,
+        );
+
+        if (result.shouldEmit) {
+          this.emitSignal(
+            access,
+            CHAT_SOCKET_EVENTS.CALL_INIT,
+            signalPayload,
+            client.id,
+            user.id,
+          );
+        }
+
+        return { success: true };
+      },
       'CHAT_CALL_INIT_FAILED',
+      CHAT_SOCKET_EVENTS.CALL_INIT,
     );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_ACCEPT)
   async handleCallAccept(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: any,
-  ): Promise<ChatSocketAck<any>> {
-    return this.forwardSignal(
-      client,
-      CHAT_SOCKET_EVENTS.CALL_ACCEPT,
-      payload,
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+        );
+        const signalPayload = this.buildCallAcceptPayload(
+          access.conversationId,
+          user,
+        );
+        const result = await this.chatCallSessionService.acceptCall(
+          access,
+          user.id,
+        );
+
+        if (result.shouldEmit) {
+          this.emitSignal(
+            access,
+            CHAT_SOCKET_EVENTS.CALL_ACCEPT,
+            signalPayload,
+            client.id,
+            user.id,
+          );
+        }
+
+        return { success: true };
+      },
       'CHAT_CALL_ACCEPT_FAILED',
+      CHAT_SOCKET_EVENTS.CALL_ACCEPT,
     );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_REJECT)
   async handleCallReject(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: any,
-  ): Promise<ChatSocketAck<any>> {
-    return this.forwardSignal(
-      client,
-      CHAT_SOCKET_EVENTS.CALL_REJECT,
-      payload,
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+        );
+        const signalPayload = this.buildCallRejectPayload(
+          access.conversationId,
+          user,
+        );
+        const result = await this.chatCallSessionService.rejectCall(
+          access,
+          user.id,
+        );
+
+        if (result.shouldEmit) {
+          this.emitSignal(
+            access,
+            CHAT_SOCKET_EVENTS.CALL_REJECT,
+            signalPayload,
+            client.id,
+            user.id,
+          );
+          void this.persistBestEffortCallSystemMessage(
+            user,
+            access.conversationKey,
+            'Call was rejected.',
+            CHAT_SOCKET_EVENTS.CALL_REJECT,
+          );
+        }
+
+        return { success: true };
+      },
       'CHAT_CALL_REJECT_FAILED',
+      CHAT_SOCKET_EVENTS.CALL_REJECT,
     );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_END)
   async handleCallEnd(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: any,
-  ): Promise<ChatSocketAck<any>> {
-    return this.forwardSignal(
-      client,
-      CHAT_SOCKET_EVENTS.CALL_END,
-      payload,
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+        );
+        const signalPayload = this.buildCallEndPayload(
+          access.conversationId,
+          user,
+        );
+        const result = await this.chatCallSessionService.endCall(
+          access,
+          user.id,
+        );
+
+        if (result.shouldEmit) {
+          this.emitSignal(
+            access,
+            CHAT_SOCKET_EVENTS.CALL_END,
+            signalPayload,
+            client.id,
+            user.id,
+          );
+          void this.persistBestEffortCallSystemMessage(
+            user,
+            access.conversationKey,
+            'Call ended.',
+            CHAT_SOCKET_EVENTS.CALL_END,
+          );
+        }
+
+        return { success: true };
+      },
       'CHAT_CALL_END_FAILED',
+      CHAT_SOCKET_EVENTS.CALL_END,
+    );
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT)
+  async handleCallHeartbeat(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+          true,
+        );
+        await this.chatCallSessionService.touchSignalingSession(
+          access,
+          user.id,
+        );
+        const heartbeatPayload = this.buildCallHeartbeatPayload(
+          access.conversationId,
+          user,
+        );
+
+        if (access.isGroup) {
+          this.emitSignal(
+            access,
+            CHAT_SOCKET_EVENTS.CALL_HEARTBEAT,
+            heartbeatPayload,
+            client.id,
+            user.id,
+          );
+        }
+
+        return { success: true };
+      },
+      'CHAT_CALL_HEARTBEAT_FAILED',
+      CHAT_SOCKET_EVENTS.CALL_HEARTBEAT,
     );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.WEBRTC_OFFER)
   async handleWebRTCOffer(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: any,
-  ): Promise<ChatSocketAck<any>> {
-    return this.forwardSignal(
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.forwardWebRtcSignal(
       client,
-      CHAT_SOCKET_EVENTS.WEBRTC_OFFER,
       payload,
+      CHAT_SOCKET_EVENTS.WEBRTC_OFFER,
       'CHAT_WEBRTC_OFFER_FAILED',
+      'offer',
     );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER)
   async handleWebRTCAnswer(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: any,
-  ): Promise<ChatSocketAck<any>> {
-    return this.forwardSignal(
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.forwardWebRtcSignal(
       client,
-      CHAT_SOCKET_EVENTS.WEBRTC_ANSWER,
       payload,
+      CHAT_SOCKET_EVENTS.WEBRTC_ANSWER,
       'CHAT_WEBRTC_ANSWER_FAILED',
+      'answer',
     );
   }
 
   @SubscribeMessage(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE)
   async handleWebRTCIceCandidate(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: any,
-  ): Promise<ChatSocketAck<any>> {
-    return this.forwardSignal(
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.forwardWebRtcSignal(
       client,
-      CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE,
       payload,
+      CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE,
       'CHAT_WEBRTC_ICE_CANDIDATE_FAILED',
+      'candidate',
     );
   }
 
-  private async forwardSignal(
+  private async forwardWebRtcSignal(
     client: AuthenticatedSocket,
+    payload: unknown,
     event: string,
-    payload: any,
     errorCode: string,
-  ): Promise<ChatSocketAck<any>> {
-    return this.withAck(async () => {
-      const user = await this.getSocketUser(client);
-      const signalPayload = ensureObject(payload);
-      const conversationId = this.extractConversationId(payload);
-      const access = await this.conversationsService.resolveConversationAccess(
-        user,
+    field: 'offer' | 'answer' | 'candidate',
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, body, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+          true,
+        );
+        await this.chatCallSessionService.touchSignalingSession(
+          access,
+          user.id,
+        );
+        const signalPayload = this.buildWebRtcPayload(
+          access.conversationId,
+          body,
+          field,
+        );
+        this.emitSignal(access, event, signalPayload, client.id, user.id);
+        return { success: true };
+      },
+      errorCode,
+      event,
+    );
+  }
+
+  private async resolveSignalAccess(
+    client: AuthenticatedSocket,
+    payload: unknown,
+    preferDirectCallSessionFastPath = false,
+  ): Promise<{
+    access: ResolvedConversationAccess;
+    body: Record<string, unknown>;
+    user: AuthenticatedUser;
+  }> {
+    const user = await this.getSocketUser(client);
+    const body = ensureObject(payload);
+    const conversationId = this.extractConversationId(body);
+
+    if (preferDirectCallSessionFastPath) {
+      const directConversationKey = this.tryDeriveDirectConversationKey(
+        user.id,
         conversationId,
-        true,
       );
 
-      this.emitSignal(access, event, signalPayload, client.id, user.id);
+      if (directConversationKey) {
+        const directSessionAccess =
+          await this.chatCallSessionService.getDirectSessionAccess(
+            directConversationKey,
+            user.id,
+          );
 
-      // Call signaling should stay fast. Persisting a system log is best-effort only.
-      if (
-        event === CHAT_SOCKET_EVENTS.CALL_REJECT ||
-        event === CHAT_SOCKET_EVENTS.CALL_END
-      ) {
-        void this.conversationsService
-          .sendMessage(user, access.conversationKey, {
-            content:
-              event === CHAT_SOCKET_EVENTS.CALL_REJECT
-                ? 'Call was rejected.'
-                : 'Call ended.',
-            type: 'SYSTEM',
-          })
-          .catch(() => {
-            this.logger.warn(
-              `Failed to persist ${event} system message for ${access.conversationKey}.`,
-            );
-          });
+        if (directSessionAccess) {
+          return {
+            access: directSessionAccess,
+            body,
+            user,
+          };
+        }
+      }
+    }
+
+    const access = await this.conversationsService.resolveConversationAccess(
+      user,
+      conversationId,
+      true,
+    );
+
+    return { access, body, user };
+  }
+
+  private tryDeriveDirectConversationKey(
+    actorUserId: string,
+    conversationId: string,
+  ): string | undefined {
+    const normalizedConversationId = conversationId.trim();
+
+    if (isDmConversationId(normalizedConversationId)) {
+      return normalizedConversationId;
+    }
+
+    if (normalizedConversationId.startsWith('dm:')) {
+      const targetUserId = normalizedConversationId.slice('dm:'.length).trim();
+
+      if (!targetUserId) {
+        return undefined;
       }
 
-      return { success: true };
-    }, errorCode);
+      return makeDmConversationId(actorUserId, targetUserId);
+    }
+
+    if (isGroupConversationId(normalizedConversationId)) {
+      return undefined;
+    }
+
+    if (normalizedConversationId.startsWith('group:')) {
+      return undefined;
+    }
+
+    return undefined;
+  }
+
+  private buildCallInitPayload(
+    conversationId: string,
+    body: Record<string, unknown>,
+    user: AuthenticatedUser,
+  ): ChatCallInitPayload {
+    return {
+      conversationId,
+      callerId: user.id,
+      callerName: user.fullName,
+      isVideo: requiredBoolean(body, 'isVideo'),
+    };
+  }
+
+  private buildCallAcceptPayload(
+    conversationId: string,
+    user: AuthenticatedUser,
+  ): ChatCallAcceptPayload {
+    return {
+      conversationId,
+      calleeId: user.id,
+    };
+  }
+
+  private buildCallRejectPayload(
+    conversationId: string,
+    user: AuthenticatedUser,
+  ): ChatCallRejectPayload {
+    return {
+      conversationId,
+      calleeId: user.id,
+    };
+  }
+
+  private buildCallEndPayload(
+    conversationId: string,
+    user: AuthenticatedUser,
+  ): ChatCallEndPayload {
+    return {
+      conversationId,
+      userId: user.id,
+      endedByUserId: user.id,
+    };
+  }
+
+  private buildCallHeartbeatPayload(
+    conversationId: string,
+    user: AuthenticatedUser,
+  ): ChatCallHeartbeatPayload {
+    return {
+      conversationId,
+      userId: user.id,
+    };
+  }
+
+  private buildWebRtcPayload(
+    conversationId: string,
+    body: Record<string, unknown>,
+    field: 'offer' | 'answer' | 'candidate',
+  ):
+    | ChatWebRTCOfferPayload
+    | ChatWebRTCAnswerPayload
+    | ChatWebRTCIceCandidatePayload {
+    if (!Object.prototype.hasOwnProperty.call(body, field)) {
+      throw new HttpException(`${field} is required.`, 400);
+    }
+
+    return {
+      conversationId,
+      [field]: body[field],
+    } as unknown as
+      | ChatWebRTCOfferPayload
+      | ChatWebRTCAnswerPayload
+      | ChatWebRTCIceCandidatePayload;
+  }
+
+  private async persistBestEffortCallSystemMessage(
+    user: AuthenticatedUser,
+    conversationKey: string,
+    content: string,
+    event: string,
+  ): Promise<void> {
+    await this.conversationsService
+      .sendMessage(user, conversationKey, {
+        content,
+        type: 'SYSTEM',
+      })
+      .catch(() => {
+        this.logger.warn(
+          `Failed to persist ${event} system message for ${conversationKey}.`,
+        );
+      });
   }
 
   private emitSignal(
     access: ResolvedConversationAccess,
     event: string,
-    payload: Record<string, unknown>,
+    payload: object,
     exceptSocketId: string,
     actorUserId: string,
   ): void {
@@ -720,13 +1092,26 @@ export class ConversationsGateway
   private async withAck<TData>(
     action: () => Promise<TData>,
     code: string,
+    eventName: string,
   ): Promise<ChatSocketAck<TData>> {
+    const startedAtMs = Date.now();
     try {
+      const data = await action();
+      this.observabilityService.recordRealtimeAck(
+        eventName,
+        Date.now() - startedAtMs,
+        'success',
+      );
       return {
         success: true,
-        data: await action(),
+        data,
       };
     } catch (error) {
+      this.observabilityService.recordRealtimeAck(
+        eventName,
+        Date.now() - startedAtMs,
+        'failed',
+      );
       return {
         success: false,
         error: this.toSocketError(error, code),

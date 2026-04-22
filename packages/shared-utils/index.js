@@ -1,3 +1,4 @@
+const { createHash } = require("crypto");
 const { monotonicFactory } = require("ulid");
 
 let createMonotonicUlid;
@@ -82,6 +83,19 @@ function makeUserPushDeviceSk(deviceId) {
   return `PUSH_DEVICE#${deviceId}`;
 }
 
+function makeUserContactAliasSk(targetUserId) {
+  return `CONTACT_ALIAS#${targetUserId}`;
+}
+
+function makePushTokenLookupPk(pushToken) {
+  const digest = createHash("sha256").update(pushToken).digest("hex");
+  return `PUSH_TOKEN#${digest}`;
+}
+
+function makePushTokenLookupSk() {
+  return "LOOKUP";
+}
+
 function makeAuthEmailOtpPk(email) {
   return `AUTH#EMAIL#${email}`;
 }
@@ -122,6 +136,22 @@ function makeMembershipSk(userId) {
   return `MEMBER#${userId}`;
 }
 
+function makeGroupBanSk(userId) {
+  return `BAN#${userId}`;
+}
+
+function makeGroupInviteLinkSk(inviteId) {
+  return `INVITE#${inviteId}`;
+}
+
+function makeGroupInviteCodeLookupPk(code) {
+  return `GROUP_INVITE_CODE#${code}`;
+}
+
+function makeGroupInviteCodeLookupSk() {
+  return "LOOKUP";
+}
+
 function makeUserGroupsKey(userId) {
   return `USER#${userId}`;
 }
@@ -135,6 +165,10 @@ function makeConversationPk(conversationId) {
 }
 
 function makeConversationAuditSk(createdAt, eventId) {
+  return `AUDIT#${createdAt}#${eventId}`;
+}
+
+function makeGroupAuditSk(createdAt, eventId) {
   return `AUDIT#${createdAt}#${eventId}`;
 }
 
@@ -216,6 +250,7 @@ module.exports = {
   isSameWard,
   makeConversationAuditSk,
   makeConversationPk,
+  makeGroupAuditSk,
   makeConversationReportLinkSk,
   makeConversationSummarySk,
   makeDmConversationId,
@@ -225,6 +260,10 @@ module.exports = {
   makeAuthRegisterDraftPk,
   makeAuthRegisterDraftSk,
   makeGroupMetadataSk,
+  makeGroupBanSk,
+  makeGroupInviteCodeLookupPk,
+  makeGroupInviteCodeLookupSk,
+  makeGroupInviteLinkSk,
   makeGroupPk,
   makeGroupTypeLocationKey,
   makeInboxPk,
@@ -232,6 +271,8 @@ module.exports = {
   makeMembershipSk,
   makeMessageSk,
   makePhoneLookupKey,
+  makePushTokenLookupPk,
+  makePushTokenLookupSk,
   makePushOutboxPk,
   makePushOutboxSk,
   makeReportAuditSk,
@@ -244,6 +285,7 @@ module.exports = {
   makeUserGroupsSk,
   makeUserPk,
   makeUserProfileSk,
+  makeUserContactAliasSk,
   makeUserPushDeviceSk,
   makeUserRefreshSessionSk,
   makeUserSessionSlotSk,

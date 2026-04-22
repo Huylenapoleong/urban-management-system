@@ -22,6 +22,7 @@ import type {
 } from '../../common/storage-records';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { ObservabilityService } from '../../infrastructure/observability/observability.service';
 import { RealtimeRedisService } from '../../infrastructure/realtime/realtime-redis.service';
 import {
   ConversationSummaryService,
@@ -45,6 +46,7 @@ export class ChatOutboxService
   private readonly logger = new Logger(ChatOutboxService.name);
   private outboxTimer?: NodeJS.Timeout;
   private outboxDrainPromise?: Promise<void>;
+  private outboxDrainScheduled = false;
 
   constructor(
     private readonly repository: UrbanTableRepository,
@@ -52,6 +54,7 @@ export class ChatOutboxService
     private readonly conversationDispatchService: ConversationDispatchService,
     private readonly realtimeRedisService: RealtimeRedisService,
     private readonly config: AppConfigService,
+    private readonly observabilityService: ObservabilityService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -96,6 +99,22 @@ export class ChatOutboxService
       event.PK,
       event.SK,
     );
+  }
+
+  requestDrain(eventName?: StoredChatOutboxEvent['eventName']): void {
+    if (eventName) {
+      this.observabilityService.recordChatOutboxDeferred(eventName);
+    }
+
+    if (this.outboxDrainScheduled) {
+      return;
+    }
+
+    this.outboxDrainScheduled = true;
+    queueMicrotask(() => {
+      this.outboxDrainScheduled = false;
+      void this.drainOutbox();
+    });
   }
 
   private makeChatOutboxPk(conversationId: string): string {
@@ -166,10 +185,21 @@ export class ChatOutboxService
     for (const item of items.filter(
       (entry) => entry.entityType === 'CHAT_OUTBOX_EVENT',
     )) {
+      const startedAtMs = Date.now();
       try {
         await this.processChatOutboxEvent(item);
         await this.deleteChatOutboxEvent(item);
+        this.observabilityService.recordChatOutboxReplay(
+          item.eventName,
+          Date.now() - startedAtMs,
+          'success',
+        );
       } catch (error) {
+        this.observabilityService.recordChatOutboxReplay(
+          item.eventName,
+          Date.now() - startedAtMs,
+          'failed',
+        );
         const message =
           error instanceof Error ? error.message : 'Unknown error.';
         this.logger.warn(

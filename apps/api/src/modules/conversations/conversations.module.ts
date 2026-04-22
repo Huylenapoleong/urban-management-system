@@ -8,6 +8,7 @@ import { ConversationSummaryService } from './conversation-summary.service';
 import { ConversationDispatchService } from './conversation-dispatch.service';
 import { ChatOutboxService } from './chat-outbox.service';
 import { ChatRealtimeService } from './chat-realtime.service';
+import { ChatCallSessionService } from './chat-call-session.service';
 import { GroupsModule } from '../groups/groups.module';
 import { UsersModule } from '../users/users.module';
 
@@ -20,6 +21,7 @@ import { UsersModule } from '../users/users.module';
     ConversationDispatchService,
     ChatOutboxService,
     ChatRealtimeService,
+    ChatCallSessionService,
     ChatRateLimitService,
     ChatSocketAuthService,
     ConversationsGateway,

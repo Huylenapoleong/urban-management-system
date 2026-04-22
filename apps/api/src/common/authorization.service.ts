@@ -1,12 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import type {
   GroupMemberRole,
+  GroupMessagePolicy,
   GroupType,
   UserRole,
 } from '@urban/shared-constants';
 import type { AuthenticatedUser } from '@urban/shared-types';
 import { isSameProvince, isSameWard } from '@urban/shared-utils';
 import type { StoredGroup, StoredReport, StoredUser } from './storage-records';
+import { normalizeGroupMemberRole } from './group-member-roles';
 
 @Injectable()
 export class AuthorizationService {
@@ -131,13 +133,15 @@ export class AuthorizationService {
   canManageGroup(
     actor: AuthenticatedUser,
     _group: StoredGroup,
-    roleInGroup?: GroupMemberRole,
+    roleInGroup?: GroupMemberRole | 'OFFICER',
   ): boolean {
     if (actor.role === 'ADMIN') {
       return true;
     }
 
-    return roleInGroup === 'OWNER' || roleInGroup === 'OFFICER';
+    const normalizedRole = normalizeGroupMemberRole(roleInGroup);
+
+    return normalizedRole === 'OWNER' || normalizedRole === 'DEPUTY';
   }
 
   canJoinGroup(actor: AuthenticatedUser, group: StoredGroup): boolean {
@@ -155,9 +159,51 @@ export class AuthorizationService {
   canDeleteGroup(
     actor: AuthenticatedUser,
     _group: StoredGroup,
-    roleInGroup?: GroupMemberRole,
+    roleInGroup?: GroupMemberRole | 'OFFICER',
   ): boolean {
-    return actor.role === 'ADMIN' || roleInGroup === 'OWNER';
+    return (
+      actor.role === 'ADMIN' ||
+      normalizeGroupMemberRole(roleInGroup) === 'OWNER'
+    );
+  }
+
+  canChangeGroupMessagePolicy(
+    actor: AuthenticatedUser,
+    roleInGroup?: GroupMemberRole | 'OFFICER',
+  ): boolean {
+    return (
+      actor.role === 'ADMIN' ||
+      normalizeGroupMemberRole(roleInGroup) === 'OWNER'
+    );
+  }
+
+  canRenameGroup(
+    _actor: AuthenticatedUser,
+    roleInGroup?: GroupMemberRole | 'OFFICER',
+  ): boolean {
+    return normalizeGroupMemberRole(roleInGroup) === 'OWNER';
+  }
+
+  canSendGroupMessage(
+    actor: AuthenticatedUser,
+    roleInGroup: GroupMemberRole | 'OFFICER' | undefined,
+    messagePolicy: GroupMessagePolicy = 'ALL_MEMBERS',
+  ): boolean {
+    if (actor.role === 'ADMIN') {
+      return true;
+    }
+
+    const normalizedRole = normalizeGroupMemberRole(roleInGroup);
+
+    switch (messagePolicy) {
+      case 'OWNER_ONLY':
+        return normalizedRole === 'OWNER';
+      case 'OWNER_AND_DEPUTIES':
+        return normalizedRole === 'OWNER' || normalizedRole === 'DEPUTY';
+      case 'ALL_MEMBERS':
+      default:
+        return Boolean(normalizedRole);
+    }
   }
 
   canReadReport(actor: AuthenticatedUser, report: StoredReport): boolean {

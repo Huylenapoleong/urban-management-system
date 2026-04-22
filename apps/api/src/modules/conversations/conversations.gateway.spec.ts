@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  ConflictException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import type { AuthenticatedUser } from '@urban/shared-types';
 import { ConversationsGateway } from './conversations.gateway';
 
@@ -21,6 +25,17 @@ describe('ConversationsGateway', () => {
     detachSocket: jest.fn(),
     getPresence: jest.fn(),
     listPresence: jest.fn(),
+  };
+  const chatCallSessionService = {
+    acceptCall: jest.fn(),
+    endCall: jest.fn(),
+    getDirectSessionAccess: jest.fn(),
+    initiateCall: jest.fn(),
+    rejectCall: jest.fn(),
+    touchSignalingSession: jest.fn(),
+  };
+  const observabilityService = {
+    recordRealtimeAck: jest.fn(),
   };
   const conversationsService = {
     deleteConversation: jest.fn(),
@@ -48,6 +63,8 @@ describe('ConversationsGateway', () => {
       chatRealtimeService as never,
       chatPresenceService as never,
       conversationsService as never,
+      chatCallSessionService as never,
+      observabilityService as never,
     );
   });
 
@@ -81,6 +98,11 @@ describe('ConversationsGateway', () => {
     expect(conversationsService.deleteConversation).toHaveBeenCalledWith(
       actor,
       'group:group-1',
+    );
+    expect(observabilityService.recordRealtimeAck).toHaveBeenCalledWith(
+      'conversation.delete',
+      expect.any(Number),
+      'success',
     );
     expect(disconnect).not.toHaveBeenCalled();
   });
@@ -176,6 +198,11 @@ describe('ConversationsGateway', () => {
         statusCode: 400,
       },
     });
+    expect(observabilityService.recordRealtimeAck).toHaveBeenCalledWith(
+      'conversation.delete',
+      expect.any(Number),
+      'failed',
+    );
     expect(disconnect).not.toHaveBeenCalled();
   });
 
@@ -227,11 +254,12 @@ describe('ConversationsGateway', () => {
       participants: ['user-1', 'user-2'],
       isGroup: false,
     });
+    chatCallSessionService.initiateCall.mockResolvedValue({
+      shouldEmit: true,
+    });
 
     const result = await gateway.handleCallInit(client, {
       conversationId: 'dm:user-2',
-      callerId: actor.id,
-      callerName: actor.fullName,
       isVideo: true,
     });
 
@@ -249,9 +277,47 @@ describe('ConversationsGateway', () => {
         isVideo: true,
       },
     );
+    expect(observabilityService.recordRealtimeAck).toHaveBeenCalledWith(
+      'call.init',
+      expect.any(Number),
+      'success',
+    );
     expect(chatRealtimeService.emitToConversation).not.toHaveBeenCalled();
     expect(conversationsService.sendMessage).not.toHaveBeenCalled();
     expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates repeated call-init from the same caller without re-emitting the signal', async () => {
+    const { client } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    conversationsService.resolveConversationAccess.mockResolvedValue({
+      conversationId: 'dm:user-2',
+      conversationKey: 'DM#user-1#user-2',
+      participants: ['user-1', 'user-2'],
+      isGroup: false,
+    });
+    chatCallSessionService.initiateCall.mockResolvedValue({
+      shouldEmit: false,
+    });
+
+    const result = await gateway.handleCallInit(client, {
+      conversationId: 'dm:user-2',
+      isVideo: true,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalled();
   });
 
   it('keeps group call signals on the conversation room', async () => {
@@ -271,10 +337,12 @@ describe('ConversationsGateway', () => {
       participants: ['user-1', 'user-2', 'user-3'],
       isGroup: true,
     });
+    chatCallSessionService.acceptCall.mockResolvedValue({
+      shouldEmit: true,
+    });
 
     const result = await gateway.handleCallAccept(client, {
       conversationId: 'group:group-1',
-      calleeId: 'user-2',
     });
 
     expect(result).toEqual({
@@ -286,12 +354,48 @@ describe('ConversationsGateway', () => {
       'call.accept',
       {
         conversationId: 'group:group-1',
-        calleeId: 'user-2',
+        calleeId: actor.id,
       },
       client.id,
     );
     expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalled();
     expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('returns a failed ack when call-accept arrives without an active session', async () => {
+    const { client } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    conversationsService.resolveConversationAccess.mockResolvedValue({
+      conversationId: 'dm:user-2',
+      conversationKey: 'DM#user-1#user-2',
+      participants: ['user-1', 'user-2'],
+      isGroup: false,
+    });
+    chatCallSessionService.acceptCall.mockRejectedValue(
+      new ConflictException('There is no active call for this conversation.'),
+    );
+
+    const result = await gateway.handleCallAccept(client, {
+      conversationId: 'dm:user-2',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: {
+        code: 'CHAT_CALL_ACCEPT_FAILED',
+        message: 'There is no active call for this conversation.',
+        statusCode: 409,
+      },
+    });
+    expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalled();
   });
 
   it('returns success for call-end even when persisting the system message fails', async () => {
@@ -311,13 +415,15 @@ describe('ConversationsGateway', () => {
       participants: ['user-1', 'user-2'],
       isGroup: false,
     });
+    chatCallSessionService.endCall.mockResolvedValue({
+      shouldEmit: true,
+    });
     conversationsService.sendMessage.mockRejectedValueOnce(
       new Error('Outbox unavailable.'),
     );
 
     const result = await gateway.handleCallEnd(client, {
       conversationId: 'dm:user-2',
-      endedByUserId: actor.id,
     });
 
     expect(result).toEqual({
@@ -329,6 +435,7 @@ describe('ConversationsGateway', () => {
       'call.end',
       {
         conversationId: 'dm:user-2',
+        userId: actor.id,
         endedByUserId: actor.id,
       },
     );
@@ -341,6 +448,101 @@ describe('ConversationsGateway', () => {
       }),
     );
     expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it('skips a fresh conversation access lookup for DM WebRTC signals when an active call session is already cached', async () => {
+    const { client } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    chatCallSessionService.getDirectSessionAccess.mockResolvedValue({
+      conversationId: 'dm:user-2',
+      conversationKey: 'DM#user-1#user-2',
+      participants: ['user-1', 'user-2'],
+      isGroup: false,
+    });
+    chatCallSessionService.touchSignalingSession.mockResolvedValue({
+      status: 'ACTIVE',
+    });
+
+    const result = await gateway.handleWebRTCOffer(client, {
+      conversationId: 'dm:user-2',
+      offer: { sdp: 'offer-sdp', type: 'offer' },
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatCallSessionService.getDirectSessionAccess).toHaveBeenCalledWith(
+      'DM#user-1#user-2',
+      actor.id,
+    );
+    expect(
+      conversationsService.resolveConversationAccess,
+    ).not.toHaveBeenCalled();
+    expect(chatRealtimeService.emitToUsers).toHaveBeenCalledWith(
+      ['user-2'],
+      'webrtc.offer',
+      {
+        conversationId: 'dm:user-2',
+        offer: { sdp: 'offer-sdp', type: 'offer' },
+      },
+    );
+  });
+
+  it('refreshes active call sessions through call-heartbeat without reloading DM access from storage', async () => {
+    const { client } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    chatCallSessionService.getDirectSessionAccess.mockResolvedValue({
+      conversationId: 'dm:user-2',
+      conversationKey: 'DM#user-1#user-2',
+      participants: ['user-1', 'user-2'],
+      isGroup: false,
+    });
+    chatCallSessionService.touchSignalingSession.mockResolvedValue({
+      status: 'ACTIVE',
+    });
+
+    const result = await gateway.handleCallHeartbeat(client, {
+      conversationId: 'dm:user-2',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatCallSessionService.getDirectSessionAccess).toHaveBeenCalledWith(
+      'DM#user-1#user-2',
+      actor.id,
+    );
+    expect(
+      conversationsService.resolveConversationAccess,
+    ).not.toHaveBeenCalled();
+    expect(chatRealtimeService.emitToUsers).not.toHaveBeenCalledWith(
+      ['user-2'],
+      'call.heartbeat',
+      expect.anything(),
+    );
+    expect(observabilityService.recordRealtimeAck).toHaveBeenCalledWith(
+      'call.heartbeat',
+      expect.any(Number),
+      'success',
+    );
   });
 });
 

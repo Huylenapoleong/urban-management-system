@@ -19,6 +19,7 @@ describe('ConversationsService', () => {
   };
   const authorizationService = {
     canAccessDirectConversation: jest.fn(),
+    canSendGroupMessage: jest.fn(),
     isAdmin: jest.fn(),
   };
   const usersService = {
@@ -26,8 +27,10 @@ describe('ConversationsService', () => {
     canStartCitizenDm: jest.fn(),
     getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
+    resolveContactDisplayName: jest.fn(),
   };
   const groupsService = {
+    getActiveBan: jest.fn(),
     getGroup: jest.fn(),
     getMembership: jest.fn(),
     listMembers: jest.fn(),
@@ -51,6 +54,7 @@ describe('ConversationsService', () => {
   const chatOutboxService = {
     buildChatOutboxEvent: jest.fn(),
     deleteChatOutboxEvent: jest.fn(),
+    requestDrain: jest.fn(),
   };
   const auditTrailService = {
     buildConversationEvent: jest.fn(),
@@ -217,7 +221,9 @@ describe('ConversationsService', () => {
       config as never,
     );
     authorizationService.canAccessDirectConversation.mockReturnValue(true);
+    authorizationService.canSendGroupMessage.mockReturnValue(true);
     authorizationService.isAdmin.mockReturnValue(false);
+    groupsService.getActiveBan.mockResolvedValue(undefined);
     usersService.getActiveByIdOrThrow.mockImplementation((userId: string) => {
       if (userId === otherUser.userId) {
         return otherUser;
@@ -250,6 +256,10 @@ describe('ConversationsService', () => {
     });
     usersService.canStartCitizenDm.mockResolvedValue(true);
     usersService.isInteractionBlocked.mockResolvedValue(false);
+    usersService.resolveContactDisplayName.mockImplementation(
+      (_ownerUserId: string, _targetUserId: string, fallbackFullName: string) =>
+        fallbackFullName,
+    );
     repository.delete.mockResolvedValue(undefined);
     repository.scanAll.mockResolvedValue([]);
     repository.put.mockResolvedValue(undefined);
@@ -276,6 +286,7 @@ describe('ConversationsService', () => {
       }),
     );
     chatOutboxService.deleteChatOutboxEvent.mockResolvedValue(undefined);
+    chatOutboxService.requestDrain.mockImplementation(() => undefined);
     conversationDispatchService.emitConversationRead.mockResolvedValue(
       undefined,
     );
@@ -484,6 +495,7 @@ describe('ConversationsService', () => {
     groupsService.getGroup.mockResolvedValue({
       groupId: 'group-1',
       groupType: 'AREA',
+      messagePolicy: 'ALL_MEMBERS',
       locationCode: actor.locationCode,
       deletedAt: null,
     });
@@ -498,6 +510,115 @@ describe('ConversationsService', () => {
     ).rejects.toThrow(
       'Only active members can access this group conversation.',
     );
+  });
+
+  it('blocks banned users from accessing a public group conversation even if they are in scope', async () => {
+    groupsService.getGroup.mockResolvedValue({
+      id: 'group-1',
+      groupId: 'group-1',
+      groupType: 'AREA',
+      messagePolicy: 'ALL_MEMBERS',
+      locationCode: actor.locationCode,
+      createdBy: actor.id,
+      memberCount: 2,
+      isOfficial: false,
+      deletedAt: null,
+      createdAt: '2026-03-18T10:00:00.000Z',
+      updatedAt: '2026-03-18T10:00:00.000Z',
+    });
+    groupsService.getActiveBan.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      expiresAt: null,
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      deletedAt: '2026-03-18T10:08:00.000Z',
+    });
+
+    await expect(
+      service.listMessages(actor, 'group:group-1', {}),
+    ).rejects.toThrow('You are banned from this group.');
+  });
+
+  it('blocks member message sends when the group policy only allows owners and deputies', async () => {
+    authorizationService.canSendGroupMessage.mockReturnValue(false);
+    groupsService.getGroup.mockResolvedValue({
+      id: 'group-1',
+      groupId: 'group-1',
+      groupType: 'AREA',
+      messagePolicy: 'OWNER_AND_DEPUTIES',
+      locationCode: actor.locationCode,
+      createdBy: actor.id,
+      memberCount: 2,
+      isOfficial: false,
+      deletedAt: null,
+      createdAt: '2026-03-18T10:00:00.000Z',
+      updatedAt: '2026-03-18T10:00:00.000Z',
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      roleInGroup: 'MEMBER',
+      deletedAt: null,
+    });
+
+    await expect(
+      service.sendMessage(actor, 'group:group-1', {
+        content: '{"text":"Khong duoc gui.","mention":[]}',
+        type: 'TEXT',
+      }),
+    ).rejects.toThrow(
+      'Only owners and deputies can send messages to this group.',
+    );
+    expect(authorizationService.canSendGroupMessage).toHaveBeenCalledWith(
+      actor,
+      'MEMBER',
+      'OWNER_AND_DEPUTIES',
+    );
+    expect(repository.transactPut).not.toHaveBeenCalled();
+  });
+
+  it('allows deputies to send messages when the group policy is OWNER_AND_DEPUTIES', async () => {
+    authorizationService.canSendGroupMessage.mockReturnValue(true);
+    groupsService.getGroup.mockResolvedValue({
+      id: 'group-1',
+      groupId: 'group-1',
+      groupType: 'AREA',
+      messagePolicy: 'OWNER_AND_DEPUTIES',
+      locationCode: actor.locationCode,
+      createdBy: actor.id,
+      memberCount: 2,
+      isOfficial: false,
+      deletedAt: null,
+      createdAt: '2026-03-18T10:00:00.000Z',
+      updatedAt: '2026-03-18T10:00:00.000Z',
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      roleInGroup: 'DEPUTY',
+      deletedAt: null,
+    });
+    groupsService.listMembers.mockResolvedValue([
+      { userId: actor.id },
+      { userId: otherUser.userId },
+    ]);
+
+    const result = await service.sendMessage(actor, 'group:group-1', {
+      content: '{"text":"Deputy van gui duoc.","mention":[]}',
+      type: 'TEXT',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        senderId: actor.id,
+        type: 'TEXT',
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalled();
   });
 
   it('filters and paginates inbox conversations by keyword and unread state', async () => {
@@ -1055,6 +1176,28 @@ describe('ConversationsService', () => {
       }),
     );
     expect(repository.transactPut).toHaveBeenCalled();
+  });
+
+  it('requests an eager outbox drain when direct dispatch fails after persisting a new message', async () => {
+    conversationDispatchService.emitMessageCreated.mockRejectedValueOnce(
+      new Error('socket dispatch failed'),
+    );
+
+    const result = await service.sendMessage(actor, `dm:${otherUser.userId}`, {
+      content: '{"text":"Fallback qua outbox ngay.","mention":[]}',
+      type: 'TEXT',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        senderId: actor.id,
+        type: 'TEXT',
+      }),
+    );
+    expect(chatOutboxService.requestDrain).toHaveBeenCalledWith(
+      'message.created',
+    );
   });
 
   it('blocks direct messages when the user pair is blocked', async () => {

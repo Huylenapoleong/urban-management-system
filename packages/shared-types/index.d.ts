@@ -1,5 +1,6 @@
 import type {
   GroupMemberRole,
+  GroupMessagePolicy,
   GroupType,
   MessageDeliveryState,
   MessageRecallScope,
@@ -105,6 +106,8 @@ export interface AuthenticatedUser {
 export interface UserFriendItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -116,6 +119,8 @@ export interface UserFriendItem {
 export interface UserFriendRequestItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -128,6 +133,8 @@ export interface UserFriendRequestItem {
 export interface UserBlockedItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -139,6 +146,8 @@ export interface UserBlockedItem {
 export interface UserDirectoryItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -150,10 +159,17 @@ export interface UserDirectoryItem {
   canSendMessageRequest: boolean;
 }
 
+export interface UserContactAlias {
+  userId: string;
+  alias: string;
+  updatedAt: string;
+}
+
 export interface GroupMetadata {
   id: string;
   groupName: string;
   groupType: GroupType;
+  messagePolicy: GroupMessagePolicy;
   locationCode: string;
   createdBy: string;
   description?: string;
@@ -170,6 +186,29 @@ export interface GroupMembership {
   roleInGroup: GroupMemberRole;
   joinedAt: string;
   deletedAt: string | null;
+  updatedAt: string;
+}
+
+export interface GroupBan {
+  groupId: string;
+  userId: string;
+  bannedByUserId: string;
+  reason?: string;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupInviteLink {
+  inviteId: string;
+  groupId: string;
+  code: string;
+  createdByUserId: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+  usedCount: number;
+  disabledAt: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -296,7 +335,7 @@ export interface PushDevice {
 
 export interface AuditEventItem {
   id: string;
-  scope: "REPORT" | "CONVERSATION";
+  scope: "REPORT" | "CONVERSATION" | "GROUP";
   action: string;
   actorUserId: string;
   occurredAt: string;
@@ -373,6 +412,11 @@ export interface ChatCallRejectPayload extends ChatConversationCommandPayload {
 }
 
 export interface ChatCallEndPayload extends ChatConversationCommandPayload {
+  userId: string;
+  endedByUserId?: string;
+}
+
+export interface ChatCallHeartbeatPayload extends ChatConversationCommandPayload {
   userId: string;
 }
 
@@ -512,6 +556,7 @@ export interface ChatConversationUpdatedEvent {
     | "message.created"
     | "message.updated"
     | "message.deleted"
+    | "conversation.metadata.updated"
     | "conversation.read"
     | "conversation.preferences.updated"
     | "conversation.request.updated";

@@ -18,6 +18,9 @@ export function makeUserProfileSk(): string;
 export function makeUserRefreshSessionSk(sessionId: string): string;
 export function makeUserSessionSlotSk(sessionScope: string): string;
 export function makeUserPushDeviceSk(deviceId: string): string;
+export function makeUserContactAliasSk(targetUserId: string): string;
+export function makePushTokenLookupPk(pushToken: string): string;
+export function makePushTokenLookupSk(): string;
 export function makeAuthEmailOtpPk(email: string): string;
 export function makeAuthEmailOtpSk(purpose: string): string;
 export function makeAuthRegisterDraftPk(email: string): string;
@@ -31,6 +34,10 @@ export function makeGroupTypeLocationKey(
   locationCode: string,
 ): string;
 export function makeMembershipSk(userId: string): string;
+export function makeGroupBanSk(userId: string): string;
+export function makeGroupInviteLinkSk(inviteId: string): string;
+export function makeGroupInviteCodeLookupPk(code: string): string;
+export function makeGroupInviteCodeLookupSk(): string;
 export function makeUserGroupsKey(userId: string): string;
 export function makeUserGroupsSk(groupId: string, joinedAt: string): string;
 export function makeConversationPk(conversationId: string): string;
@@ -38,6 +45,7 @@ export function makeConversationAuditSk(
   createdAt: string,
   eventId: string,
 ): string;
+export function makeGroupAuditSk(createdAt: string, eventId: string): string;
 export function makeConversationReportLinkSk(reportId: string): string;
 export function makeMessageSk(sentAt: string, messageId: string): string;
 export function makeInboxPk(userId: string): string;

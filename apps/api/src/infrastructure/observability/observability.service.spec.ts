@@ -48,6 +48,10 @@ describe('ObservabilityService', () => {
       statusCode: 503,
     });
     service.recordSessionRevocations('logout_all', 2);
+    service.recordRealtimeAck('message.send', 24, 'success');
+    service.recordRealtimeAck('call.init', 18, 'failed');
+    service.recordChatOutboxDeferred('message.created');
+    service.recordChatOutboxReplay('message.created', 11, 'success');
     service.recordRetentionRun(5, 4);
     service.recordChatReconciliationRun(6, 3, 1, 'repair');
 
@@ -60,6 +64,22 @@ describe('ObservabilityService', () => {
       '429': 1,
       '503': 1,
     });
+    expect(snapshot.counters.realtimeAcksTotal).toBe(2);
+    expect(snapshot.counters.realtimeAckFailuresTotal).toBe(1);
+    expect(snapshot.counters.realtimeAcksByEvent).toEqual({
+      'call.init': 1,
+      'message.send': 1,
+    });
+    expect(snapshot.counters.realtimeAckFailuresByEvent).toEqual({
+      'call.init': 1,
+    });
+    expect(snapshot.counters.chatOutboxDeferredByEvent).toEqual({
+      'message.created': 1,
+    });
+    expect(snapshot.counters.chatOutboxReplaySuccessByEvent).toEqual({
+      'message.created': 1,
+    });
+    expect(snapshot.counters.chatOutboxReplayFailureByEvent).toEqual({});
     expect(snapshot.counters.sessionRevocationsTotal).toBe(2);
     expect(snapshot.counters.sessionRevocationsByReason).toEqual({
       logout_all: 2,
@@ -72,6 +92,15 @@ describe('ObservabilityService', () => {
     expect(snapshot.counters.chatReconciliationCandidatesUpdatedTotal).toBe(3);
     expect(snapshot.counters.chatReconciliationCandidatesDeletedTotal).toBe(1);
     expect(snapshot.timings.httpAverageDurationMs).toBe(22.38);
+    expect(snapshot.timings.realtimeAckAverageDurationMs).toBe(21);
+    expect(snapshot.timings.realtimeAckAverageDurationByEvent).toEqual({
+      'call.init': 18,
+      'message.send': 24,
+    });
+    expect(snapshot.timings.chatOutboxReplayAverageDurationMs).toBe(11);
+    expect(snapshot.timings.chatOutboxReplayAverageDurationByEvent).toEqual({
+      'message.created': 11,
+    });
     expect(snapshot.gauges.chatOutbox.pendingCount).toBe(0);
     expect(snapshot.gauges.pushOutbox.pendingCount).toBe(0);
     expect(snapshot.maintenance).toEqual(
@@ -138,6 +167,9 @@ describe('ObservabilityService', () => {
       statusCode: 429,
     });
     service.recordSessionRevocations('logout', 1);
+    service.recordRealtimeAck('call.init', 12, 'success');
+    service.recordChatOutboxDeferred('message.created');
+    service.recordChatOutboxReplay('message.created', 8, 'success');
     service.recordRetentionRun(3, 2);
     service.recordChatReconciliationRun(4, 2, 1, 'preview');
 
@@ -152,6 +184,15 @@ describe('ObservabilityService', () => {
     );
     expect(metrics).toContain(
       'urban_api_session_revocations_by_reason_total{reason="logout"} 1',
+    );
+    expect(metrics).toContain(
+      'urban_api_realtime_ack_total{event="call.init",outcome="success_or_failed"} 1',
+    );
+    expect(metrics).toContain(
+      'urban_api_chat_outbox_replay_total{event="message.created",outcome="deferred"} 1',
+    );
+    expect(metrics).toContain(
+      'urban_api_chat_outbox_replay_average_duration_milliseconds{event="message.created"} 8',
     );
     expect(metrics).toContain('urban_api_retention_runs_total 1');
     expect(metrics).toContain('urban_api_chat_reconciliation_runs_total 1');

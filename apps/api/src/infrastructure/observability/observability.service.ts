@@ -51,6 +51,9 @@ interface OutboxGauge {
   pendingCount: number;
 }
 
+type ChatOutboxEventName = StoredChatOutboxEvent['eventName'];
+type RealtimeAckOutcome = 'success' | 'failed';
+
 export interface ObservabilitySnapshot {
   service: string;
   timestamp: string;
@@ -59,6 +62,13 @@ export interface ObservabilitySnapshot {
     httpResponses429Total: number;
     httpResponses503Total: number;
     httpResponsesByStatusCode: Record<string, number>;
+    realtimeAcksTotal: number;
+    realtimeAckFailuresTotal: number;
+    realtimeAcksByEvent: Record<string, number>;
+    realtimeAckFailuresByEvent: Record<string, number>;
+    chatOutboxDeferredByEvent: Record<string, number>;
+    chatOutboxReplaySuccessByEvent: Record<string, number>;
+    chatOutboxReplayFailureByEvent: Record<string, number>;
     retentionCandidatesPurgedTotal: number;
     retentionCandidatesSeenTotal: number;
     retentionRunsTotal: number;
@@ -71,6 +81,10 @@ export interface ObservabilitySnapshot {
   };
   timings: {
     httpAverageDurationMs: number;
+    realtimeAckAverageDurationMs: number;
+    realtimeAckAverageDurationByEvent: Record<string, number>;
+    chatOutboxReplayAverageDurationMs: number;
+    chatOutboxReplayAverageDurationByEvent: Record<string, number>;
   };
   gauges: {
     chatOutbox: OutboxGauge;
@@ -93,6 +107,16 @@ export interface ObservabilitySnapshot {
 export class ObservabilityService {
   private readonly logger = new Logger(ObservabilityService.name);
   private readonly httpResponsesByStatusCode = new Map<number, number>();
+  private readonly realtimeAcksByEvent = new Map<string, number>();
+  private readonly realtimeAckFailuresByEvent = new Map<string, number>();
+  private readonly realtimeAckDurationMsByEvent = new Map<string, number>();
+  private readonly chatOutboxDeferredByEvent = new Map<string, number>();
+  private readonly chatOutboxReplaySuccessByEvent = new Map<string, number>();
+  private readonly chatOutboxReplayFailureByEvent = new Map<string, number>();
+  private readonly chatOutboxReplayDurationMsByEvent = new Map<
+    string,
+    number
+  >();
   private readonly sessionRevocationsByReason = new Map<
     SessionRevocationReason,
     number
@@ -101,6 +125,11 @@ export class ObservabilityService {
   private httpResponses429Total = 0;
   private httpResponses503Total = 0;
   private httpDurationTotalMs = 0;
+  private realtimeAcksTotal = 0;
+  private realtimeAckFailuresTotal = 0;
+  private realtimeAckDurationTotalMs = 0;
+  private chatOutboxReplayCount = 0;
+  private chatOutboxReplayDurationTotalMs = 0;
   private retentionCandidatesPurgedTotal = 0;
   private retentionCandidatesSeenTotal = 0;
   private retentionRunsTotal = 0;
@@ -168,6 +197,59 @@ export class ObservabilityService {
     );
   }
 
+  recordRealtimeAck(
+    eventName: string,
+    durationMs: number,
+    outcome: RealtimeAckOutcome,
+  ): void {
+    const sanitizedDurationMs = Math.max(durationMs, 0);
+
+    this.realtimeAcksTotal += 1;
+    this.realtimeAckDurationTotalMs += sanitizedDurationMs;
+    this.incrementMetricMap(this.realtimeAcksByEvent, eventName, 1);
+    this.incrementMetricMap(
+      this.realtimeAckDurationMsByEvent,
+      eventName,
+      sanitizedDurationMs,
+    );
+
+    if (outcome === 'failed') {
+      this.realtimeAckFailuresTotal += 1;
+      this.incrementMetricMap(this.realtimeAckFailuresByEvent, eventName, 1);
+    }
+  }
+
+  recordChatOutboxDeferred(eventName: ChatOutboxEventName): void {
+    this.incrementMetricMap(this.chatOutboxDeferredByEvent, eventName, 1);
+  }
+
+  recordChatOutboxReplay(
+    eventName: ChatOutboxEventName,
+    durationMs: number,
+    outcome: RealtimeAckOutcome,
+  ): void {
+    const sanitizedDurationMs = Math.max(durationMs, 0);
+
+    this.chatOutboxReplayCount += 1;
+    this.chatOutboxReplayDurationTotalMs += sanitizedDurationMs;
+    this.incrementMetricMap(
+      this.chatOutboxReplayDurationMsByEvent,
+      eventName,
+      sanitizedDurationMs,
+    );
+
+    if (outcome === 'success') {
+      this.incrementMetricMap(
+        this.chatOutboxReplaySuccessByEvent,
+        eventName,
+        1,
+      );
+      return;
+    }
+
+    this.incrementMetricMap(this.chatOutboxReplayFailureByEvent, eventName, 1);
+  }
+
   recordRetentionRun(candidateCount: number, deletedCount: number): void {
     this.retentionRunsTotal += 1;
     this.retentionCandidatesSeenTotal += candidateCount;
@@ -212,6 +294,23 @@ export class ObservabilityService {
             ([statusCode, count]) => [String(statusCode), count],
           ),
         ),
+        realtimeAcksTotal: this.realtimeAcksTotal,
+        realtimeAckFailuresTotal: this.realtimeAckFailuresTotal,
+        realtimeAcksByEvent: this.mapNumberEntriesToObject(
+          this.realtimeAcksByEvent,
+        ),
+        realtimeAckFailuresByEvent: this.mapNumberEntriesToObject(
+          this.realtimeAckFailuresByEvent,
+        ),
+        chatOutboxDeferredByEvent: this.mapNumberEntriesToObject(
+          this.chatOutboxDeferredByEvent,
+        ),
+        chatOutboxReplaySuccessByEvent: this.mapNumberEntriesToObject(
+          this.chatOutboxReplaySuccessByEvent,
+        ),
+        chatOutboxReplayFailureByEvent: this.mapNumberEntriesToObject(
+          this.chatOutboxReplayFailureByEvent,
+        ),
         retentionCandidatesPurgedTotal: this.retentionCandidatesPurgedTotal,
         retentionCandidatesSeenTotal: this.retentionCandidatesSeenTotal,
         retentionRunsTotal: this.retentionRunsTotal,
@@ -234,6 +333,34 @@ export class ObservabilityService {
                 (this.httpDurationTotalMs / this.httpRequestsTotal).toFixed(2),
               )
             : 0,
+        realtimeAckAverageDurationMs:
+          this.realtimeAcksTotal > 0
+            ? Number(
+                (
+                  this.realtimeAckDurationTotalMs / this.realtimeAcksTotal
+                ).toFixed(2),
+              )
+            : 0,
+        realtimeAckAverageDurationByEvent: this.buildAverageMap(
+          this.realtimeAckDurationMsByEvent,
+          this.realtimeAcksByEvent,
+        ),
+        chatOutboxReplayAverageDurationMs:
+          this.chatOutboxReplayCount > 0
+            ? Number(
+                (
+                  this.chatOutboxReplayDurationTotalMs /
+                  this.chatOutboxReplayCount
+                ).toFixed(2),
+              )
+            : 0,
+        chatOutboxReplayAverageDurationByEvent: this.buildAverageMap(
+          this.chatOutboxReplayDurationMsByEvent,
+          this.combineMaps(
+            this.chatOutboxReplaySuccessByEvent,
+            this.chatOutboxReplayFailureByEvent,
+          ),
+        ),
       },
       gauges: {
         chatOutbox,
@@ -351,6 +478,58 @@ export class ObservabilityService {
       `${METRIC_PREFIX}_http_request_duration_average_milliseconds`,
       snapshot.timings.httpAverageDurationMs,
     );
+
+    this.appendMetricHeader(
+      lines,
+      `${METRIC_PREFIX}_realtime_ack_total`,
+      'Total realtime socket acknowledgements by event and outcome.',
+      'counter',
+    );
+    for (const [eventName, count] of Object.entries(
+      snapshot.counters.realtimeAcksByEvent,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      this.appendMetricValue(
+        lines,
+        `${METRIC_PREFIX}_realtime_ack_total`,
+        count,
+        {
+          event: eventName,
+          outcome: 'success_or_failed',
+        },
+      );
+    }
+    for (const [eventName, count] of Object.entries(
+      snapshot.counters.realtimeAckFailuresByEvent,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      this.appendMetricValue(
+        lines,
+        `${METRIC_PREFIX}_realtime_ack_total`,
+        count,
+        {
+          event: eventName,
+          outcome: 'failed',
+        },
+      );
+    }
+
+    this.appendMetricHeader(
+      lines,
+      `${METRIC_PREFIX}_realtime_ack_average_duration_milliseconds`,
+      'Average realtime socket acknowledgement duration in milliseconds by event.',
+      'gauge',
+    );
+    for (const [eventName, averageDurationMs] of Object.entries(
+      snapshot.timings.realtimeAckAverageDurationByEvent,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      this.appendMetricValue(
+        lines,
+        `${METRIC_PREFIX}_realtime_ack_average_duration_milliseconds`,
+        averageDurationMs,
+        {
+          event: eventName,
+        },
+      );
+    }
 
     this.appendMetricHeader(
       lines,
@@ -590,6 +769,71 @@ export class ObservabilityService {
 
     this.appendMetricHeader(
       lines,
+      `${METRIC_PREFIX}_chat_outbox_replay_total`,
+      'Chat outbox replay activity grouped by event and outcome.',
+      'counter',
+    );
+    for (const [eventName, count] of Object.entries(
+      snapshot.counters.chatOutboxDeferredByEvent,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      this.appendMetricValue(
+        lines,
+        `${METRIC_PREFIX}_chat_outbox_replay_total`,
+        count,
+        {
+          event: eventName,
+          outcome: 'deferred',
+        },
+      );
+    }
+    for (const [eventName, count] of Object.entries(
+      snapshot.counters.chatOutboxReplaySuccessByEvent,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      this.appendMetricValue(
+        lines,
+        `${METRIC_PREFIX}_chat_outbox_replay_total`,
+        count,
+        {
+          event: eventName,
+          outcome: 'success',
+        },
+      );
+    }
+    for (const [eventName, count] of Object.entries(
+      snapshot.counters.chatOutboxReplayFailureByEvent,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      this.appendMetricValue(
+        lines,
+        `${METRIC_PREFIX}_chat_outbox_replay_total`,
+        count,
+        {
+          event: eventName,
+          outcome: 'failed',
+        },
+      );
+    }
+
+    this.appendMetricHeader(
+      lines,
+      `${METRIC_PREFIX}_chat_outbox_replay_average_duration_milliseconds`,
+      'Average chat outbox replay processing duration in milliseconds by event.',
+      'gauge',
+    );
+    for (const [eventName, averageDurationMs] of Object.entries(
+      snapshot.timings.chatOutboxReplayAverageDurationByEvent,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      this.appendMetricValue(
+        lines,
+        `${METRIC_PREFIX}_chat_outbox_replay_average_duration_milliseconds`,
+        averageDurationMs,
+        {
+          event: eventName,
+        },
+      );
+    }
+
+    this.appendMetricHeader(
+      lines,
       `${METRIC_PREFIX}_push_outbox_pending_count`,
       'Pending push outbox events.',
       'gauge',
@@ -765,6 +1009,54 @@ export class ObservabilityService {
       oldestCreatedAt,
       oldestAgeMs,
     };
+  }
+
+  private incrementMetricMap(
+    target: Map<string, number>,
+    key: string,
+    amount: number,
+  ): void {
+    target.set(key, (target.get(key) ?? 0) + amount);
+  }
+
+  private mapNumberEntriesToObject(
+    source: Map<string, number>,
+  ): Record<string, number> {
+    return Object.fromEntries(
+      Array.from(source.entries()).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    );
+  }
+
+  private buildAverageMap(
+    totals: Map<string, number>,
+    counts: Map<string, number>,
+  ): Record<string, number> {
+    const keys = new Set([...totals.keys(), ...counts.keys()]);
+    const entries = Array.from(keys)
+      .sort((left, right) => left.localeCompare(right))
+      .map((key) => {
+        const total = totals.get(key) ?? 0;
+        const count = counts.get(key) ?? 0;
+        const average = count > 0 ? Number((total / count).toFixed(2)) : 0;
+        return [key, average] as const;
+      });
+
+    return Object.fromEntries(entries);
+  }
+
+  private combineMaps(
+    left: Map<string, number>,
+    right: Map<string, number>,
+  ): Map<string, number> {
+    const combined = new Map(left);
+
+    for (const [key, value] of right.entries()) {
+      combined.set(key, (combined.get(key) ?? 0) + value);
+    }
+
+    return combined;
   }
 
   private appendMetricHeader(

@@ -8,6 +8,7 @@ NestJS backend for SmartCity OTT using six DynamoDB tables on AWS.
 - Integration guide: `apps/api/docs/FE_INTEGRATION.md`
 - Postman collection: `apps/api/docs/postman/urban-management-api.postman_collection.json`
 - Postman environment: `apps/api/docs/postman/urban-management-api.postman_environment.json`
+- Realtime ops guide: `apps/api/docs/CHAT_REALTIME_OPERATIONS.md`
 - Release checklist: `apps/api/docs/RELEASE_CHECKLIST.md`
 
 ## Modules
@@ -31,7 +32,7 @@ These are intentional product/backend policies, not accidental restrictions:
 
 - Direct messages are not globally open. Citizen-to-citizen DM is allowed only when users are friends or a same-scope direct message request was accepted; staff/service DM remains constrained by role and scope.
 - Public groups expose metadata/discovery by scope, but the actual group conversation stream is member-only.
-- Group management is membership-based. `ADMIN` can manage any group, while non-admin staff must be an `OWNER` or `OFFICER` member to manage a group.
+- Group management is membership-based. `ADMIN` can manage any group, while non-admin staff must be an `OWNER` or `DEPUTY` member to manage a group.
 - Report status transitions follow a backend state machine. FE should only show actions valid for the current status.
 
 ## Environment
@@ -62,6 +63,8 @@ Important variables:
 - `CHAT_OUTBOX_POLL_INTERVAL_MS=3000`
 - `CHAT_OUTBOX_BATCH_SIZE=100`
 - `CHAT_OUTBOX_SHARD_COUNT=8`
+- `CHAT_CALL_INVITE_TTL_SECONDS=90`
+- `CHAT_CALL_ACTIVE_TTL_SECONDS=14400`
 - `PUSH_PROVIDER=log`
 - `PUSH_WEBHOOK_URL` optional bridge endpoint when `PUSH_PROVIDER=webhook`
 - `AUTH_OTP_PROVIDER=log`
@@ -325,6 +328,28 @@ Notes:
 - Search on `users`, `groups`, `reports`, `conversations`, and `messages-in-one-conversation` is currently filter-based rather than full-text indexed search.
 - Message search is intentionally scoped to one conversation; there is still no global full-text search across all messages.
 
+## User Discovery And Contact Aliases
+
+- `GET /api/users/discover` returns `displayName` and optional `contactAlias` for each result.
+- FE should render `displayName` directly instead of reconstructing it from `fullName`.
+- `displayName` already applies the private alias precedence rule:
+  - `contactAlias` when present
+  - otherwise the target user's `fullName`
+- Private contact aliases are managed through:
+  - `PUT /api/users/me/contacts/:userId/alias`
+  - `DELETE /api/users/me/contacts/:userId/alias`
+- Aliases are private to the authenticated user, sync across devices, and are currently allowed only for:
+  - existing friends
+  - or users with an existing direct conversation
+
+## Group Governance Notes
+
+- Group rename is stricter than general group management:
+  - `OWNER` can rename the group
+  - `DEPUTY` can still manage other allowed metadata and membership flows, but cannot rename
+  - `ADMIN` can still manage groups globally, but rename itself remains owner-only under the current policy
+- When a group name changes, the API now propagates the new name into existing inbox summaries and emits `conversation.updated` with `reason = "conversation.metadata.updated"` so FE can refresh open chat headers and chat-list rows immediately.
+
 ## App Runtime
 
 - Every route is protected by Bearer JWT unless marked public.
@@ -422,6 +447,7 @@ Response fields:
 ## Chat Realtime
 
 Socket transport uses Socket.IO with namespace `/chat`.
+OpenAPI documents the HTTP APIs. The Socket.IO command and payload contract is documented in this section and in `apps/api/docs/FE_INTEGRATION.md`.
 
 Handshake authentication:
 
@@ -446,6 +472,14 @@ Client command events:
 - `conversation.read`: `{ "conversationId": "dm:<userId>" }`
 - `typing.start`: `{ "conversationId": "group:<groupId>", "clientTimestamp": "2026-03-17T11:00:00.000Z" }`
 - `typing.stop`: same payload as `typing.start`
+- `call.init`: `{ "conversationId": "dm:<userId>", "isVideo": true }`
+- `call.accept`: `{ "conversationId": "dm:<userId>" }`
+- `call.reject`: `{ "conversationId": "dm:<userId>" }`
+- `call.end`: `{ "conversationId": "dm:<userId>" }`
+- `call.heartbeat`: `{ "conversationId": "dm:<userId>" }`; send this every `30-60s` while a long-running call stays active
+- `webrtc.offer`: `{ "conversationId": "dm:<userId>", "offer": { ... } }`
+- `webrtc.answer`: `{ "conversationId": "dm:<userId>", "answer": { ... } }`
+- `webrtc.ice-candidate`: `{ "conversationId": "dm:<userId>", "candidate": { ... } }`
 
 Server push events:
 
@@ -453,12 +487,19 @@ Server push events:
 - `message.updated`: edited message payload for open conversation views
 - `message.deleted`: deleted message tombstone for open conversation views
 - `conversation.updated`: inbox summary change after new message, edit of the latest message, delete of the latest message, or read action
+- `conversation.updated` with `reason = "conversation.metadata.updated"`: metadata-only summary refresh, for example group rename or direct-message alias change
 - `conversation.removed`: emitted when deleting the last visible message removes the conversation from inbox state, or when a user deletes that conversation from their own inbox
 - `conversation.read`: read receipt with `readByUserId` and `readAt`
 - `presence.snapshot`: emitted to the joining socket after `conversation.join`
 - `presence.updated`: emitted to conversation room members when a participant connects or disconnects
 - `typing.state`: ephemeral typing state for sockets that joined the conversation room
 - `chat.error`: emitted on connection auth failure before disconnect
+- `call.init`: emitted with canonical caller identity from the authenticated actor, for example `{ "conversationId": "dm:<userId>", "callerId": "01...", "callerName": "Citizen A", "isVideo": true }`
+- `call.accept`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01..." }`
+- `call.reject`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01..." }`
+- `call.end`: emitted with `{ "conversationId": "dm:<userId>", "userId": "01...", "endedByUserId": "01..." }`
+- `call.heartbeat`: group-only keepalive event emitted with `{ "conversationId": "group:<groupId>", "userId": "01..." }`
+- `webrtc.offer`, `webrtc.answer`, `webrtc.ice-candidate`: forwarded with the original SDP/candidate payload after active-call validation
 
 Socket ack format:
 
@@ -496,6 +537,10 @@ Notes:
 - `replyTo` must reference a message in the same conversation.
 - Typing events are only broadcast to sockets that explicitly joined the conversation room via `conversation.join`.
 - Outbox replay can re-emit the same logical event during recovery; clients should deduplicate by `eventId`.
+- FE should not send or trust `callerId`, `calleeId`, or `userId` in command payloads; backend canonicalizes actor identity from the authenticated socket.
+- `call.end` keeps both `userId` and `endedByUserId` in the server payload for backward compatibility; FE should prefer `endedByUserId` when present.
+- `call.heartbeat` refreshes long-running call sessions so they do not expire mid-call; DM heartbeat refreshes server state without broadcasting a new signal to the peer.
+- Realtime latency and replay metrics are documented in `apps/api/docs/CHAT_REALTIME_OPERATIONS.md`.
 
 ## Push Notifications
 

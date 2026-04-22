@@ -2,12 +2,16 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import {
   CHAT_SOCKET_EVENTS,
+  type GroupMemberRole,
+  type GroupMessagePolicy,
   MESSAGE_RECALL_SCOPES,
   MESSAGE_TYPES,
 } from '@urban/shared-constants';
@@ -122,6 +126,7 @@ export class ConversationsService {
     private readonly conversationStateService: ConversationStateService,
     private readonly conversationSummaryService: ConversationSummaryService,
     private readonly usersService: UsersService,
+    @Inject(forwardRef(() => GroupsService))
     private readonly groupsService: GroupsService,
     private readonly chatRateLimitService: ChatRateLimitService,
     private readonly conversationDispatchService: ConversationDispatchService,
@@ -487,6 +492,38 @@ export class ConversationsService {
       access.conversationId,
       access.participants,
       payload,
+    );
+  }
+
+  async sendGroupSystemMessage(
+    actor: AuthenticatedUser,
+    groupId: string,
+    participants: string[],
+    content: string,
+  ): Promise<MessageItem> {
+    const normalizedContent = content.trim();
+    if (!normalizedContent) {
+      throw new BadRequestException('System message content cannot be empty.');
+    }
+
+    const uniqueParticipants = Array.from(new Set(participants));
+    if (uniqueParticipants.length === 0) {
+      throw new BadRequestException(
+        'Cannot send a group system message without participants.',
+      );
+    }
+
+    const conversationKey = `GRP#${groupId}`;
+
+    return this.createMessage(
+      actor,
+      conversationKey,
+      `group:${groupId}`,
+      uniqueParticipants,
+      {
+        type: 'SYSTEM',
+        content: normalizedContent,
+      },
     );
   }
 
@@ -2743,6 +2780,7 @@ export class ConversationsService {
     eventName: StoredChatOutboxEvent['eventName'],
     error: unknown,
   ): void {
+    this.chatOutboxService.requestDrain(eventName);
     const message = error instanceof Error ? error.message : 'Unknown error.';
     this.logger.warn(
       `Deferred ${eventName} replay to chat outbox for ${eventId}: ${message}`,
@@ -3077,6 +3115,20 @@ export class ConversationsService {
     return this.conversationStateService.buildPreview(message);
   }
 
+  private getGroupMessagePolicyErrorMessage(
+    messagePolicy: GroupMessagePolicy,
+  ): string {
+    switch (messagePolicy) {
+      case 'OWNER_ONLY':
+        return 'Only the owner can send messages to this group.';
+      case 'OWNER_AND_DEPUTIES':
+        return 'Only owners and deputies can send messages to this group.';
+      case 'ALL_MEMBERS':
+      default:
+        return 'Only active members can send messages to this group.';
+    }
+  }
+
   private async resolveConversationParticipants(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -3084,11 +3136,23 @@ export class ConversationsService {
   ): Promise<string[]> {
     if (isGroupConversationId(conversationId)) {
       const groupId = conversationId.slice('GRP#'.length);
-      await this.groupsService.getGroup(actor, groupId);
+      const group = await this.groupsService.getGroup(actor, groupId);
+      const activeBan = await this.groupsService.getActiveBan(
+        groupId,
+        actor.id,
+      );
       const actorMembership = await this.groupsService.getMembership(
         groupId,
         actor.id,
       );
+      const actorRoleInGroup: GroupMemberRole | undefined =
+        actorMembership?.roleInGroup;
+      const groupMessagePolicy: GroupMessagePolicy =
+        group.messagePolicy ?? 'ALL_MEMBERS';
+
+      if (activeBan && actor.role !== 'ADMIN') {
+        throw new ForbiddenException('You are banned from this group.');
+      }
 
       if (!actorMembership || actorMembership.deletedAt) {
         if (actor.role !== 'ADMIN') {
@@ -3098,6 +3162,19 @@ export class ConversationsService {
               : 'Only active members can access this group conversation.',
           );
         }
+      }
+
+      if (
+        requireSendAccess &&
+        !this.authorizationService.canSendGroupMessage(
+          actor,
+          actorRoleInGroup,
+          groupMessagePolicy,
+        )
+      ) {
+        throw new ForbiddenException(
+          this.getGroupMessagePolicyErrorMessage(groupMessagePolicy),
+        );
       }
 
       const members = await this.groupsService.listMembers(actor, groupId);

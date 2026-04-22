@@ -1020,6 +1020,176 @@ describe('UsersService', () => {
     );
   });
 
+  it('stores a private contact alias and updates the existing DM summary label', async () => {
+    repository.get.mockImplementation(
+      (_tableName: string, pk: string, sk: string) => {
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === otherCitizen.PK && sk === otherCitizen.SK) {
+          return otherCitizen;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-1' &&
+          options?.beginsWith === 'CONV#DM#user-1#user-2#LAST#'
+        ) {
+          return [
+            {
+              PK: 'USER#user-1',
+              SK: 'CONV#DM#user-1#user-2#LAST#2026-03-20T00:06:00.000Z',
+              entityType: 'CONVERSATION',
+              GSI1PK: 'INBOX_STATS#user-1#DM',
+              userId: 'user-1',
+              conversationId: 'DM#user-1#user-2',
+              groupName: otherCitizen.fullName,
+              lastMessagePreview: 'Hello there',
+              lastSenderName: otherCitizen.fullName,
+              unreadCount: 1,
+              isGroup: false,
+              isPinned: false,
+              archivedAt: null,
+              mutedUntil: null,
+              deletedAt: null,
+              updatedAt: '2026-03-20T00:06:00.000Z',
+              lastReadAt: null,
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.setContactAlias(actor, otherCitizen.userId, {
+      alias: 'Anh Hai',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: otherCitizen.userId,
+        alias: 'Anh Hai',
+      }),
+    );
+    expect(repository.put).toHaveBeenCalledWith(
+      'Users',
+      expect.objectContaining({
+        entityType: 'USER_CONTACT_ALIAS',
+        targetUserId: otherCitizen.userId,
+        alias: 'Anh Hai',
+      }),
+    );
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        conversationId: 'DM#user-1#user-2',
+        groupName: 'Anh Hai',
+      }),
+    );
+    expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
+      actor.id,
+      'conversation.updated',
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          conversationId: `dm:${otherCitizen.userId}`,
+          groupName: 'Anh Hai',
+        }),
+      }),
+    );
+  });
+
+  it('clears a private contact alias and restores the counterpart full name in DM summary', async () => {
+    repository.get.mockImplementation(
+      (_tableName: string, pk: string, sk: string) => {
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === otherCitizen.PK && sk === otherCitizen.SK) {
+          return otherCitizen;
+        }
+
+        if (
+          pk === currentUser.PK &&
+          sk === `CONTACT_ALIAS#${otherCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_CONTACT_ALIAS',
+            ownerUserId: currentUser.userId,
+            targetUserId: otherCitizen.userId,
+            alias: 'Anh Hai',
+            createdAt: '2026-03-20T00:06:00.000Z',
+            updatedAt: '2026-03-20T00:06:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-1' &&
+          options?.beginsWith === 'CONV#DM#user-1#user-2#LAST#'
+        ) {
+          return [
+            {
+              PK: 'USER#user-1',
+              SK: 'CONV#DM#user-1#user-2#LAST#2026-03-20T00:06:00.000Z',
+              entityType: 'CONVERSATION',
+              GSI1PK: 'INBOX_STATS#user-1#DM',
+              userId: 'user-1',
+              conversationId: 'DM#user-1#user-2',
+              groupName: 'Anh Hai',
+              lastMessagePreview: 'Hello there',
+              lastSenderName: otherCitizen.fullName,
+              unreadCount: 1,
+              isGroup: false,
+              isPinned: false,
+              archivedAt: null,
+              mutedUntil: null,
+              deletedAt: null,
+              updatedAt: '2026-03-20T00:06:00.000Z',
+              lastReadAt: null,
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.clearContactAlias(actor, otherCitizen.userId);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: otherCitizen.userId,
+      }),
+    );
+    expect(repository.delete).toHaveBeenCalledWith(
+      'Users',
+      currentUser.PK,
+      `CONTACT_ALIAS#${otherCitizen.userId}`,
+    );
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        conversationId: 'DM#user-1#user-2',
+        groupName: otherCitizen.fullName,
+      }),
+    );
+  });
+
   it('rejects an incoming friend request and deletes both pending request records', async () => {
     repository.get.mockImplementation(
       (tableName: string, pk: string, sk: string) => {
