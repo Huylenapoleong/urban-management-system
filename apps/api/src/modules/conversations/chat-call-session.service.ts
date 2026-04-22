@@ -14,6 +14,7 @@ type ChatCallSessionStatus = 'RINGING' | 'ACTIVE';
 
 interface ChatCallSession {
   acceptedByUserIds: string[];
+  acceptedAt: string | null;
   conversationId: string;
   conversationKey: string;
   createdAt: string;
@@ -81,6 +82,7 @@ export class ChatCallSessionService {
     const createdAt = nowIso();
     const session: ChatCallSession = {
       acceptedByUserIds: access.isGroup ? [callerUserId] : [],
+      acceptedAt: null,
       conversationId: access.conversationId,
       conversationKey: access.conversationKey,
       createdAt,
@@ -145,9 +147,11 @@ export class ChatCallSessionService {
       };
     }
 
+    const acceptedAt = session.acceptedAt ?? nowIso();
     session.acceptedByUserIds = Array.from(
       new Set([...session.acceptedByUserIds, calleeUserId]),
     );
+    session.acceptedAt = acceptedAt;
     session.endedByUserIds = session.endedByUserIds.filter(
       (userId) => userId !== calleeUserId,
     );
@@ -467,6 +471,7 @@ export class ChatCallSessionService {
       const parsed = JSON.parse(serializedSession) as Partial<ChatCallSession>;
 
       if (
+        (parsed.acceptedAt !== null && typeof parsed.acceptedAt !== 'string') ||
         typeof parsed.conversationId !== 'string' ||
         typeof parsed.conversationKey !== 'string' ||
         typeof parsed.createdAt !== 'string' ||
@@ -488,6 +493,7 @@ export class ChatCallSessionService {
         acceptedByUserIds: parsed.acceptedByUserIds.filter(
           (userId): userId is string => typeof userId === 'string',
         ),
+        acceptedAt: parsed.acceptedAt ?? null,
         conversationId: parsed.conversationId,
         conversationKey: parsed.conversationKey,
         createdAt: parsed.createdAt,

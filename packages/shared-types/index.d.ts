@@ -220,12 +220,24 @@ export interface GroupOwnershipTransferResult {
   transferredAt: string;
 }
 
+export interface CallEventInfo {
+  status: "REJECTED" | "ENDED" | "PARTICIPANT_LEFT";
+  isVideo: boolean;
+  startedAt: string;
+  acceptedAt?: string | null;
+  endedAt: string;
+  durationSeconds: number;
+  initiatedByUserId: string;
+  endedByUserId?: string;
+}
+
 export interface MessageReplyReference {
   id: string;
   senderId: string;
   senderName: string;
   type: MessageType;
   content: string;
+  callEvent?: CallEventInfo;
   attachmentAsset?: MediaAsset;
   attachmentUrl?: string;
   deletedAt: string | null;
@@ -242,6 +254,7 @@ export interface MessageItem {
   senderAvatarUrl?: string;
   type: MessageType;
   content: string;
+  callEvent?: CallEventInfo;
   attachmentAsset?: MediaAsset;
   attachmentUrl?: string;
   replyTo?: string;
@@ -415,19 +428,30 @@ export interface ChatCallInitPayload extends ChatConversationCommandPayload {
   callerId: string;
   callerName: string;
   isVideo: boolean;
+  startedAt?: string;
 }
 
 export interface ChatCallAcceptPayload extends ChatConversationCommandPayload {
   calleeId: string;
+  acceptedAt?: string;
 }
 
 export interface ChatCallRejectPayload extends ChatConversationCommandPayload {
   calleeId: string;
+  startedAt?: string;
+  acceptedAt?: string | null;
+  endedAt?: string;
+  durationSeconds?: number;
 }
 
 export interface ChatCallEndPayload extends ChatConversationCommandPayload {
   userId: string;
   endedByUserId?: string;
+  startedAt?: string;
+  acceptedAt?: string | null;
+  endedAt?: string;
+  durationSeconds?: number;
+  callStillActive?: boolean;
 }
 
 export interface ChatCallHeartbeatPayload extends ChatConversationCommandPayload {

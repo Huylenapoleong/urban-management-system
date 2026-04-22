@@ -63,11 +63,24 @@ describe('ChatCallSessionService', () => {
     const accepted = await service.acceptCall(dmAccess, 'user-2');
 
     expect(accepted.shouldEmit).toBe(true);
+    expect(accepted.session?.acceptedAt).toEqual(expect.any(String));
     await expect(
       service.touchSignalingSession(dmAccess, 'user-1'),
     ).resolves.toMatchObject({
       status: 'ACTIVE',
     });
+  });
+
+  it('preserves the original acceptedAt when additional group participants join later', async () => {
+    await service.initiateCall(groupAccess, 'user-1', true);
+
+    const firstAccept = await service.acceptCall(groupAccess, 'user-2');
+    const secondAccept = await service.acceptCall(groupAccess, 'user-3');
+
+    expect(firstAccept.session?.acceptedAt).toEqual(expect.any(String));
+    expect(secondAccept.session?.acceptedAt).toBe(
+      firstAccept.session?.acceptedAt,
+    );
   });
 
   it('treats duplicate direct call-end as idempotent once the session is gone', async () => {

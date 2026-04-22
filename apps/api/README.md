@@ -496,10 +496,10 @@ Server push events:
 - `presence.updated`: emitted to conversation room members when a participant connects or disconnects
 - `typing.state`: ephemeral typing state for sockets that joined the conversation room
 - `chat.error`: emitted on connection auth failure before disconnect
-- `call.init`: emitted with canonical caller identity from the authenticated actor, for example `{ "conversationId": "dm:<userId>", "callerId": "01...", "callerName": "Citizen A", "isVideo": true }`
-- `call.accept`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01..." }`
-- `call.reject`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01..." }`
-- `call.end`: emitted with `{ "conversationId": "dm:<userId>", "userId": "01...", "endedByUserId": "01..." }`
+- `call.init`: emitted with canonical caller identity and `startedAt`, for example `{ "conversationId": "dm:<userId>", "callerId": "01...", "callerName": "Citizen A", "isVideo": true, "startedAt": "2026-04-22T14:00:00.000Z" }`
+- `call.accept`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01...", "acceptedAt": "2026-04-22T14:00:08.000Z" }`
+- `call.reject`: emitted with `{ "conversationId": "dm:<userId>", "calleeId": "01...", "startedAt": "...", "acceptedAt": null, "endedAt": "...", "durationSeconds": 0 }`
+- `call.end`: emitted with `{ "conversationId": "dm:<userId>", "userId": "01...", "endedByUserId": "01...", "startedAt": "...", "acceptedAt": "...", "endedAt": "...", "durationSeconds": 320, "callStillActive": false }`
 - `call.heartbeat`: group-only keepalive event emitted with `{ "conversationId": "group:<groupId>", "userId": "01..." }`
 - `webrtc.offer`, `webrtc.answer`, `webrtc.ice-candidate`: forwarded with the original SDP/candidate payload after active-call validation
 
@@ -541,6 +541,8 @@ Notes:
 - Outbox replay can re-emit the same logical event during recovery; clients should deduplicate by `eventId`.
 - FE should not send or trust `callerId`, `calleeId`, or `userId` in command payloads; backend canonicalizes actor identity from the authenticated socket.
 - `call.end` keeps both `userId` and `endedByUserId` in the server payload for backward compatibility; FE should prefer `endedByUserId` when present.
+- FE should use the server-provided `acceptedAt` as the single source of truth for in-call timers so all participants count from the same moment.
+- Persisted call-history system messages may include `message.callEvent` metadata with `status`, `isVideo`, `startedAt`, `acceptedAt`, `endedAt`, and `durationSeconds`; use this metadata instead of defaulting duration to `00:00`.
 - `call.heartbeat` refreshes long-running call sessions so they do not expire mid-call; DM heartbeat refreshes server state without broadcasting a new signal to the peer.
 - Realtime latency and replay metrics are documented in `apps/api/docs/CHAT_REALTIME_OPERATIONS.md`.
 

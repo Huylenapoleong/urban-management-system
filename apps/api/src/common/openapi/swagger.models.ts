@@ -827,6 +827,40 @@ export class GroupOwnershipTransferResultDto {
   transferredAt!: string;
 }
 
+export class CallEventInfoDto {
+  @ApiProperty({
+    enum: ['REJECTED', 'ENDED', 'PARTICIPANT_LEFT'],
+    example: 'ENDED',
+  })
+  status!: 'REJECTED' | 'ENDED' | 'PARTICIPANT_LEFT';
+
+  @ApiProperty({ example: true })
+  isVideo!: boolean;
+
+  @ApiProperty({ example: '2026-04-22T14:00:00.000Z' })
+  startedAt!: string;
+
+  @ApiPropertyOptional({
+    example: '2026-04-22T14:00:08.000Z',
+    nullable: true,
+    description:
+      'Canonical server timestamp when the call first became active. FE should use this value to start any in-call timer for all participants.',
+  })
+  acceptedAt?: string | null;
+
+  @ApiProperty({ example: '2026-04-22T14:05:08.000Z' })
+  endedAt!: string;
+
+  @ApiProperty({ example: 300 })
+  durationSeconds!: number;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  initiatedByUserId!: string;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENB00000000' })
+  endedByUserId?: string;
+}
+
 export class MessageReplyReferenceDto {
   @ApiProperty({ example: '01JPCY3000GROUPMSG00000001' })
   id!: string;
@@ -842,6 +876,13 @@ export class MessageReplyReferenceDto {
 
   @ApiProperty({ example: '{"text":"O ga truoc so 123 Le Loi","mention":[]}' })
   content!: string;
+
+  @ApiPropertyOptional({
+    type: () => CallEventInfoDto,
+    description:
+      'Present for persisted call-system messages so FE can render call history cards and durations without inferring from plain text.',
+  })
+  callEvent?: CallEventInfoDto;
 
   @ApiPropertyOptional({ type: () => MediaAssetDto })
   attachmentAsset?: MediaAssetDto;
@@ -883,6 +924,13 @@ export class MessageItemDto {
 
   @ApiProperty({ example: '{"text":"O ga truoc so 123 Le Loi","mention":[]}' })
   content!: string;
+
+  @ApiPropertyOptional({
+    type: () => CallEventInfoDto,
+    description:
+      'Present for persisted call-system messages. FE should prefer this metadata over trying to derive call duration from text.',
+  })
+  callEvent?: CallEventInfoDto;
 
   @ApiPropertyOptional({ type: () => MediaAssetDto })
   attachmentAsset?: MediaAssetDto;

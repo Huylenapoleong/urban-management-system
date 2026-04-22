@@ -20,6 +20,7 @@ import type {
   ApiSuccessResponse,
   AuditEventItem,
   AuthenticatedUser,
+  CallEventInfo,
   ConversationHistoryClearedResult,
   ConversationSummary,
   MediaAsset,
@@ -535,6 +536,41 @@ export class ConversationsService {
       {
         type: 'SYSTEM',
         content: normalizedContent,
+      },
+      {
+        skipRateLimit: true,
+      },
+    );
+  }
+
+  async sendConversationSystemMessage(
+    actor: AuthenticatedUser,
+    access: ResolvedConversationAccess,
+    content: string,
+    options: {
+      callEvent?: CallEventInfo;
+    } = {},
+  ): Promise<MessageItem> {
+    const normalizedContent = content.trim();
+
+    if (!normalizedContent) {
+      throw new BadRequestException('System message content cannot be empty.');
+    }
+
+    return this.createMessage(
+      actor,
+      access.conversationKey,
+      access.conversationId,
+      access.participants,
+      {
+        type: 'SYSTEM',
+        content: options.callEvent
+          ? this.buildSystemMessageContent(normalizedContent, options.callEvent)
+          : normalizedContent,
+      },
+      {
+        callEvent: options.callEvent,
+        skipRateLimit: true,
       },
     );
   }
@@ -1458,6 +1494,8 @@ export class ConversationsService {
     payload: unknown,
     options: {
       forwardedFrom?: StoredMessage;
+      callEvent?: CallEventInfo;
+      skipRateLimit?: boolean;
     } = {},
   ): Promise<MessageItem> {
     const body = ensureObject(payload);
@@ -1495,7 +1533,9 @@ export class ConversationsService {
     }
 
     await this.ensureReplyTargetAvailable(conversationId, replyTo);
-    this.chatRateLimitService.consumeMessageSend(actor.id);
+    if (!options.skipRateLimit) {
+      this.chatRateLimitService.consumeMessageSend(actor.id);
+    }
     const replyMessage = await this.buildReplyMessageReference(
       conversationId,
       replyTo,
@@ -1533,6 +1573,7 @@ export class ConversationsService {
       senderAvatarUrl: actor.avatarUrl,
       type,
       content,
+      callEvent: options.callEvent,
       attachmentAsset: attachment.asset,
       attachmentUrl: attachment.url,
       replyTo,
@@ -1576,6 +1617,7 @@ export class ConversationsService {
         replyTo: replyTo ?? '',
         type,
         forwardedFromMessageId: forwardedFrom?.messageId ?? '',
+        callEventStatus: options.callEvent?.status ?? '',
       },
     });
     const pushRecord = this.buildChatPushOutboxEvent(
@@ -2198,6 +2240,7 @@ export class ConversationsService {
       content: replyTarget.recalledAt
         ? this.getRecalledStructuredContent()
         : replyTarget.content,
+      callEvent: replyTarget.callEvent,
       attachmentAsset: replyTarget.recalledAt
         ? undefined
         : replyTarget.attachmentAsset,
@@ -3195,6 +3238,17 @@ export class ConversationsService {
       type,
       rawContent,
     );
+  }
+
+  private buildSystemMessageContent(
+    text: string,
+    callEvent?: CallEventInfo,
+  ): string {
+    return JSON.stringify({
+      text,
+      mention: [],
+      ...(callEvent ? { callEvent } : {}),
+    });
   }
 
   private usesStructuredContent(type: SupportedMessageType): boolean {
