@@ -403,7 +403,6 @@ export class ConversationsService {
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
     const access = await this.resolveConversationAccess(actor, conversationId);
-    await this.reconcileViewerConversationSummary(actor.id, access);
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const type = parseEnumQuery(query.type, 'type', MESSAGE_TYPES);
     const fromUserId = optionalQueryString(query.fromUserId, 'fromUserId');
@@ -417,13 +416,17 @@ export class ConversationsService {
         beginsWith: 'MSG#',
       },
     );
-    const filtered = items.filter((item) => {
-      if (
-        !this.conversationStateService.isMessageVisibleToUser(item, actor.id)
-      ) {
-        return false;
-      }
-
+    const visibleMessages =
+      this.conversationStateService.filterVisibleMessagesForUser(
+        items,
+        actor.id,
+      );
+    await this.reconcileViewerConversationSummary(
+      actor.id,
+      access,
+      visibleMessages,
+    );
+    const filtered = visibleMessages.filter((item) => {
       if (type && item.type !== type) {
         return false;
       }
@@ -2983,6 +2986,7 @@ export class ConversationsService {
   private async reconcileViewerConversationSummary(
     actorId: string,
     access: ResolvedConversationAccess,
+    visibleMessages?: StoredMessage[],
   ): Promise<void> {
     const syncResult =
       await this.conversationSummaryService.syncConversationSummaryForUser(
@@ -2991,6 +2995,7 @@ export class ConversationsService {
           participants: access.participants,
         },
         actorId,
+        visibleMessages,
       );
 
     if (syncResult.removed) {

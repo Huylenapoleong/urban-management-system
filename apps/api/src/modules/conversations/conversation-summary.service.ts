@@ -300,15 +300,18 @@ export class ConversationSummaryService {
   async syncConversationSummaryForUser(
     access: ConversationSummaryAccess,
     participantId: string,
+    visibleMessagesOverride?: StoredMessage[],
   ): Promise<SingleConversationSyncResult> {
     const existingConversation = await this.getConversationSummary(
       participantId,
       access.conversationKey,
     );
-    const visibleMessages = await this.listVisibleMessagesForUser(
-      access.conversationKey,
-      participantId,
-    );
+    const visibleMessages =
+      visibleMessagesOverride ??
+      (await this.listVisibleMessagesForUser(
+        access.conversationKey,
+        participantId,
+      ));
 
     if (visibleMessages.length === 0) {
       if (existingConversation) {

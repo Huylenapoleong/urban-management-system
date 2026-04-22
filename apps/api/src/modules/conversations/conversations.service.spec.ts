@@ -872,8 +872,15 @@ describe('ConversationsService', () => {
     const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
       limit: '20',
     });
+    const messageQueries = repository.queryByPk.mock.calls.filter(
+      ([tableName, pk, options]: [string, string, { beginsWith?: string }]) =>
+        tableName === 'Messages' &&
+        pk === latestMessage.PK &&
+        options?.beginsWith === 'MSG#',
+    );
 
     expect(result.data).toHaveLength(1);
+    expect(messageQueries).toHaveLength(1);
     expect(repository.put).toHaveBeenCalledWith(
       'Conversations',
       expect.objectContaining({
