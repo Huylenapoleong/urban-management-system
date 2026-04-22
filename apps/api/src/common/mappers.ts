@@ -272,6 +272,7 @@ export function toConversationSummary(
     requestRequestedAt: conversation.requestRequestedAt ?? null,
     requestRespondedAt: conversation.requestRespondedAt ?? null,
     requestRespondedByUserId: conversation.requestRespondedByUserId ?? null,
+    historyClearedAt: conversation.historyClearedAt ?? null,
     deletedAt: conversation.deletedAt,
     updatedAt: conversation.updatedAt,
   };

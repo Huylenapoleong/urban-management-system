@@ -20,6 +20,7 @@ import type {
   ApiSuccessResponse,
   AuditEventItem,
   AuthenticatedUser,
+  ConversationHistoryClearedResult,
   ConversationSummary,
   MediaAsset,
   MessageItem,
@@ -403,6 +404,11 @@ export class ConversationsService {
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
     const access = await this.resolveConversationAccess(actor, conversationId);
+    const existingConversation =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        access.conversationKey,
+      );
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const type = parseEnumQuery(query.type, 'type', MESSAGE_TYPES);
     const fromUserId = optionalQueryString(query.fromUserId, 'fromUserId');
@@ -420,11 +426,13 @@ export class ConversationsService {
       this.conversationStateService.filterVisibleMessagesForUser(
         items,
         actor.id,
+        existingConversation?.historyClearedAt ?? null,
       );
     await this.reconcileViewerConversationSummary(
       actor.id,
       access,
       visibleMessages,
+      existingConversation,
     );
     const filtered = visibleMessages.filter((item) => {
       if (type && item.type !== type) {
@@ -941,6 +949,69 @@ export class ConversationsService {
       removedAt,
     };
   }
+
+  async clearConversationHistory(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationHistoryClearedResult> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const existingConversation =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        access.conversationKey,
+      );
+
+    if (!existingConversation || existingConversation.deletedAt) {
+      throw new NotFoundException('Conversation not found in inbox.');
+    }
+
+    const clearedAt = nowIso();
+    const nextConversation: StoredConversation = {
+      ...existingConversation,
+      lastMessagePreview: '',
+      lastSenderName: '',
+      unreadCount: 0,
+      historyClearedAt: clearedAt,
+      updatedAt: clearedAt,
+    };
+
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: nextConversation,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': existingConversation.updatedAt,
+          },
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException(
+          'Conversation history changed. Please retry.',
+        );
+      }
+
+      throw error;
+    }
+
+    this.conversationDispatchService.emitConversationSummaryUpdated(
+      createUlid(),
+      actor.id,
+      access.conversationKey,
+      nextConversation,
+      'conversation.history.cleared',
+      clearedAt,
+    );
+
+    return {
+      conversationId: access.conversationId,
+      clearedAt,
+    };
+  }
+
   async updateMessage(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -1319,10 +1390,11 @@ export class ConversationsService {
     }
 
     if (
-      !this.conversationStateService.isMessageVisibleToUser(
-        sourceMessage,
+      !(await this.isMessageVisibleToActor(
         actor.id,
-      )
+        sourceAccess.conversationKey,
+        sourceMessage,
+      ))
     ) {
       throw new NotFoundException('Message not found.');
     }
@@ -1927,6 +1999,7 @@ export class ConversationsService {
           participantId,
           effectiveMessages,
           lastReadAt,
+          existingConversation?.historyClearedAt ?? null,
         ),
         isGroup: false,
         isPinned: existingConversation?.isPinned ?? false,
@@ -1937,6 +2010,7 @@ export class ConversationsService {
         requestRequestedAt: state.requestRequestedAt,
         requestRespondedAt: state.requestRespondedAt,
         requestRespondedByUserId: state.requestRespondedByUserId,
+        historyClearedAt: existingConversation?.historyClearedAt ?? null,
         deletedAt: null,
         updatedAt: updatedAtOverride ?? effectiveLatestMessage.sentAt,
         lastReadAt,
@@ -2579,11 +2653,13 @@ export class ConversationsService {
     participantId: string,
     messages: StoredMessage[],
     lastReadAt: string | null,
+    historyClearedAt?: string | null,
   ): number {
     return this.conversationStateService.computeUnreadCount(
       participantId,
       messages,
       lastReadAt,
+      historyClearedAt,
     );
   }
 
@@ -2987,6 +3063,7 @@ export class ConversationsService {
     actorId: string,
     access: ResolvedConversationAccess,
     visibleMessages?: StoredMessage[],
+    existingConversation?: StoredConversation,
   ): Promise<void> {
     const syncResult =
       await this.conversationSummaryService.syncConversationSummaryForUser(
@@ -2996,6 +3073,7 @@ export class ConversationsService {
         },
         actorId,
         visibleMessages,
+        existingConversation,
       );
 
     if (syncResult.removed) {
@@ -3019,6 +3097,24 @@ export class ConversationsService {
         syncResult.summary.updatedAt,
       );
     }
+  }
+
+  private async isMessageVisibleToActor(
+    actorId: string,
+    conversationKey: string,
+    message: StoredMessage,
+  ): Promise<boolean> {
+    const summary =
+      await this.conversationSummaryService.getConversationSummary(
+        actorId,
+        conversationKey,
+      );
+
+    return this.conversationStateService.isMessageVisibleToUser(
+      message,
+      actorId,
+      summary?.historyClearedAt ?? null,
+    );
   }
 
   private getMessageDeliveryState(

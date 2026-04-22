@@ -903,6 +903,105 @@ describe('ConversationsService', () => {
     );
   });
 
+  it('clears conversation history for the current user without deleting shared messages', async () => {
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.clearConversationHistory(
+      actor,
+      `dm:${otherUser.userId}`,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        clearedAt: expect.any(String),
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith([
+      expect.objectContaining({
+        tableName: 'Conversations',
+        item: expect.objectContaining({
+          PK: actorSummary.PK,
+          conversationId: conversationKey,
+          lastMessagePreview: '',
+          lastSenderName: '',
+          unreadCount: 0,
+          historyClearedAt: expect.any(String),
+        }),
+      }),
+    ]);
+    expect(
+      conversationDispatchService.emitConversationSummaryUpdated,
+    ).toHaveBeenCalledWith(
+      expect.any(String),
+      actor.id,
+      conversationKey,
+      expect.objectContaining({
+        historyClearedAt: expect.any(String),
+        unreadCount: 0,
+      }),
+      'conversation.history.cleared',
+      expect.any(String),
+    );
+    expect(repository.delete).not.toHaveBeenCalledWith(
+      'Messages',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('hides messages sent before the user cleared the conversation history', async () => {
+    const clearedSummary: StoredConversation = {
+      ...actorSummary,
+      historyClearedAt: '2026-03-18T10:06:00.000Z',
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [clearedSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [latestMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      limit: '20',
+    });
+
+    expect(result.data).toHaveLength(0);
+    expect(repository.delete).not.toHaveBeenCalledWith(
+      'Conversations',
+      actorSummary.PK,
+      actorSummary.SK,
+    );
+  });
+
   it('rejects direct messages when policy denies access to the target user', async () => {
     authorizationService.canAccessDirectConversation.mockReturnValueOnce(false);
 

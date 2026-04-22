@@ -17,6 +17,7 @@ interface ChatCallSession {
   conversationId: string;
   conversationKey: string;
   createdAt: string;
+  endedByUserIds: string[];
   initiatedByUserId: string;
   isGroup: boolean;
   isVideo: boolean;
@@ -83,6 +84,7 @@ export class ChatCallSessionService {
       conversationId: access.conversationId,
       conversationKey: access.conversationKey,
       createdAt,
+      endedByUserIds: [],
       initiatedByUserId: callerUserId,
       isGroup: access.isGroup,
       isVideo,
@@ -145,6 +147,9 @@ export class ChatCallSessionService {
 
     session.acceptedByUserIds = Array.from(
       new Set([...session.acceptedByUserIds, calleeUserId]),
+    );
+    session.endedByUserIds = session.endedByUserIds.filter(
+      (userId) => userId !== calleeUserId,
     );
     session.rejectedByUserIds = session.rejectedByUserIds.filter(
       (userId) => userId !== calleeUserId,
@@ -233,7 +238,43 @@ export class ChatCallSessionService {
       );
     }
 
-    await this.deleteSession(access.conversationKey);
+    if (!session.isGroup) {
+      await this.deleteSession(access.conversationKey);
+
+      return {
+        shouldEmit: true,
+        session,
+      };
+    }
+
+    if (session.endedByUserIds.includes(userId)) {
+      return {
+        shouldEmit: false,
+        session,
+      };
+    }
+
+    session.acceptedByUserIds = session.acceptedByUserIds.filter(
+      (participantId) => participantId !== userId,
+    );
+    session.rejectedByUserIds = session.rejectedByUserIds.filter(
+      (participantId) => participantId !== userId,
+    );
+    session.endedByUserIds = Array.from(
+      new Set([...session.endedByUserIds, userId]),
+    );
+
+    if (session.acceptedByUserIds.length === 0) {
+      await this.deleteSession(access.conversationKey);
+
+      return {
+        shouldEmit: true,
+        session,
+      };
+    }
+
+    session.updatedAt = nowIso();
+    await this.persistSession(session, this.config.chatCallActiveTtlSeconds);
 
     return {
       shouldEmit: true,
@@ -257,9 +298,32 @@ export class ChatCallSessionService {
       throw new ConflictException('The call has not been accepted yet.');
     }
 
+    if (session.isGroup && !session.acceptedByUserIds.includes(userId)) {
+      throw new ConflictException(
+        'Only accepted participants can exchange media for this call.',
+      );
+    }
+
     session.updatedAt = nowIso();
     await this.persistSession(session, this.config.chatCallActiveTtlSeconds);
     return session;
+  }
+
+  async listMediaRecipientUserIds(
+    conversationKey: string,
+    actorUserId: string,
+  ): Promise<string[] | undefined> {
+    const session = await this.getSession(conversationKey);
+
+    if (!session) {
+      return undefined;
+    }
+
+    const recipients = (
+      session.isGroup ? session.acceptedByUserIds : session.participantUserIds
+    ).filter((userId) => userId !== actorUserId);
+
+    return Array.from(new Set(recipients));
   }
 
   async getDirectSessionAccess(
@@ -406,6 +470,8 @@ export class ChatCallSessionService {
         typeof parsed.conversationId !== 'string' ||
         typeof parsed.conversationKey !== 'string' ||
         typeof parsed.createdAt !== 'string' ||
+        (!Array.isArray(parsed.endedByUserIds) &&
+          parsed.endedByUserIds !== undefined) ||
         typeof parsed.initiatedByUserId !== 'string' ||
         typeof parsed.isGroup !== 'boolean' ||
         typeof parsed.isVideo !== 'boolean' ||
@@ -425,6 +491,11 @@ export class ChatCallSessionService {
         conversationId: parsed.conversationId,
         conversationKey: parsed.conversationKey,
         createdAt: parsed.createdAt,
+        endedByUserIds: Array.isArray(parsed.endedByUserIds)
+          ? parsed.endedByUserIds.filter(
+              (userId): userId is string => typeof userId === 'string',
+            )
+          : [],
         initiatedByUserId: parsed.initiatedByUserId,
         isGroup: parsed.isGroup,
         isVideo: parsed.isVideo,

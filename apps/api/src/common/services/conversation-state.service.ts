@@ -104,10 +104,12 @@ export class ConversationStateService {
     participantId: string,
     messages: StoredMessage[],
     lastReadAt: string | null,
+    historyClearedAt?: string | null,
   ): number {
     return messages.filter(
       (message) =>
         this.isRenderableMessage(message) &&
+        (!historyClearedAt || message.sentAt > historyClearedAt) &&
         message.senderId !== participantId &&
         (!lastReadAt || message.sentAt > lastReadAt),
     ).length;
@@ -177,7 +179,8 @@ export class ConversationStateService {
       (current.requestRespondedAt ?? null) !==
         (next.requestRespondedAt ?? null) ||
       (current.requestRespondedByUserId ?? null) !==
-        (next.requestRespondedByUserId ?? null)
+        (next.requestRespondedByUserId ?? null) ||
+      (current.historyClearedAt ?? null) !== (next.historyClearedAt ?? null)
     );
   }
 
@@ -319,12 +322,20 @@ export class ConversationStateService {
     );
   }
 
-  isMessageVisibleToUser(message: StoredMessage, userId: string): boolean {
+  isMessageVisibleToUser(
+    message: StoredMessage,
+    userId: string,
+    historyClearedAt?: string | null,
+  ): boolean {
     if (message.deletedAt) {
       return false;
     }
 
     if (message.senderId === userId && message.deletedForSenderAt) {
+      return false;
+    }
+
+    if (historyClearedAt && message.sentAt <= historyClearedAt) {
       return false;
     }
 
@@ -334,9 +345,10 @@ export class ConversationStateService {
   filterVisibleMessagesForUser(
     messages: StoredMessage[],
     userId: string,
+    historyClearedAt?: string | null,
   ): StoredMessage[] {
     return messages.filter((message) =>
-      this.isMessageVisibleToUser(message, userId),
+      this.isMessageVisibleToUser(message, userId, historyClearedAt),
     );
   }
   getMessageDeliveryState(
