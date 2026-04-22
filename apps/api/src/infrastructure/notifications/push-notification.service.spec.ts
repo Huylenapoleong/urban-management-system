@@ -1,4 +1,7 @@
-import type { StoredPushDevice } from '../../common/storage-records';
+import type {
+  StoredPushDevice,
+  StoredPushOutboxEvent,
+} from '../../common/storage-records';
 import {
   makePushTokenLookupPk,
   makePushTokenLookupSk,
@@ -25,6 +28,8 @@ describe('PushNotificationService', () => {
     pushOutboxShardCount: 2,
     pushProvider: 'disabled',
     pushSkipActiveUsers: true,
+    pushWebhookUrl: undefined as string | undefined,
+    pushWebhookTimeoutMs: 5000,
   };
 
   let service: PushNotificationService;
@@ -98,6 +103,108 @@ describe('PushNotificationService', () => {
           },
         }),
       ]),
+    );
+  });
+
+  it('looks up mute state through the latest summary prefix instead of scanning the whole inbox', async () => {
+    repository.queryByPk.mockResolvedValue([
+      {
+        PK: 'USER#user-1',
+        SK: 'CONV#DM#user-1#user-2#LAST#2026-04-22T08:00:00.000Z',
+        entityType: 'CONVERSATION',
+        conversationId: 'DM#user-1#user-2',
+        mutedUntil: '9999-12-31T23:59:59.999Z',
+        deletedAt: null,
+      },
+    ]);
+
+    const presenceHarness = service as unknown as {
+      isConversationMuted(
+        userId: string,
+        conversationId: string,
+      ): Promise<boolean>;
+    };
+
+    await expect(
+      presenceHarness.isConversationMuted('user-1', 'DM#user-1#user-2'),
+    ).resolves.toBe(true);
+
+    expect(repository.queryByPk).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-1',
+      expect.objectContaining({
+        beginsWith: 'CONV#DM#user-1#user-2#LAST#',
+        limit: 1,
+        scanForward: false,
+      }),
+    );
+  });
+
+  it('passes an abort signal when dispatching push webhooks', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+    const originalFetch = global.fetch;
+    global.fetch = fetchMock as typeof fetch;
+    config.pushProvider = 'webhook';
+    config.pushWebhookUrl = 'https://push.test/webhook';
+    service = new PushNotificationService(
+      repository as never,
+      chatPresenceService as never,
+      config as never,
+    );
+
+    try {
+      const dispatchHarness = service as unknown as {
+        dispatchToDevice(
+          userId: string,
+          device: StoredPushDevice,
+          event: StoredPushOutboxEvent,
+        ): Promise<void>;
+      };
+
+      await dispatchHarness.dispatchToDevice(
+        'user-1',
+        {
+          PK: 'USER#user-1',
+          SK: 'PUSH_DEVICE#device-1',
+          entityType: 'USER_PUSH_DEVICE',
+          userId: 'user-1',
+          deviceId: 'device-1',
+          provider: 'WEB',
+          platform: 'chrome',
+          appVariant: 'web',
+          pushToken: 'push-token-123456',
+          disabledAt: null,
+          lastSeenAt: '2026-04-22T08:00:00.000Z',
+          createdAt: '2026-04-22T08:00:00.000Z',
+          updatedAt: '2026-04-22T08:00:00.000Z',
+        },
+        {
+          PK: 'PUSH_OUTBOX#0',
+          SK: 'EVENT#2026-04-22T08:00:00.000Z#evt-1',
+          entityType: 'PUSH_OUTBOX_EVENT',
+          eventId: 'evt-1',
+          eventName: 'chat.message.created',
+          actorUserId: 'user-2',
+          recipientUserIds: ['user-1'],
+          title: 'Hello',
+          body: 'World',
+          createdAt: '2026-04-22T08:00:00.000Z',
+          skipIfActive: true,
+        },
+      );
+    } finally {
+      global.fetch = originalFetch;
+      config.pushProvider = 'disabled';
+      config.pushWebhookUrl = undefined;
+    }
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://push.test/webhook',
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
     );
   });
 });

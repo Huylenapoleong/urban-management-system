@@ -199,10 +199,15 @@ export class AppConfigService {
     .trim()
     .toLowerCase();
   readonly pushWebhookUrl = process.env.PUSH_WEBHOOK_URL || undefined;
+  readonly pushWebhookTimeoutMs = readNumber('PUSH_WEBHOOK_TIMEOUT_MS', 5000);
   readonly authOtpProvider = (process.env.AUTH_OTP_PROVIDER ?? 'log')
     .trim()
     .toLowerCase();
   readonly authOtpWebhookUrl = process.env.AUTH_OTP_WEBHOOK_URL || undefined;
+  readonly authOtpWebhookTimeoutMs = readNumber(
+    'AUTH_OTP_WEBHOOK_TIMEOUT_MS',
+    5000,
+  );
   readonly authOtpSmtpHost = process.env.AUTH_OTP_SMTP_HOST || undefined;
   readonly authOtpSmtpPort = readNumber('AUTH_OTP_SMTP_PORT', 465);
   readonly authOtpSmtpSecure = readBoolean('AUTH_OTP_SMTP_SECURE', true);
@@ -476,6 +481,10 @@ export class AppConfigService {
       this.authOtpRequestRateLimitWindowSeconds,
     );
     this.ensurePositive(
+      'AUTH_OTP_WEBHOOK_TIMEOUT_MS',
+      this.authOtpWebhookTimeoutMs,
+    );
+    this.ensurePositive(
       'AUTH_OTP_REQUEST_RATE_LIMIT_MAX_PER_WINDOW',
       this.authOtpRequestRateLimitMaxPerWindow,
     );
@@ -527,6 +536,7 @@ export class AppConfigService {
       'PUSH_OUTBOX_POLL_INTERVAL_MS',
       this.pushOutboxPollIntervalMs,
     );
+    this.ensurePositive('PUSH_WEBHOOK_TIMEOUT_MS', this.pushWebhookTimeoutMs);
     this.ensurePositive('PUSH_OUTBOX_BATCH_SIZE', this.pushOutboxBatchSize);
     this.ensurePositive('PUSH_OUTBOX_SHARD_COUNT', this.pushOutboxShardCount);
     this.ensurePositive(

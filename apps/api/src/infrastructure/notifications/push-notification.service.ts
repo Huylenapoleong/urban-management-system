@@ -412,7 +412,11 @@ export class PushNotificationService
     const summaries = await this.repository.queryByPk<StoredConversation>(
       this.config.dynamodbConversationsTableName,
       makeInboxPk(userId),
-      { beginsWith: 'CONV#' },
+      {
+        beginsWith: `CONV#${conversationId}#LAST#`,
+        limit: 1,
+        scanForward: false,
+      },
     );
     const summary = summaries.find(
       (item) =>
@@ -440,25 +444,44 @@ export class PushNotificationService
           return;
         }
 
-        const response = await fetch(this.config.pushWebhookUrl, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            userId,
-            deviceId: device.deviceId,
-            provider: device.provider,
-            platform: device.platform,
-            pushToken: device.pushToken,
-            notification: {
-              title: event.title,
-              body: event.body,
-            },
-            data: event.data ?? {},
-            eventName: event.eventName,
-            eventId: event.eventId,
-            createdAt: event.createdAt,
-          }),
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+          controller.abort();
+        }, this.config.pushWebhookTimeoutMs);
+        let response: Response;
+
+        try {
+          response = await fetch(this.config.pushWebhookUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              userId,
+              deviceId: device.deviceId,
+              provider: device.provider,
+              platform: device.platform,
+              pushToken: device.pushToken,
+              notification: {
+                title: event.title,
+                body: event.body,
+              },
+              data: event.data ?? {},
+              eventName: event.eventName,
+              eventId: event.eventId,
+              createdAt: event.createdAt,
+            }),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted) {
+            throw new Error(
+              `Push webhook timed out after ${this.config.pushWebhookTimeoutMs}ms.`,
+            );
+          }
+
+          throw error;
+        } finally {
+          clearTimeout(timeout);
+        }
 
         if (!response.ok) {
           throw new Error(

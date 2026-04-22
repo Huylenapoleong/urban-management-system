@@ -2309,12 +2309,12 @@ export class UsersService {
       makeInboxPk(userId),
       {
         beginsWith: `CONV#${conversationId}#LAST#`,
+        limit: 1,
+        scanForward: false,
       },
     );
 
-    return items
-      .filter((item) => item.entityType === 'CONVERSATION')
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    return items.find((item) => item.entityType === 'CONVERSATION');
   }
 
   private async getBlockEdge(
@@ -2560,6 +2560,7 @@ export class UsersService {
       {
         beginsWith: `CONV#${conversationId}#LAST#`,
         limit: 1,
+        scanForward: false,
       },
     );
 
