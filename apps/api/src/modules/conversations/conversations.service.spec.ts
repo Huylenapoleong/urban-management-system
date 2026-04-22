@@ -824,6 +824,78 @@ describe('ConversationsService', () => {
     expect(result.data[0]?.id).toBe(latestMessage.messageId);
   });
 
+  it('reconciles a stale unread summary when opening the conversation', async () => {
+    const staleSummary: StoredConversation = {
+      ...actorSummary,
+      unreadCount: 10,
+      updatedAt: '2026-03-18T10:06:00.000Z',
+    };
+    const ghostMessage: StoredMessage = {
+      ...latestMessage,
+      SK: 'MSG#2026-03-18T10:04:30.000Z#01MESSAGE0000000000000010',
+      messageId: '01MESSAGE0000000000000010',
+      content: '{"text":"","mention":[]}',
+      sentAt: '2026-03-18T10:04:30.000Z',
+      updatedAt: '2026-03-18T10:04:30.000Z',
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [staleSummary];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === otherSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [otherSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'MSG#'
+        ) {
+          return [latestMessage, ghostMessage];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      limit: '20',
+    });
+
+    expect(result.data).toHaveLength(1);
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        PK: actorSummary.PK,
+        conversationId: conversationKey,
+        unreadCount: 1,
+      }),
+    );
+    expect(
+      conversationDispatchService.emitConversationSummaryUpdated,
+    ).toHaveBeenCalledWith(
+      expect.any(String),
+      actor.id,
+      conversationKey,
+      expect.objectContaining({
+        unreadCount: 1,
+      }),
+      'conversation.metadata.updated',
+      expect.any(String),
+    );
+  });
+
   it('rejects direct messages when policy denies access to the target user', async () => {
     authorizationService.canAccessDirectConversation.mockReturnValueOnce(false);
 

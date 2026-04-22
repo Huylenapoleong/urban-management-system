@@ -403,6 +403,7 @@ export class ConversationsService {
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
     const access = await this.resolveConversationAccess(actor, conversationId);
+    await this.reconcileViewerConversationSummary(actor.id, access);
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const type = parseEnumQuery(query.type, 'type', MESSAGE_TYPES);
     const fromUserId = optionalQueryString(query.fromUserId, 'fromUserId');
@@ -2977,6 +2978,42 @@ export class ConversationsService {
       participantIds,
       summariesByUser,
     };
+  }
+
+  private async reconcileViewerConversationSummary(
+    actorId: string,
+    access: ResolvedConversationAccess,
+  ): Promise<void> {
+    const syncResult =
+      await this.conversationSummaryService.syncConversationSummaryForUser(
+        {
+          conversationKey: access.conversationKey,
+          participants: access.participants,
+        },
+        actorId,
+      );
+
+    if (syncResult.removed) {
+      this.conversationDispatchService.emitConversationRemoved(
+        createUlid(),
+        actorId,
+        access.conversationKey,
+        nowIso(),
+        'message.deleted',
+      );
+      return;
+    }
+
+    if (syncResult.changed && syncResult.summary) {
+      this.conversationDispatchService.emitConversationSummaryUpdated(
+        createUlid(),
+        actorId,
+        access.conversationKey,
+        syncResult.summary,
+        'conversation.metadata.updated',
+        syncResult.summary.updatedAt,
+      );
+    }
   }
 
   private getMessageDeliveryState(
