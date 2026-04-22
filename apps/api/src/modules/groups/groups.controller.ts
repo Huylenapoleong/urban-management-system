@@ -42,10 +42,12 @@ import {
   GroupInviteLinkDto,
   GroupMembershipDto,
   GroupMetadataDto,
+  GroupOwnershipTransferResultDto,
   LeaveGroupRequestDto,
   ListAuditQueryDto,
   ListGroupsQueryDto,
   ManageGroupMemberRequestDto,
+  TransferGroupOwnershipRequestDto,
   UpdateGroupMemberRoleRequestDto,
   UpdateGroupRequestDto,
 } from '../../common/openapi/swagger.models';
@@ -220,6 +222,49 @@ export class GroupsController {
     return this.groupsService.updateGroup(user, groupId, body);
   }
 
+  @Post(':groupId/ownership-transfer')
+  @ApiOperation({
+    summary: 'Transfer group ownership',
+    description:
+      'Transfers owner role to another active member without requiring the current owner to leave the group. The previous owner remains in the group as deputy.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiBody({ type: TransferGroupOwnershipRequestDto })
+  @ApiOkEnvelopeResponse(GroupOwnershipTransferResultDto, {
+    description: 'Ownership transfer result.',
+  })
+  @ApiBadRequestExamples('The ownership transfer request is invalid.', [
+    {
+      name: 'ownershipTransferSelf',
+      summary: 'Owner cannot transfer to themselves',
+      message: 'Choose another active member as the new owner.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/ownership-transfer',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot transfer group ownership.', [
+    {
+      name: 'ownershipTransferForbidden',
+      summary: 'Only owner or admin may transfer ownership',
+      message: 'You cannot transfer group ownership.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/ownership-transfer',
+    },
+  ])
+  @ApiNotFoundExamples('The target membership does not exist.', [
+    {
+      name: 'ownershipTransferMemberMissing',
+      summary: 'Target membership not found',
+      message: 'Membership not found.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/ownership-transfer',
+    },
+  ])
+  transferOwnership(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+    @Body() body: TransferGroupOwnershipRequestDto,
+  ) {
+    return this.groupsService.transferOwnership(user, groupId, body);
+  }
+
   @Delete(':groupId')
   @ApiOperation({ summary: 'Delete group' })
   @ApiParam({ name: 'groupId', type: String })
@@ -249,6 +294,47 @@ export class GroupsController {
     },
   ])
   deleteGroup(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('groupId') groupId: string,
+  ) {
+    return this.groupsService.deleteGroup(user, groupId);
+  }
+
+  @Post(':groupId/dissolve')
+  @ApiOperation({
+    summary: 'Dissolve group',
+    description:
+      'Production-friendly alias for group deletion. Marks the group deleted, schedules cleanup, and revokes chat access for members.',
+  })
+  @ApiParam({ name: 'groupId', type: String })
+  @ApiOkEnvelopeResponse(GroupMetadataDto, {
+    description: 'Deleted/dissolved group metadata.',
+  })
+  @ApiForbiddenExamples('The actor cannot dissolve this group.', [
+    {
+      name: 'groupDissolveForbidden',
+      summary: 'Group dissolve denied',
+      message: 'You cannot delete this group.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/dissolve',
+    },
+  ])
+  @ApiConflictExamples('The group changed while dissolve was processed.', [
+    {
+      name: 'groupDissolveConflict',
+      summary: 'Optimistic concurrency conflict',
+      message: 'Group changed. Please retry.',
+      path: '/api/groups/01JPCY1000AREAGROUP0000000/dissolve',
+    },
+  ])
+  @ApiNotFoundExamples('The target group does not exist.', [
+    {
+      name: 'groupDissolveMissing',
+      summary: 'Group not found',
+      message: 'Group not found.',
+      path: '/api/groups/01JPCY1000UNKNOWNGROUP000000/dissolve',
+    },
+  ])
+  dissolveGroup(
     @CurrentUser() user: AuthenticatedUser,
     @Param('groupId') groupId: string,
   ) {
