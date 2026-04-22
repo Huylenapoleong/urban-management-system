@@ -139,7 +139,7 @@ export default function FloatingAiChatbot() {
                 numberOfLines={2}
                 style={styles.input}
               />
-              <Button mode="contained" onPress={sendQuestion} loading={isSending} disabled={isSending}>
+              <Button mode="contained" onPress={sendQuestion} disabled={isSending}>
                 Gui
               </Button>
             </Card.Content>

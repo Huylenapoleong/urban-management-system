@@ -1,7 +1,8 @@
 import React from 'react';
-import { Image, Modal as NativeModal, TouchableOpacity, View } from 'react-native';
-import { ActivityIndicator, IconButton, Text } from 'react-native-paper';
-import { ResizeMode, Video } from 'expo-av';
+import { Modal as NativeModal, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
+import { IconButton, Text } from 'react-native-paper';
+import { SkeletonInline } from '@/components/skeleton/Skeleton';
 
 type ChatMediaPanelsProps = {
   styles: any;
@@ -11,6 +12,11 @@ type ChatMediaPanelsProps = {
   onSaveFullscreenMedia: () => Promise<void> | void;
   downloadingMedia: boolean;
 };
+
+const LazyVideo = React.lazy(async () => {
+  const module = await import('expo-av');
+  return { default: module.Video as React.ComponentType<any> };
+});
 
 export function ChatMediaPanels({
   styles,
@@ -33,18 +39,27 @@ export function ChatMediaPanels({
         </TouchableOpacity>
 
         {fullscreenMedia?.type === 'image' ? (
-          <Image source={{ uri: fullscreenMedia.uri }} style={styles.fullscreenMedia} resizeMode="contain" />
+          <Image
+            source={{ uri: fullscreenMedia.uri }}
+            style={styles.fullscreenMedia}
+            contentFit="contain"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+            transition={160}
+          />
         ) : null}
 
         {fullscreenMedia?.type === 'video' ? (
-          <Video
-            source={{ uri: fullscreenMedia.uri }}
-            style={styles.fullscreenMedia}
-            useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
-            shouldPlay
-            isLooping={false}
-          />
+          <React.Suspense fallback={<View style={styles.fullscreenMedia} />}>
+            <LazyVideo
+              source={{ uri: fullscreenMedia.uri }}
+              style={styles.fullscreenMedia}
+              useNativeControls
+              resizeMode="contain"
+              shouldPlay
+              isLooping={false}
+            />
+          </React.Suspense>
         ) : null}
 
         {fullscreenMedia?.uri ? (
@@ -54,7 +69,7 @@ export function ChatMediaPanels({
             disabled={downloadingMedia}
           >
             {downloadingMedia ? (
-              <ActivityIndicator size="small" color={colors.textOnPrimary} />
+              <SkeletonInline width={42} height={12} />
             ) : (
               <Text style={{ color: colors.textOnPrimary, fontWeight: '700' }}>Luu</Text>
             )}

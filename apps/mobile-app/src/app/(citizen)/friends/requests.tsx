@@ -1,14 +1,15 @@
 import React from 'react';
-import { View, StyleSheet, FlatList, RefreshControl, Platform } from 'react-native';
-import { Text, Appbar, useTheme, ActivityIndicator, List, Button, Avatar } from 'react-native-paper';
+import { View, StyleSheet, FlatList } from 'react-native';
+import { Text, Appbar, useTheme, List, Button, Avatar } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useFriendRequests, useAcceptFriendRequest, useRejectFriendRequest, useCancelFriendRequest } from '@/hooks/shared/useUsers';
 import { convertToS3Url } from '@/constants/s3';
+import { ListSkeleton } from '@/components/skeleton/Skeleton';
 
 export default function FriendRequestsScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { data: requests, isLoading, refetch } = useFriendRequests();
+  const { data: requests, isLoading } = useFriendRequests();
   const { mutateAsync: acceptRequest } = useAcceptFriendRequest();
   const { mutateAsync: rejectRequest } = useRejectFriendRequest();
   const { mutateAsync: cancelRequest } = useCancelFriendRequest();
@@ -58,13 +59,16 @@ export default function FriendRequestsScreen() {
       </View>
 
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-        </View>
+        <ListSkeleton count={6} />
       ) : (
         <FlatList
           data={filteredRequests}
           keyExtractor={(item) => item.userId}
+          removeClippedSubviews
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={50}
           renderItem={({ item }) => {
             const avatarUrl = item.avatarUrl || (item as any).avatarAsset?.resolvedUrl;
             const s3Url = avatarUrl ? convertToS3Url(avatarUrl) : undefined;
@@ -92,7 +96,6 @@ export default function FriendRequestsScreen() {
                           mode="contained" 
                           compact 
                           onPress={() => handleAction(item.userId, 'ACCEPT')}
-                          loading={actingId === item.userId}
                           disabled={actingId !== null}
                           style={styles.actionBtn}
                         >
@@ -102,7 +105,6 @@ export default function FriendRequestsScreen() {
                           mode="outlined" 
                           compact 
                           onPress={() => handleAction(item.userId, 'REJECT')}
-                          loading={actingId === item.userId}
                           disabled={actingId !== null}
                           style={[styles.actionBtn, { borderColor: theme.colors.error }]}
                           textColor={theme.colors.error}
@@ -115,7 +117,6 @@ export default function FriendRequestsScreen() {
                         mode="outlined" 
                         compact 
                         onPress={() => handleAction(item.userId, 'CANCEL')}
-                        loading={actingId === item.userId}
                         disabled={actingId !== null}
                         style={styles.actionBtn}
                       >
@@ -132,9 +133,6 @@ export default function FriendRequestsScreen() {
             <View style={styles.empty}>
               <Text style={{ color: '#667085' }}>Hiện tại không có lời mời nào tại đây.</Text>
             </View>
-          }
-          refreshControl={
-            <RefreshControl refreshing={isLoading} onRefresh={refetch} />
           }
           contentContainerStyle={styles.listContent}
         />

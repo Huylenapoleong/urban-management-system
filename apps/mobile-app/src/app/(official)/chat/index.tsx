@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, FlatList, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { Text, Avatar, Badge, Searchbar, useTheme, ActivityIndicator, Divider, SegmentedButtons, IconButton, Card, Portal, Modal, Button } from 'react-native-paper';
+import { Text, Avatar, Badge, Searchbar, useTheme, Divider, SegmentedButtons, IconButton, Card, Portal, Modal, Button } from 'react-native-paper';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useConversations, type ConversationSummaryItem } from '../../../hooks/shared/useConversations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,6 +11,8 @@ import { useAuth } from '../../../providers/AuthProvider';
 import { socketClient } from '../../../lib/socket-client';
 import { CHAT_SOCKET_EVENTS } from '@urban/shared-constants';
 import { convertToS3Url } from '../../../constants/s3';
+import { ListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
+import { prefetchConversationMessages } from '@/services/prefetch';
 
 const PRESENCE_OFFLINE_GRACE_MS = 120000;
 const OFFICIAL_DM_PRESENCE_CACHE: Record<string, any> = {};
@@ -215,6 +218,7 @@ const resolveConversationPathId = (conversationId: string) => {
 
 export default function ChatListScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const theme = useTheme();
   const { user: currentUser } = useAuth();
   const currentUserId = String((currentUser as any)?.sub || (currentUser as any)?.id || '');
@@ -227,26 +231,87 @@ export default function ChatListScreen() {
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
   const [dmPresenceByConversationId, setDmPresenceByConversationId] = useState<Record<string, any>>(() => ({ ...OFFICIAL_DM_PRESENCE_CACHE }));
   const [presenceNowMs, setPresenceNowMs] = useState(() => Date.now());
-  const { data: conversations, isLoading, refetch } = useConversations({ q: searchQuery || undefined });
+  const { data: conversations, isLoading, isFetching, isRefetching, refetch } = useConversations({ q: searchQuery || undefined });
+  const { isFirstLoad, isRefreshing } = useSkeletonQuery({ data: conversations, isLoading, isFetching, isRefetching });
 
   const openConversation = useCallback((conversationId: string) => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.replace(`/chat/${encodeURIComponent(conversationId)}`);
-      return;
-    }
+    void prefetchConversationMessages(queryClient, conversationId);
 
     router.push({
       pathname: '/(official)/chat/[id]',
       params: { id: conversationId },
     } as any);
-  }, [router]);
+  }, [queryClient, router]);
   
   // Refresh list whenever screen is focused (user comes back from chat)
   useFocusEffect(
     useCallback(() => {
-      refetch();
-    }, [refetch])
+      const hasConversationCache = queryClient
+        .getQueriesData({ queryKey: ['conversations'] })
+        .some(([, data]) => Array.isArray(data));
+
+      if (!hasConversationCache) {
+        refetch();
+      }
+    }, [queryClient, refetch])
   );
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const handleConversationUpdated = (event: any) => {
+      if (!event?.summary?.conversationId) {
+        return;
+      }
+
+      queryClient.setQueriesData<ConversationSummaryItem[]>(
+        { queryKey: ['conversations'] },
+        (current) => {
+          if (!Array.isArray(current)) {
+            return current;
+          }
+
+          const index = current.findIndex((item) => item.conversationId === event.summary.conversationId);
+          if (index === -1) {
+            return [event.summary, ...current];
+          }
+
+          const next = [...current];
+          next[index] = event.summary;
+          return next;
+        },
+      );
+    };
+
+    const handleConversationRemoved = (event: any) => {
+      if (!event?.conversationId) {
+        return;
+      }
+
+      queryClient.setQueriesData<ConversationSummaryItem[]>(
+        { queryKey: ['conversations'] },
+        (current) =>
+          Array.isArray(current)
+            ? current.filter((item) => item.conversationId !== event.conversationId)
+            : current,
+      );
+    };
+
+    void socketClient.connect().then(() => {
+      if (cancelled) {
+        return;
+      }
+
+      socketClient.on(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, handleConversationUpdated);
+      socketClient.on(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      socketClient.off(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, handleConversationUpdated);
+      socketClient.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
+    };
+  }, [queryClient]);
 
   React.useEffect(() => {
     const intervalId = setInterval(() => {
@@ -476,12 +541,12 @@ export default function ChatListScreen() {
     return sorted;
   }, [conversations, filterMode, getConversationSortTimestamp]);
 
-  const handlePress = (id: string) => {
+  const handlePress = useCallback((id: string) => {
     if (!id) {
       return;
     }
     openConversation(id);
-  };
+  }, [openConversation]);
 
   const openConversationSettings = useCallback((item: ConversationSummaryItem) => {
     setSelectedConversation(item);
@@ -599,16 +664,19 @@ export default function ChatListScreen() {
       </View>
 
       {/* List */}
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator animating size="large" />
-        </View>
+      {isFirstLoad ? (
+        <ListSkeleton count={7} />
       ) : (
         <FlatList
           data={sortedConversations}
           keyExtractor={item => item.conversationId}
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefreshing}
+          removeClippedSubviews={Platform.OS !== 'web'}
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={50}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <Divider style={{ marginHorizontal: 16 }} />}
           renderItem={({ item }) => {

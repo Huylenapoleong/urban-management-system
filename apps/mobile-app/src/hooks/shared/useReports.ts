@@ -55,7 +55,7 @@ export const useReports = ({
             new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
         );
     },
-    staleTime: 60 * 1000,
+    staleTime: 30 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 };
@@ -65,7 +65,8 @@ export const useReport = (id?: string) => {
     queryKey: ['reports', id],
     queryFn: ({ signal }) => ApiClient.get<ReportItem>(`/reports/${id}`, undefined, { signal }),
     enabled: !!id,
-    staleTime: 60 * 1000,
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 
@@ -99,6 +100,8 @@ export const useReportAudit = (reportId: string) => {
     queryKey: ['reports', reportId, 'audit'],
     queryFn: ({ signal }) => ApiClient.get(`/reports/${reportId}/audit`, undefined, { signal }),
     enabled: !!reportId,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 };
 
@@ -112,5 +115,7 @@ export const useLinkedConversations = (reportId: string) => {
         { signal },
       ),
     enabled: !!reportId,
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };

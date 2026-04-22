@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { MediaAsset, ReportItem } from "@urban/shared-types";
 import Header from "@/components/Header";
 import CitizenReportCard from "@/components/shared/CitizenReportCard";
@@ -7,6 +7,7 @@ import { ENV_CONFIG } from "@/constants/env";
 import colors from "@/constants/colors";
 import { convertToS3Url } from "@/constants/s3";
 import { listReports } from "@/services/api/report.api";
+import { CardListSkeleton } from "@/components/skeleton/Skeleton";
 
 function resolveReportMediaUrl(value?: string | null): string | null {
   if (!value) {
@@ -78,7 +79,7 @@ export default function ReportHistoryPage() {
       />
 
       {loading ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} size="large" />
+        <CardListSkeleton count={4} />
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {error ? <Text style={styles.error}>{error}</Text> : null}

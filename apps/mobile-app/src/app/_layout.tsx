@@ -1,35 +1,67 @@
 import React from "react";
-import { AppState, LogBox, Platform } from "react-native";
-import { Stack } from "expo-router";
-
-LogBox.ignoreLogs([
-  "Unexpected text node",
-  "Unexpected text node: .",
-  "A text node cannot be a child of a <View>"
-]);
+import { AppState, LogBox } from "react-native";
+import { Stack, usePathname } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { PaperProvider } from "react-native-paper";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import AsyncStorageShim from "@/lib/async-storage-shim";
-import { usePathname } from "expo-router";
-import { AuthProvider } from "@/providers/AuthProvider";
+import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { socketClient } from "@/lib/socket-client";
 import FloatingAiChatbot from "@/components/shared/FloatingAiChatbot";
+import { ApiClient } from "@/lib/api-client";
+import { queryKeys } from "@/services/query-keys";
 
 import { WebRTCProvider } from '../providers/WebRTCProvider';
+
+LogBox.ignoreLogs([
+  "Unexpected text node",
+  "Unexpected text node: .",
+  "A text node cannot be a child of a <View>",
+]);
+
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 60 * 1000,
+      staleTime: 30 * 1000,
       gcTime: 10 * 60 * 1000,
-      retry: 1,
+      retry: 2,
+      retryDelay: (failureCount) => Math.min(1000 * 2 ** failureCount, 10 * 1000),
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
-      refetchOnMount: false,
+      refetchOnMount: true,
     },
   },
+});
+
+queryClient.setQueryDefaults(['messages'], {
+  staleTime: Infinity,
+  gcTime: 30 * 60 * 1000,
+  refetchOnMount: false,
+  refetchOnReconnect: false,
+});
+queryClient.setQueryDefaults(['profile'], {
+  staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
+});
+queryClient.setQueryDefaults(['reports'], {
+  staleTime: 30 * 1000,
+  gcTime: 10 * 60 * 1000,
+});
+queryClient.setQueryDefaults(['feed'], {
+  staleTime: 30 * 1000,
+  gcTime: 10 * 60 * 1000,
+});
+queryClient.setQueryDefaults(['static'], {
+  staleTime: 60 * 60 * 1000,
+  gcTime: 24 * 60 * 60 * 1000,
+});
+queryClient.setQueryDefaults(['uploads', 'avatar-library'], {
+  staleTime: 60 * 60 * 1000,
+  gcTime: 24 * 60 * 60 * 1000,
 });
 
 const getPersistStorage = () => {
@@ -57,6 +89,16 @@ const WEB_RUNTIME_GUARD_TAG = '[web-runtime-guard:mobile-app]';
 const WEB_RUNTIME_GUARD_FLAG = '__umsWebRuntimeGuardInstalled__';
 const SAFE_HISTORY_METHOD_FLAG = '__umsSafeHistoryMethod__';
 const HISTORY_FALLBACK_IN_PROGRESS_FLAG = '__umsHistoryFallbackInProgress__';
+let splashHidden = false;
+
+async function hideSplashOnce() {
+  if (splashHidden) {
+    return;
+  }
+
+  splashHidden = true;
+  await SplashScreen.hideAsync().catch(() => {});
+}
 
 function installWebRuntimeGuards() {
   if (typeof window === 'undefined') {
@@ -91,7 +133,7 @@ function installWebRuntimeGuards() {
   };
 
   const getHistoryTargets = () => {
-    const targets: Array<{ label: string; target: any }> = [
+    const targets: { label: string; target: any }[] = [
       { label: 'window.history', target: window.history as any },
     ];
 
@@ -315,7 +357,12 @@ function SocketLifecycleManager() {
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'background' || nextState === 'inactive') {
-        socketClient.disconnect();
+        socketClient.pause();
+        return;
+      }
+
+      if (nextState === 'active') {
+        void socketClient.resume().catch(() => {});
       }
     });
 
@@ -335,7 +382,61 @@ function WebRuntimeSafetyManager() {
   return null;
 }
 
+function SplashPreloadManager({ queryHydrated }: { queryHydrated: boolean }) {
+  const queryClient = useQueryClient();
+  const { user, isLoading, logout } = useAuth();
+  const userId = user?.sub ?? '';
+
+  React.useEffect(() => {
+    if (!queryHydrated || isLoading) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const finishSplashPreload = async () => {
+      if (!userId) {
+        await hideSplashOnce();
+        return;
+      }
+
+      const profileKey = queryKeys.profile();
+      const cachedProfile = queryClient.getQueryData(profileKey);
+
+      if (!cachedProfile) {
+        try {
+          await queryClient.prefetchQuery({
+            queryKey: profileKey,
+            queryFn: ({ signal }) => ApiClient.get('/users/me', undefined, { signal }),
+            staleTime: 5 * 60 * 1000,
+            gcTime: 30 * 60 * 1000,
+          });
+        } catch (error: any) {
+          const status = Number(error?.status ?? error?.response?.status);
+          if (!cancelled && (status === 401 || status === 403)) {
+            await logout();
+          }
+        }
+      }
+
+      if (!cancelled) {
+        await hideSplashOnce();
+      }
+    };
+
+    void finishSplashPreload();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoading, logout, queryClient, queryHydrated, userId]);
+
+  return null;
+}
+
 export default function RootLayout() {
+  const [queryHydrated, setQueryHydrated] = React.useState(false);
+
   return (
     <PersistQueryClientProvider
       client={queryClient}
@@ -343,12 +444,14 @@ export default function RootLayout() {
         persister: queryPersister,
         maxAge: 24 * 60 * 60 * 1000,
       }}
+      onSuccess={() => setQueryHydrated(true)}
     >
       <NavigationQueryLifecycleManager />
       <SocketLifecycleManager />
       <WebRuntimeSafetyManager />
       <PaperProvider>
         <AuthProvider>
+          <SplashPreloadManager queryHydrated={queryHydrated} />
           <WebRTCProvider>
             <Stack screenOptions={{ headerShown: false }} />
             <FloatingAiChatbot />

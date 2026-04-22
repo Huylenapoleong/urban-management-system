@@ -2,7 +2,12 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import client, { request } from "./client";
 import type { UserProfile } from "@urban/shared-types";
-import { AUTH_TOKEN_KEY, clearWebToken, writeWebToken } from "@/lib/web-token-storage";
+import {
+  AUTH_TOKEN_KEY,
+  REFRESH_TOKEN_KEY,
+  clearWebToken,
+  writeWebTokens,
+} from "@/lib/web-token-storage";
 
 type LoginRequest = {
   login: string;
@@ -27,13 +32,16 @@ type OtpVerifyRequest = {
   otpCode: string;
 };
 
-const persistToken = async (token: string) => {
+const persistTokens = async (accessToken: string, refreshToken?: string) => {
   if (Platform.OS === "web") {
-    writeWebToken(token);
+    writeWebTokens(accessToken, refreshToken);
     return;
   }
 
-  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, accessToken);
+  if (refreshToken) {
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
+  }
 };
 
 const clearToken = async () => {
@@ -42,7 +50,10 @@ const clearToken = async () => {
     return;
   }
 
-  await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+  await Promise.all([
+    SecureStore.deleteItemAsync(AUTH_TOKEN_KEY),
+    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+  ]);
 };
 
 export async function login(params: LoginRequest) {
@@ -51,7 +62,7 @@ export async function login(params: LoginRequest) {
     user: UserProfile;
   }>(client.post("/auth/login", params));
 
-  await persistToken(data.tokens.accessToken);
+  await persistTokens(data.tokens.accessToken, data.tokens.refreshToken);
 
   return data;
 }
@@ -62,7 +73,7 @@ export async function register(params: RegisterRequest) {
     user: UserProfile;
   }>(client.post("/auth/register", params));
 
-  await persistToken(data.tokens.accessToken);
+  await persistTokens(data.tokens.accessToken, data.tokens.refreshToken);
 
   return data;
 }
@@ -81,7 +92,7 @@ export async function verifyRegisterOtp(params: OtpVerifyRequest) {
     user: UserProfile;
   }>(client.post("/auth/register/verify-otp", params));
 
-  await persistToken(data.tokens.accessToken);
+  await persistTokens(data.tokens.accessToken, data.tokens.refreshToken);
   return data;
 }
 
@@ -95,7 +106,7 @@ export async function verifyLoginOtp(params: OtpVerifyRequest) {
     user: UserProfile;
   }>(client.post("/auth/login/verify-otp", params));
 
-  await persistToken(data.tokens.accessToken);
+  await persistTokens(data.tokens.accessToken, data.tokens.refreshToken);
   return data;
 }
 
@@ -105,7 +116,7 @@ export async function refresh(params: { refreshToken: string }) {
     user: UserProfile;
   }>(client.post("/auth/refresh", params));
 
-  await persistToken(data.tokens.accessToken);
+  await persistTokens(data.tokens.accessToken, data.tokens.refreshToken);
   return data;
 }
 
@@ -167,7 +178,7 @@ export async function confirmReactivateAccount(params: OtpVerifyRequest) {
     user: UserProfile;
   }>(client.post("/auth/account/reactivate/confirm", params));
 
-  await persistToken(data.tokens.accessToken);
+  await persistTokens(data.tokens.accessToken, data.tokens.refreshToken);
   return data;
 }
 

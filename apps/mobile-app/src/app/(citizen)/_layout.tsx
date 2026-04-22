@@ -1,22 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   AppState,
-  Animated,
   PanResponder,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs, useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
 import type { ConversationSummary } from "@urban/shared-types";
 import colors from "@/constants/colors";
 import { useAuth } from "@/providers/AuthProvider";
 import { listConversations } from "@/services/api/conversation.api";
+import { SkeletonDetail } from "@/components/skeleton/Skeleton";
+import { prefetchConversationMessages } from "@/services/prefetch";
 
 const CHAT_BUBBLE_SETTING_KEY = "citizen.chatBubble.enabled";
 
@@ -30,10 +32,21 @@ async function readChatBubbleSetting(): Promise<string | null> {
 
 function ChatBubbleOverlay() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [enabled, setEnabled] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
   const [targetConversation, setTargetConversation] = useState<ConversationSummary | null>(null);
-  const position = useRef(new Animated.ValueXY({ x: 18, y: 150 })).current;
+  const translateX = useSharedValue(18);
+  const translateY = useSharedValue(150);
+  const offsetX = useSharedValue(18);
+  const offsetY = useSharedValue(150);
+
+  const bubbleAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+    ],
+  }));
 
   const panResponder = useMemo(
     () =>
@@ -41,16 +54,19 @@ function ChatBubbleOverlay() {
         onMoveShouldSetPanResponder: (_, gesture) =>
           Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
         onPanResponderGrant: () => {
-          position.extractOffset();
+          offsetX.value = translateX.value;
+          offsetY.value = translateY.value;
         },
-        onPanResponderMove: Animated.event([null, { dx: position.x, dy: position.y }], {
-          useNativeDriver: false,
-        }),
+        onPanResponderMove: (_, gesture) => {
+          translateX.value = offsetX.value + gesture.dx;
+          translateY.value = offsetY.value + gesture.dy;
+        },
         onPanResponderRelease: () => {
-          position.flattenOffset();
+          translateX.value = withSpring(translateX.value, { damping: 18, stiffness: 180 });
+          translateY.value = withSpring(translateY.value, { damping: 18, stiffness: 180 });
         },
       }),
-    [position],
+    [offsetX, offsetY, translateX, translateY],
   );
 
   const loadSetting = useCallback(async () => {
@@ -114,20 +130,19 @@ function ChatBubbleOverlay() {
       pointerEvents="box-none"
       style={[
         styles.chatBubbleWrap,
-        {
-          transform: position.getTranslateTransform(),
-        },
+        bubbleAnimatedStyle,
       ]}
       {...panResponder.panHandlers}
     >
       <Pressable
         style={styles.chatBubble}
-        onPress={() =>
+        onPress={() => {
+          void prefetchConversationMessages(queryClient, targetConversation.conversationId);
           router.push({
             pathname: "/(citizen)/chat/[id]",
             params: { id: targetConversation.conversationId },
-          })
-        }
+          });
+        }}
       >
         <Ionicons name="chatbubble-ellipses" size={26} color="white" />
         <View style={styles.chatBubbleBadge}>
@@ -161,7 +176,7 @@ export default function CitizenLayout() {
   if (isLoading) {
     return (
       <View style={styles.loader}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <SkeletonDetail />
       </View>
     );
   }

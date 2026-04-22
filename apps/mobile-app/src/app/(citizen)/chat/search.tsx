@@ -1,13 +1,16 @@
 import React, { useState } from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Avatar, Button, IconButton, Surface, Text, TextInput, useTheme } from "react-native-paper";
 import { ApiClient } from "@/lib/api-client";
+import { prefetchConversationMessages } from "@/services/prefetch";
 
 export default function CitizenSearchUserScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,6 +41,7 @@ export default function CitizenSearchUserScreen() {
       return;
     }
 
+    void prefetchConversationMessages(queryClient, `dm:${targetUserId}`);
     router.replace({
       pathname: '/(citizen)/chat/[id]',
       params: { id: `dm:${targetUserId}` },
@@ -78,7 +82,6 @@ export default function CitizenSearchUserScreen() {
           <Button
             mode="contained"
             onPress={handleSearch}
-            loading={loading}
             disabled={loading || !query.trim()}
             style={styles.searchButton}
           >

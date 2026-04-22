@@ -1,8 +1,11 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { socketClient } from '../../lib/socket-client';
 import { ApiClient } from '../../lib/api-client';
 import { uploadMedia } from '../../services/api/upload.api';
 import { CHAT_SOCKET_EVENTS } from '@urban/shared-constants';
+import { queryKeys } from '@/services/query-keys';
+import { useSkeletonQuery } from '@/components/skeleton/Skeleton';
 import type {
   MessageItem,
   ChatMessageCreatedEvent,
@@ -118,6 +121,8 @@ export const useChatConversation = (
   currentUser?: any,
   options?: UseChatConversationOptions,
 ) => {
+  const queryClient = useQueryClient();
+  const messagesQueryKey = useMemo(() => queryKeys.messages(conversationId), [conversationId]);
 
   const looksLikeRecallText = useCallback((value: unknown) => {
     if (typeof value !== 'string') {
@@ -262,9 +267,14 @@ export const useChatConversation = (
   const conversationKeyRef = useRef<string | null>(null);
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const typingEmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesRef = useRef<any[]>([]);
   const [isReady, setIsReady] = useState(false);
   const currentUserId = currentUser?.id || currentUser?.sub;
   const accessDeniedHandledRef = useRef(false);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const isDmConversation = useCallback((value: string) => /^dm:|^DM#/i.test(value), []);
 
@@ -317,13 +327,75 @@ export const useChatConversation = (
     await new Promise((resolve) => setTimeout(resolve, ms));
   }, []);
 
+  const updateMessageCache = useCallback((updater: (previous: any[]) => any[]) => {
+    setMessages((previous) => {
+      const next = updater(previous);
+      queryClient.setQueryData(messagesQueryKey, next);
+      return next;
+    });
+  }, [messagesQueryKey, queryClient]);
+
+  const replaceMessageCache = useCallback((next: any[]) => {
+    queryClient.setQueryData(messagesQueryKey, next);
+    setMessages(next);
+  }, [messagesQueryKey, queryClient]);
+
+  const historyQuery = useQuery<any[]>({
+    queryKey: messagesQueryKey,
+    queryFn: async ({ signal }) => {
+      const data = await ApiClient.get<MessageItem[]>(
+        `/conversations/${encodeURIComponent(conversationId)}/messages`,
+        { limit: INITIAL_MESSAGES_LIMIT },
+        { signal },
+      );
+
+      return Array.isArray(data)
+        ? [...data].reverse().map((message) => normalizeRecalledMessage(message))
+        : [];
+    },
+    enabled: Boolean(conversationId),
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+  });
+  const { isFirstLoad: isFirstHistoryLoad } = useSkeletonQuery(historyQuery);
+
   // ── 1. Load message history from REST API ────────────────────────────────
   useEffect(() => {
     if (!conversationId) return;
-    setIsLoadingHistory(true);
     setIsLoadingOlderMessages(false);
     setHasOlderMessages(true);
-    setMessages([]);
+
+    if (historyQuery.error) {
+      notifyAccessDenied(historyQuery.error);
+      console.error('[useChatConversation] Failed to load history:', historyQuery.error);
+      setIsLoadingHistory(false);
+      return;
+    }
+
+    if (Array.isArray(historyQuery.data)) {
+      replaceMessageCache(historyQuery.data);
+      setIsLoadingHistory(false);
+      setHasOlderMessages(historyQuery.data.length >= INITIAL_MESSAGES_LIMIT);
+      return;
+    }
+
+    if (historyQuery.isLoading || historyQuery.isFetching || !historyQuery.data) {
+      setIsLoadingHistory(isFirstHistoryLoad);
+      return;
+    }
+
+    const cachedMessages = queryClient.getQueryData<any[]>(messagesQueryKey);
+    if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
+      replaceMessageCache(cachedMessages.map((message) => normalizeRecalledMessage(message)));
+      setIsLoadingHistory(false);
+      setHasOlderMessages(cachedMessages.length >= INITIAL_MESSAGES_LIMIT);
+      return;
+    }
+
+    setIsLoadingHistory(true);
+    replaceMessageCache([]);
     let cancelled = false;
     const abortController = new AbortController();
 
@@ -342,12 +414,11 @@ export const useChatConversation = (
             return;
           }
 
-          // Backend returns newest-first, we reverse it to oldest-first so the newest appears at the bottom
-          setMessages(
-            Array.isArray(data)
-              ? [...data].reverse().map((message) => normalizeRecalledMessage(message))
-              : [],
-          );
+          // Backend returns newest-first, we keep local state oldest-first so newest stays at the bottom.
+          const normalizedMessages = Array.isArray(data)
+            ? [...data].reverse().map((message) => normalizeRecalledMessage(message))
+            : [];
+          replaceMessageCache(normalizedMessages);
 
           if (Array.isArray(data)) {
             setHasOlderMessages(data.length >= INITIAL_MESSAGES_LIMIT);
@@ -379,7 +450,21 @@ export const useChatConversation = (
       cancelled = true;
       abortController.abort();
     };
-  }, [conversationId, shouldRetryDmForbidden, wait]);
+  }, [
+    conversationId,
+    historyQuery.data,
+    historyQuery.error,
+    historyQuery.isFetching,
+    historyQuery.isLoading,
+    isFirstHistoryLoad,
+    messagesQueryKey,
+    normalizeRecalledMessage,
+    notifyAccessDenied,
+    queryClient,
+    replaceMessageCache,
+    shouldRetryDmForbidden,
+    wait,
+  ]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!conversationId || isLoadingHistory || isLoadingOlderMessages || !hasOlderMessages) {
@@ -407,7 +492,7 @@ export const useChatConversation = (
         ? [...older].reverse().map((message) => normalizeRecalledMessage(message))
         : [];
 
-      setMessages((prev) => {
+      updateMessageCache((prev) => {
         if (!incoming.length) {
           return prev;
         }
@@ -428,7 +513,15 @@ export const useChatConversation = (
     } finally {
       setIsLoadingOlderMessages(false);
     }
-  }, [conversationId, hasOlderMessages, isLoadingHistory, isLoadingOlderMessages, messages, normalizeRecalledMessage]);
+  }, [
+    conversationId,
+    hasOlderMessages,
+    isLoadingHistory,
+    isLoadingOlderMessages,
+    messages,
+    normalizeRecalledMessage,
+    updateMessageCache,
+  ]);
 
   // ── 2. Socket: join room + real-time listeners ────────────────────────────
   useEffect(() => {
@@ -495,7 +588,7 @@ export const useChatConversation = (
     // with payload: ChatMessageCreatedEvent { message: MessageItem, ... }
     const onMessageCreated = (event: ChatMessageCreatedEvent) => {
       if (mounted && event?.message) {
-        setMessages(prev => {
+        updateMessageCache(prev => {
           const next = prev.filter((message) => {
             if (message.id === event.message.id) {
               return false;
@@ -615,7 +708,7 @@ export const useChatConversation = (
     // Server emits CHAT_SOCKET_EVENTS.MESSAGE_UPDATED = "message.updated"
     const onMessageUpdated = (event: ChatMessageUpdatedEvent) => {
       if (mounted && event?.message) {
-        setMessages((prev) =>
+        updateMessageCache((prev) =>
           prev.map((m) => {
             if (m.id !== event.message.id) {
               return m;
@@ -645,7 +738,7 @@ export const useChatConversation = (
     const onMessageDeleted = (event: ChatMessageDeletedEvent) => {
       if (mounted && event?.messageId) {
         const occurredAt = event.occurredAt || new Date().toISOString();
-        setMessages((prev) =>
+        updateMessageCache((prev) =>
           prev.map((m) =>
             m.id === event.messageId
               ? normalizeRecalledMessage(
@@ -690,7 +783,18 @@ export const useChatConversation = (
       socketClient.off('connect', onSocketConnect);
       socketClient.off('disconnect', onSocketDisconnect);
     };
-  }, [conversationId, notifyAccessDenied, shouldRetryDmForbidden, wait, currentUserId, normalizePresenceState]);
+  }, [
+    conversationId,
+    currentUserId,
+    logRecallDebug,
+    mergePresenceWithGrace,
+    normalizePresenceState,
+    normalizeRecalledMessage,
+    notifyAccessDenied,
+    shouldRetryDmForbidden,
+    updateMessageCache,
+    wait,
+  ]);
 
   // ── 3. Send message ───────────────────────────────────────────────────────
   const sendMessage = useCallback(async (
@@ -718,9 +822,10 @@ export const useChatConversation = (
         sentAt: new Date().toISOString(),
         deletedAt: null,
         clientMessageId,
-        isOptimistic: true
+        isOptimistic: true,
+        sendStatus: 'sending',
       };
-      setMessages(prev => [...prev, optimisticMsg]);
+      updateMessageCache(prev => [...prev, optimisticMsg]);
     }
 
     try {
@@ -761,17 +866,33 @@ export const useChatConversation = (
       );
 
       if (created?.id || created?.messageId) {
-        setMessages((prev) => {
+        updateMessageCache((prev) => {
           const withoutOptimistic = prev.filter((m) => m.id !== clientMessageId && m.clientMessageId !== clientMessageId);
           return [...withoutOptimistic, normalizeRecalledMessage(created)];
         });
       }
     } catch (e) {
       console.error('[useChatConversation] Send message failed:', e);
-      // Remove optimistic message when both realtime and REST fallback fail.
-      setMessages(prev => prev.filter(m => m.id !== clientMessageId));
+      updateMessageCache(prev =>
+        prev.map((message) =>
+          message.id === clientMessageId || message.clientMessageId === clientMessageId
+            ? {
+                ...message,
+                isOptimistic: false,
+                sendStatus: 'failed',
+                errorMessage: (e as Error)?.message || 'Send failed',
+              }
+            : message,
+        ),
+      );
     }
-  }, [conversationId, isReady, currentUser, normalizeRecalledMessage]);
+  }, [
+    conversationId,
+    currentUser,
+    isReady,
+    normalizeRecalledMessage,
+    updateMessageCache,
+  ]);
 
   const createClientMessageId = useCallback(
     () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -788,7 +909,8 @@ export const useChatConversation = (
 
     const fetchOnce = async () => {
       try {
-        const latest = messages[messages.length - 1];
+        const latestMessages = messagesRef.current;
+        const latest = latestMessages[latestMessages.length - 1];
         const after = latest?.sentAt || latest?.createdAt;
         const data = await ApiClient.get<MessageItem[]>(
           `/conversations/${encodeURIComponent(conversationId)}/messages`,
@@ -806,7 +928,7 @@ export const useChatConversation = (
           return;
         }
 
-        setMessages((prev) => {
+        updateMessageCache((prev) => {
           const map = new Map<string, any>(prev.map((item) => [String(item?.id || ''), item]));
           for (const message of data) {
             const key = String(message?.id || '');
@@ -832,7 +954,7 @@ export const useChatConversation = (
     return () => {
       cancelled = true;
     };
-  }, [conversationId, isReady, normalizeRecalledMessage]);
+  }, [conversationId, isReady, normalizeRecalledMessage, updateMessageCache]);
 
   // ── 3.1 Upload and Send Media ─────────────────────────────────────────────
   const sendMedia = useCallback(async (
@@ -944,12 +1066,12 @@ export const useChatConversation = (
       );
 
       // Hide only on current client timeline.
-      setMessages((prev) => prev.filter((message) => message.id !== messageId));
+      updateMessageCache((prev) => prev.filter((message) => message.id !== messageId));
     } catch (e) {
       console.error('[useChatConversation] Hide message failed:', e);
       throw e;
     }
-  }, [conversationId, isReady]);
+  }, [conversationId, isReady, updateMessageCache]);
 
   // Backward compatibility for existing callsites.
   const deleteMessage = recallMessage;

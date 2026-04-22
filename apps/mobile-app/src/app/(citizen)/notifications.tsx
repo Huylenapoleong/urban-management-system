@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import Header from "@/components/Header";
 import colors from "@/constants/colors";
 import { listConversations } from "@/services/api/conversation.api";
 import { listReports } from "@/services/api/report.api";
 import type { ConversationSummary, ReportItem } from "@urban/shared-types";
+import { ListSkeleton } from "@/components/skeleton/Skeleton";
 
 type NotificationCard = {
   id: string;
@@ -84,7 +85,7 @@ export default function NotificationsPage() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Header title="Notifications" subtitle="Important updates at a glance" />
       {loading ? (
-        <ActivityIndicator style={styles.loader} size="large" color={colors.primary} />
+        <ListSkeleton count={2} />
       ) : error ? (
         <Text style={styles.error}>{error}</Text>
       ) : (

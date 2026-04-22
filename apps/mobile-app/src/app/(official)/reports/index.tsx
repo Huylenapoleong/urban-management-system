@@ -1,24 +1,29 @@
 import React, { useMemo, useState } from 'react';
 import { View, FlatList, StyleSheet } from 'react-native';
-import { ActivityIndicator, SegmentedButtons, Surface, Text, useTheme } from 'react-native-paper';
+import { SegmentedButtons, Surface, Text, useTheme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { isSameProvince, isSameWard } from '@urban/shared-utils';
 import { useReports } from '../../../hooks/shared/useReports';
 import { ReportCard } from '../../../components/shared/ReportCard';
 import { useAuth } from '../../../providers/AuthProvider';
+import { CardListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
+import { prefetchReport } from '@/services/prefetch';
 
 export default function OfficialReportsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const theme = useTheme();
   const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<string>('');
 
-  const { data: reports, isLoading, error, refetch } = useReports({
+  const { data: reports, isLoading, isFetching, isRefetching, error, refetch } = useReports({
     status: statusFilter || undefined,
     assignedToMe: true,
     locationCode: user?.locationCode,
   });
+  const { isFirstLoad, isRefreshing } = useSkeletonQuery({ data: reports, isLoading, isFetching, isRefetching });
 
   const scopedReports = useMemo(() => {
     const source = Array.isArray(reports) ? reports : [];
@@ -64,6 +69,7 @@ export default function OfficialReportsScreen() {
   }, [user?.role]);
 
   const handlePress = (id: string) => {
+    void prefetchReport(queryClient, id);
     router.push(`/(official)/reports/${id}` as any);
   };
 
@@ -123,17 +129,20 @@ export default function OfficialReportsScreen() {
         </Surface>
       </View>
 
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator animating size="large" color={theme.colors.primary} />
-        </View>
+      {isFirstLoad ? (
+        <CardListSkeleton count={5} />
       ) : (
         <FlatList
           data={scopedReports}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => <ReportCard report={item} onPress={handlePress} />}
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefreshing}
+          removeClippedSubviews
+          initialNumToRender={8}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          updateCellsBatchingPeriod={50}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={

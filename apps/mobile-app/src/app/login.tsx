@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, ImageBackground, StatusBar, Pressable } from 'react-native';
+import { View, StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import { Text, TextInput, Button, Surface, HelperText, Portal, Modal } from 'react-native-paper';
 import { useAuth } from '../providers/AuthProvider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+const LOGIN_HERO_IMAGE =
+  'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop';
 
 export default function LoginScreen() {
   const { login, requestUnlockAccountOtp, confirmUnlockAccount } = useAuth();
@@ -79,16 +82,21 @@ export default function LoginScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       
-      <ImageBackground 
-        source={{ uri: 'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop' }} 
-        style={styles.headerImage}
-      >
+      <View style={styles.headerImage}>
+        <Image
+          source={{ uri: LOGIN_HERO_IMAGE }}
+          style={styles.headerPhoto}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+          transition={180}
+        />
         <View style={styles.headerOverlay}>
           <MaterialCommunityIcons name="city-variant-outline" size={60} color="#fff" style={styles.logo} />
           <Text style={styles.brandTitle}>URBAN{'\n'}MANAGEMENT</Text>
           <Text style={styles.brandSubtitle}>Hệ thống vận hành Đô thị Thông minh</Text>
         </View>
-      </ImageBackground>
+      </View>
 
       <KeyboardAvoidingView 
         style={styles.keyboardView}
@@ -150,7 +158,6 @@ export default function LoginScreen() {
           <Button 
             mode="contained" 
             onPress={handleLogin} 
-            loading={loading}
             disabled={loading}
             style={styles.loginButton}
             contentStyle={styles.buttonContent}
@@ -209,7 +216,6 @@ export default function LoginScreen() {
               <Button 
                 mode="contained" 
                 onPress={handleRequestUnlock} 
-                loading={unlockLoading}
                 disabled={unlockLoading}
                 buttonColor="#1976D2"
                 style={styles.unlockBtn}
@@ -256,7 +262,6 @@ export default function LoginScreen() {
               <Button 
                 mode="contained" 
                 onPress={handleConfirmUnlock} 
-                loading={unlockLoading}
                 disabled={unlockLoading}
                 buttonColor="#1976D2"
                 style={styles.unlockBtn}
@@ -286,7 +291,8 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f7fa' },
-  headerImage: { width: '100%', height: 350, backgroundColor: '#024285' },
+  headerImage: { width: '100%', height: 350, backgroundColor: '#024285', overflow: 'hidden' },
+  headerPhoto: { ...StyleSheet.absoluteFillObject },
   headerOverlay: { flex: 1, backgroundColor: 'rgba(0,35,90,0.65)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
   logo: { marginBottom: 16 },
   brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '900', letterSpacing: 2, textAlign: 'center', lineHeight: 38 },

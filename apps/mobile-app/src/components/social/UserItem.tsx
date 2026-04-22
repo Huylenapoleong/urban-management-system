@@ -12,7 +12,7 @@ interface UserItemProps {
   actionLoading?: boolean;
 }
 
-export function UserItem({ user, onPress, onAction, actionLoading = false }: UserItemProps) {
+function UserItemComponent({ user, onPress, onAction, actionLoading = false }: UserItemProps) {
   const theme = useTheme();
   
   // Type guards and data normalization
@@ -60,7 +60,7 @@ export function UserItem({ user, onPress, onAction, actionLoading = false }: Use
 
     if (relationState === 'INCOMING_REQUEST') {
       return (
-        <Button mode="contained" compact onPress={onAction} loading={actionLoading} style={styles.actionBtn}>
+        <Button mode="contained" compact onPress={onAction} disabled={actionLoading} style={styles.actionBtn}>
           Chấp nhận
         </Button>
       );
@@ -72,7 +72,7 @@ export function UserItem({ user, onPress, onAction, actionLoading = false }: Use
           mode="outlined" 
           compact 
           onPress={onAction} 
-          loading={actionLoading} 
+          disabled={actionLoading}
           style={styles.actionBtn}
           icon="account-plus-outline"
         >
@@ -114,6 +114,8 @@ export function UserItem({ user, onPress, onAction, actionLoading = false }: Use
     </Pressable>
   );
 }
+
+export const UserItem = React.memo(UserItemComponent);
 
 const styles = StyleSheet.create({
   container: {

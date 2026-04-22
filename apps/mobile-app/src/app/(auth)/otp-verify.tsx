@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable } from 'react-native';
-import { Text, Surface, Button, TextInput, useTheme, ActivityIndicator } from 'react-native-paper';
+import { Text, Surface, Button, TextInput, useTheme } from 'react-native-paper';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../providers/AuthProvider';
 
@@ -104,7 +104,6 @@ export default function OtpVerifyScreen() {
           <Button
             mode="contained"
             onPress={handleVerify}
-            loading={loading}
             disabled={loading || otp.length !== 6}
             style={styles.button}
           >

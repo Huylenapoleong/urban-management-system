@@ -319,7 +319,6 @@ export default function ForgotPasswordScreen() {
                 <Button 
                   mode="contained" 
                   onPress={handleRequestOtp} 
-                  loading={loading}
                   disabled={loading}
                   style={styles.actionButton}
                   contentStyle={styles.actionButtonContent}
@@ -400,7 +399,6 @@ export default function ForgotPasswordScreen() {
                 <Button 
                   mode="contained" 
                   onPress={handleFinalReset} 
-                  loading={loading}
                   disabled={loading}
                   style={styles.actionButton}
                   contentStyle={styles.actionButtonContent}

@@ -7,6 +7,8 @@ export const useUserSearch = (query: string) => {
     queryKey: ['users', 'search', query],
     queryFn: () => ApiClient.get('/users/discover', { q: query }),
     enabled: query.length >= 2,
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 
@@ -14,6 +16,8 @@ export const useUserDiscovery = () => {
   return useQuery<UserDirectoryItem[]>({
     queryKey: ['users', 'discover'],
     queryFn: () => ApiClient.get('/users/discover'),
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 
@@ -21,6 +25,8 @@ export const useFriends = () => {
   return useQuery<UserFriendItem[]>({
     queryKey: ['users', 'me', 'friends'],
     queryFn: () => ApiClient.get('/users/me/friends'),
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 
@@ -28,6 +34,8 @@ export const useFriendRequests = () => {
   return useQuery<UserFriendRequestItem[]>({
     queryKey: ['users', 'me', 'friend-requests'],
     queryFn: () => ApiClient.get('/users/me/friend-requests'),
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 
@@ -88,6 +96,8 @@ export const useUserPresence = (userId: string) => {
   return useQuery<{ isActive: boolean; lastSeenAt?: string }>({
     queryKey: ['users', userId, 'presence'],
     queryFn: () => ApiClient.get(`/users/${userId}/presence`),
-    refetchInterval: 30000, // Refetch every 30s
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: false,
   });
 };

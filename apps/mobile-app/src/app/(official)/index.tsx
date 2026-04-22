@@ -1,24 +1,33 @@
 import React from 'react';
-import { View, ScrollView, StyleSheet, ImageBackground, StatusBar, Pressable } from 'react-native';
-import { Text, Button, useTheme, Surface, IconButton, ActivityIndicator } from 'react-native-paper';
+import { View, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
+import { Image } from 'expo-image';
+import { Text, Button, useTheme, Surface, IconButton } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useReports } from '../../hooks/shared/useReports';
 import { useAuth } from '../../providers/AuthProvider';
 import { useProfile } from '../../hooks/shared/useProfile';
 import CitizenReportCard from '../../components/shared/CitizenReportCard';
 import { isSameProvince, isSameWard } from '@urban/shared-utils';
+import { CardListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
+import { prefetchReport } from '@/services/prefetch';
+
+const DASHBOARD_HERO_IMAGE =
+  'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop';
 
 export default function OfficialDashboardScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const { data: profile } = useProfile();
 
   // Fetch recent reports to simulate statistics and showcase lists
-  const { data: reports, isLoading } = useReports({
+  const { data: reports, isLoading, isFetching, isRefetching } = useReports({
     locationCode: user?.locationCode,
   });
+  const { isFirstLoad } = useSkeletonQuery({ data: reports, isLoading, isFetching, isRefetching });
 
   const scopedReports = React.useMemo(() => {
     const source = Array.isArray(reports) ? reports : [];
@@ -61,11 +70,15 @@ export default function OfficialDashboardScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         
         {/* Hero Header */}
-        <ImageBackground 
-          source={{ uri: 'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop' }} 
-          style={styles.heroBackground}
-          imageStyle={{ opacity: 0.8 }}
-        >
+        <View style={styles.heroBackground}>
+          <Image
+            source={{ uri: DASHBOARD_HERO_IMAGE }}
+            style={styles.heroImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+            transition={180}
+          />
           <View style={styles.heroOverlay}>
             <View style={styles.headerContent}>
               <View>
@@ -77,7 +90,7 @@ export default function OfficialDashboardScreen() {
               </Surface>
             </View>
           </View>
-        </ImageBackground>
+        </View>
 
         {/* Stats Section */}
         <View style={styles.statsContainer}>
@@ -113,16 +126,22 @@ export default function OfficialDashboardScreen() {
             <Button mode="text" labelStyle={{ fontWeight: 'bold' }} onPress={() => router.push('/(official)/reports')}>XEM TẤT CẢ</Button>
           </View>
 
-          {isLoading ? (
-            <ActivityIndicator animating size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
+          {isFirstLoad ? (
+            <CardListSkeleton count={3} />
           ) : (
             scopedReports.slice(0, 4).map((item) => (
-              <Pressable key={item.id} onPress={() => router.push(`/(official)/reports/${item.id}` as any)}>
+              <Pressable
+                key={item.id}
+                onPress={() => {
+                  void prefetchReport(queryClient, item.id);
+                  router.push(`/(official)/reports/${item.id}` as any);
+                }}
+              >
                 <CitizenReportCard report={item as any} />
               </Pressable>
             ))
           )}
-          {scopedReports.length === 0 && !isLoading && (
+          {scopedReports.length === 0 && !isFirstLoad && (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons name="check-decagram" size={48} color="#4caf50" />
               <Text variant="bodyLarge" style={{ color: '#666', marginTop: 12 }}>Tuyệt vời! Khu vực hiện tại không có sự cố nào.</Text>
@@ -136,7 +155,8 @@ export default function OfficialDashboardScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  heroBackground: { width: '100%', height: 200, backgroundColor: '#024285' },
+  heroBackground: { width: '100%', height: 200, backgroundColor: '#024285', overflow: 'hidden' },
+  heroImage: { ...StyleSheet.absoluteFillObject, opacity: 0.8 },
   heroOverlay: { flex: 1, backgroundColor: 'rgba(0,35,90,0.6)', paddingTop: 50, paddingHorizontal: 24, justifyContent: 'center' },
   headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   greetingText: { color: 'rgba(255,255,255,0.9)', fontSize: 16, marginBottom: 4 },

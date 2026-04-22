@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
-import { CallState, CallEndedSummary } from '../hooks/shared/useWebRTC';
-import { MediaStream } from '../hooks/shared/WebRTCShim';
+import type { CallState, CallEndedSummary } from '../hooks/shared/useWebRTC';
+import type { MediaStream } from '../hooks/shared/WebRTCShim';
 
 export interface WebRTCContextValue {
   callState: CallState;

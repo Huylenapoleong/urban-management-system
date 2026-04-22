@@ -34,8 +34,8 @@ export const useProfile = () => {
   return useQuery<UserProfile>({
     queryKey: ['profile', 'me'],
     queryFn: ({ signal }) => ApiClient.get<UserProfile>('/users/me', undefined, { signal }),
-    staleTime: 3 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 };
 
@@ -65,8 +65,8 @@ export const useAvatarLibrary = () => {
     queryKey: ['uploads', 'avatar-library'],
     queryFn: ({ signal }) =>
       ApiClient.get<AvatarLibraryItem[]>('/uploads/media', { target: 'AVATAR' }, { signal }),
-    staleTime: 2 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 };
 

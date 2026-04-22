@@ -1,10 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, Image, ScrollView, Alert, Share } from 'react-native';
-import { Text, TextInput, IconButton, Appbar, ActivityIndicator, Avatar, Portal, Modal, Button } from 'react-native-paper';
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, ScrollView, Alert, Share } from 'react-native';
+import { Image } from 'expo-image';
+import { Text, TextInput, IconButton, Appbar, Avatar, Portal, Modal, Button } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, useSegments } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
-import { Audio, ResizeMode, Video } from 'expo-av';
 import { useChatConversation } from '../../../hooks/shared/useChatConversation';
 import { useAuth } from '../../../providers/AuthProvider';
 import { useWebRTCContext } from '../../../providers/WebRTCContext';
@@ -19,6 +17,7 @@ import { ChatMediaPanels } from './_components/ChatMediaPanels';
 import { GroupInfoModal } from './_components/GroupInfoModal';
 import { InviteFriendsModal } from './_components/InviteFriendsModal';
 import { uploadMedia } from '../../../services/api/upload.api';
+import { MessageListSkeleton, SkeletonInline, SkeletonMessageBubble } from '@/components/skeleton/Skeleton';
 
 const OFFICIAL_CHAT_PRIMARY = '#1f3e68';
 const OFFICIAL_CHAT_TEXT = '#ffffff';
@@ -41,6 +40,11 @@ const OFFICIAL_CHAT_COLORS = {
   border: `${OFFICIAL_CHAT_PRIMARY}2e`,
   overlay: `${OFFICIAL_CHAT_PRIMARY}99`,
 };
+
+const LazyVideo = React.lazy(async () => {
+  const module = await import('expo-av');
+  return { default: module.Video as React.ComponentType<any> };
+});
 
 type MessageWithLegacyMedia = {
   attachmentUrl?: string | null;
@@ -165,6 +169,7 @@ const MemoMessageWrapper = React.memo(
     );
   }
 );
+MemoMessageWrapper.displayName = 'MemoMessageWrapper';
 
 export default function OfficialChatScreen() {
   const { id: conversationId } = useLocalSearchParams<{ id: string }>();
@@ -263,7 +268,7 @@ export default function OfficialChatScreen() {
   };
 
   const flatListRef = useRef<FlatList>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingRef = useRef<any>(null);
   
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [editingMessage, setEditingMessage] = useState<any>(null);
@@ -333,6 +338,9 @@ export default function OfficialChatScreen() {
     sendTyping,
     typingUsers,
     markRead,
+    hasOlderMessages,
+    isLoadingOlderMessages,
+    loadOlderMessages,
     deleteMessage,
     updateMessage,
     forwardMessage,
@@ -408,6 +416,7 @@ export default function OfficialChatScreen() {
       return;
     }
 
+    const ImagePicker = await import('expo-image-picker');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -638,6 +647,7 @@ export default function OfficialChatScreen() {
 
   // ── Media Handlers ────────────────────────────────────────────────────────
   const pickImage = async () => {
+    const ImagePicker = await import('expo-image-picker');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: false,
@@ -665,6 +675,7 @@ export default function OfficialChatScreen() {
   };
 
   const takePhoto = async () => {
+    const ImagePicker = await import('expo-image-picker');
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       quality: 0.8,
@@ -683,6 +694,7 @@ export default function OfficialChatScreen() {
   };
 
   const pickVideo = async () => {
+    const ImagePicker = await import('expo-image-picker');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['videos'],
       allowsEditing: false,
@@ -710,6 +722,7 @@ export default function OfficialChatScreen() {
   };
 
   const takeVideo = async () => {
+    const ImagePicker = await import('expo-image-picker');
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['videos'],
       quality: 0.8,
@@ -736,6 +749,7 @@ export default function OfficialChatScreen() {
 
   const pickDocument = async () => {
     try {
+      const DocumentPicker = await import('expo-document-picker');
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
         multiple: true,
@@ -815,6 +829,7 @@ export default function OfficialChatScreen() {
 
   const startRecording = async () => {
     try {
+      const { Audio } = await import('expo-av');
       await Audio.requestPermissionsAsync();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
@@ -1022,7 +1037,14 @@ export default function OfficialChatScreen() {
 
       return (
         <TouchableOpacity activeOpacity={0.9} onPress={() => setFullscreenMedia({ uri: attachmentUrl, type: 'image' })}>
-          <Image source={{ uri: attachmentUrl }} style={styles.mediaImage} resizeMode="cover" />
+          <Image
+            source={{ uri: attachmentUrl }}
+            style={styles.mediaImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+            transition={160}
+          />
         </TouchableOpacity>
       );
     }
@@ -1039,14 +1061,16 @@ export default function OfficialChatScreen() {
 
       return (
         <TouchableOpacity style={styles.mediaVideo} activeOpacity={0.85} onPress={() => setFullscreenMedia({ uri: attachmentUrl, type: 'video' })}>
-          <Video
-            source={{ uri: attachmentUrl }}
-            style={styles.mediaVideoPlayer}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay
-            isMuted
-            isLooping
-          />
+          <React.Suspense fallback={<View style={styles.mediaVideoPlayer} />}>
+            <LazyVideo
+              source={{ uri: attachmentUrl }}
+              style={styles.mediaVideoPlayer}
+              resizeMode="cover"
+              shouldPlay
+              isMuted
+              isLooping
+            />
+          </React.Suspense>
           <View pointerEvents="none" style={styles.mediaVideoOverlay}>
             <IconButton icon="arrow-expand" iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} size={24} />
           </View>
@@ -1318,14 +1342,7 @@ export default function OfficialChatScreen() {
         conversationDisplayName={convInfo?.groupName || (isGroup ? 'Nhóm Trò Chuyện' : (knownUsers[decodedId?.replace('dm:', '') || ''] || 'Tin nhắn'))}
         subtitleText={getPresenceSubtitle()}
         isPeerOnline={!isGroup && presenceByUser[String(decodedId?.replace('dm:', ''))]?.isActive}
-        onBack={() => {
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.location.replace('/chat');
-            return;
-          }
-
-          router.replace(chatListPath as any);
-        }}
+        onBack={() => router.replace(chatListPath as any)}
         onStartAudioCall={handleStartAudioCall}
         onStartVideoCall={handleStartVideoCall}
         onOpenInfo={() => setGroupInfoDialogVisible(true)}
@@ -1357,7 +1374,7 @@ export default function OfficialChatScreen() {
       >
         {isLoadingHistory ? (
           <View style={styles.center}>
-            <ActivityIndicator size="large" />
+            <MessageListSkeleton count={8} />
             <Text style={{ marginTop: 8, color: OFFICIAL_CHAT_COLORS.mutedOnSurface }}>Đang tải tin nhắn...</Text>
           </View>
         ) : (
@@ -1368,11 +1385,26 @@ export default function OfficialChatScreen() {
             initialNumToRender={15}
             maxToRenderPerBatch={10}
             windowSize={5}
+            updateCellsBatchingPeriod={40}
+            removeClippedSubviews={Platform.OS !== 'web'}
             keyExtractor={(item) => String(item.id)}
             renderItem={renderMessage}
+            onEndReachedThreshold={0.35}
+            onEndReached={() => {
+              if (hasOlderMessages && !isLoadingOlderMessages) {
+                void loadOlderMessages();
+              }
+            }}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             contentContainerStyle={styles.listContent}
+            ListFooterComponent={
+              isLoadingOlderMessages ? (
+                <View style={styles.loadOlderSkeleton}>
+                  <SkeletonMessageBubble />
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               <View style={[styles.emptyContainer, { transform: [{ scaleY: -1 }] }]}>
                 <Text variant="bodyMedium" style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface, textAlign: 'center' }}>
@@ -1664,7 +1696,8 @@ export default function OfficialChatScreen() {
           </ScrollView>
           <View style={styles.forwardActions}>
             <Button mode="text" onPress={() => setForwardDialogVisible(false)} disabled={isForwarding}>Hủy</Button>
-            <Button mode="contained" onPress={submitForward} loading={isForwarding} disabled={isForwarding || !forwardTargetIds.length}>
+            {isForwarding ? <SkeletonInline width={56} height={12} /> : null}
+            <Button mode="contained" onPress={submitForward} disabled={isForwarding || !forwardTargetIds.length}>
               Gửi
             </Button>
           </View>
@@ -1729,6 +1762,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { padding: 16, paddingBottom: 32 },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 300 },
+  loadOlderSkeleton: { paddingVertical: 8, transform: [{ scaleY: -1 }] },
   messageWrapper: { flexDirection: 'row', marginBottom: 12, maxWidth: '94%' },
   messageWrapperLeft: { alignSelf: 'flex-start' },
   messageWrapperRight: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },

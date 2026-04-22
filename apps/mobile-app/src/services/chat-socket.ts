@@ -1,29 +1,14 @@
-import { io, type Socket } from "socket.io-client";
-import { CHAT_SOCKET_EVENTS, CHAT_SOCKET_NAMESPACE } from "@urban/shared-constants";
+import type { Socket } from "socket.io-client";
+import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type {
   ChatConversationCommandPayload,
   ChatConversationSubscription,
   ChatSocketAck,
 } from "@urban/shared-types";
 import { readAccessToken as readStoredAccessToken } from "./api/client";
+import { socketClient } from "@/lib/socket-client";
 
 type ChatSocketInstance = Socket;
-
-let chatSocket: ChatSocketInstance | undefined;
-let chatSocketToken: string | undefined;
-
-function getApiBaseUrl(): string {
-  return (
-    process.env.EXPO_PUBLIC_API_URL ||
-    process.env.API_BASE_URL ||
-    "http://localhost:3001"
-  );
-}
-
-function getSocketOrigin(): string {
-  const apiBaseUrl = getApiBaseUrl().trim();
-  return apiBaseUrl.replace(/\/api\/?$/i, "");
-}
 
 async function requireAccessToken(): Promise<string> {
   const token = await readStoredAccessToken();
@@ -36,51 +21,22 @@ async function requireAccessToken(): Promise<string> {
 }
 
 export async function connectChatSocket(): Promise<ChatSocketInstance> {
-  const token = await requireAccessToken();
-  const bearerToken = `Bearer ${token}`;
+  await requireAccessToken();
+  await socketClient.connect();
 
-  if (!chatSocket) {
-    chatSocket = io(`${getSocketOrigin()}${CHAT_SOCKET_NAMESPACE}`, {
-      autoConnect: false,
-      auth: {
-        token: bearerToken,
-      },
-      transports: ["websocket"],
-    });
-    chatSocketToken = bearerToken;
-  } else if (chatSocketToken !== bearerToken) {
-    chatSocket.removeAllListeners();
-    chatSocket.disconnect();
-    chatSocket.auth = {
-      token: bearerToken,
-    };
-    chatSocketToken = bearerToken;
-  } else {
-    chatSocket.auth = {
-      token: bearerToken,
-    };
+  if (!socketClient.socket) {
+    throw new Error("Socket is not initialized.");
   }
 
-  if (!chatSocket.connected) {
-    chatSocket.connect();
-  }
-
-  return chatSocket;
+  return socketClient.socket;
 }
 
 export function getChatSocket(): ChatSocketInstance | undefined {
-  return chatSocket;
+  return socketClient.socket ?? undefined;
 }
 
 export function disconnectChatSocket(): void {
-  if (!chatSocket) {
-    return;
-  }
-
-  chatSocket.removeAllListeners();
-  chatSocket.disconnect();
-  chatSocket = undefined;
-  chatSocketToken = undefined;
+  socketClient.disconnect();
 }
 
 export async function emitChatAck<TData>(
@@ -119,7 +75,9 @@ export async function joinConversation(
 export async function leaveConversation(
   conversationId: string,
 ): Promise<ChatSocketAck<{ conversationId: string }>> {
-  if (!chatSocket || !chatSocket.connected) {
+  const socket = getChatSocket();
+
+  if (!socket || !socket.connected) {
     return {
       success: true,
       data: { conversationId },

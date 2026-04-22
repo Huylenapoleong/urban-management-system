@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Card, Text, Chip, useTheme } from 'react-native-paper';
+import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ReportItem } from '@urban/shared-types';
 import { convertToS3Url } from '@/constants/s3';
@@ -17,7 +18,7 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }>
   REJECTED: { bg: '#e0e0e0', text: '#616161', label: 'TỪ CHỐI' },
 };
 
-export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
+const ReportCardComponent: React.FC<ReportCardProps> = ({ report, onPress }) => {
   const theme = useTheme();
   const statusConfig = STATUS_CONFIG[report.status] || { bg: '#f5f5f5', text: '#666', label: report.status };
   const coverImageUrl = report.mediaUrls?.[0] ? convertToS3Url(report.mediaUrls[0]) : null;
@@ -29,7 +30,16 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
       mode="elevated" 
       elevation={1}
     >
-      {coverImageUrl ? <Card.Cover source={{ uri: coverImageUrl }} style={styles.coverImage} /> : null}
+      {coverImageUrl ? (
+        <Image
+          source={{ uri: coverImageUrl }}
+          style={styles.coverImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+          transition={160}
+        />
+      ) : null}
       <Card.Content style={{ padding: 16 }}>
         <View style={styles.header}>
           <Text variant="titleMedium" style={styles.title} numberOfLines={1}>
@@ -68,6 +78,8 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report, onPress }) => {
     </Card>
   );
 };
+
+export const ReportCard = React.memo(ReportCardComponent);
 
 const styles = StyleSheet.create({
   card: {

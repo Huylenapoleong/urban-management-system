@@ -2,7 +2,6 @@ import { useAuth } from "@/providers/AuthProvider";
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
 import {
-  ActivityIndicator,
   Avatar,
   Button,
   Card,
@@ -28,6 +27,7 @@ import {
 } from '@/hooks/shared/useProfile';
 import { OtpVerificationModal } from '@/components/auth/OtpVerificationModal';
 import { convertToS3Url } from '@/constants/s3';
+import { ListSkeleton, Skeleton, SkeletonProfile } from '@/components/skeleton/Skeleton';
 import { readTempCache, writeTempCache } from '@/lib/page-temp-cache';
 
 const CHAT_BUBBLE_SETTING_KEY = "citizen.chatBubble.enabled";
@@ -436,7 +436,7 @@ export default function ProfilePage() {
   if (isLoading) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" />
+        <SkeletonProfile />
       </View>
     );
   }
@@ -461,7 +461,7 @@ export default function ProfilePage() {
             )}
             {isUploading ? (
               <View style={[StyleSheet.absoluteFill, styles.avatarOverlay]}>
-                <ActivityIndicator color="#fff" />
+                <Skeleton width={28} height={28} radius={14} />
               </View>
             ) : null}
             <IconButton
@@ -602,7 +602,6 @@ export default function ProfilePage() {
               mode="outlined"
               icon="account-off-outline"
               onPress={handleRemoveCurrentAvatar}
-              loading={isRemovingAvatar}
               disabled={isRemovingAvatar || !currentAvatarKey}
               style={styles.avatarActionButton}
             >
@@ -615,7 +614,7 @@ export default function ProfilePage() {
           <Card.Content style={styles.cardContent}>
             <View style={styles.infoHeader}>
               <Text variant="titleMedium" style={styles.infoTitle}>Thiết bị đang đăng nhập</Text>
-              <Button mode="text" onPress={() => void fetchSessions()} loading={loadingSessions} compact>
+              <Button mode="text" onPress={() => void fetchSessions()} disabled={loadingSessions} compact>
                 Làm mới
               </Button>
             </View>
@@ -772,7 +771,7 @@ export default function ProfilePage() {
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setEditVisible(false)}>Hủy</Button>
-            <Button mode="contained" onPress={handleSaveEdit} loading={isUpdating}>
+            <Button mode="contained" onPress={handleSaveEdit} disabled={isUpdating}>
               Lưu thay đổi
             </Button>
           </Dialog.Actions>
@@ -862,7 +861,7 @@ export default function ProfilePage() {
           <Dialog.Title>Thư viện avatar</Dialog.Title>
           <Dialog.Content>
             {isLoadingAvatarLibrary ? (
-              <ActivityIndicator />
+              <ListSkeleton count={4} />
             ) : avatarLibrary.length === 0 ? (
               <Text style={styles.listDesc}>Chưa có avatar nào trong thư viện.</Text>
             ) : (
@@ -887,7 +886,6 @@ export default function ProfilePage() {
                           compact
                           mode={isCurrent ? 'contained' : 'text'}
                           disabled={isCurrent || isSettingAvatar}
-                          loading={!isCurrent && isSettingAvatar}
                           onPress={() => void handleSetCurrentAvatar(asset.key)}
                         >
                           {isCurrent ? 'Đang dùng' : 'Dùng ảnh này'}
@@ -897,7 +895,6 @@ export default function ProfilePage() {
                           mode="text"
                           textColor="#D32F2F"
                           disabled={isCurrent || isDeletingAvatarFile}
-                          loading={!isCurrent && isDeletingAvatarFile}
                           onPress={() => void handleDeleteAvatarFile(asset.key, isCurrent)}
                         >
                           Xóa file

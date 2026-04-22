@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  ActivityIndicator,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,6 +26,8 @@ import { listConversations } from "@/services/api/conversation.api";
 import { ApiClient } from "@/lib/api-client";
 import { listReports } from "@/services/api/report.api";
 import { readTempCache, writeTempCache } from "@/lib/page-temp-cache";
+import { CardListSkeleton, useSkeletonQuery } from "@/components/skeleton/Skeleton";
+import { prefetchConversationMessages } from "@/services/prefetch";
 
 const HOME_CACHE_KEY = 'citizen.home.snapshot';
 const HOME_CACHE_TTL_MS = 45 * 1000;
@@ -81,33 +82,36 @@ function resolveAvatarUrl(item: {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const [communityReports, setCommunityReports] = useState<ReportItem[]>([]);
   const [recentChats, setRecentChats] = useState<ConversationSummary[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<UserFriendRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const homeSnapshot = useMemo(
+    () => (communityReports.length > 0 || recentChats.length > 0 ? { communityReports, recentChats } : undefined),
+    [communityReports, recentChats],
+  );
+  const { isFirstLoad } = useSkeletonQuery({
+    data: homeSnapshot,
+    isLoading: loading,
+    isFetching: loading,
+    isRefetching: loading && Boolean(homeSnapshot),
+  });
 
   const openChatList = useCallback(() => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      window.location.assign("/chat");
-      return;
-    }
-
     router.push("/(citizen)/chat");
   }, [router]);
 
   const openChatConversation = useCallback((conversationId: string) => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      window.location.assign(`/chat/${encodeURIComponent(conversationId)}`);
-      return;
-    }
+    void prefetchConversationMessages(queryClient, conversationId);
 
     router.push({
       pathname: "/(citizen)/chat/[id]",
       params: { id: conversationId },
     });
-  }, [router]);
+  }, [queryClient, router]);
 
   const loadFriendData = useCallback(async (signal?: AbortSignal) => {
     const incomingData = await ApiClient.get<UserFriendRequestItem[]>("/users/me/friend-requests", {
@@ -123,8 +127,10 @@ export default function HomeScreen() {
     );
   }, []);
 
-  const loadData = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
+  const loadData = useCallback(async (signal?: AbortSignal, silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const [reportsData, chatsData] = await Promise.all([
@@ -162,7 +168,9 @@ export default function HomeScreen() {
       }
       setError((err as Error)?.message ?? "Không thể tải dữ liệu trang chủ");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [loadFriendData]);
 
@@ -171,6 +179,7 @@ export default function HomeScreen() {
       HOME_CACHE_KEY,
       HOME_CACHE_TTL_MS,
     );
+    const hasCached = Boolean(cached);
     if (cached) {
       setCommunityReports(cached.communityReports);
       setRecentChats(cached.recentChats);
@@ -178,7 +187,7 @@ export default function HomeScreen() {
     }
 
     const controller = new AbortController();
-    void loadData(controller.signal);
+    void loadData(controller.signal, hasCached);
 
     return () => {
       controller.abort();
@@ -189,11 +198,11 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       const controller = new AbortController();
-      void loadData(controller.signal);
+      void loadData(controller.signal, communityReports.length > 0 || recentChats.length > 0);
       return () => {
         controller.abort();
       };
-    }, [loadData])
+    }, [communityReports.length, loadData, recentChats.length])
   );
 
   const unreadMessages = useMemo(
@@ -201,11 +210,11 @@ export default function HomeScreen() {
     [recentChats],
   );
 
-  if (loading) {
+  if (isFirstLoad) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <CardListSkeleton count={4} />
+      </ScrollView>
     );
   }
 

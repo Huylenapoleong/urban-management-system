@@ -1,12 +1,12 @@
 import React from 'react';
 import {
-  ActivityIndicator,
   Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SkeletonInline } from '@/components/skeleton/Skeleton';
 
 type ConfirmDialogProps = {
   visible: boolean;
@@ -78,7 +78,7 @@ export default function ConfirmDialog({
               disabled={disableClose}
             >
               {confirmLoading ? (
-                <ActivityIndicator size="small" color="#ffffff" />
+                <SkeletonInline width={52} height={12} />
               ) : (
                 <Text style={styles.buttonSolidText}>{confirmText}</Text>
               )}

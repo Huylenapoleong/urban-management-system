@@ -328,7 +328,7 @@ export default function RegisterScreen() {
             </HelperText>
           )}
 
-          <Button mode="contained" onPress={handleRegister} loading={loading} disabled={loading} style={styles.button}>
+          <Button mode="contained" onPress={handleRegister} disabled={loading} style={styles.button}>
             Đăng ký cư dân
           </Button>
           <View style={styles.footer}>

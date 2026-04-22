@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ActivityIndicator,
   Alert,
   Platform,
   Pressable,
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
+import { CardListSkeleton } from "@/components/skeleton/Skeleton";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { REPORT_CATEGORIES, REPORT_PRIORITIES } from "@urban/shared-constants";
 import type { ImagePickerAsset } from "expo-image-picker";
@@ -429,7 +429,14 @@ export default function ReportPage() {
 
       {selectedImage ? (
         <View style={styles.previewCard}>
-          <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} contentFit="cover" />
+          <Image
+            source={{ uri: selectedImage.uri }}
+            style={styles.previewImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj" }}
+            transition={160}
+          />
           <View style={styles.previewContent}>
             <Text style={styles.previewTitle}>{selectedImage.fileName}</Text>
             <Text style={styles.previewSubtitle}>Ảnh này sẽ được upload lên hệ thống khi gửi phản ánh.</Text>
@@ -463,7 +470,7 @@ export default function ReportPage() {
       </View>
 
       {loadingReports ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} />
+        <CardListSkeleton count={3} />
       ) : reports.length > 0 ? (
         reports.map((report) => <CitizenReportCard key={report.id} report={report} />)
       ) : (

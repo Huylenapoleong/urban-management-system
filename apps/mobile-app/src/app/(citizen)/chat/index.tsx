@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, StyleSheet, Text, View, TouchableOpacity, Platform } from "react-native";
+import { FlatList, StyleSheet, Text, View, TouchableOpacity, Platform } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Avatar, Badge, Card, Divider, IconButton, Searchbar, SegmentedButtons, Portal, Modal, Button } from "react-native-paper";
 import colors from "@/constants/colors";
 import { useCitizenInbox } from "@/features/chat/citizen/useCitizenInbox";
@@ -11,6 +12,8 @@ import client from "@/services/api/client";
 import { convertToS3Url } from "@/constants/s3";
 import { socketClient } from "@/lib/socket-client";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
+import { ListSkeleton } from "@/components/skeleton/Skeleton";
+import { prefetchConversationMessages } from "@/services/prefetch";
 
 const PRESENCE_OFFLINE_GRACE_MS = 120000;
 const CITIZEN_DM_PRESENCE_CACHE: Record<string, any> = {};
@@ -216,6 +219,7 @@ const buildConversationPreferenceDelta = (
 
 export default function ChatListPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const tabBarHeight = useBottomTabBarHeight();
   const { user: currentUser } = useAuth();
   const currentUserId = String((currentUser as any)?.sub || (currentUser as any)?.id || '');
@@ -231,16 +235,13 @@ export default function ChatListPage() {
   const [presenceNowMs, setPresenceNowMs] = useState(() => Date.now());
 
   const openConversation = React.useCallback((conversationId: string) => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      window.location.replace(`/chat/${encodeURIComponent(conversationId)}`);
-      return;
-    }
+    void prefetchConversationMessages(queryClient, conversationId);
 
     router.push({
       pathname: "/(citizen)/chat/[id]",
       params: { id: conversationId },
     });
-  }, [router]);
+  }, [queryClient, router]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -645,7 +646,7 @@ export default function ChatListPage() {
         </View>
       </View>
       {loading ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} />
+        <ListSkeleton count={7} />
       ) : error ? (
         <Text style={styles.error}>{error}</Text>
       ) : (
@@ -654,6 +655,11 @@ export default function ChatListPage() {
           keyExtractor={(item) => item.conversationId}
           contentContainerStyle={{ padding: 16, paddingBottom: tabBarHeight + 24 }}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={Platform.OS !== "web"}
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={50}
           ItemSeparatorComponent={() => <Divider style={{ marginHorizontal: 16 }} />}
           renderItem={({ item }) => {
             const displayPresence = !item.isGroup

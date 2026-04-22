@@ -82,7 +82,10 @@ export class ApiClient {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
-      throw new Error(extractErrorMessage(errorData));
+      const error = new Error(extractErrorMessage(errorData));
+      (error as any).status = response.status;
+      (error as any).data = errorData;
+      throw error;
     }
 
     const data = await response.json();

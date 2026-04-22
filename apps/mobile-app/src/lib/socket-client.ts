@@ -34,6 +34,33 @@ class SocketClient {
   private connectPromise: Promise<void> | null = null;
   private isConnecting = false;
   private authToken: string | null = null;
+  private coreConnectHandler?: () => void;
+  private coreDisconnectHandler?: (reason: string) => void;
+  private coreConnectErrorHandler?: (error: Error) => void;
+  private coreReadyHandler?: (payload: any) => void;
+
+  private unbindCoreListeners() {
+    if (!this.socket) {
+      return;
+    }
+
+    if (this.coreConnectHandler) {
+      this.socket.off('connect', this.coreConnectHandler);
+      this.coreConnectHandler = undefined;
+    }
+    if (this.coreDisconnectHandler) {
+      this.socket.off('disconnect', this.coreDisconnectHandler);
+      this.coreDisconnectHandler = undefined;
+    }
+    if (this.coreConnectErrorHandler) {
+      this.socket.off('connect_error', this.coreConnectErrorHandler);
+      this.coreConnectErrorHandler = undefined;
+    }
+    if (this.coreReadyHandler) {
+      this.socket.off(CHAT_SOCKET_EVENTS.READY as string, this.coreReadyHandler);
+      this.coreReadyHandler = undefined;
+    }
+  }
 
   private bindCoreListeners(resolve: () => void, reject: (error: unknown) => void) {
     if (!this.socket) {
@@ -41,34 +68,37 @@ class SocketClient {
       return;
     }
 
-    this.socket.off('connect');
-    this.socket.off('disconnect');
-    this.socket.off('connect_error');
-    this.socket.off(CHAT_SOCKET_EVENTS.READY as string);
+    this.unbindCoreListeners();
+    const socket = this.socket;
 
-    this.socket.on('connect', () => {
+    this.coreConnectHandler = () => {
       debugLog('Socket connected:', this.socket?.id);
       this.isConnecting = false;
       this.connectPromise = null;
       resolve();
-    });
+    };
 
-    this.socket.on(CHAT_SOCKET_EVENTS.READY, (payload: any) => {
+    this.coreReadyHandler = (payload: any) => {
       debugLog('Chat Socket Ready:', payload);
-    });
+    };
 
-    this.socket.on('disconnect', (reason) => {
+    this.coreDisconnectHandler = (reason) => {
       debugLog('Socket disconnected:', reason);
       this.isConnecting = false;
       this.connectPromise = null;
-    });
+    };
 
-    this.socket.on('connect_error', (error) => {
+    this.coreConnectErrorHandler = (error) => {
       debugError('Socket connect error:', error);
       this.isConnecting = false;
       this.connectPromise = null;
       reject(error);
-    });
+    };
+
+    socket.on('connect', this.coreConnectHandler);
+    socket.on(CHAT_SOCKET_EVENTS.READY, this.coreReadyHandler);
+    socket.on('disconnect', this.coreDisconnectHandler);
+    socket.on('connect_error', this.coreConnectErrorHandler);
   }
 
   connect(): Promise<void> {
@@ -129,14 +159,41 @@ class SocketClient {
     return this.connectPromise;
   }
 
-  disconnect() {
-    if (this.socket) {
-      this.socket.removeAllListeners();
-      this.socket.disconnect();
-      this.socket = null;
+  resume() {
+    if (!this.socket || this.socket.connected) {
+      return Promise.resolve();
     }
-    this.authToken = null;
+
+    return this.connect();
+  }
+
+  pause() {
+    if (this.socket?.connected) {
+      this.socket.disconnect();
+    }
+    this.isConnecting = false;
     this.connectPromise = null;
+  }
+
+  disconnect(options: { removeListeners?: boolean; resetToken?: boolean } = {}) {
+    const removeListeners = options.removeListeners ?? true;
+    const resetToken = options.resetToken ?? true;
+
+    if (this.socket) {
+      this.unbindCoreListeners();
+      if (removeListeners) {
+        this.socket.removeAllListeners();
+      }
+      this.socket.disconnect();
+      if (removeListeners) {
+        this.socket = null;
+      }
+    }
+    if (resetToken) {
+      this.authToken = null;
+    }
+    this.connectPromise = null;
+    this.isConnecting = false;
   }
 
   emitWithAck<T = any>(event: string, payload: any): Promise<T> {

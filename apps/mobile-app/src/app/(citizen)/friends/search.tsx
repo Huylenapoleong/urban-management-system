@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, FlatList, Keyboard } from 'react-native';
-import { Text, Searchbar, Appbar, useTheme, ActivityIndicator } from 'react-native-paper';
+import { Text, Searchbar, Appbar, useTheme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUserSearch, useUserDiscovery, useSendFriendRequest } from '@/hooks/shared/useUsers';
 import { UserItem } from '@/components/social/UserItem';
+import { ListSkeleton, SkeletonInline } from '@/components/skeleton/Skeleton';
+import { prefetchConversationMessages } from '@/services/prefetch';
 
 export default function UserSearchScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   
   const { data: searchResults, isLoading: isSearching } = useUserSearch(searchQuery);
@@ -17,7 +21,12 @@ export default function UserSearchScreen() {
 
   const handleAction = async (userId: string, isFriend: boolean) => {
     if (isFriend) {
-      router.push(`/(citizen)/chat/${encodeURIComponent(`dm:${userId}`)}`);
+      const conversationId = `dm:${userId}`;
+      void prefetchConversationMessages(queryClient, conversationId);
+      router.push({
+        pathname: '/(citizen)/chat/[id]',
+        params: { id: conversationId },
+      });
       return;
     }
 
@@ -46,7 +55,6 @@ export default function UserSearchScreen() {
           placeholder="Nhập tên người dùng..."
           onChangeText={setSearchQuery}
           value={searchQuery}
-          loading={isSearching}
           style={styles.searchBar}
           elevation={1}
         />
@@ -57,14 +65,19 @@ export default function UserSearchScreen() {
           {searchQuery.length >= 2 ? 'Kết quả tìm kiếm' : 'Gợi ý kết bạn'}
         </Text>
 
+        {isSearching ? <SkeletonInline width={96} height={12} style={styles.inlineRefresh} /> : null}
+
         {isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" />
-          </View>
+          <ListSkeleton count={7} />
         ) : (
           <FlatList
             data={displayData}
             keyExtractor={(item) => item.userId}
+            removeClippedSubviews
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={7}
+            updateCellsBatchingPeriod={50}
             renderItem={({ item }) => (
               <UserItem 
                 user={item} 
@@ -116,6 +129,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingTop: 40,
+  },
+  inlineRefresh: {
+    marginLeft: 16,
+    marginBottom: 8,
   },
   listContent: {
     paddingBottom: 40,

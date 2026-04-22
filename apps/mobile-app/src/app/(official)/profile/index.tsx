@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Text, Button, Avatar, Card, List, useTheme, ActivityIndicator, IconButton, Portal, Dialog, TextInput } from 'react-native-paper';
+import { Text, Button, Avatar, Card, List, useTheme, IconButton, Portal, Dialog, TextInput } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../../providers/AuthProvider';
 import {
@@ -13,6 +13,7 @@ import {
   useUploadAvatar,
 } from '../../../hooks/shared/useProfile';
 import { convertToS3Url } from '../../../constants/s3';
+import { ListSkeleton, Skeleton, SkeletonProfile } from '@/components/skeleton/Skeleton';
 
 export default function ProfileScreen() {
   const { logout } = useAuth();
@@ -132,7 +133,7 @@ export default function ProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" />
+        <SkeletonProfile />
       </View>
     );
   }
@@ -150,7 +151,7 @@ export default function ProfileScreen() {
             )}
             {isUploading && (
               <View style={[StyleSheet.absoluteFill, styles.avatarOverlay]}>
-                <ActivityIndicator color="#fff" />
+                <Skeleton width={28} height={28} radius={14} />
               </View>
             )}
             <IconButton
@@ -222,7 +223,6 @@ export default function ProfileScreen() {
               mode="outlined"
               icon="account-off-outline"
               onPress={handleRemoveCurrentAvatar}
-              loading={isRemovingAvatar}
               disabled={isRemovingAvatar || !currentAvatarKey}
               style={styles.avatarActionButton}
             >
@@ -282,7 +282,7 @@ export default function ProfileScreen() {
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setEditVisible(false)}>Hủy</Button>
-            <Button mode="contained" onPress={handleSaveEdit} loading={isUpdating}>Lưu thay đổi</Button>
+            <Button mode="contained" onPress={handleSaveEdit} disabled={isUpdating}>Lưu thay đổi</Button>
           </Dialog.Actions>
         </Dialog>
 
@@ -290,7 +290,7 @@ export default function ProfileScreen() {
           <Dialog.Title>Thư viện avatar</Dialog.Title>
           <Dialog.Content>
             {isLoadingAvatarLibrary ? (
-              <ActivityIndicator />
+              <ListSkeleton count={4} />
             ) : avatarLibrary.length === 0 ? (
               <Text style={styles.listDesc}>Chưa có avatar nào trong thư viện.</Text>
             ) : (
@@ -315,7 +315,6 @@ export default function ProfileScreen() {
                           compact
                           mode={isCurrent ? 'contained' : 'text'}
                           disabled={isCurrent || isSettingAvatar}
-                          loading={!isCurrent && isSettingAvatar}
                           onPress={() => void handleSetCurrentAvatar(asset.key)}
                         >
                           {isCurrent ? 'Đang dùng' : 'Dùng ảnh này'}
@@ -325,7 +324,6 @@ export default function ProfileScreen() {
                           mode="text"
                           textColor="#D32F2F"
                           disabled={isCurrent || isDeletingAvatarFile}
-                          loading={!isCurrent && isDeletingAvatarFile}
                           onPress={() => void handleDeleteAvatarFile(asset.key, isCurrent)}
                         >
                           Xóa file

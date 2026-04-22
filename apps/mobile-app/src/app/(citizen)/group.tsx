@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -14,12 +13,15 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { GROUP_TYPES } from "@urban/shared-constants";
 import type { GroupMetadata } from "@urban/shared-types";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import colors from "@/constants/colors";
 import { ApiClient } from "@/lib/api-client";
 import { useAuth } from "@/providers/AuthProvider";
 import { createGroup, joinGroup, leaveGroup } from "@/services/api/group.api";
 import { readTempCache, writeTempCache } from "@/lib/page-temp-cache";
+import { ListSkeleton } from "@/components/skeleton/Skeleton";
+import { prefetchConversationMessages } from "@/services/prefetch";
 
 type GroupWithStatus = GroupMetadata & {
   joined: boolean;
@@ -71,6 +73,7 @@ const toRankTarget = (group: GroupMetadata) => normalizeText([group.groupName, g
 export default function GroupsScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [allGroups, setAllGroups] = useState<GroupMetadata[]>([]);
   const [joinedGroups, setJoinedGroups] = useState<GroupMetadata[]>([]);
   const [searchText, setSearchText] = useState("");
@@ -194,6 +197,7 @@ export default function GroupsScreen() {
         "Thành công",
         "Đã tạo nhóm PRIVATE của bạn. Chỉ thành viên mới có thể thấy và vào phòng chat này.",
       );
+      void prefetchConversationMessages(queryClient, `group:${createdGroup.id}`);
       router.push({
         pathname: "/(citizen)/chat/[id]",
         params: { id: `group:${createdGroup.id}` },
@@ -211,6 +215,7 @@ export default function GroupsScreen() {
       return;
     }
 
+    void prefetchConversationMessages(queryClient, `group:${group.id}`);
     router.push({
       pathname: "/(citizen)/chat/[id]",
       params: { id: `group:${group.id}` },
@@ -266,7 +271,7 @@ export default function GroupsScreen() {
         </View>
 
         {loading ? (
-          <ActivityIndicator style={styles.loader} size="large" color={colors.primary} />
+          <ListSkeleton count={6} />
         ) : visibleGroups.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="people-circle-outline" size={42} color={colors.textSecondary} />

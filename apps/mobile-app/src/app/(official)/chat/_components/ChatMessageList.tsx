@@ -1,6 +1,7 @@
 import React from 'react';
 import { FlatList, ScrollView, TouchableOpacity, View } from 'react-native';
-import { ActivityIndicator, IconButton, Text } from 'react-native-paper';
+import { IconButton, Text } from 'react-native-paper';
+import { MessageListSkeleton, SkeletonMessageBubble } from '@/components/skeleton/Skeleton';
 
 type ChatMessageListProps = {
   styles: any;
@@ -60,10 +61,7 @@ export function ChatMessageList({
       )}
 
       {isLoadingHistory ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-          <Text style={{ marginTop: 8, color: colors.mutedOnSurface }}>Dang tai tin nhan...</Text>
-        </View>
+        <MessageListSkeleton count={8} />
       ) : (
         <FlatList
           ref={flatListRef}
@@ -98,8 +96,7 @@ export function ChatMessageList({
           ListHeaderComponent={
             isLoadingOlderMessages ? (
               <View style={styles.loadOlderWrap}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={styles.loadOlderText}>Dang tai tin cu hon...</Text>
+                <SkeletonMessageBubble />
               </View>
             ) : null
           }

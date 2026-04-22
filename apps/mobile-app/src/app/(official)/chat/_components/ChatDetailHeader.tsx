@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, TouchableOpacity } from 'react-native';
-import { Appbar, Avatar, ActivityIndicator } from 'react-native-paper';
+import { Appbar, Avatar } from 'react-native-paper';
+import { Skeleton } from '@/components/skeleton/Skeleton';
 
 type ChatDetailHeaderProps = {
   styles: any;
@@ -56,7 +57,7 @@ export function ChatDetailHeader({
           )}
           {isUpdatingAvatar && (
             <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, justifyContent: 'center', alignItems: 'center' }}>
-               <ActivityIndicator size="small" color="#fff" />
+               <Skeleton width={20} height={20} radius={10} />
             </View>
           )}
         </TouchableOpacity>

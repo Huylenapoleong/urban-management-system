@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Modal, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform } from 'react-native';
-import { Text, Surface, Button, TextInput, useTheme, ActivityIndicator, IconButton } from 'react-native-paper';
+import { Text, Surface, Button, TextInput, useTheme, IconButton } from 'react-native-paper';
 
 interface OtpVerificationModalProps {
   visible: boolean;
@@ -121,7 +121,6 @@ export function OtpVerificationModal({
               <Button
                 mode="contained"
                 onPress={handleVerify}
-                loading={loading}
                 disabled={loading || otp.length !== 6}
                 style={styles.button}
                 contentStyle={styles.buttonContent}

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
@@ -12,6 +11,7 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import type {
   MediaAsset,
   UserDirectoryItem,
@@ -24,6 +24,8 @@ import colors from "@/constants/colors";
 import { ENV_CONFIG } from "@/constants/env";
 import { convertToS3Url } from "@/constants/s3";
 import { ApiClient } from "@/lib/api-client";
+import { ListSkeleton, SkeletonInline } from "@/components/skeleton/Skeleton";
+import { prefetchConversationMessages } from "@/services/prefetch";
 
 type FriendTab = "SUGGESTIONS" | "OUTGOING" | "FRIENDS";
 type FriendAction = "send" | "cancel" | "accept" | "reject" | "unfriend";
@@ -57,6 +59,7 @@ function resolveAvatarUrl(item: { avatarUrl?: string; avatarAsset?: MediaAsset }
 
 export default function FriendsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<FriendTab>("SUGGESTIONS");
   const [incomingRequests, setIncomingRequests] = useState<UserFriendRequestItem[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<UserFriendRequestItem[]>([]);
@@ -178,12 +181,14 @@ export default function FriendsScreen() {
 
   const handleOpenChat = useCallback(
     (userId: string) => {
+      const conversationId = `dm:${userId}`;
+      void prefetchConversationMessages(queryClient, conversationId);
       router.push({
         pathname: "/(citizen)/chat/[id]",
-        params: { id: `dm:${userId}` },
+        params: { id: conversationId },
       });
     },
-    [router],
+    [queryClient, router],
   );
 
   const handleFriendAction = useCallback(
@@ -307,7 +312,7 @@ export default function FriendsScreen() {
             />
           </View>
 
-          {searching ? <ActivityIndicator style={styles.loader} color={colors.primary} /> : null}
+          {searching ? <SkeletonInline width={96} height={12} style={styles.loader} /> : null}
           {!searching && suggestions.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>Chưa có gợi ý phù hợp</Text>
@@ -392,8 +397,8 @@ export default function FriendsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={styles.container}>
+        <ListSkeleton count={7} />
       </View>
     );
   }

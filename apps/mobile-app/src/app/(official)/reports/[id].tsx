@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Alert, SafeAreaView } from 'react-native';
-import { Text, Chip, Button, ActivityIndicator, useTheme, Surface, Divider, Dialog, Portal, RadioButton, Appbar, List, TextInput, Avatar } from 'react-native-paper';
+import { Text, Chip, Button, useTheme, Surface, Divider, Dialog, Portal, RadioButton, Appbar, List, TextInput, Avatar } from 'react-native-paper';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useReport, useUpdateReportStatus, useLinkedConversations, useAssignOfficer, useReportAudit } from '../../../hooks/shared/useReports';
 import { useUserSearch } from '../../../hooks/shared/useUsers';
 import { convertToS3Url } from '@/constants/s3';
+import { ListSkeleton, SkeletonDetail } from '@/components/skeleton/Skeleton';
+import { prefetchConversationMessages } from '@/services/prefetch';
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   NEW: { color: '#f44336', label: 'Chờ xử lý' },
@@ -18,6 +21,7 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
 export default function ReportDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const theme = useTheme();
   
   const { data: report, isLoading, error } = useReport(id);
@@ -41,7 +45,7 @@ export default function ReportDetailsScreen() {
           <Appbar.Content title="Chi tiết phản ánh" />
         </Appbar.Header>
         <View style={styles.center}>
-          <ActivityIndicator size="large" />
+          <SkeletonDetail />
         </View>
       </SafeAreaView>
     );
@@ -132,7 +136,15 @@ export default function ReportDetailsScreen() {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaList}>
             {imageUrls.map((url) => (
-              <Image key={url} source={{ uri: url }} style={styles.mediaImage} contentFit="cover" />
+              <Image
+                key={url}
+                source={{ uri: url }}
+                style={styles.mediaImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+                transition={160}
+              />
             ))}
           </ScrollView>
         </Surface>
@@ -199,14 +211,23 @@ export default function ReportDetailsScreen() {
           icon="chat" 
             onPress={() => {
               if (report.userId) { // Fallback/Prioritize private DM with the citizen
-                router.push(`/(official)/chat/dm:${report.userId}`);
+                const targetId = `dm:${report.userId}`;
+                void prefetchConversationMessages(queryClient, targetId);
+                router.push({
+                  pathname: '/(official)/chat/[id]',
+                  params: { id: targetId },
+                });
               } else {
                 const linked = linkedConversations?.[0];
                 const targetId =
                   linked?.conversationId ||
                   ((report as any)?.groupId ? `group:${(report as any).groupId}` : undefined);
                 if (targetId) {
-                  router.push(`/(official)/chat/${targetId}`);
+                  void prefetchConversationMessages(queryClient, targetId);
+                  router.push({
+                    pathname: '/(official)/chat/[id]',
+                    params: { id: targetId },
+                  });
                 } else {
                   Alert.alert("Thông báo", "Báo cáo này chưa có phòng trao đổi liên kết.");
                 }
@@ -231,7 +252,7 @@ export default function ReportDetailsScreen() {
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setStatusDialogVisible(false)}>Huy</Button>
-            <Button onPress={handleUpdateStatus} loading={isUpdating} disabled={isUpdating}>Lưu</Button>
+            <Button onPress={handleUpdateStatus} disabled={isUpdating}>Lưu</Button>
           </Dialog.Actions>
         </Dialog>
 
@@ -248,7 +269,7 @@ export default function ReportDetailsScreen() {
             />
             <ScrollView style={styles.officerList}>
               {isSearchingOfficers ? (
-                <ActivityIndicator style={{ marginTop: 20 }} />
+                <ListSkeleton count={4} />
               ) : (
                 officers?.map((officer) => (
                   <List.Item

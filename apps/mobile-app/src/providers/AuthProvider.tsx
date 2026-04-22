@@ -6,8 +6,24 @@ import { jwtDecode } from 'jwt-decode';
 import { JwtClaims } from '@urban/shared-types';
 import { useRouter, useSegments } from 'expo-router';
 import { socketClient } from '../lib/socket-client';
-import { ACCESS_TOKEN_KEY, AUTH_TOKEN_KEY, clearWebToken, readWebToken, writeWebToken } from '../lib/web-token-storage';
+import {
+  AUTH_TOKEN_KEY,
+  REFRESH_TOKEN_KEY,
+  clearWebToken,
+  readWebRefreshToken,
+  readWebToken,
+  writeWebTokens,
+} from '../lib/web-token-storage';
 import { connectChatSocket, disconnectChatSocket } from '../services/chat-socket';
+
+type AuthTokens = {
+  accessToken: string;
+  refreshToken?: string;
+};
+
+type AuthResponse = {
+  tokens: AuthTokens;
+};
 
 interface AuthContextType {
   user: JwtClaims | null;
@@ -58,22 +74,36 @@ async function readStoredToken(): Promise<string | null> {
   return null;
 }
 
-async function persistToken(token: string): Promise<void> {
+async function readStoredRefreshToken(): Promise<string | null> {
   if (Platform.OS === 'web') {
-    writeWebToken(token);
+    return readWebRefreshToken();
+  }
+
+  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+}
+
+async function persistTokens(accessToken: string, refreshToken?: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    writeWebTokens(accessToken, refreshToken);
     return;
   }
 
-  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+  await SecureStore.setItemAsync(AUTH_TOKEN_KEY, accessToken);
+  if (refreshToken) {
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
+  }
 }
 
-async function clearStoredToken(): Promise<void> {
+async function clearStoredTokens(): Promise<void> {
   if (Platform.OS === 'web') {
     clearWebToken();
     return;
   }
 
-  await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+  await Promise.all([
+    SecureStore.deleteItemAsync(AUTH_TOKEN_KEY),
+    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+  ]);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -87,17 +117,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const loadToken = async () => {
       try {
         const token = await readStoredToken();
+        const refreshToken = await readStoredRefreshToken();
+
         if (token) {
           const decoded = jwtDecode<JwtClaims>(token);
           if (decoded.exp * 1000 < Date.now()) {
-            await clearStoredToken();
-            setUser(null);
-          } else {
-            setUser(decoded);
+            if (!refreshToken) {
+              await clearStoredTokens();
+              setUser(null);
+              return;
+            }
+
+            const refreshed = await ApiClient.post<AuthResponse>('/auth/refresh', { refreshToken });
+            if (!refreshed?.tokens?.accessToken) {
+              throw new Error('Refresh token response did not include an access token.');
+            }
+
+            await persistTokens(refreshed.tokens.accessToken, refreshed.tokens.refreshToken ?? refreshToken);
+            setUser(jwtDecode<JwtClaims>(refreshed.tokens.accessToken));
+            return;
           }
+
+          setUser(decoded);
+          return;
+        }
+
+        if (refreshToken) {
+          const refreshed = await ApiClient.post<AuthResponse>('/auth/refresh', { refreshToken });
+          if (!refreshed?.tokens?.accessToken) {
+            throw new Error('Refresh token response did not include an access token.');
+          }
+
+          await persistTokens(refreshed.tokens.accessToken, refreshed.tokens.refreshToken ?? refreshToken);
+          setUser(jwtDecode<JwtClaims>(refreshed.tokens.accessToken));
         }
       } catch (e) {
         console.error('Failed to load token', e);
+        await clearStoredTokens();
+        setUser(null);
       } finally {
         setIsLoading(false);
       }
@@ -163,14 +220,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (phone: string, password: string) => {
     try {
-      const response = await ApiClient.post<{ tokens: { accessToken: string } }>('/auth/login', { login: phone, password });
+      const response = await ApiClient.post<AuthResponse>('/auth/login', { login: phone, password });
 
       if (response && response.tokens && response.tokens.accessToken) {
         const token = response.tokens.accessToken;
 
         socketClient.disconnect();
         disconnectChatSocket();
-        await persistToken(token);
+        await persistTokens(token, response.tokens.refreshToken);
 
         const decoded = jwtDecode<JwtClaims>(token);
         setUser(decoded);
@@ -191,7 +248,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     socketClient.disconnect();
     disconnectChatSocket();
-    await clearStoredToken();
+    const refreshToken = await readStoredRefreshToken();
+    if (refreshToken) {
+      await ApiClient.post('/auth/logout', { refreshToken }).catch(() => {});
+    }
+    await clearStoredTokens();
     setUser(null);
   }, []);
 
@@ -204,14 +265,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     avatarUrl?: string;
   }) => {
     try {
-      const response = await ApiClient.post<{ tokens: { accessToken: string } }>('/auth/register', payload);
+      const response = await ApiClient.post<AuthResponse>('/auth/register', payload);
 
       if (response && response.tokens && response.tokens.accessToken) {
         const token = response.tokens.accessToken;
 
         socketClient.disconnect();
         disconnectChatSocket();
-        await persistToken(token);
+        await persistTokens(token, response.tokens.refreshToken);
 
         const decoded = jwtDecode<JwtClaims>(token);
         setUser(decoded);
@@ -228,10 +289,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const verifyLoginOtp = useCallback(async (login: string, otpCode: string) => {
-    const response = await ApiClient.post<{ tokens: { accessToken: string } }>('/auth/login/verify-otp', { login, otpCode });
+    const response = await ApiClient.post<AuthResponse>('/auth/login/verify-otp', { login, otpCode });
     if (response?.tokens?.accessToken) {
       const token = response.tokens.accessToken;
-      await persistToken(token);
+      await persistTokens(token, response.tokens.refreshToken);
       setUser(jwtDecode<JwtClaims>(token));
     }
   }, []);
@@ -241,10 +302,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const verifyRegisterOtp = useCallback(async (login: string, otpCode: string) => {
-    const response = await ApiClient.post<{ tokens: { accessToken: string } }>('/auth/register/verify-otp', { login, otpCode });
+    const response = await ApiClient.post<AuthResponse>('/auth/register/verify-otp', { login, otpCode });
     if (response?.tokens?.accessToken) {
       const token = response.tokens.accessToken;
-      await persistToken(token);
+      await persistTokens(token, response.tokens.refreshToken);
       setUser(jwtDecode<JwtClaims>(token));
     }
   }, []);
@@ -300,12 +361,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const confirmUnlockAccount = useCallback(async (login: string, password: string, otpCode: string) => {
-    const response = await ApiClient.post<{ tokens: { accessToken: string } }>('/auth/unlock/confirm', { login, password, otpCode });
+    const response = await ApiClient.post<AuthResponse>('/auth/unlock/confirm', { login, password, otpCode });
     if (response?.tokens?.accessToken) {
       const token = response.tokens.accessToken;
       socketClient.disconnect();
       disconnectChatSocket();
-      await persistToken(token);
+      await persistTokens(token, response.tokens.refreshToken);
       setUser(jwtDecode<JwtClaims>(token));
     }
   }, []);
