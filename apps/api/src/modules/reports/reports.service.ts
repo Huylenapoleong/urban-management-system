@@ -233,7 +233,7 @@ export class ReportsService {
       );
     }
 
-    const filtered = reports
+        const filtered = reports
       .filter((report) => report.entityType === 'REPORT')
       .filter((report) => !report.deletedAt)
       .filter((report) =>
@@ -817,20 +817,14 @@ export class ReportsService {
     ownerUserId: string,
     entityId?: string,
   ): { assets?: MediaAsset[]; urls?: string[] } {
-    const hasMediaKeys = Object.prototype.hasOwnProperty.call(
-      body,
-      'mediaKeys',
-    );
-    const hasMediaUrls = Object.prototype.hasOwnProperty.call(
-      body,
-      'mediaUrls',
-    );
+    const mediaKeys = optionalStringArray(body, 'mediaKeys', 10, 500);
+    const mediaUrls = optionalStringArray(body, 'mediaUrls', 10, 500);
+    const hasMediaKeys = mediaKeys !== undefined;
+    const hasMediaUrls = mediaUrls !== undefined;
 
     if (hasMediaKeys) {
-      const mediaKeys = optionalStringArray(body, 'mediaKeys', 10, 500) ?? [];
-
       return {
-        assets: mediaKeys.map((key) =>
+        assets: (mediaKeys ?? []).map((key) =>
           this.mediaAssetService.createOwnedAssetReference({
             key,
             target: 'REPORT',
@@ -845,7 +839,7 @@ export class ReportsService {
     if (hasMediaUrls) {
       return {
         assets: [],
-        urls: optionalStringArray(body, 'mediaUrls', 10, 500) ?? [],
+        urls: mediaUrls ?? [],
       };
     }
 

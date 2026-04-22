@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -14,16 +13,22 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { GROUP_TYPES } from "@urban/shared-constants";
 import type { GroupMetadata } from "@urban/shared-types";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import colors from "@/constants/colors";
+import { ApiClient } from "@/lib/api-client";
 import { useAuth } from "@/providers/AuthProvider";
-import { createGroup, joinGroup, leaveGroup, listGroups } from "@/services/api/group.api";
+import { createGroup, joinGroup, leaveGroup } from "@/services/api/group.api";
+import { readTempCache, writeTempCache } from "@/lib/page-temp-cache";
+import { ListSkeleton } from "@/components/skeleton/Skeleton";
+import { prefetchConversationMessages } from "@/services/prefetch";
 
 type GroupWithStatus = GroupMetadata & {
   joined: boolean;
 };
 
 const PRIVATE_GROUP_TYPE = GROUP_TYPES.find((type) => type === "PRIVATE") ?? "PRIVATE";
+const GROUPS_CACHE_TTL_MS = 45 * 1000;
 
 function normalizeText(value: string) {
   return value
@@ -68,6 +73,7 @@ const toRankTarget = (group: GroupMetadata) => normalizeText([group.groupName, g
 export default function GroupsScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [allGroups, setAllGroups] = useState<GroupMetadata[]>([]);
   const [joinedGroups, setJoinedGroups] = useState<GroupMetadata[]>([]);
   const [searchText, setSearchText] = useState("");
@@ -79,26 +85,46 @@ export default function GroupsScreen() {
 
   const normalizedSearch = useMemo(() => normalizeText(searchText), [searchText]);
 
-  const loadGroups = useCallback(async () => {
+  const loadGroups = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const keyword = searchText.trim() || undefined;
+      const cacheKey = `citizen.groups.${keyword || 'all'}`;
+      const cached = readTempCache<{ all: GroupMetadata[]; mine: GroupMetadata[] }>(cacheKey, GROUPS_CACHE_TTL_MS);
+      if (cached) {
+        setAllGroups(cached.all);
+        setJoinedGroups(cached.mine);
+        setLoading(false);
+      }
+
       const [all, mine] = await Promise.all([
-        listGroups({ q: keyword, limit: 100 }),
-        listGroups({ mine: true, limit: 100 }),
+        ApiClient.get<GroupMetadata[]>('/groups', { q: keyword, limit: 100 }, { signal }),
+        ApiClient.get<GroupMetadata[]>('/groups', { mine: true, limit: 100 }, { signal }),
       ]);
+
+      if (signal?.aborted) {
+        return;
+      }
 
       setAllGroups(all);
       setJoinedGroups(mine);
+      writeTempCache(cacheKey, { all, mine });
     } catch (err: unknown) {
-      Alert.alert("Loi", (err as Error)?.message ?? "Khong the tai danh sach nhom");
+      if ((err as any)?.name === 'AbortError') {
+        return;
+      }
+      Alert.alert("Lỗi", (err as Error)?.message ?? "Không thể tải danh sách nhóm");
     } finally {
       setLoading(false);
     }
   }, [searchText]);
 
   useEffect(() => {
-    void loadGroups();
+    const controller = new AbortController();
+    void loadGroups(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [loadGroups]);
 
   const joinedIds = useMemo(() => new Set(joinedGroups.map((group) => group.id)), [joinedGroups]);
@@ -134,7 +160,7 @@ export default function GroupsScreen() {
 
   const handleJoinToggle = async (group: GroupWithStatus) => {
     if (group.createdBy === user?.sub) {
-      Alert.alert("Khong the roi nhom", "Ban la chu nhom, hien tai khong the roi nhom do chinh minh tao.");
+      Alert.alert("Không thể rời nhóm", "Bạn là chủ nhóm, hiện tại không thể rời nhóm do chính mình tạo.");
       return;
     }
 
@@ -146,7 +172,7 @@ export default function GroupsScreen() {
       }
       await loadGroups();
     } catch (err: unknown) {
-      Alert.alert("Loi", (err as Error)?.message ?? "Khong the cap nhat trang thai tham gia");
+      Alert.alert("Lỗi", (err as Error)?.message ?? "Không thể cập nhật trạng thái tham gia");
     }
   };
 
@@ -168,15 +194,16 @@ export default function GroupsScreen() {
       setDescription("");
       await loadGroups();
       Alert.alert(
-        "Thanh cong",
-        "Da tao nhom PRIVATE cua ban. Chi thanh vien moi co the thay va vao phong chat nay.",
+        "Thành công",
+        "Đã tạo nhóm PRIVATE của bạn. Chỉ thành viên mới có thể thấy và vào phòng chat này.",
       );
+      void prefetchConversationMessages(queryClient, `group:${createdGroup.id}`);
       router.push({
         pathname: "/(citizen)/chat/[id]",
         params: { id: `group:${createdGroup.id}` },
       });
     } catch (err: unknown) {
-      Alert.alert("Loi", (err as Error)?.message ?? "Khong the tao nhom");
+      Alert.alert("Lỗi", (err as Error)?.message ?? "Không thể tạo nhóm");
     } finally {
       setSaving(false);
     }
@@ -184,10 +211,11 @@ export default function GroupsScreen() {
 
   const openGroupChat = (group: GroupWithStatus) => {
     if (!group.joined) {
-      Alert.alert("Chua tham gia", "Hay tham gia nhom truoc khi vao phong chat.");
+      Alert.alert("Chưa tham gia", "Hãy tham gia nhóm trước khi vào phòng chat.");
       return;
     }
 
+    void prefetchConversationMessages(queryClient, `group:${group.id}`);
     router.push({
       pathname: "/(citizen)/chat/[id]",
       params: { id: `group:${group.id}` },
@@ -196,19 +224,19 @@ export default function GroupsScreen() {
 
   return (
     <View style={styles.container}>
-      <Header title="Community Groups" subtitle="Mot noi duy nhat de tim, tham gia va tao nhom" />
+      <Header title="Nhóm cộng đồng" subtitle="Một nơi duy nhất để tìm, tham gia và tạo nhóm" />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.heroCard}>
           <View style={styles.heroText}>
-            <Text style={styles.heroTitle}>Group citizen hub</Text>
+            <Text style={styles.heroTitle}>Trung tâm nhóm công dân</Text>
             <Text style={styles.heroSubtitle}>
-              Tim nhom ban da co quyen truy cap, tham gia nhanh va tao nhom PRIVATE trong khu vuc cua ban.
+              Tìm nhóm bạn đã có quyền truy cập, tham gia nhanh và tạo nhóm PRIVATE trong khu vực của bạn.
             </Text>
           </View>
           <Pressable style={styles.heroButton} onPress={() => setShowCreateModal(true)}>
             <Ionicons name="add" size={18} color="white" />
-            <Text style={styles.heroButtonText}>Create</Text>
+            <Text style={styles.heroButtonText}>Tạo</Text>
           </Pressable>
         </View>
 
@@ -216,7 +244,7 @@ export default function GroupsScreen() {
           <Ionicons name="search" size={18} color={colors.textSecondary} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Tim nhom gan dung theo ten, mo ta, khu vuc..."
+            placeholder="Tìm nhóm gần đúng theo tên, mô tả, khu vực..."
             placeholderTextColor={colors.textSecondary}
             value={searchText}
             onChangeText={setSearchText}
@@ -226,29 +254,29 @@ export default function GroupsScreen() {
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
             <View style={[styles.statusDot, styles.statusDotJoined]} />
-            <Text style={styles.legendText}>Da tham gia</Text>
+            <Text style={styles.legendText}>Đã tham gia</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.statusDot, styles.statusDotIdle]} />
-            <Text style={styles.legendText}>Chua tham gia</Text>
+            <Text style={styles.legendText}>Chưa tham gia</Text>
           </View>
-          <Text style={styles.legendSummary}>{`${joinedGroups.length} nhom cua ban`}</Text>
+          <Text style={styles.legendSummary}>{`${joinedGroups.length} nhóm của bạn`}</Text>
         </View>
 
         <View style={styles.noticeCard}>
           <Ionicons name="information-circle-outline" size={18} color="#1d4ed8" />
           <Text style={styles.noticeText}>
-            Nhom do citizen tao se la PRIVATE. Can bo cung dia ban se khong tu thay nhom nay neu chua duoc them vao.
+            Nhóm do citizen tạo sẽ là PRIVATE. Cán bộ cùng địa bàn sẽ không tự thấy nhóm này nếu chưa được thêm vào.
           </Text>
         </View>
 
         {loading ? (
-          <ActivityIndicator style={styles.loader} size="large" color={colors.primary} />
+          <ListSkeleton count={6} />
         ) : visibleGroups.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="people-circle-outline" size={42} color={colors.textSecondary} />
-            <Text style={styles.emptyTitle}>Khong tim thay nhom phu hop</Text>
-            <Text style={styles.emptyText}>Thu tim theo tu khoa gan dung hoac tao nhom rieng de bat dau.</Text>
+            <Text style={styles.emptyTitle}>Không tìm thấy nhóm phù hợp</Text>
+            <Text style={styles.emptyText}>Thử tìm theo từ khóa gần đúng hoặc tạo nhóm riêng để bắt đầu.</Text>
           </View>
         ) : (
           visibleGroups.map((group) => (
@@ -268,7 +296,7 @@ export default function GroupsScreen() {
                     />
                     <Text style={styles.groupName}>{group.groupName}</Text>
                   </View>
-                  <Text style={styles.groupMeta}>{`${group.groupType} • ${group.memberCount} thanh vien`}</Text>
+                  <Text style={styles.groupMeta}>{`${group.groupType} • ${group.memberCount} thành viên`}</Text>
                   <Text style={styles.groupLocation}>{group.locationCode}</Text>
                 </View>
                 <View style={styles.actionsColumn}>
@@ -284,7 +312,7 @@ export default function GroupsScreen() {
                     <Text
                       style={[styles.chatButtonText, !group.joined && styles.chatButtonTextDisabled]}
                     >
-                      Chat
+                      Trò chuyện
                     </Text>
                   </Pressable>
                   <Pressable
@@ -302,13 +330,13 @@ export default function GroupsScreen() {
                         group.createdBy === user?.sub ? styles.ownerButtonText : null,
                       ]}
                     >
-                      {group.createdBy === user?.sub ? "Owner" : group.joined ? "Leave" : "Join"}
+                      {group.createdBy === user?.sub ? "Chủ nhóm" : group.joined ? "Rời nhóm" : "Tham gia"}
                     </Text>
                   </Pressable>
                 </View>
               </View>
               <Text style={styles.groupDescription}>
-                {group.description || "Nhom chua co mo ta chi tiet."}
+                {group.description || "Nhóm chưa có mô tả chi tiết."}
               </Text>
             </Pressable>
           ))
@@ -318,26 +346,26 @@ export default function GroupsScreen() {
       <Modal animationType="fade" transparent visible={showCreateModal} onRequestClose={() => setShowCreateModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Create private group</Text>
+            <Text style={styles.modalTitle}>Tạo nhóm riêng tư</Text>
             <Text style={styles.modalText}>
-              Citizen chi duoc tao nhom PRIVATE trong dung dia ban cua minh. Nhom nay chi thanh vien moi co the thay va tham gia.
+              Citizen chỉ được tạo nhóm PRIVATE trong đúng địa bàn của mình. Nhóm này chỉ thành viên mới có thể thấy và tham gia.
             </Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Ten nhom"
+              placeholder="Tên nhóm"
               value={groupName}
               onChangeText={setGroupName}
             />
             <TextInput
               style={[styles.modalInput, styles.modalTextarea]}
-              placeholder="Mo ta ngan gon"
+              placeholder="Mô tả ngắn gọn"
               value={description}
               onChangeText={setDescription}
               multiline
             />
             <View style={styles.modalActions}>
               <Pressable style={styles.modalGhostButton} onPress={() => setShowCreateModal(false)}>
-                <Text style={styles.modalGhostText}>Cancel</Text>
+                <Text style={styles.modalGhostText}>Hủy</Text>
               </Pressable>
               <Pressable
                 style={[
@@ -347,7 +375,7 @@ export default function GroupsScreen() {
                 onPress={() => void handleCreateGroup()}
                 disabled={!groupName.trim() || !user?.locationCode || saving}
               >
-                <Text style={styles.modalPrimaryText}>{saving ? "Creating..." : "Create group"}</Text>
+                <Text style={styles.modalPrimaryText}>{saving ? "Đang tạo..." : "Tạo nhóm"}</Text>
               </Pressable>
             </View>
           </View>

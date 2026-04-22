@@ -1,4 +1,4 @@
 {
   "compilerOptions": {},
-  "include": ["apps/**/*", "packages/**/*"]
+  "extends": "expo/tsconfig.base"
 }

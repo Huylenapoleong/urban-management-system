@@ -16,7 +16,7 @@ export const useReports = ({
 } = {}) => {
   return useQuery<ReportItem[]>({
     queryKey: ['reports', { status, category, assignedToMe, locationCode }],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const baseParams: any = {};
       if (assignedToMe) baseParams.assignedToMe = assignedToMe;
       if (locationCode) baseParams.locationCode = locationCode;
@@ -25,18 +25,18 @@ export const useReports = ({
         return ApiClient.get<ReportItem[]>('/reports', {
           ...baseParams,
           status,
-        });
+        }, { signal });
       }
 
       if (category) {
         return ApiClient.get<ReportItem[]>('/reports', {
           ...baseParams,
           category,
-        });
+        }, { signal });
       }
 
       if (!locationCode) {
-        return ApiClient.get<ReportItem[]>('/reports', baseParams);
+        return ApiClient.get<ReportItem[]>('/reports', baseParams, { signal });
       }
 
       const resultSets = await Promise.all(
@@ -44,7 +44,7 @@ export const useReports = ({
           ApiClient.get<ReportItem[]>('/reports', {
             ...baseParams,
             status: reportStatus,
-          }),
+          }, { signal }),
         ),
       );
 
@@ -55,14 +55,18 @@ export const useReports = ({
             new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
         );
     },
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 
 export const useReport = (id?: string) => {
   return useQuery<ReportItem>({
     queryKey: ['reports', id],
-    queryFn: () => ApiClient.get<ReportItem>(`/reports/${id}`),
+    queryFn: ({ signal }) => ApiClient.get<ReportItem>(`/reports/${id}`, undefined, { signal }),
     enabled: !!id,
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 
@@ -78,10 +82,40 @@ export const useUpdateReportStatus = () => {
   });
 };
 
+export const useAssignOfficer = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ reportId, officerId }: { reportId: string, officerId: string }) => {
+      return ApiClient.post(`/reports/${reportId}/assign`, { officerId });
+    },
+    onSuccess: (_, { reportId }) => {
+      queryClient.invalidateQueries({ queryKey: ['reports', reportId] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+};
+
+export const useReportAudit = (reportId: string) => {
+  return useQuery<any[]>({
+    queryKey: ['reports', reportId, 'audit'],
+    queryFn: ({ signal }) => ApiClient.get(`/reports/${reportId}/audit`, undefined, { signal }),
+    enabled: !!reportId,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
+  });
+};
+
 export const useLinkedConversations = (reportId: string) => {
   return useQuery<{ conversationId: string; conversationKey: string }[]>({
     queryKey: ['reports', reportId, 'conversations'],
-    queryFn: () => ApiClient.get<{ conversationId: string; conversationKey: string }[]>(`/reports/${reportId}/conversations`),
+    queryFn: ({ signal }) =>
+      ApiClient.get<{ conversationId: string; conversationKey: string }[]>(
+        `/reports/${reportId}/conversations`,
+        undefined,
+        { signal },
+      ),
     enabled: !!reportId,
+    staleTime: 30 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };

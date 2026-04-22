@@ -1,26 +1,136 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { ConversationSummary, ReportItem } from "@urban/shared-types";
+import type {
+  ConversationSummary,
+  MediaAsset,
+  ReportItem,
+  UserFriendRequestItem,
+} from "@urban/shared-types";
 import { useRouter } from "expo-router";
 import Avatar from "@/components/Avatar";
 import CitizenReportCard from "@/components/shared/CitizenReportCard";
+import { ENV_CONFIG } from "@/constants/env";
 import colors from "@/constants/colors";
+import { convertToS3Url } from "@/constants/s3";
 import { useAuth } from "@/providers/AuthProvider";
 import { listConversations } from "@/services/api/conversation.api";
+import { ApiClient } from "@/lib/api-client";
 import { listReports } from "@/services/api/report.api";
+import { readTempCache, writeTempCache } from "@/lib/page-temp-cache";
+import { CardListSkeleton, useSkeletonQuery } from "@/components/skeleton/Skeleton";
+import { prefetchConversationMessages } from "@/services/prefetch";
+
+const HOME_CACHE_KEY = 'citizen.home.snapshot';
+const HOME_CACHE_TTL_MS = 45 * 1000;
+
+function resolveRemoteUrl(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const converted = convertToS3Url(trimmed);
+  if (/^https?:\/\//i.test(converted)) {
+    return converted;
+  }
+
+  const normalized = converted.replace(/^\/+/, "");
+  if (normalized.startsWith("uploads/")) {
+    return `${ENV_CONFIG.S3.NEW_BASE_URL}${normalized.replace(/^uploads\/+/, "")}`;
+  }
+
+  return `${ENV_CONFIG.API_BASE_URL.replace(/\/+$/, "")}/${normalized}`;
+}
+
+function normalizeReportMedia(report: ReportItem): ReportItem {
+  const mediaUrls = (report.mediaUrls ?? [])
+    .map((value) => resolveRemoteUrl(value))
+    .filter((value): value is string => Boolean(value));
+  const fallbackUrls = (report.mediaAssets ?? [])
+    .map((asset: MediaAsset) => resolveRemoteUrl(asset.resolvedUrl || asset.key))
+    .filter((value): value is string => Boolean(value));
+
+  return {
+    ...report,
+    mediaUrls: mediaUrls.length > 0 ? mediaUrls : fallbackUrls,
+  };
+}
+
+function resolveAvatarUrl(item: {
+  avatarUrl?: string;
+  avatarAsset?: MediaAsset;
+}): string | undefined {
+  return (
+    resolveRemoteUrl(item.avatarUrl) ||
+    resolveRemoteUrl(item.avatarAsset?.resolvedUrl || item.avatarAsset?.key) ||
+    undefined
+  );
+}
 
 export default function HomeScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const [communityReports, setCommunityReports] = useState<ReportItem[]>([]);
   const [recentChats, setRecentChats] = useState<ConversationSummary[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<UserFriendRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const homeSnapshot = useMemo(
+    () => (communityReports.length > 0 || recentChats.length > 0 ? { communityReports, recentChats } : undefined),
+    [communityReports, recentChats],
+  );
+  const { isFirstLoad } = useSkeletonQuery({
+    data: homeSnapshot,
+    isLoading: loading,
+    isFetching: loading,
+    isRefetching: loading && Boolean(homeSnapshot),
+  });
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const openChatList = useCallback(() => {
+    router.push("/(citizen)/chat");
+  }, [router]);
+
+  const openChatConversation = useCallback((conversationId: string) => {
+    void prefetchConversationMessages(queryClient, conversationId);
+
+    router.push({
+      pathname: "/(citizen)/chat/[id]",
+      params: { id: conversationId },
+    });
+  }, [queryClient, router]);
+
+  const loadFriendData = useCallback(async (signal?: AbortSignal) => {
+    const incomingData = await ApiClient.get<UserFriendRequestItem[]>("/users/me/friend-requests", {
+      direction: "INCOMING",
+      limit: 20,
+    }, { signal });
+
+    setIncomingRequests(
+      incomingData.map((item: UserFriendRequestItem) => ({
+        ...item,
+        avatarUrl: resolveAvatarUrl(item),
+      })),
+    );
+  }, []);
+
+  const loadData = useCallback(async (signal?: AbortSignal, silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const [reportsData, chatsData] = await Promise.all([
@@ -28,33 +138,71 @@ export default function HomeScreen() {
         listConversations(),
       ]);
 
-      setCommunityReports(
-        [...reportsData].sort(
-          (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-        ),
-      );
-      setRecentChats(
+      const nextReports =
+        [...reportsData]
+          .map((report) => normalizeReportMedia(report))
+          .sort(
+            (left, right) =>
+              new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+          );
+      const nextChats =
         [...chatsData].sort(
           (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-        ),
-      );
+        );
+      if (signal?.aborted) {
+        return;
+      }
+
+      setCommunityReports(nextReports);
+      setRecentChats(nextChats);
+      await loadFriendData(signal);
+
+      writeTempCache(HOME_CACHE_KEY, {
+        communityReports: nextReports,
+        recentChats: nextChats,
+      });
       setError(null);
     } catch (err: unknown) {
-      setError((err as Error)?.message ?? "Khong the tai du lieu trang chu");
+      if ((err as any)?.name === 'AbortError') {
+        return;
+      }
+      setError((err as Error)?.message ?? "Không thể tải dữ liệu trang chủ");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [loadFriendData]);
 
   useEffect(() => {
-    void loadData();
+    const cached = readTempCache<{ communityReports: ReportItem[]; recentChats: ConversationSummary[] }>(
+      HOME_CACHE_KEY,
+      HOME_CACHE_TTL_MS,
+    );
+    const hasCached = Boolean(cached);
+    if (cached) {
+      setCommunityReports(cached.communityReports);
+      setRecentChats(cached.recentChats);
+      setLoading(false);
+    }
+
+    const controller = new AbortController();
+    void loadData(controller.signal, hasCached);
+
+    return () => {
+      controller.abort();
+    };
   }, [loadData]);
 
   // Auto-refresh khi quay lại home tab
   useFocusEffect(
     useCallback(() => {
-      void loadData();
-    }, [loadData])
+      const controller = new AbortController();
+      void loadData(controller.signal, communityReports.length > 0 || recentChats.length > 0);
+      return () => {
+        controller.abort();
+      };
+    }, [communityReports.length, loadData, recentChats.length])
   );
 
   const unreadMessages = useMemo(
@@ -62,11 +210,11 @@ export default function HomeScreen() {
     [recentChats],
   );
 
-  if (loading) {
+  if (isFirstLoad) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <CardListSkeleton count={4} />
+      </ScrollView>
     );
   }
 
@@ -76,9 +224,9 @@ export default function HomeScreen() {
         <View style={styles.welcomeRow}>
           <Avatar name={user?.sub ?? "Citizen"} size={64} />
           <View style={styles.welcomeText}>
-            <Text style={styles.welcomeTitle}>Trang cong dong</Text>
+            <Text style={styles.welcomeTitle}>Trang cộng đồng</Text>
             <Text style={styles.welcomeSubtitle}>
-              Xem phan anh cong dong, vao chat, va theo doi lich su cua ban.
+              Xem phản ánh cộng đồng, vào chat, và theo dõi lịch sử của bạn.
             </Text>
           </View>
           <Pressable
@@ -92,11 +240,22 @@ export default function HomeScreen() {
         <View style={styles.quickActions}>
           <Pressable style={styles.quickAction} onPress={() => router.push("/(citizen)/report")}>
             <Ionicons name="document-text-outline" size={18} color={colors.primary} />
-            <Text style={styles.quickActionText}>Gui phan anh</Text>
+            <Text style={styles.quickActionText}>Gửi phản ánh</Text>
           </Pressable>
-          <Pressable style={styles.quickAction} onPress={() => router.push("/(citizen)/chat")}>
+          <Pressable style={styles.quickAction} onPress={openChatList}>
             <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
-            <Text style={styles.quickActionText}>Mo chat</Text>
+            <Text style={styles.quickActionText}>Mở chat</Text>
+          </Pressable>
+          <Pressable style={styles.quickAction} onPress={() => router.push("/(citizen)/friends" as any)}>
+            <View style={styles.quickActionIconWrap}>
+              <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+              {incomingRequests.length > 0 ? (
+                <View style={styles.quickActionBadge}>
+                  <Text style={styles.quickActionBadgeText}>{incomingRequests.length}</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.quickActionText}>Bạn bè</Text>
           </Pressable>
         </View>
       </View>
@@ -104,11 +263,11 @@ export default function HomeScreen() {
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
           <Text style={styles.statNumber}>{communityReports.length}</Text>
-          <Text style={styles.statLabel}>Phan anh cong dong</Text>
+          <Text style={styles.statLabel}>Phản ánh cộng đồng</Text>
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statNumber}>{unreadMessages}</Text>
-          <Text style={styles.statLabel}>Tin nhan chua doc</Text>
+          <Text style={styles.statLabel}>Tin nhắn chưa đọc</Text>
         </View>
       </View>
 
@@ -119,16 +278,16 @@ export default function HomeScreen() {
       ) : null}
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Phan anh cong dong</Text>
+        <Text style={styles.sectionTitle}>Phản ánh cộng đồng</Text>
         <Text style={styles.sectionSubtitle}>
-          Citizen chi co quyen xem feed cong dong, khong the sua hoac xoa phan anh cua nguoi khac.
+          Citizen chỉ có quyền xem feed cộng đồng, không thể sửa hoặc xóa phản ánh của người khác.
         </Text>
         {communityReports.length > 0 ? (
           communityReports.map((report) => <CitizenReportCard key={report.id} report={report} />)
         ) : (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Chua co phan anh cong dong</Text>
-            <Text style={styles.emptyText}>Khi co phan anh moi, feed se cap nhat tai day.</Text>
+            <Text style={styles.emptyTitle}>Chưa có phản ánh cộng đồng</Text>
+            <Text style={styles.emptyText}>Khi có phản ánh mới, feed sẽ cập nhật tại đây.</Text>
           </View>
         )}
       </View>
@@ -136,11 +295,11 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <View style={styles.chatSectionHeader}>
           <View>
-            <Text style={styles.sectionTitle}>Tro chuyen</Text>
-            <Text style={styles.sectionSubtitle}>Tat ca doan chat hien co khi thoat khoi hoi thoai.</Text>
+            <Text style={styles.sectionTitle}>Trò chuyện</Text>
+            <Text style={styles.sectionSubtitle}>Tất cả đoạn chat hiện có khi thoát khỏi hội thoại.</Text>
           </View>
-          <Pressable onPress={() => router.push("/(citizen)/chat")}>
-            <Text style={styles.sectionLink}>Mo danh sach</Text>
+          <Pressable onPress={openChatList}>
+            <Text style={styles.sectionLink}>Mở danh sách</Text>
           </Pressable>
         </View>
 
@@ -149,17 +308,12 @@ export default function HomeScreen() {
             <Pressable
               key={chat.conversationId}
               style={styles.chatPreview}
-              onPress={() =>
-                router.push({
-                  pathname: "/(citizen)/chat/[id]",
-                  params: { id: chat.conversationId },
-                })
-              }
+              onPress={() => openChatConversation(chat.conversationId)}
             >
               <View style={styles.chatMain}>
                 <Text style={styles.chatTitle}>{chat.groupName}</Text>
                 <Text style={styles.chatPreviewText} numberOfLines={1}>
-                  {chat.lastMessagePreview || "Chua co tin nhan, bam de bat dau tro chuyen"}
+                  {chat.lastMessagePreview || "Chưa có tin nhắn, bấm để bắt đầu trò chuyện"}
                 </Text>
               </View>
               {chat.unreadCount > 0 ? (
@@ -171,8 +325,8 @@ export default function HomeScreen() {
           ))
         ) : (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Chua co doan chat nao</Text>
-            <Text style={styles.emptyText}>Hay tham gia nhom hoac tao nhom de bat dau.</Text>
+            <Text style={styles.emptyTitle}>Chưa có đoạn chat nào</Text>
+            <Text style={styles.emptyText}>Hãy tham gia nhóm hoặc tạo nhóm để bắt đầu.</Text>
           </View>
         )}
       </View>
@@ -254,6 +408,26 @@ const styles = StyleSheet.create({
   },
   quickActionText: {
     color: colors.primary,
+    fontWeight: "800",
+  },
+  quickActionIconWrap: {
+    position: "relative",
+  },
+  quickActionBadge: {
+    position: "absolute",
+    top: -10,
+    right: -12,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+    backgroundColor: "#dc2626",
+  },
+  quickActionBadgeText: {
+    color: "white",
+    fontSize: 10,
     fontWeight: "800",
   },
   statsRow: {

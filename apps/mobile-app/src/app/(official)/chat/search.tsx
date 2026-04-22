@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
-import { Text, TextInput, Button, Surface, useTheme, Avatar, ActivityIndicator, IconButton } from 'react-native-paper';
+import { Text, TextInput, Button, Surface, useTheme, Avatar, IconButton } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { ApiClient } from '../../../lib/api-client';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../providers/AuthProvider';
+import { prefetchConversationMessages } from '@/services/prefetch';
 
 export default function SearchUserScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   
   const [query, setQuery] = useState('');
@@ -33,8 +36,15 @@ export default function SearchUserScreen() {
   };
 
   const handleChat = () => {
-    if (!result?.id) return;
-    router.replace(`/(official)/chat/dm-${result.id}` as any);
+    const targetUserId = (result?.userId || result?.id || '').trim();
+
+    if (!targetUserId) return;
+
+    void prefetchConversationMessages(queryClient, `dm:${targetUserId}`);
+    router.replace({
+      pathname: '/(official)/chat/[id]',
+      params: { id: `dm:${targetUserId}` },
+    } as any);
   };
 
   return (
@@ -68,7 +78,6 @@ export default function SearchUserScreen() {
           <Button 
             mode="contained" 
             onPress={handleSearch} 
-            loading={loading}
             disabled={loading || !query.trim()}
             style={styles.searchBtn}
           >

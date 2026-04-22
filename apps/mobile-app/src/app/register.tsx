@@ -3,6 +3,7 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable
 import { Text, TextInput, Button, Surface, HelperText, Chip } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../providers/AuthProvider';
+import { OtpVerificationModal } from '../components/auth/OtpVerificationModal';
 
 type WardOption = {
   code: string;
@@ -83,10 +84,12 @@ type RegisterForm = {
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register } = useAuth();
+  const { register, requestRegisterOtp, verifyRegisterOtp } = useAuth();
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
   const [form, setForm] = useState<RegisterForm>({
     fullName: '',
     phone: '',
@@ -161,8 +164,8 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (form.password.length < 8) {
-      setErrorMsg('Mật khẩu phải có ít nhất 8 ký tự.');
+    if (form.password.length < 10) {
+      setErrorMsg('Mật khẩu phải có ít nhất 10 ký tự.');
       return;
     }
 
@@ -173,18 +176,30 @@ export default function RegisterScreen() {
 
     try {
       setLoading(true);
-      await register({
-        fullName: form.fullName.trim(),
-        password: form.password,
-        locationCode,
-        phone: form.phone.trim() || undefined,
-        email: form.email.trim() || undefined,
-      });
+      // Initiate OTP flow instead of direct registration
+      await requestRegisterOtp(form.email.trim());
+      setShowOtpModal(true);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Đăng ký không thành công.');
+      setErrorMsg(err?.message || 'Không thể gửi mã xác thực. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async (otpCode: string) => {
+    try {
+      setOtpLoading(true);
+      await verifyRegisterOtp(form.email.trim(), otpCode);
+      // Auth provider will handle navigation after successful registration
+    } catch (err: any) {
+      throw err; // Modal will handle display
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    await requestRegisterOtp(form.email.trim());
   };
 
   return (
@@ -313,10 +328,9 @@ export default function RegisterScreen() {
             </HelperText>
           )}
 
-          <Button mode="contained" onPress={handleRegister} loading={loading} disabled={loading} style={styles.button}>
+          <Button mode="contained" onPress={handleRegister} disabled={loading} style={styles.button}>
             Đăng ký cư dân
           </Button>
-
           <View style={styles.footer}>
             <Text>Bạn đã có tài khoản? </Text>
             <Pressable onPress={() => router.push('/login')}>
@@ -324,6 +338,16 @@ export default function RegisterScreen() {
             </Pressable>
           </View>
         </Surface>
+
+        <OtpVerificationModal
+          visible={showOtpModal}
+          onDismiss={() => setShowOtpModal(false)}
+          onVerify={handleVerifyOtp}
+          onResend={handleResendOtp}
+          loading={otpLoading}
+          loginIdentifier={form.email}
+          subtitle="Chúng tôi đã gửi mã xác thực đến email của bạn."
+        />
       </ScrollView>
     </KeyboardAvoidingView>
   );

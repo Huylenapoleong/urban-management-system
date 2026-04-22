@@ -8,11 +8,13 @@ import {
   Req,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import type { AuthenticatedUser, JwtClaims } from '@urban/shared-types';
@@ -42,6 +44,7 @@ import {
   DeleteAccountConfirmRequestDto,
   DeleteAccountResultDto,
   DismissSessionHistoryResultDto,
+  ErrorResponseDto,
   ForgotPasswordConfirmRequestDto,
   ForgotPasswordConfirmResultDto,
   ForgotPasswordRequestDto,
@@ -408,6 +411,36 @@ export class AuthController {
   }
 
   @Public()
+  @Post('unlock/request-otp')
+  @ApiOperation({
+    summary: 'Request OTP to unlock account',
+    description: 'Provide login and password to verify, then sends OTP to account email to unlock a LOCKED account.',
+  })
+  @ApiBody({ type: LoginOtpRequestDto })
+  @ApiOkEnvelopeResponse(AuthOtpChallengeResultDto)
+  requestUnlockAccountOtp(@Body() body: LoginOtpRequestDto) {
+    return this.authService.requestUnlockAccountOtp(body);
+  }
+
+  @Public()
+  @Post('unlock/confirm')
+  @ApiOperation({
+    summary: 'Confirm OTP to unlock account and login',
+    description: 'Verify the OTP. If valid, unlocks the account and returns tokens to login.',
+  })
+  @ApiBody({ type: LoginOtpVerifyRequestDto })
+  @ApiOkEnvelopeResponse(AuthSessionDto)
+  confirmUnlockAccount(
+    @Body() body: LoginOtpVerifyRequestDto,
+    @Req() request: Request,
+  ) {
+    return this.authService.confirmUnlockAccount(
+      body,
+      extractSessionClientMetadata(request),
+    );
+  }
+
+  @Public()
   @Post('refresh')
   @ApiOperation({
     summary: 'Refresh access token pair',
@@ -514,6 +547,17 @@ export class AuthController {
   )
   requestForgotPasswordOtp(@Body() body: ForgotPasswordRequestDto) {
     return this.authService.requestForgotPasswordOtp(body);
+  }
+
+  @Public()
+  @Post('password/forgot/verify')
+  @ApiOperation({ summary: 'Verify forgot password OTP without consuming it' })
+  @ApiBody({ type: LoginOtpVerifyRequestDto })
+  @ApiOkEnvelopeResponse(GenericAcceptedResultDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  verifyForgotPasswordOtp(@Body() body: LoginOtpVerifyRequestDto) {
+    return this.authService.verifyForgotPasswordOtp(body);
   }
 
   @Public()

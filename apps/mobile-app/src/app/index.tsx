@@ -1,7 +1,8 @@
 import { useEffect } from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/providers/AuthProvider";
+import { SkeletonDetail } from "@/components/skeleton/Skeleton";
 
 export default function Index() {
   const router = useRouter();
@@ -24,7 +25,7 @@ export default function Index() {
   if (isLoading) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" color="#1677ff" />
+        <SkeletonDetail />
       </View>
     );
   }

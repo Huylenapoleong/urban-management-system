@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,18 +13,21 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
+import { CardListSkeleton } from "@/components/skeleton/Skeleton";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { REPORT_CATEGORIES, REPORT_PRIORITIES } from "@urban/shared-constants";
 import type { ImagePickerAsset } from "expo-image-picker";
-import type { ReportItem } from "@urban/shared-types";
+import type { MediaAsset, ReportItem, UploadedAsset } from "@urban/shared-types";
 import { parseLocationCode } from "@urban/shared-utils";
 import Header from "@/components/Header";
 import Button from "@/components/Button";
 import CitizenReportCard from "@/components/shared/CitizenReportCard";
+import { ApiClient } from "@/lib/api-client";
+import { ENV_CONFIG } from "@/constants/env";
 import colors from "@/constants/colors";
+import { convertToS3Url } from "@/constants/s3";
 import { useAuth } from "@/providers/AuthProvider";
-import { createReport, listReports } from "@/services/api/report.api";
-import { uploadMedia } from "@/services/api/upload.api";
+import { listReports } from "@/services/api/report.api";
 
 type LocationOption = {
   key: string;
@@ -35,25 +38,138 @@ type LocationOption = {
 type SelectedImage = {
   uri: string;
   fileName: string;
+  fileSize?: number;
   mimeType?: string;
+  webFile?: File;
 };
 
-const hasCitizenS3Config = Boolean(
-  process.env.S3_BUCKET_NAME ||
-    process.env.EXPO_PUBLIC_S3_ENDPOINT ||
-    process.env.EXPO_PUBLIC_S3_ACCESS_KEY ||
-    process.env.EXPO_PUBLIC_S3_SECRET_KEY ||
-    process.env.S3_BUCKET_NAME ||
-    process.env.S3_ENDPOINT ||
-    process.env.AWS_ACCESS_KEY_ID ||
-    process.env.AWS_SECRET_ACCESS_KEY,
-);
+type CreateReportPayload = {
+  title: string;
+  description: string;
+  category: (typeof REPORT_CATEGORIES)[number];
+  priority: (typeof REPORT_PRIORITIES)[number];
+  locationCode: string;
+  mediaUrls?: string[];
+};
+
+const API_REPORT_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 function toSelectedImage(asset: ImagePickerAsset): SelectedImage {
   return {
     uri: asset.uri,
     fileName: asset.fileName || asset.uri.split("/").pop() || `report-${Date.now()}.jpg`,
+    fileSize: asset.fileSize,
     mimeType: asset.mimeType || undefined,
+    webFile: (asset as ImagePickerAsset & { file?: File }).file,
+  };
+}
+
+function inferReportImageMimeType(image: SelectedImage): string {
+  const rawMimeType = image.mimeType?.split(";")[0]?.trim().toLowerCase();
+
+  if (rawMimeType === "image/jpg") {
+    return "image/jpeg";
+  }
+
+  if (rawMimeType) {
+    return rawMimeType;
+  }
+
+  const lowerName = image.fileName.toLowerCase();
+
+  if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+
+  if (lowerName.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lowerName.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  if (lowerName.endsWith(".gif")) {
+    return "image/gif";
+  }
+
+  return "image/jpeg";
+}
+
+async function appendReportUploadFile(formData: FormData, image: SelectedImage) {
+  const contentType = inferReportImageMimeType(image);
+
+  if (!API_REPORT_IMAGE_MIME_TYPES.has(contentType)) {
+    throw new Error("API chỉ nhận ảnh JPEG, PNG, WEBP hoặc GIF. Vui lòng chọn ảnh khác.");
+  }
+
+  if (Platform.OS === "web") {
+    const sourceBlob: Blob = image.webFile
+      ? image.webFile
+      : await fetch(image.uri).then((response) => response.blob());
+
+    if (sourceBlob.size <= 0) {
+      throw new Error("Tệp ảnh đang rỗng. Vui lòng chọn lại ảnh khác.");
+    }
+
+    const uploadBlob =
+      sourceBlob.type === contentType
+        ? sourceBlob
+        : new Blob([sourceBlob], { type: contentType });
+    const uploadFile =
+      typeof File !== "undefined" && !(uploadBlob instanceof File)
+        ? new File([uploadBlob], image.fileName, { type: contentType })
+        : uploadBlob;
+
+    formData.append("file", uploadFile, image.fileName);
+    return;
+  }
+
+  formData.append(
+    "file",
+    {
+      uri: image.uri,
+      name: image.fileName,
+      type: contentType,
+    } as any,
+  );
+}
+
+function resolveReportMediaUrl(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const converted = convertToS3Url(trimmed);
+  if (/^https?:\/\//i.test(converted)) {
+    return converted;
+  }
+
+  const normalized = converted.replace(/^\/+/, "");
+  if (normalized.startsWith("uploads/")) {
+    return `${ENV_CONFIG.S3.NEW_BASE_URL}${normalized.replace(/^uploads\/+/, "")}`;
+  }
+
+  return `${ENV_CONFIG.API_BASE_URL.replace(/\/+$/, "")}/${normalized}`;
+}
+
+function normalizeReportMedia(report: ReportItem): ReportItem {
+  const fallbackUrls = (report.mediaAssets ?? [])
+    .map((asset: MediaAsset) => resolveReportMediaUrl(asset.resolvedUrl || asset.key))
+    .filter((value): value is string => Boolean(value));
+
+  const mediaUrls = (report.mediaUrls ?? [])
+    .map((value) => resolveReportMediaUrl(value))
+    .filter((value): value is string => Boolean(value));
+
+  return {
+    ...report,
+    mediaUrls: mediaUrls.length > 0 ? mediaUrls : fallbackUrls,
   };
 }
 
@@ -89,12 +205,23 @@ export default function ReportPage() {
     }
 
     return [
-      { key: "country", label: "Quoc gia", value: locationSegments.country },
-      { key: "province", label: "Tinh/Thanh", value: locationSegments.province },
-      { key: "district", label: "Quan/Huyen", value: locationSegments.district },
-      { key: "ward", label: "Phuong/Xa", value: locationSegments.ward },
+      { key: "country", label: "Quốc gia", value: locationSegments.country },
+      { key: "province", label: "Tỉnh/Thành", value: locationSegments.province },
+      { key: "district", label: "Quận/Huyện", value: locationSegments.district },
+      { key: "ward", label: "Phường/Xã", value: locationSegments.ward },
     ];
   }, [locationSegments]);
+
+  const uploadReportMedia = useCallback(
+    async (image: SelectedImage): Promise<UploadedAsset> => {
+      const formData = new FormData();
+      formData.append("target", "REPORT");
+      await appendReportUploadFile(formData, image);
+
+      return await ApiClient.upload<UploadedAsset>("/uploads/media", formData);
+    },
+    [],
+  );
 
   const loadMyReports = useCallback(async () => {
     setLoadingReports(true);
@@ -102,13 +229,15 @@ export default function ReportPage() {
     try {
       const data = await listReports({ mine: true, limit: 100 });
       setReports(
-        [...data].sort(
+        [...data]
+          .map((report) => normalizeReportMedia(report))
+          .sort(
           (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-        ),
+          ),
       );
       setError(null);
     } catch (err: unknown) {
-      setError((err as Error)?.message ?? "Khong the tai danh sach phan anh");
+      setError((err as Error)?.message ?? "Không thể tải danh sách phản ánh");
     } finally {
       setLoadingReports(false);
     }
@@ -122,12 +251,12 @@ export default function ReportPage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("Can quyen truy cap", "Vui long cap quyen thu vien anh de dinh kem tep.");
+      Alert.alert("Cần quyền truy cập", "Vui lòng cấp quyền thư viện ảnh để đính kèm tệp.");
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       quality: 0.8,
       allowsEditing: true,
     });
@@ -141,12 +270,12 @@ export default function ReportPage() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("Can quyen camera", "Vui long cap quyen camera de chup anh moi.");
+      Alert.alert("Cần quyền camera", "Vui lòng cấp quyền camera để chụp ảnh mới.");
       return;
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       quality: 0.8,
       allowsEditing: true,
     });
@@ -158,12 +287,12 @@ export default function ReportPage() {
 
   const submit = async () => {
     if (!user?.locationCode) {
-      setError("Khong xac dinh duoc khu vuc cua ban");
+      setError("Không xác định được khu vực của bạn");
       return;
     }
 
     if (!title.trim() || !description.trim()) {
-      setError("Vui long nhap day du tieu de va noi dung phan anh");
+      setError("Vui lòng nhập đầy đủ tiêu đề và nội dung phản ánh");
       return;
     }
 
@@ -174,36 +303,43 @@ export default function ReportPage() {
       const mediaUrls: string[] = [];
 
       if (selectedImage) {
-        const uploadedAsset = await uploadMedia({
-          uri: selectedImage.uri,
-          fileName: selectedImage.fileName,
-          mimeType: selectedImage.mimeType,
-          target: "REPORT",
-        });
+        const uploadedAsset = await uploadReportMedia(selectedImage);
+        const uploadedUrl = resolveReportMediaUrl(uploadedAsset.url) || resolveReportMediaUrl(uploadedAsset.key);
 
-        mediaUrls.push(uploadedAsset.url);
+        if (!uploadedUrl) {
+          throw new Error("Upload thành công nhưng không nhận được URL ảnh.");
+        }
+
+        mediaUrls.push(uploadedUrl);
       }
 
-      const createdReport = await createReport({
+      const payload: CreateReportPayload = {
         title: title.trim(),
         description: description.trim(),
         category,
         priority,
         locationCode: user.locationCode,
-        mediaUrls,
-      });
+      };
+
+      if (mediaUrls.length > 0) {
+        payload.mediaUrls = mediaUrls;
+      }
+
+      const createdReport = normalizeReportMedia(await ApiClient.post<ReportItem>("/reports", payload));
 
       setReports((prev) => [createdReport, ...prev]);
       setTitle("");
       setDescription("");
       setSelectedImage(null);
       setError(null);
-      setSuccessMessage("Da gui phan anh thanh cong");
+      setSuccessMessage("Đã gửi phản ánh thành công");
       
       // Invalidate queries để home page auto-refresh
       await queryClient.invalidateQueries({ queryKey: ['reports'] });
     } catch (err: unknown) {
-      setError((err as Error)?.message ?? "Khong the gui phan anh");
+      const message = (err as Error)?.message ?? "Không thể gửi phản ánh";
+      setError(message);
+      Alert.alert("Lỗi gửi phản ánh", message);
     } finally {
       setSubmitting(false);
     }
@@ -211,21 +347,12 @@ export default function ReportPage() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Header title="Gui phan anh" subtitle="Them anh dinh kem, gui dung dia ban, va theo doi lich su da gui" />
-
-      <View style={styles.infoCard}>
-        <Ionicons name="information-circle-outline" size={18} color="#1d4ed8" />
-        <Text style={styles.infoText}>
-          {hasCitizenS3Config
-            ? "Citizen app dang co bien moi truong lien quan den S3. Upload anh se di qua upload API hien co cua he thong."
-            : "Khong tim thay cau hinh S3 trong .env cua Citizen app. Minh khong them key moi; upload anh se goi upload API san co va thanh cong hay khong se phu thuoc cau hinh S3 phia backend."}
-        </Text>
-      </View>
+      <Header title="Gửi phản ánh" subtitle="Thêm ảnh đính kèm, gửi đúng địa bàn, và theo dõi lịch sử đã gửi" />
 
       <View style={styles.locationCard}>
-        <Text style={styles.cardTitle}>Vi tri phan anh</Text>
+        <Text style={styles.cardTitle}>Vị trí phản ánh</Text>
         <Text style={styles.cardHint}>
-          Tai khoan cong dan chi duoc tao phan anh trong dung dia ban da dang ky.
+          Tài khoản công dân chỉ được tạo phản ánh trong đúng địa bàn đã đăng ký.
         </Text>
         <View style={styles.locationGrid}>
           {locationOptions.map((item) => (
@@ -238,20 +365,20 @@ export default function ReportPage() {
         {user?.locationCode ? (
           <Text style={styles.helperText}>{`Location code: ${user.locationCode}`}</Text>
         ) : (
-          <Text style={styles.errorText}>Khong tai duoc locationCode cua tai khoan.</Text>
+          <Text style={styles.errorText}>Không tải được locationCode của tài khoản.</Text>
         )}
       </View>
 
-      <Text style={styles.label}>Tieu de phan anh</Text>
+      <Text style={styles.label}>Tiêu đề phản ánh</Text>
       <TextInput
         style={styles.input}
         value={title}
         onChangeText={setTitle}
-        placeholder="Vi du: Den duong hong tai hem 12"
+        placeholder="Ví dụ: Đèn đường hỏng tại hẻm 12"
         placeholderTextColor={colors.textSecondary}
       />
 
-      <Text style={styles.label}>Danh muc</Text>
+      <Text style={styles.label}>Danh mục</Text>
       <View style={styles.selectorRow}>
         {REPORT_CATEGORIES.map((item) => (
           <TouchableOpacity
@@ -264,7 +391,7 @@ export default function ReportPage() {
         ))}
       </View>
 
-      <Text style={styles.label}>Do uu tien</Text>
+      <Text style={styles.label}>Độ ưu tiên</Text>
       <View style={styles.selectorRow}>
         {REPORT_PRIORITIES.map((item) => (
           <TouchableOpacity
@@ -277,35 +404,42 @@ export default function ReportPage() {
         ))}
       </View>
 
-      <Text style={styles.label}>Noi dung phan anh</Text>
+      <Text style={styles.label}>Nội dung phản ánh</Text>
       <TextInput
         style={styles.textarea}
         value={description}
         onChangeText={setDescription}
-        placeholder="Mo ta ro su co, thoi gian, vi tri, tac dong thuc te..."
+        placeholder="Mô tả rõ sự cố, thời gian, vị trí, tác động thực tế..."
         placeholderTextColor={colors.textSecondary}
         multiline
         numberOfLines={6}
       />
 
-      <Text style={styles.label}>Anh dinh kem</Text>
+      <Text style={styles.label}>Ảnh đính kèm</Text>
       <View style={styles.imageActionRow}>
         <Pressable style={styles.imageActionButton} onPress={() => void handlePickImage()}>
           <Ionicons name="images-outline" size={18} color={colors.primary} />
-          <Text style={styles.imageActionText}>Chon tu thu vien</Text>
+          <Text style={styles.imageActionText}>Chọn từ thư viện</Text>
         </Pressable>
         <Pressable style={styles.imageActionButton} onPress={() => void handleTakePhoto()}>
           <Ionicons name="camera-outline" size={18} color={colors.primary} />
-          <Text style={styles.imageActionText}>Chup anh moi</Text>
+          <Text style={styles.imageActionText}>Chụp ảnh mới</Text>
         </Pressable>
       </View>
 
       {selectedImage ? (
         <View style={styles.previewCard}>
-          <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} contentFit="cover" />
+          <Image
+            source={{ uri: selectedImage.uri }}
+            style={styles.previewImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj" }}
+            transition={160}
+          />
           <View style={styles.previewContent}>
             <Text style={styles.previewTitle}>{selectedImage.fileName}</Text>
-            <Text style={styles.previewSubtitle}>Anh nay se duoc upload len he thong khi gui phan anh.</Text>
+            <Text style={styles.previewSubtitle}>Ảnh này sẽ được upload lên hệ thống khi gửi phản ánh.</Text>
           </View>
           <Pressable style={styles.removeImageButton} onPress={() => setSelectedImage(null)}>
             <Ionicons name="close" size={16} color="#b91c1c" />
@@ -314,7 +448,7 @@ export default function ReportPage() {
       ) : (
         <View style={styles.emptyUploadCard}>
           <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
-          <Text style={styles.emptyUploadText}>Ban co the chon anh hoac chup anh moi de gui kem.</Text>
+          <Text style={styles.emptyUploadText}>Bạn có thể chọn ảnh hoặc chụp ảnh mới để gửi kèm.</Text>
         </View>
       )}
 
@@ -322,7 +456,7 @@ export default function ReportPage() {
         onPress={() => void submit()}
         disabled={!title.trim() || !description.trim() || !user?.locationCode || submitting}
       >
-        {submitting ? "Dang gui..." : "Gui phan anh"}
+        {submitting ? "Đang gửi..." : "Gửi phản ánh"}
       </Button>
 
       {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
@@ -330,19 +464,19 @@ export default function ReportPage() {
 
       <View style={styles.historyHeader}>
         <View>
-          <Text style={styles.historyTitle}>Phan anh da gui</Text>
-          <Text style={styles.historySubtitle}>Day du anh, noi dung, trang thai va thoi gian gui</Text>
+          <Text style={styles.historyTitle}>Phản ánh đã gửi</Text>
+          <Text style={styles.historySubtitle}>Đầy đủ ảnh, nội dung, trạng thái và thời gian gửi</Text>
         </View>
       </View>
 
       {loadingReports ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} />
+        <CardListSkeleton count={3} />
       ) : reports.length > 0 ? (
         reports.map((report) => <CitizenReportCard key={report.id} report={report} />)
       ) : (
         <View style={styles.emptyHistoryCard}>
-          <Text style={styles.emptyHistoryTitle}>Chua co lich su phan anh</Text>
-          <Text style={styles.emptyHistoryText}>Phan anh vua gui se xuat hien trong danh sach nay.</Text>
+          <Text style={styles.emptyHistoryTitle}>Chưa có lịch sử phản ánh</Text>
+          <Text style={styles.emptyHistoryText}>Phản ánh vừa gửi sẽ xuất hiện trong danh sách này.</Text>
         </View>
       )}
     </ScrollView>
@@ -357,25 +491,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 14,
     paddingBottom: 34,
-  },
-  infoCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: "#eff6ff",
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    marginBottom: 12,
-  },
-  infoText: {
-    flex: 1,
-    color: "#1e3a8a",
-    lineHeight: 20,
-    fontSize: 13,
-    fontWeight: "600",
   },
   locationCard: {
     backgroundColor: "white",

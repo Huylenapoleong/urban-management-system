@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, Image as RNImage, Pressable } from "react-native";
+import React from "react";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import { Image } from "expo-image";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import colors from "@/constants/colors";
@@ -12,7 +13,7 @@ type ChatBubbleProps = {
   messageType?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
 };
 
-export default function ChatBubble({ 
+function ChatBubble({ 
   text, 
   isOwn, 
   time, 
@@ -31,10 +32,13 @@ export default function ChatBubble({
       ]}>
         {correctedAttachmentUrl && isImageMessage ? (
           <>
-            <RNImage 
+            <Image
               source={{ uri: correctedAttachmentUrl }}
               style={styles.imageAttachment}
-              resizeMode="cover"
+              cachePolicy="memory-disk"
+              contentFit="cover"
+              placeholder={{ blurhash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj" }}
+              transition={160}
             />
             {text && <Text style={[styles.text, isOwn && styles.textWhite]}>{text}</Text>}
           </>
@@ -60,6 +64,8 @@ export default function ChatBubble({
     </View>
   );
 }
+
+export default React.memo(ChatBubble);
 
 const styles = StyleSheet.create({
   container: {

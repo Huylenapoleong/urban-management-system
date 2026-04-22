@@ -50,6 +50,7 @@ const OTP_PURPOSES = Object.freeze([
   "DEACTIVATE_ACCOUNT",
   "REACTIVATE_ACCOUNT",
   "DELETE_ACCOUNT",
+  "UNLOCK_ACCOUNT",
 ]);
 
 const REPORT_CATEGORIES = Object.freeze([

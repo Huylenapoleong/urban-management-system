@@ -40,3 +40,71 @@ export async function getUserById(userId: string): Promise<UserProfile> {
   return await client.get(`/users/${encodeURIComponent(userId)}`);
 }
 
+export async function listUsers(params?: any): Promise<UserProfile[]> {
+  return await client.get("/users", { params });
+}
+
+export async function createUser(data: any): Promise<UserProfile> {
+  return await client.post("/users", data);
+}
+
+export async function discoverUsers(params?: any): Promise<any[]> {
+  return await client.get("/users/discover", { params });
+}
+
+export async function searchExactUser(query: string): Promise<UserProfile> {
+  return await client.get("/users/search", { params: { q: query } });
+}
+
+export async function getUserPresence(userId: string): Promise<any> {
+  return await client.get(`/users/${encodeURIComponent(userId)}/presence`);
+}
+
+export async function getMyPresence(): Promise<any> {
+  return await client.get("/users/me/presence");
+}
+
+export async function updateUserStatus(userId: string, status: string): Promise<UserProfile> {
+  return await client.patch(`/users/${encodeURIComponent(userId)}/status`, { status });
+}
+
+export async function listFriends(params?: any): Promise<any[]> {
+  return await client.get("/users/me/friends", { params });
+}
+
+export async function listFriendRequests(params?: any): Promise<any[]> {
+  return await client.get("/users/me/friend-requests", { params });
+}
+
+export async function sendFriendRequest(userId: string): Promise<any> {
+  return await client.post(`/users/me/friends/${encodeURIComponent(userId)}/request`);
+}
+
+export async function acceptFriendRequest(userId: string): Promise<any> {
+  return await client.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/accept`);
+}
+
+export async function rejectFriendRequest(userId: string): Promise<any> {
+  return await client.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/reject`);
+}
+
+export async function cancelFriendRequest(userId: string): Promise<any> {
+  return await client.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/cancel`);
+}
+
+export async function removeFriend(userId: string): Promise<any> {
+  return await client.delete(`/users/me/friends/${encodeURIComponent(userId)}`);
+}
+
+export async function listPushDevices(): Promise<any[]> {
+  return await client.get("/users/me/push-devices");
+}
+
+export async function registerPushDevice(data: any): Promise<any> {
+  return await client.post("/users/me/push-devices", data);
+}
+
+export async function deletePushDevice(deviceId: string): Promise<void> {
+  await client.delete(`/users/me/push-devices/${encodeURIComponent(deviceId)}`);
+}
+

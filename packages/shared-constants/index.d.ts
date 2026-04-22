@@ -63,6 +63,7 @@ export const OTP_PURPOSES: readonly [
   "DEACTIVATE_ACCOUNT",
   "REACTIVATE_ACCOUNT",
   "DELETE_ACCOUNT",
+  "UNLOCK_ACCOUNT",
 ];
 export type OtpPurpose = (typeof OTP_PURPOSES)[number];
 

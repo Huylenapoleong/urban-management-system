@@ -401,6 +401,60 @@ export class UsersService {
     );
   }
 
+  async unlockOwnAccount(userId: string): Promise<StoredUser> {
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = await this.getByIdOrThrow(userId);
+
+      if (current.status === 'ACTIVE') {
+        return current;
+      }
+
+      if (current.status !== 'LOCKED') {
+        throw new BadRequestException(
+          'Only locked accounts can be unlocked via OTP.',
+        );
+      }
+
+      const nextUser: StoredUser = {
+        ...current,
+        status: 'ACTIVE',
+        deletedAt: null,
+        updatedAt: nowIso(),
+      };
+
+      try {
+        await this.repository.transactPut([
+          {
+            tableName: this.config.dynamodbUsersTableName,
+            item: nextUser,
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+            expressionAttributeValues: {
+              ':expectedUpdatedAt': current.updatedAt,
+            },
+          },
+        ]);
+        return nextUser;
+      } catch (error) {
+        if (!this.isConditionalWriteConflict(error)) {
+          throw error;
+        }
+
+        if (attempt === maxAttempts - 1) {
+          throw new ConflictException(
+            'User profile was changed by another request. Please retry.',
+          );
+        }
+      }
+    }
+
+    throw new ConflictException(
+      'User profile was changed by another request. Please retry.',
+    );
+  }
+
   async deleteOwnAccountPermanently(userId: string): Promise<StoredUser> {
     const maxAttempts = 3;
 
@@ -797,6 +851,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<UserFriendItem[], ApiResponseMeta>> {
+    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     const limit = parseLimit(query.limit);
     const edges = (
@@ -916,6 +971,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<UserFriendRequestItem[], ApiResponseMeta>> {
+    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     const limit = parseLimit(query.limit);
     const directionRaw = optionalQueryString(query.direction, 'direction');
@@ -1122,10 +1178,11 @@ export class UsersService {
           return true;
         }
 
-        return [user.fullName, user.phone ?? '', user.email ?? '']
+        const haystacks = [user.fullName, user.phone ?? '', user.email ?? '']
           .join(' ')
-          .toLowerCase()
-          .includes(keyword);
+          .toLowerCase();
+
+        return haystacks.includes(keyword);
       })
       .map((user) => {
         const relationState = this.resolveFriendRelationState(
@@ -1139,11 +1196,12 @@ export class UsersService {
         const directMessageRequest = directMessageRequestByUserId.get(
           user.userId,
         );
+        const hasAcceptedDirectMessageRequest =
+          directMessageRequest?.status === 'ACCEPTED';
         const canMessage =
-          user.role === 'CITIZEN' && actor.role === 'CITIZEN'
-            ? friendUserIds.has(user.userId) ||
-              directMessageRequest?.status === 'ACCEPTED'
-            : canAccessDirectConversation;
+          friendUserIds.has(user.userId) ||
+          hasAcceptedDirectMessageRequest ||
+          canAccessDirectConversation;
         const canSendFriendRequest =
           actor.role === 'CITIZEN' &&
           user.role === 'CITIZEN' &&
@@ -1223,6 +1281,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     targetUserId: string,
   ): Promise<UserFriendRequestItem> {
+    this.assertCitizenFriendshipActor(actor);
     const requester = await this.getActiveByIdOrThrow(actor.id);
     const target = await this.getActiveByIdOrThrow(targetUserId);
     this.assertFriendshipEligiblePair(requester, target);
@@ -1316,6 +1375,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     requesterUserId: string,
   ): Promise<UserFriendItem> {
+    this.assertCitizenFriendshipActor(actor);
     const receiver = await this.getActiveByIdOrThrow(actor.id);
     const requester = await this.getActiveByIdOrThrow(requesterUserId);
     this.assertFriendshipEligiblePair(receiver, requester);
@@ -1416,6 +1476,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     requesterUserId: string,
   ): Promise<{ userId: string; action: 'REJECTED'; occurredAt: string }> {
+    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     await this.getByIdOrThrow(requesterUserId);
 
@@ -1472,6 +1533,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     targetUserId: string,
   ): Promise<{ userId: string; action: 'CANCELED'; occurredAt: string }> {
+    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     await this.getByIdOrThrow(targetUserId);
 
@@ -1528,6 +1590,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     friendUserId: string,
   ): Promise<{ userId: string; removedAt: string }> {
+    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     await this.getByIdOrThrow(friendUserId);
 
@@ -1825,18 +1888,20 @@ export class UsersService {
       return false;
     }
 
-    const edge = await this.getFriendEdge(userId, otherUserId);
-    return Boolean(edge);
+    const directEdge = await this.getFriendEdge(userId, otherUserId);
+
+    if (directEdge) {
+      return true;
+    }
+
+    const reverseEdge = await this.getFriendEdge(otherUserId, userId);
+    return Boolean(reverseEdge);
   }
 
   async canStartCitizenDm(
     actor: AuthenticatedUser,
     target: StoredUser,
   ): Promise<boolean> {
-    if (actor.role !== 'CITIZEN' || target.role !== 'CITIZEN') {
-      return true;
-    }
-
     return this.areFriends(actor.id, target.userId);
   }
 
@@ -1956,11 +2021,11 @@ export class UsersService {
     actor: AuthenticatedUser,
     target: StoredUser,
   ): boolean {
-    if (actor.role === 'CITIZEN' && target.role === 'CITIZEN') {
-      return true;
+    if (actor.id === target.userId) {
+      return false;
     }
 
-    return this.authorizationService.canAccessDirectConversation(actor, target);
+    return true;
   }
 
   private async getUsersByIds(userIds: string[]): Promise<StoredUser[]> {
@@ -1987,9 +2052,25 @@ export class UsersService {
     leftUser: StoredUser,
     rightUser: StoredUser,
   ): void {
+    if (leftUser.deletedAt || rightUser.deletedAt) {
+      throw new BadRequestException('User account is unavailable.');
+    }
+
+    if (leftUser.status !== 'ACTIVE' || rightUser.status !== 'ACTIVE') {
+      throw new BadRequestException('Only active accounts can use friendship.');
+    }
+
     if (leftUser.role !== 'CITIZEN' || rightUser.role !== 'CITIZEN') {
       throw new BadRequestException(
         'Friend requests are only supported between citizen accounts.',
+      );
+    }
+  }
+
+  private assertCitizenFriendshipActor(actor: AuthenticatedUser): void {
+    if (actor.role !== 'CITIZEN') {
+      throw new ForbiddenException(
+        'Friendship is only available for citizen accounts.',
       );
     }
   }

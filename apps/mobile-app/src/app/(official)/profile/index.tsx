@@ -1,19 +1,39 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Text, Button, Avatar, Card, List, useTheme, ActivityIndicator, IconButton, Portal, Dialog, TextInput } from 'react-native-paper';
+import { Text, Button, Avatar, Card, List, useTheme, IconButton, Portal, Dialog, TextInput } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../../providers/AuthProvider';
-import { useProfile, useUpdateProfile, useUploadAvatar } from '../../../hooks/shared/useProfile';
+import {
+  useAvatarLibrary,
+  useDeleteAvatarFile,
+  useProfile,
+  useRemoveCurrentAvatar,
+  useSetCurrentAvatar,
+  useUpdateProfile,
+  useUploadAvatar,
+} from '../../../hooks/shared/useProfile';
+import { convertToS3Url } from '../../../constants/s3';
+import { ListSkeleton, Skeleton, SkeletonProfile } from '@/components/skeleton/Skeleton';
 
 export default function ProfileScreen() {
   const { logout } = useAuth();
   const { data: profile, isLoading } = useProfile();
   const { mutate: updateProfile, isPending: isUpdating } = useUpdateProfile();
   const { mutateAsync: uploadAvatar, isPending: isUploading } = useUploadAvatar();
+  const { data: avatarLibrary = [], isLoading: isLoadingAvatarLibrary, refetch: refetchAvatarLibrary } = useAvatarLibrary();
+  const { mutateAsync: setCurrentAvatar, isPending: isSettingAvatar } = useSetCurrentAvatar();
+  const { mutateAsync: removeCurrentAvatar, isPending: isRemovingAvatar } = useRemoveCurrentAvatar();
+  const { mutateAsync: deleteAvatarFile, isPending: isDeletingAvatarFile } = useDeleteAvatarFile();
   const theme = useTheme();
 
   const [editVisible, setEditVisible] = useState(false);
   const [editForm, setEditForm] = useState({ fullName: '', phone: '', email: '', locationCode: '' });
+  const [avatarLibraryVisible, setAvatarLibraryVisible] = useState(false);
+
+  const profileAvatarUrl =
+    (profile?.avatarAsset?.resolvedUrl && convertToS3Url(profile.avatarAsset.resolvedUrl)) ||
+    (profile?.avatarUrl ? convertToS3Url(profile.avatarUrl) : undefined);
+  const currentAvatarKey = profile?.avatarAsset?.key || profile?.avatarKey || undefined;
 
   const handleOpenEdit = () => {
     if (profile) {
@@ -61,10 +81,59 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleSetCurrentAvatar = async (key: string) => {
+    try {
+      await setCurrentAvatar(key);
+      Alert.alert('Thành công', 'Đã cập nhật avatar hiện tại.');
+    } catch (err: any) {
+      Alert.alert('Lỗi', err?.message || 'Không thể cập nhật avatar.');
+    }
+  };
+
+  const handleRemoveCurrentAvatar = async () => {
+    Alert.alert('Xác nhận', 'Bạn muốn gỡ avatar hiện tại khỏi hồ sơ?', [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Đồng ý',
+        onPress: async () => {
+          try {
+            await removeCurrentAvatar();
+            Alert.alert('Thành công', 'Đã gỡ avatar hiện tại.');
+          } catch (err: any) {
+            Alert.alert('Lỗi', err?.message || 'Không thể gỡ avatar hiện tại.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteAvatarFile = async (key: string, isCurrent: boolean) => {
+    if (isCurrent) {
+      Alert.alert('Thông báo', 'Không thể xóa file avatar đang sử dụng.');
+      return;
+    }
+
+    Alert.alert('Xác nhận', 'Bạn muốn xóa hẳn file avatar này khỏi thư viện?', [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Xóa',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteAvatarFile(key);
+            await refetchAvatarLibrary();
+          } catch (err: any) {
+            Alert.alert('Lỗi', err?.message || 'Không thể xóa file avatar.');
+          }
+        },
+      },
+    ]);
+  };
+
   if (isLoading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" />
+        <SkeletonProfile />
       </View>
     );
   }
@@ -75,14 +144,14 @@ export default function ProfileScreen() {
         {/* Header Profile Section */}
         <View style={styles.avatarSection}>
           <View style={styles.avatarWrapper}>
-            {profile?.avatarUrl ? (
-              <Avatar.Image size={100} source={{ uri: profile.avatarUrl }} style={styles.avatarBorder} />
+            {profileAvatarUrl ? (
+              <Avatar.Image size={100} source={{ uri: profileAvatarUrl }} style={styles.avatarBorder} />
             ) : (
               <Avatar.Icon size={100} icon="account" style={styles.avatarPlaceholder} />
             )}
             {isUploading && (
               <View style={[StyleSheet.absoluteFill, styles.avatarOverlay]}>
-                <ActivityIndicator color="#fff" />
+                <Skeleton width={28} height={28} radius={14} />
               </View>
             )}
             <IconButton
@@ -132,6 +201,33 @@ export default function ProfileScreen() {
               descriptionStyle={styles.listDesc}
               left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="map-marker" color="#1976D2" /></View>}
             />
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.infoCard} elevation={2}>
+          <Card.Content style={{ paddingVertical: 12 }}>
+            <View style={styles.infoHeader}>
+              <Text variant="titleMedium" style={{ fontWeight: '800', color: '#1a1a1a' }}>Quản lý avatar</Text>
+            </View>
+            <List.Item
+              title="Thư viện avatar"
+              description="Xem avatar đã upload, đặt lại avatar cũ hoặc xóa file không dùng."
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDesc}
+              onPress={() => setAvatarLibraryVisible(true)}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="image-multiple" color="#1976D2" /></View>}
+              right={props => <List.Icon {...props} icon="chevron-right" />}
+            />
+
+            <Button
+              mode="outlined"
+              icon="account-off-outline"
+              onPress={handleRemoveCurrentAvatar}
+              disabled={isRemovingAvatar || !currentAvatarKey}
+              style={styles.avatarActionButton}
+            >
+              Gỡ avatar hiện tại
+            </Button>
           </Card.Content>
         </Card>
 
@@ -186,7 +282,62 @@ export default function ProfileScreen() {
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setEditVisible(false)}>Hủy</Button>
-            <Button mode="contained" onPress={handleSaveEdit} loading={isUpdating}>Lưu thay đổi</Button>
+            <Button mode="contained" onPress={handleSaveEdit} disabled={isUpdating}>Lưu thay đổi</Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        <Dialog visible={avatarLibraryVisible} onDismiss={() => setAvatarLibraryVisible(false)}>
+          <Dialog.Title>Thư viện avatar</Dialog.Title>
+          <Dialog.Content>
+            {isLoadingAvatarLibrary ? (
+              <ListSkeleton count={4} />
+            ) : avatarLibrary.length === 0 ? (
+              <Text style={styles.listDesc}>Chưa có avatar nào trong thư viện.</Text>
+            ) : (
+              <ScrollView style={styles.avatarLibraryList}>
+                {avatarLibrary.map((asset: any) => {
+                  const avatarUrl = asset?.url ? convertToS3Url(asset.url) : undefined;
+                  const isCurrent = Boolean(currentAvatarKey && asset?.key === currentAvatarKey);
+
+                  return (
+                    <View key={asset.key} style={styles.avatarLibraryRow}>
+                      {avatarUrl ? (
+                        <Avatar.Image size={44} source={{ uri: avatarUrl }} />
+                      ) : (
+                        <Avatar.Icon size={44} icon="account" style={styles.avatarPlaceholder} />
+                      )}
+                      <View style={styles.avatarLibraryMeta}>
+                        <Text numberOfLines={1} style={styles.avatarLibraryFile}>{asset.originalFileName || asset.fileName || asset.key}</Text>
+                        <Text style={styles.avatarLibrarySub}>{isCurrent ? 'Đang sử dụng' : 'Có thể đặt làm avatar hiện tại'}</Text>
+                      </View>
+                      <View style={styles.avatarLibraryActions}>
+                        <Button
+                          compact
+                          mode={isCurrent ? 'contained' : 'text'}
+                          disabled={isCurrent || isSettingAvatar}
+                          onPress={() => void handleSetCurrentAvatar(asset.key)}
+                        >
+                          {isCurrent ? 'Đang dùng' : 'Dùng ảnh này'}
+                        </Button>
+                        <Button
+                          compact
+                          mode="text"
+                          textColor="#D32F2F"
+                          disabled={isCurrent || isDeletingAvatarFile}
+                          onPress={() => void handleDeleteAvatarFile(asset.key, isCurrent)}
+                        >
+                          Xóa file
+                        </Button>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => void refetchAvatarLibrary()}>Làm mới</Button>
+            <Button onPress={() => setAvatarLibraryVisible(false)}>Đóng</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
@@ -224,6 +375,19 @@ const styles = StyleSheet.create({
   iconCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f0f4f8', justifyContent: 'center', alignItems: 'center', alignSelf: 'center' },
   listTitle: { fontWeight: '700', color: '#424242', fontSize: 14 },
   listDesc: { color: '#757575', marginTop: 2, fontSize: 13 },
+  avatarActionButton: { marginHorizontal: 12, marginTop: 8 },
+  avatarLibraryList: { maxHeight: 360 },
+  avatarLibraryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eceff1',
+  },
+  avatarLibraryMeta: { flex: 1, marginLeft: 10 },
+  avatarLibraryFile: { fontWeight: '600', color: '#263238', fontSize: 13 },
+  avatarLibrarySub: { color: '#607d8b', fontSize: 12, marginTop: 2 },
+  avatarLibraryActions: { alignItems: 'flex-end', justifyContent: 'center' },
   
   logoutBtn: { marginHorizontal: 16, borderRadius: 16, marginTop: 8 },
   input: { marginBottom: 12, backgroundColor: '#fff' }

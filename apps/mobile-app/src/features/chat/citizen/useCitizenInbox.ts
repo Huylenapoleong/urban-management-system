@@ -18,9 +18,12 @@ export function useCitizenInbox() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const seenEventIds = useRef(new Set<string>());
+  const hasLoadedOnceRef = useRef(false);
 
   const refresh = useCallback(async (activeRef?: { current: boolean }) => {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) {
+      setLoading(true);
+    }
 
     try {
       const [conversationItems, groupItems] = await Promise.all([
@@ -34,6 +37,7 @@ export function useCitizenInbox() {
 
       setConversations(conversationItems);
       setJoinedGroups(groupItems);
+      hasLoadedOnceRef.current = true;
       setError(null);
     } catch (err: unknown) {
       if (activeRef && !activeRef.current) {

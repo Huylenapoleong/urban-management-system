@@ -1,26 +1,68 @@
 import React from 'react';
-import { View, ScrollView, StyleSheet, ImageBackground, StatusBar } from 'react-native';
-import { Text, Card, Chip, Button, useTheme, Surface, IconButton, ActivityIndicator } from 'react-native-paper';
+import { View, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
+import { Image } from 'expo-image';
+import { Text, Button, useTheme, Surface, IconButton } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useReports } from '../../hooks/shared/useReports';
 import { useAuth } from '../../providers/AuthProvider';
 import { useProfile } from '../../hooks/shared/useProfile';
+import CitizenReportCard from '../../components/shared/CitizenReportCard';
+import { isSameProvince, isSameWard } from '@urban/shared-utils';
+import { CardListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
+import { prefetchReport } from '@/services/prefetch';
+
+const DASHBOARD_HERO_IMAGE =
+  'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop';
 
 export default function OfficialDashboardScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const { data: profile } = useProfile();
 
   // Fetch recent reports to simulate statistics and showcase lists
-  const { data: reports, isLoading } = useReports({
+  const { data: reports, isLoading, isFetching, isRefetching } = useReports({
     locationCode: user?.locationCode,
   });
+  const { isFirstLoad } = useSkeletonQuery({ data: reports, isLoading, isFetching, isRefetching });
 
-  const totalReports = reports?.length || 0;
-  const pendingCount = reports?.filter(r => r.status === 'NEW').length || 0;
-  const inProgressCount = reports?.filter(r => r.status === 'IN_PROGRESS').length || 0;
+  const scopedReports = React.useMemo(() => {
+    const source = Array.isArray(reports) ? reports : [];
+    const officerLocationCode = String(user?.locationCode || '').trim();
+    const role = String(user?.role || '');
+
+    if (role === 'ADMIN') {
+      return source;
+    }
+
+    if (!officerLocationCode) {
+      return [];
+    }
+
+    return source.filter((item: any) => {
+      const reportLocationCode = String(item?.locationCode || '').trim();
+      if (!reportLocationCode) {
+        return false;
+      }
+
+      if (role === 'WARD_OFFICER') {
+        return isSameWard(reportLocationCode, officerLocationCode);
+      }
+
+      if (role === 'PROVINCE_OFFICER') {
+        return isSameProvince(reportLocationCode, officerLocationCode);
+      }
+
+      return reportLocationCode === officerLocationCode;
+    });
+  }, [reports, user?.locationCode, user?.role]);
+
+  const totalReports = scopedReports.length;
+  const pendingCount = scopedReports.filter(r => r.status === 'NEW').length;
+  const inProgressCount = scopedReports.filter(r => r.status === 'IN_PROGRESS').length;
 
   return (
     <View style={[styles.container, { backgroundColor: '#f2f5f9' }]}>
@@ -28,11 +70,15 @@ export default function OfficialDashboardScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         
         {/* Hero Header */}
-        <ImageBackground 
-          source={{ uri: 'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop' }} 
-          style={styles.heroBackground}
-          imageStyle={{ opacity: 0.8 }}
-        >
+        <View style={styles.heroBackground}>
+          <Image
+            source={{ uri: DASHBOARD_HERO_IMAGE }}
+            style={styles.heroImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+            transition={180}
+          />
           <View style={styles.heroOverlay}>
             <View style={styles.headerContent}>
               <View>
@@ -44,7 +90,7 @@ export default function OfficialDashboardScreen() {
               </Surface>
             </View>
           </View>
-        </ImageBackground>
+        </View>
 
         {/* Stats Section */}
         <View style={styles.statsContainer}>
@@ -80,45 +126,22 @@ export default function OfficialDashboardScreen() {
             <Button mode="text" labelStyle={{ fontWeight: 'bold' }} onPress={() => router.push('/(official)/reports')}>XEM TẤT CẢ</Button>
           </View>
 
-          {isLoading ? (
-            <ActivityIndicator animating size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
+          {isFirstLoad ? (
+            <CardListSkeleton count={3} />
           ) : (
-            reports?.slice(0, 4).map((item) => (
-              <Surface key={item.id} style={styles.incidentCard} elevation={1}>
-                <View style={styles.cardContent}>
-                  <View style={styles.cardInfo}>
-                    <Text variant="titleMedium" numberOfLines={1} style={styles.cardTitle}>{item.title}</Text>
-                    <View style={styles.locationRow}>
-                      <MaterialCommunityIcons name="map-marker-radius" size={16} color="#666" />
-                      <Text variant="bodySmall" style={styles.locationText}>{item.locationCode || 'Khu vực chung'}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.actionColumn}>
-                    <Chip 
-                      compact 
-                      textStyle={{ fontSize: 11, fontWeight: 'bold', color: item.status === 'NEW' ? '#d32f2f' : '#f57c00' }} 
-                      style={[
-                        styles.statusChip, 
-                        { backgroundColor: item.status === 'NEW' ? '#ffcdd2' : '#ffe0b2' }
-                      ]}
-                    >
-                      {item.status === 'NEW' ? 'MỚI' : 'XỬ LÝ'}
-                    </Chip>
-                  </View>
-                </View>
-                <Button 
-                  mode="contained-tonal" 
-                  style={styles.cardButton} 
-                  contentStyle={{ height: 36 }}
-                  labelStyle={{ fontSize: 13, fontWeight: 'bold' }}
-                  onPress={() => router.push(`/(official)/reports/${item.id}` as any)}
-                >
-                  XEM CHI TIẾT
-                </Button>
-              </Surface>
+            scopedReports.slice(0, 4).map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => {
+                  void prefetchReport(queryClient, item.id);
+                  router.push(`/(official)/reports/${item.id}` as any);
+                }}
+              >
+                <CitizenReportCard report={item as any} />
+              </Pressable>
             ))
           )}
-          {reports?.length === 0 && !isLoading && (
+          {scopedReports.length === 0 && !isFirstLoad && (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons name="check-decagram" size={48} color="#4caf50" />
               <Text variant="bodyLarge" style={{ color: '#666', marginTop: 12 }}>Tuyệt vời! Khu vực hiện tại không có sự cố nào.</Text>
@@ -132,7 +155,8 @@ export default function OfficialDashboardScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  heroBackground: { width: '100%', height: 200, backgroundColor: '#024285' },
+  heroBackground: { width: '100%', height: 200, backgroundColor: '#024285', overflow: 'hidden' },
+  heroImage: { ...StyleSheet.absoluteFillObject, opacity: 0.8 },
   heroOverlay: { flex: 1, backgroundColor: 'rgba(0,35,90,0.6)', paddingTop: 50, paddingHorizontal: 24, justifyContent: 'center' },
   headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   greetingText: { color: 'rgba(255,255,255,0.9)', fontSize: 16, marginBottom: 4 },
@@ -148,16 +172,6 @@ const styles = StyleSheet.create({
   recentSection: { paddingHorizontal: 20, marginTop: 24 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontWeight: '800', fontSize: 18, color: '#1a1a1a' },
-  
-  incidentCard: { marginBottom: 16, borderRadius: 20, backgroundColor: '#ffffff', padding: 16, overflow: 'hidden' },
-  cardContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  cardInfo: { flex: 1, paddingRight: 12 },
-  cardTitle: { fontWeight: '700', fontSize: 16, color: '#2c3e50', marginBottom: 6 },
-  locationRow: { flexDirection: 'row', alignItems: 'center' },
-  locationText: { marginLeft: 6, color: '#607d8b', fontSize: 13, fontWeight: '500' },
-  actionColumn: { alignItems: 'flex-end' },
-  statusChip: { borderRadius: 12 },
-  cardButton: { marginTop: 16, borderRadius: 12 },
   
   emptyState: { alignItems: 'center', marginTop: 40, padding: 20 }
 });

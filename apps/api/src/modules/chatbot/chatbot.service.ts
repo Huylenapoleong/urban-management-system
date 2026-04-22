@@ -195,12 +195,55 @@ export class ChatbotService {
     const systemPrompt = this.buildSystemPrompt(docs, userRole);
 
     // === Step 3: Generate ===
-    const answer = await this.groq.complete(systemPrompt, question);
+    let answer: string;
+
+    try {
+      answer = await this.groq.complete(systemPrompt, question);
+    } catch (error) {
+      this.logger.error(
+        `Groq completion failed, using fallback summary for question: "${question}"`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      answer = this.buildLocalFallbackAnswer(question, docs);
+    }
 
     return {
       answer,
       sources: docs.map((d) => ({ title: d.title, source: d.source })),
     };
+  }
+
+  /**
+   * Fallback local response used when external LLM provider is unavailable.
+   * Keeps API response successful so client chat UX does not break.
+   */
+  private buildLocalFallbackAnswer(
+    question: string,
+    docs: KnowledgeDocument[],
+  ): string {
+    const topDocs = docs.slice(0, 3);
+
+    if (topDocs.length === 0) {
+      return NO_DATA_FALLBACK;
+    }
+
+    const highlights = topDocs
+      .map((doc, index) => {
+        const normalized = String(doc.content || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const preview = normalized.slice(0, 180);
+        const suffix = normalized.length > 180 ? '...' : '';
+        return `${index + 1}. ${doc.title}: ${preview}${suffix}`;
+      })
+      .join('\n');
+
+    return (
+      'He thong AI dang tam thoi qua tai hoac chua cau hinh key hop le. ' +
+      'Duoi day la thong tin tham khao tu co so tri thuc de ban xem nhanh:\n\n' +
+      highlights +
+      '\n\nBan co the gui lai cau hoi sau it phut de nhan cau tra loi chi tiet hon.'
+    );
   }
 
   // ─── Document Retrieval ─────────────────────────────────────────────────────

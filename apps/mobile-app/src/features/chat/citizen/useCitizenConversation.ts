@@ -60,6 +60,7 @@ export function useCitizenConversation({
 
   const joinedConversationKeyRef = useRef<string | null>(null);
   const seenEventIds = useRef(new Set<string>());
+  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const ensureSessionMatchesCurrentUser = useCallback(async () => {
     if (!currentUserId) {
@@ -169,9 +170,21 @@ export function useCitizenConversation({
         };
 
         const handleMessageCreated = (event: ChatMessageCreatedEvent) => {
+          console.log("[CHAT] MESSAGE_CREATED received:", {
+            conversationId: event.conversationId,
+            messageId: event.message?.id,
+            clientMessageId: event.clientMessageId,
+            type: event.message?.type,
+            attachmentUrl: event.message?.attachmentUrl,
+            attachmentKey: event.message?.attachmentAsset?.key,
+          });
+
           if (event.conversationId !== conversationId || !rememberEvent(seenEventIds, event.eventId)) {
+            console.log("[CHAT] MESSAGE_CREATED filtered out - conv mismatch or already seen");
             return;
           }
+
+          console.log("[CHAT] Adding MESSAGE_CREATED to state, messageId:", event.message?.id);
 
           setMessages((prev) => {
             const filtered = prev.filter(
@@ -230,6 +243,12 @@ export function useCitizenConversation({
             return;
           }
 
+          const currentTimeout = typingTimeoutsRef.current[event.userId];
+          if (currentTimeout) {
+            clearTimeout(currentTimeout);
+            delete typingTimeoutsRef.current[event.userId];
+          }
+
           setTypingByUser((prev) => {
             if (!event.isTyping) {
               const next = { ...prev };
@@ -242,6 +261,17 @@ export function useCitizenConversation({
               [event.userId]: event,
             };
           });
+
+          if (event.isTyping) {
+            typingTimeoutsRef.current[event.userId] = setTimeout(() => {
+              setTypingByUser((prev) => {
+                const next = { ...prev };
+                delete next[event.userId];
+                return next;
+              });
+              delete typingTimeoutsRef.current[event.userId];
+            }, 3000);
+          }
         };
 
         chatSocket.on("connect", handleConnect);
@@ -266,6 +296,8 @@ export function useCitizenConversation({
         }
 
         cleanupSocketListeners = () => {
+          Object.values(typingTimeoutsRef.current).forEach(clearTimeout);
+          typingTimeoutsRef.current = {};
           chatSocket.off("connect", handleConnect);
           chatSocket.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
           chatSocket.off(CHAT_SOCKET_EVENTS.MESSAGE_UPDATED, handleMessageUpdated);
@@ -284,6 +316,8 @@ export function useCitizenConversation({
     return () => {
       active = false;
       cleanupSocketListeners?.();
+      Object.values(typingTimeoutsRef.current).forEach(clearTimeout);
+      typingTimeoutsRef.current = {};
       setPresenceByUser({});
       setTypingByUser({});
       setJoinedConversationKey(null);
@@ -357,8 +391,6 @@ export function useCitizenConversation({
 
       setError(null);
       return true;
-      setMessages((prev) => prev.filter((item: any) => item.id !== nextClientMessageId));
-      throw error;
     } finally {
       setSending(false);
     }
@@ -401,16 +433,17 @@ export function useCitizenConversation({
     return true;
   }, [conversationId]);
 
-  const deleteMessage = useCallback(async (messageId: string) => {
+  const recallMessage = useCallback(async (messageId: string) => {
     if (!conversationId || !messageId) {
       return false;
     }
 
     const response = await emitChatAck(
-      CHAT_SOCKET_EVENTS.MESSAGE_DELETE,
+      CHAT_SOCKET_EVENTS.MESSAGE_RECALL,
       {
         conversationId,
         messageId,
+        scope: "EVERYONE",
       },
     );
 
@@ -422,6 +455,9 @@ export function useCitizenConversation({
     setError(null);
     return true;
   }, [conversationId]);
+
+  // Backward compatibility for existing callsites.
+  const deleteMessage = recallMessage;
 
   const typingUsers = useMemo(
     () => Object.values(typingByUser).map((item) => item.fullName).filter(Boolean),
@@ -453,6 +489,8 @@ export function useCitizenConversation({
     sendMessage,
     setTyping,
     updateMessage,
+    recallMessage,
     deleteMessage,
+    typingUsers,
   };
 }

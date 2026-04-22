@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { StyleSheet, Text, View, Pressable, Image as RNImage } from "react-native";
+import { memo, useState, useEffect } from "react";
+import { StyleSheet, Text, View, Pressable } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import type { ReportItem } from "@urban/shared-types";
@@ -16,7 +16,7 @@ type CitizenReportCardProps = {
   report: ReportItem;
 };
 
-export default function CitizenReportCard({ report }: CitizenReportCardProps) {
+function CitizenReportCard({ report }: CitizenReportCardProps) {
   const primaryImage = report.mediaUrls?.[0];
   const processingColor = getReportProcessingColor(report.status);
   const [imageError, setImageError] = useState(false);
@@ -40,12 +40,15 @@ export default function CitizenReportCard({ report }: CitizenReportCardProps) {
   return (
     <View style={styles.card}>
       {correctedImageUrl && !imageError ? (
-        <RNImage 
+        <Image
           source={{ uri: correctedImageUrl }} 
           style={styles.image} 
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          placeholder={{ blurhash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj" }}
+          transition={180}
           onError={(error) => {
-            console.log('Image load error:', correctedImageUrl, error.nativeEvent);
+            console.log('Image load error:', correctedImageUrl, error);
             setImageError(true);
           }}
           onLoad={() => console.log('Image loaded successfully:', correctedImageUrl)}
@@ -97,6 +100,8 @@ export default function CitizenReportCard({ report }: CitizenReportCardProps) {
     </View>
   );
 }
+
+export default memo(CitizenReportCard);
 
 const styles = StyleSheet.create({
   card: {

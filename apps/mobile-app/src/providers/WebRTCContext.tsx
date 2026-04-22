@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
-import { CallState } from '../hooks/shared/useWebRTC';
-import { MediaStream } from '../hooks/shared/WebRTCShim';
+import type { CallState, CallEndedSummary } from '../hooks/shared/useWebRTC';
+import type { MediaStream } from '../hooks/shared/WebRTCShim';
 
 export interface WebRTCContextValue {
   callState: CallState;
@@ -14,6 +14,11 @@ export interface WebRTCContextValue {
   endCall: () => void;
   toggleMute: () => void;
   toggleVideo: () => void;
+  isVideoOn: boolean;
+  callError: string | null;
+  lastEndedCall: CallEndedSummary | null;
+  callDurationSeconds: number;
+  clearLastEndedCall: () => void;
 }
 
 export const WebRTCContext = createContext<WebRTCContextValue | null>(null);
