@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import {
@@ -33,6 +34,8 @@ import {
   ApiNotFoundExamples,
 } from '../../common/openapi/swagger-errors';
 import {
+  BlockActionResultDto,
+  BlockedUserItemDto,
   FriendActionResultDto,
   FriendRequestItemDto,
   FriendRequestQueryDto,
@@ -46,6 +49,9 @@ import {
   PushDeviceDto,
   PushDeviceRemovalResultDto,
   RegisterPushDeviceRequestDto,
+  SetUserContactAliasRequestDto,
+  UserContactAliasDto,
+  UserContactAliasRemovalResultDto,
   UserDirectoryItemDto,
   UpdateProfileRequestDto,
   UpdateUserStatusRequestDto,
@@ -114,6 +120,37 @@ export class UsersController {
     @Query() query: ListFriendsQueryDto,
   ) {
     return this.usersService.listFriends(
+      user,
+      query as Record<string, unknown>,
+    );
+  }
+
+  @Get('me/blocks')
+  @ApiOperation({
+    summary: 'List users I blocked',
+    description:
+      'Returns the authenticated user block list. Blocked users are hidden from normal discovery and cannot send friend requests, message requests, direct messages, or calls.',
+  })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOkEnvelopeResponse(BlockedUserItemDto, {
+    isArray: true,
+    description:
+      'Blocked users for the authenticated user, including when the block was created.',
+  })
+  @ApiBadRequestExamples('The block list query is invalid.', [
+    {
+      name: 'blocksInvalidLimit',
+      summary: 'Invalid pagination limit',
+      message: 'limit must be a positive integer.',
+      path: '/api/users/me/blocks?limit=0',
+    },
+  ])
+  listMyBlockedUsers(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListFriendsQueryDto,
+  ) {
+    return this.usersService.listBlockedUsers(
       user,
       query as Record<string, unknown>,
     );
@@ -354,6 +391,139 @@ export class UsersController {
     @Param('userId') userId: string,
   ) {
     return this.usersService.removeFriend(user, userId);
+  }
+
+  @Post('me/blocks/:userId')
+  @ApiOperation({
+    summary: 'Block a user',
+    description:
+      'Creates a user-level block. Blocking removes friendship and pending friend requests between the pair, keeps existing chat history, and prevents new friend requests, message requests, direct messages, and calls until unblocked.',
+  })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(BlockActionResultDto, {
+    description: 'Returns the blocked user id and block timestamp.',
+  })
+  @ApiBadRequestExamples('The block request is invalid.', [
+    {
+      name: 'blockSelf',
+      summary: 'Cannot block yourself',
+      message: 'Cannot block yourself.',
+      path: '/api/users/me/blocks/01JPCY0000CITIZENA00000000',
+    },
+  ])
+  @ApiNotFoundExamples('The target user does not exist.', [
+    {
+      name: 'blockMissingUser',
+      summary: 'Target user not found',
+      message: 'User not found.',
+      path: '/api/users/me/blocks/01JPCY0000UNKNOWNUSER000000',
+    },
+  ])
+  blockUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.blockUser(user, userId);
+  }
+
+  @Delete('me/blocks/:userId')
+  @ApiOperation({
+    summary: 'Unblock a user',
+    description:
+      'Removes a user-level block. Existing chat history stays intact; only future interactions become possible again if other policy checks also allow them.',
+  })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(BlockActionResultDto, {
+    description: 'Returns the unblocked user id and unblock timestamp.',
+  })
+  @ApiNotFoundExamples('The target user is not currently blocked.', [
+    {
+      name: 'unblockMissing',
+      summary: 'Blocked user not found',
+      message: 'Blocked user not found.',
+      path: '/api/users/me/blocks/01JPCY0000CITIZENB00000000',
+    },
+  ])
+  unblockUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.unblockUser(user, userId);
+  }
+
+  @Put('me/contacts/:userId/alias')
+  @ApiOperation({
+    summary: 'Set or replace a private contact alias',
+    description:
+      'Stores a private alias for a friend or an existing direct-message counterpart. The alias becomes the display name for that contact in supported friend/chat responses and direct-message conversation summaries.',
+  })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiBody({ type: SetUserContactAliasRequestDto })
+  @ApiOkEnvelopeResponse(UserContactAliasDto, {
+    description: 'Returns the saved alias and its updated timestamp.',
+  })
+  @ApiBadRequestExamples('The alias input is invalid.', [
+    {
+      name: 'aliasSelf',
+      summary: 'Cannot alias yourself',
+      message: 'Cannot set an alias for yourself.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENA00000000/alias',
+    },
+    {
+      name: 'aliasMissingValue',
+      summary: 'Alias is required',
+      message: 'alias is required.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENB00000000/alias',
+    },
+  ])
+  @ApiForbiddenExamples('The actor cannot alias this user yet.', [
+    {
+      name: 'aliasForbidden',
+      summary: 'Alias not allowed for unrelated user',
+      message:
+        'You can only set an alias for friends or existing direct conversations.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENB00000000/alias',
+    },
+  ])
+  @ApiNotFoundExamples('The target user does not exist.', [
+    {
+      name: 'aliasMissingUser',
+      summary: 'Target user not found',
+      message: 'User not found.',
+      path: '/api/users/me/contacts/01JPCY0000UNKNOWNUSER000000/alias',
+    },
+  ])
+  setContactAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+    @Body() body: SetUserContactAliasRequestDto,
+  ) {
+    return this.usersService.setContactAlias(user, userId, body);
+  }
+
+  @Delete('me/contacts/:userId/alias')
+  @ApiOperation({
+    summary: 'Clear a private contact alias',
+    description:
+      'Removes the saved alias for a contact. After clearing, FE should fall back to the target user full name in supported friend/chat responses and direct-message conversation summaries.',
+  })
+  @ApiParam({ name: 'userId', type: String })
+  @ApiOkEnvelopeResponse(UserContactAliasRemovalResultDto, {
+    description: 'Returns the cleared user id and clear timestamp.',
+  })
+  @ApiNotFoundExamples('The alias does not exist.', [
+    {
+      name: 'aliasMissing',
+      summary: 'Alias not found',
+      message: 'Contact alias not found.',
+      path: '/api/users/me/contacts/01JPCY0000CITIZENB00000000/alias',
+    },
+  ])
+  clearContactAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.clearContactAlias(user, userId);
   }
 
   @Get('discover')

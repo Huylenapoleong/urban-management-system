@@ -3,12 +3,15 @@ import type {
   AuthSessionInfo,
   AuthenticatedUser,
   ConversationSummary,
+  GroupBan,
+  GroupInviteLink,
   GroupMembership,
   GroupMetadata,
   MessageItem,
   PushDevice,
   ReportConversationLinkItem,
   ReportItem,
+  UserBlockedItem,
   UserFriendItem,
   UserFriendRequestItem,
   UserProfile,
@@ -16,6 +19,9 @@ import type {
 import type {
   StoredConversation,
   StoredConversationAuditEvent,
+  StoredGroupAuditEvent,
+  StoredGroupBan,
+  StoredGroupInviteLink,
   StoredRefreshSession,
   StoredGroup,
   StoredMembership,
@@ -26,6 +32,7 @@ import type {
   StoredReportConversationLink,
   StoredUser,
 } from './storage-records';
+import { normalizeGroupMemberRole } from './group-member-roles';
 
 function maskPushToken(pushToken: string): string {
   if (pushToken.length <= 10) {
@@ -60,6 +67,7 @@ export function toUserFriendItem(
   return {
     userId: user.userId,
     fullName: user.fullName,
+    displayName: user.fullName,
     role: user.role,
     locationCode: user.locationCode,
     avatarAsset: user.avatarAsset,
@@ -77,6 +85,7 @@ export function toUserFriendRequestItem(
   return {
     userId: user.userId,
     fullName: user.fullName,
+    displayName: user.fullName,
     role: user.role,
     locationCode: user.locationCode,
     avatarAsset: user.avatarAsset,
@@ -84,6 +93,23 @@ export function toUserFriendRequestItem(
     status: user.status,
     direction,
     requestedAt,
+  };
+}
+
+export function toUserBlockedItem(
+  user: StoredUser,
+  blockedAt: string,
+): UserBlockedItem {
+  return {
+    userId: user.userId,
+    fullName: user.fullName,
+    displayName: user.fullName,
+    role: user.role,
+    locationCode: user.locationCode,
+    avatarAsset: user.avatarAsset,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    blockedAt,
   };
 }
 
@@ -144,6 +170,7 @@ export function toGroupMetadata(group: StoredGroup): GroupMetadata {
     id: group.groupId,
     groupName: group.groupName,
     groupType: group.groupType,
+    messagePolicy: group.messagePolicy ?? 'ALL_MEMBERS',
     locationCode: group.locationCode,
     createdBy: group.createdBy,
     description: group.description,
@@ -155,11 +182,45 @@ export function toGroupMetadata(group: StoredGroup): GroupMetadata {
   };
 }
 
+export function toGroupBan(ban: StoredGroupBan): GroupBan {
+  return {
+    groupId: ban.groupId,
+    userId: ban.userId,
+    bannedByUserId: ban.bannedByUserId,
+    reason: ban.reason,
+    expiresAt: ban.expiresAt,
+    createdAt: ban.createdAt,
+    updatedAt: ban.updatedAt,
+  };
+}
+
+export function toGroupInviteLink(
+  inviteLink: StoredGroupInviteLink,
+): GroupInviteLink {
+  return {
+    inviteId: inviteLink.inviteId,
+    groupId: inviteLink.groupId,
+    code: inviteLink.code,
+    createdByUserId: inviteLink.createdByUserId,
+    expiresAt: inviteLink.expiresAt,
+    maxUses: inviteLink.maxUses,
+    usedCount: inviteLink.usedCount,
+    disabledAt: inviteLink.disabledAt,
+    createdAt: inviteLink.createdAt,
+    updatedAt: inviteLink.updatedAt,
+  };
+}
+
 export function toMembership(membership: StoredMembership): GroupMembership {
+  const roleInGroup =
+    typeof membership.roleInGroup === 'string'
+      ? normalizeGroupMemberRole(membership.roleInGroup)
+      : undefined;
+
   return {
     groupId: membership.groupId,
     userId: membership.userId,
-    roleInGroup: membership.roleInGroup,
+    roleInGroup: roleInGroup ?? 'MEMBER',
     joinedAt: membership.joinedAt,
     deletedAt: membership.deletedAt,
     updatedAt: membership.updatedAt,
@@ -176,6 +237,7 @@ export function toMessage(message: StoredMessage): MessageItem {
     senderAvatarUrl: message.senderAvatarUrl,
     type: message.type,
     content: message.content,
+    callEvent: message.callEvent,
     attachmentAsset: message.attachmentAsset,
     attachmentUrl: message.attachmentUrl,
     replyTo: message.replyTo,
@@ -211,6 +273,7 @@ export function toConversationSummary(
     requestRequestedAt: conversation.requestRequestedAt ?? null,
     requestRespondedAt: conversation.requestRespondedAt ?? null,
     requestRespondedByUserId: conversation.requestRespondedByUserId ?? null,
+    historyClearedAt: conversation.historyClearedAt ?? null,
     deletedAt: conversation.deletedAt,
     updatedAt: conversation.updatedAt,
   };
@@ -237,7 +300,10 @@ export function toReport(report: StoredReport): ReportItem {
 }
 
 export function toAuditEvent(
-  event: StoredConversationAuditEvent | StoredReportAuditEvent,
+  event:
+    | StoredConversationAuditEvent
+    | StoredGroupAuditEvent
+    | StoredReportAuditEvent,
   scope: AuditEventItem['scope'],
 ): AuditEventItem {
   return {

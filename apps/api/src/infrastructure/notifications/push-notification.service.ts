@@ -14,6 +14,8 @@ import type {
 import {
   createUlid,
   makeInboxPk,
+  makePushTokenLookupPk,
+  makePushTokenLookupSk,
   makePushOutboxPk,
   makePushOutboxSk,
   makeUserPk,
@@ -25,6 +27,7 @@ import { toPushDevice } from '../../common/mappers';
 import type {
   StoredConversation,
   StoredPushDevice,
+  StoredPushTokenLookup,
   StoredPushOutboxEvent,
 } from '../../common/storage-records';
 import {
@@ -117,12 +120,7 @@ export class PushNotificationService
       makeUserPk(userId),
       makeUserPushDeviceSk(deviceId),
     );
-
-    await this.removeConflictingDeviceRegistrations(
-      userId,
-      deviceId,
-      pushToken,
-    );
+    const conflictingLookup = await this.getPushTokenLookup(pushToken);
 
     const nextDevice: StoredPushDevice = {
       PK: makeUserPk(userId),
@@ -139,8 +137,65 @@ export class PushNotificationService
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
+    const nextLookup: StoredPushTokenLookup = {
+      PK: makePushTokenLookupPk(pushToken),
+      SK: makePushTokenLookupSk(),
+      entityType: 'USER_PUSH_TOKEN_LOOKUP',
+      userId,
+      deviceId,
+      createdAt:
+        conflictingLookup?.userId === userId &&
+        conflictingLookup.deviceId === deviceId
+          ? conflictingLookup.createdAt
+          : now,
+      updatedAt: now,
+    };
+    const writes: Parameters<UrbanTableRepository['transactWrite']>[0] = [
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: nextDevice,
+      },
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbUsersTableName,
+        item: nextLookup,
+      },
+    ];
 
-    await this.repository.put(this.config.dynamodbUsersTableName, nextDevice);
+    if (existing && existing.pushToken !== pushToken) {
+      writes.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makePushTokenLookupPk(existing.pushToken),
+          SK: makePushTokenLookupSk(),
+        },
+        conditionExpression:
+          'attribute_not_exists(PK) OR (userId = :userId AND deviceId = :deviceId)',
+        expressionAttributeValues: {
+          ':userId': userId,
+          ':deviceId': deviceId,
+        },
+      });
+    }
+
+    if (
+      conflictingLookup &&
+      (conflictingLookup.userId !== userId ||
+        conflictingLookup.deviceId !== deviceId)
+    ) {
+      writes.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: makeUserPk(conflictingLookup.userId),
+          SK: makeUserPushDeviceSk(conflictingLookup.deviceId),
+        },
+      });
+    }
+
+    await this.repository.transactWrite(writes);
     return toPushDevice(nextDevice);
   }
 
@@ -157,12 +212,30 @@ export class PushNotificationService
     if (!existing || existing.entityType !== 'USER_PUSH_DEVICE') {
       throw new NotFoundException('Push device not found.');
     }
+    const lookup = await this.getPushTokenLookup(existing.pushToken);
+    const writes: Parameters<UrbanTableRepository['transactWrite']>[0] = [
+      {
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: existing.PK,
+          SK: existing.SK,
+        },
+      },
+    ];
 
-    await this.repository.delete(
-      this.config.dynamodbUsersTableName,
-      existing.PK,
-      existing.SK,
-    );
+    if (lookup?.userId === userId && lookup.deviceId === deviceId) {
+      writes.push({
+        kind: 'delete',
+        tableName: this.config.dynamodbUsersTableName,
+        key: {
+          PK: lookup.PK,
+          SK: lookup.SK,
+        },
+      });
+    }
+
+    await this.repository.transactWrite(writes);
 
     return {
       deviceId,
@@ -219,41 +292,20 @@ export class PushNotificationService
     return items.filter((item) => item.entityType === 'USER_PUSH_DEVICE');
   }
 
-  private async removeConflictingDeviceRegistrations(
-    userId: string,
-    deviceId: string,
+  private async getPushTokenLookup(
     pushToken: string,
-  ): Promise<void> {
-    const devices = await this.findDevicesByPushToken(pushToken);
-
-    for (const device of devices) {
-      if (device.userId === userId && device.deviceId === deviceId) {
-        continue;
-      }
-
-      await this.repository.delete(
-        this.config.dynamodbUsersTableName,
-        device.PK,
-        device.SK,
-      );
-      this.logger.warn(
-        'Removed conflicting push token registration for ' +
-          `${device.userId}/${device.deviceId}.`,
-      );
-    }
-  }
-
-  private async findDevicesByPushToken(
-    pushToken: string,
-  ): Promise<StoredPushDevice[]> {
-    const items = await this.repository.scanAll<StoredPushDevice>(
+  ): Promise<StoredPushTokenLookup | undefined> {
+    const lookup = await this.repository.get<StoredPushTokenLookup>(
       this.config.dynamodbUsersTableName,
+      makePushTokenLookupPk(pushToken),
+      makePushTokenLookupSk(),
     );
 
-    return items.filter(
-      (item) =>
-        item.entityType === 'USER_PUSH_DEVICE' && item.pushToken === pushToken,
-    );
+    if (!lookup || lookup.entityType !== 'USER_PUSH_TOKEN_LOOKUP') {
+      return undefined;
+    }
+
+    return lookup;
   }
   private getPushOutboxShard(seed: string): number {
     const size = Math.max(this.config.pushOutboxShardCount, 1);
@@ -360,7 +412,11 @@ export class PushNotificationService
     const summaries = await this.repository.queryByPk<StoredConversation>(
       this.config.dynamodbConversationsTableName,
       makeInboxPk(userId),
-      { beginsWith: 'CONV#' },
+      {
+        beginsWith: `CONV#${conversationId}#LAST#`,
+        limit: 1,
+        scanForward: false,
+      },
     );
     const summary = summaries.find(
       (item) =>
@@ -388,25 +444,44 @@ export class PushNotificationService
           return;
         }
 
-        const response = await fetch(this.config.pushWebhookUrl, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            userId,
-            deviceId: device.deviceId,
-            provider: device.provider,
-            platform: device.platform,
-            pushToken: device.pushToken,
-            notification: {
-              title: event.title,
-              body: event.body,
-            },
-            data: event.data ?? {},
-            eventName: event.eventName,
-            eventId: event.eventId,
-            createdAt: event.createdAt,
-          }),
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+          controller.abort();
+        }, this.config.pushWebhookTimeoutMs);
+        let response: Response;
+
+        try {
+          response = await fetch(this.config.pushWebhookUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              userId,
+              deviceId: device.deviceId,
+              provider: device.provider,
+              platform: device.platform,
+              pushToken: device.pushToken,
+              notification: {
+                title: event.title,
+                body: event.body,
+              },
+              data: event.data ?? {},
+              eventName: event.eventName,
+              eventId: event.eventId,
+              createdAt: event.createdAt,
+            }),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted) {
+            throw new Error(
+              `Push webhook timed out after ${this.config.pushWebhookTimeoutMs}ms.`,
+            );
+          }
+
+          throw error;
+        } finally {
+          clearTimeout(timeout);
+        }
 
         if (!response.ok) {
           throw new Error(

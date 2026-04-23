@@ -187,14 +187,27 @@ export class AppConfigService {
   );
   readonly chatOutboxBatchSize = readNumber('CHAT_OUTBOX_BATCH_SIZE', 100);
   readonly chatOutboxShardCount = readNumber('CHAT_OUTBOX_SHARD_COUNT', 8);
+  readonly chatCallInviteTtlSeconds = readNumber(
+    'CHAT_CALL_INVITE_TTL_SECONDS',
+    90,
+  );
+  readonly chatCallActiveTtlSeconds = readNumber(
+    'CHAT_CALL_ACTIVE_TTL_SECONDS',
+    4 * 60 * 60,
+  );
   readonly pushProvider = (process.env.PUSH_PROVIDER ?? 'log')
     .trim()
     .toLowerCase();
   readonly pushWebhookUrl = process.env.PUSH_WEBHOOK_URL || undefined;
+  readonly pushWebhookTimeoutMs = readNumber('PUSH_WEBHOOK_TIMEOUT_MS', 5000);
   readonly authOtpProvider = (process.env.AUTH_OTP_PROVIDER ?? 'log')
     .trim()
     .toLowerCase();
   readonly authOtpWebhookUrl = process.env.AUTH_OTP_WEBHOOK_URL || undefined;
+  readonly authOtpWebhookTimeoutMs = readNumber(
+    'AUTH_OTP_WEBHOOK_TIMEOUT_MS',
+    5000,
+  );
   readonly authOtpSmtpHost = process.env.AUTH_OTP_SMTP_HOST || undefined;
   readonly authOtpSmtpPort = readNumber('AUTH_OTP_SMTP_PORT', 465);
   readonly authOtpSmtpSecure = readBoolean('AUTH_OTP_SMTP_SECURE', true);
@@ -478,6 +491,10 @@ export class AppConfigService {
       this.authOtpRequestRateLimitWindowSeconds,
     );
     this.ensurePositive(
+      'AUTH_OTP_WEBHOOK_TIMEOUT_MS',
+      this.authOtpWebhookTimeoutMs,
+    );
+    this.ensurePositive(
       'AUTH_OTP_REQUEST_RATE_LIMIT_MAX_PER_WINDOW',
       this.authOtpRequestRateLimitMaxPerWindow,
     );
@@ -518,9 +535,18 @@ export class AppConfigService {
     this.ensurePositive('CHAT_OUTBOX_BATCH_SIZE', this.chatOutboxBatchSize);
     this.ensurePositive('CHAT_OUTBOX_SHARD_COUNT', this.chatOutboxShardCount);
     this.ensurePositive(
+      'CHAT_CALL_INVITE_TTL_SECONDS',
+      this.chatCallInviteTtlSeconds,
+    );
+    this.ensurePositive(
+      'CHAT_CALL_ACTIVE_TTL_SECONDS',
+      this.chatCallActiveTtlSeconds,
+    );
+    this.ensurePositive(
       'PUSH_OUTBOX_POLL_INTERVAL_MS',
       this.pushOutboxPollIntervalMs,
     );
+    this.ensurePositive('PUSH_WEBHOOK_TIMEOUT_MS', this.pushWebhookTimeoutMs);
     this.ensurePositive('PUSH_OUTBOX_BATCH_SIZE', this.pushOutboxBatchSize);
     this.ensurePositive('PUSH_OUTBOX_SHARD_COUNT', this.pushOutboxShardCount);
     this.ensurePositive(
@@ -551,6 +577,12 @@ export class AppConfigService {
     if (this.chatPresenceHeartbeatSeconds >= this.chatPresenceTtlSeconds) {
       throw new Error(
         'CHAT_PRESENCE_HEARTBEAT_SECONDS must be lower than CHAT_PRESENCE_TTL_SECONDS.',
+      );
+    }
+
+    if (this.chatCallActiveTtlSeconds < this.chatCallInviteTtlSeconds) {
+      throw new Error(
+        'CHAT_CALL_ACTIVE_TTL_SECONDS must be greater than or equal to CHAT_CALL_INVITE_TTL_SECONDS.',
       );
     }
 

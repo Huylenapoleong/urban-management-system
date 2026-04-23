@@ -33,6 +33,7 @@ import {
 } from '../../common/openapi/swagger-errors';
 import {
   AuditEventItemDto,
+  ConversationHistoryClearedResultDto,
   ConversationDeletedResultDto,
   ConversationSummaryDto,
   CreateDirectMessageRequestDto,
@@ -1116,6 +1117,53 @@ export class ConversationsController {
     @Param('conversationId') conversationId: string,
   ) {
     return this.conversationsService.deleteConversation(user, conversationId);
+  }
+
+  @Post(':conversationId/clear')
+  @ApiOperation({
+    summary: 'Clear conversation history for the current user',
+    description:
+      'Hides all existing messages in the target conversation for the current user only, across their devices. Shared messages remain intact for other participants, and new messages after the clear point continue to appear normally.',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
+  })
+  @ApiOkEnvelopeResponse(ConversationHistoryClearedResultDto, {
+    description: 'Per-user conversation history clear result.',
+  })
+  @ApiNotFoundExamples(
+    'The conversation is not currently present in the actor inbox.',
+    [
+      {
+        name: 'clearConversationMissing',
+        summary: 'Conversation not found in inbox',
+        message: 'Conversation not found in inbox.',
+        path: '/api/conversations/dm:01JPCY0000CITIZENB00000000/clear',
+      },
+    ],
+  )
+  @ApiConflictExamples(
+    'The conversation changed while clear-history was processed.',
+    [
+      {
+        name: 'clearConversationConflict',
+        summary: 'Conversation history changed',
+        message: 'Conversation history changed. Please retry.',
+        path: '/api/conversations/dm:01JPCY0000CITIZENB00000000/clear',
+      },
+    ],
+  )
+  clearConversationHistory(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.clearConversationHistory(
+      user,
+      conversationId,
+    );
   }
 
   @Post(':conversationId/read')

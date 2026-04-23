@@ -2,12 +2,16 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import {
   CHAT_SOCKET_EVENTS,
+  type GroupMemberRole,
+  type GroupMessagePolicy,
   MESSAGE_RECALL_SCOPES,
   MESSAGE_TYPES,
 } from '@urban/shared-constants';
@@ -16,6 +20,8 @@ import type {
   ApiSuccessResponse,
   AuditEventItem,
   AuthenticatedUser,
+  CallEventInfo,
+  ConversationHistoryClearedResult,
   ConversationSummary,
   MediaAsset,
   MessageItem,
@@ -122,6 +128,7 @@ export class ConversationsService {
     private readonly conversationStateService: ConversationStateService,
     private readonly conversationSummaryService: ConversationSummaryService,
     private readonly usersService: UsersService,
+    @Inject(forwardRef(() => GroupsService))
     private readonly groupsService: GroupsService,
     private readonly chatRateLimitService: ChatRateLimitService,
     private readonly conversationDispatchService: ConversationDispatchService,
@@ -398,6 +405,11 @@ export class ConversationsService {
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
     const access = await this.resolveConversationAccess(actor, conversationId);
+    const existingConversation =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        access.conversationKey,
+      );
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const type = parseEnumQuery(query.type, 'type', MESSAGE_TYPES);
     const fromUserId = optionalQueryString(query.fromUserId, 'fromUserId');
@@ -411,13 +423,19 @@ export class ConversationsService {
         beginsWith: 'MSG#',
       },
     );
-    const filtered = items.filter((item) => {
-      if (
-        !this.conversationStateService.isMessageVisibleToUser(item, actor.id)
-      ) {
-        return false;
-      }
-
+    const visibleMessages =
+      this.conversationStateService.filterVisibleMessagesForUser(
+        items,
+        actor.id,
+        existingConversation?.historyClearedAt ?? null,
+      );
+    await this.reconcileViewerConversationSummary(
+      actor.id,
+      access,
+      visibleMessages,
+      existingConversation,
+    );
+    const filtered = visibleMessages.filter((item) => {
       if (type && item.type !== type) {
         return false;
       }
@@ -487,6 +505,73 @@ export class ConversationsService {
       access.conversationId,
       access.participants,
       payload,
+    );
+  }
+
+  async sendGroupSystemMessage(
+    actor: AuthenticatedUser,
+    groupId: string,
+    participants: string[],
+    content: string,
+  ): Promise<MessageItem> {
+    const normalizedContent = content.trim();
+    if (!normalizedContent) {
+      throw new BadRequestException('System message content cannot be empty.');
+    }
+
+    const uniqueParticipants = Array.from(new Set(participants));
+    if (uniqueParticipants.length === 0) {
+      throw new BadRequestException(
+        'Cannot send a group system message without participants.',
+      );
+    }
+
+    const conversationKey = `GRP#${groupId}`;
+
+    return this.createMessage(
+      actor,
+      conversationKey,
+      `group:${groupId}`,
+      uniqueParticipants,
+      {
+        type: 'SYSTEM',
+        content: normalizedContent,
+      },
+      {
+        skipRateLimit: true,
+      },
+    );
+  }
+
+  async sendConversationSystemMessage(
+    actor: AuthenticatedUser,
+    access: ResolvedConversationAccess,
+    content: string,
+    options: {
+      callEvent?: CallEventInfo;
+    } = {},
+  ): Promise<MessageItem> {
+    const normalizedContent = content.trim();
+
+    if (!normalizedContent) {
+      throw new BadRequestException('System message content cannot be empty.');
+    }
+
+    return this.createMessage(
+      actor,
+      access.conversationKey,
+      access.conversationId,
+      access.participants,
+      {
+        type: 'SYSTEM',
+        content: options.callEvent
+          ? this.buildSystemMessageContent(normalizedContent, options.callEvent)
+          : normalizedContent,
+      },
+      {
+        callEvent: options.callEvent,
+        skipRateLimit: true,
+      },
     );
   }
 
@@ -900,6 +985,69 @@ export class ConversationsService {
       removedAt,
     };
   }
+
+  async clearConversationHistory(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationHistoryClearedResult> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const existingConversation =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        access.conversationKey,
+      );
+
+    if (!existingConversation || existingConversation.deletedAt) {
+      throw new NotFoundException('Conversation not found in inbox.');
+    }
+
+    const clearedAt = nowIso();
+    const nextConversation: StoredConversation = {
+      ...existingConversation,
+      lastMessagePreview: '',
+      lastSenderName: '',
+      unreadCount: 0,
+      historyClearedAt: clearedAt,
+      updatedAt: clearedAt,
+    };
+
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbConversationsTableName,
+          item: nextConversation,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': existingConversation.updatedAt,
+          },
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException(
+          'Conversation history changed. Please retry.',
+        );
+      }
+
+      throw error;
+    }
+
+    this.conversationDispatchService.emitConversationSummaryUpdated(
+      createUlid(),
+      actor.id,
+      access.conversationKey,
+      nextConversation,
+      'conversation.history.cleared',
+      clearedAt,
+    );
+
+    return {
+      conversationId: access.conversationId,
+      clearedAt,
+    };
+  }
+
   async updateMessage(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -1280,10 +1428,11 @@ export class ConversationsService {
     }
 
     if (
-      !this.conversationStateService.isMessageVisibleToUser(
-        sourceMessage,
+      !(await this.isMessageVisibleToActor(
         actor.id,
-      )
+        sourceAccess.conversationKey,
+        sourceMessage,
+      ))
     ) {
       throw new NotFoundException('Message not found.');
     }
@@ -1347,6 +1496,8 @@ export class ConversationsService {
     payload: unknown,
     options: {
       forwardedFrom?: StoredMessage;
+      callEvent?: CallEventInfo;
+      skipRateLimit?: boolean;
     } = {},
   ): Promise<MessageItem> {
     const body = ensureObject(payload);
@@ -1384,7 +1535,9 @@ export class ConversationsService {
     }
 
     await this.ensureReplyTargetAvailable(conversationId, replyTo);
-    this.chatRateLimitService.consumeMessageSend(actor.id);
+    if (!options.skipRateLimit) {
+      this.chatRateLimitService.consumeMessageSend(actor.id);
+    }
     const replyMessage = await this.buildReplyMessageReference(
       conversationId,
       replyTo,
@@ -1394,6 +1547,20 @@ export class ConversationsService {
       this.buildForwardedMessageMetadata(options.forwardedFrom);
 
     const content = this.normalizeStoredContent(type, rawContent);
+
+    if (
+      !this.hasMeaningfulMessageBody(
+        type,
+        content,
+        attachment.asset,
+        attachment.url,
+      )
+    ) {
+      throw new BadRequestException(
+        'content, attachmentKey or attachmentUrl is required.',
+      );
+    }
+
     const sentAt = nowIso();
     const messageId = createUlid();
     const message: StoredMessage = {
@@ -1408,6 +1575,7 @@ export class ConversationsService {
       senderAvatarUrl: actor.avatarUrl,
       type,
       content,
+      callEvent: options.callEvent,
       attachmentAsset: attachment.asset,
       attachmentUrl: attachment.url,
       replyTo,
@@ -1451,6 +1619,7 @@ export class ConversationsService {
         replyTo: replyTo ?? '',
         type,
         forwardedFromMessageId: forwardedFrom?.messageId ?? '',
+        callEventStatus: options.callEvent?.status ?? '',
       },
     });
     const pushRecord = this.buildChatPushOutboxEvent(
@@ -1608,6 +1777,18 @@ export class ConversationsService {
       );
     }
 
+    if (
+      status === 'ACCEPTED' &&
+      (await this.usersService.isInteractionBlocked(
+        request.requesterUserId,
+        request.targetUserId,
+      ))
+    ) {
+      throw new ForbiddenException(
+        'Direct messaging is blocked between these users.',
+      );
+    }
+
     const activeMessages =
       await this.conversationSummaryService.listActiveMessages(conversationKey);
     const latestMessage = activeMessages[0];
@@ -1695,6 +1876,14 @@ export class ConversationsService {
     conversationId: string,
   ): Promise<void> {
     if (
+      await this.usersService.isInteractionBlocked(actor.id, targetUser.userId)
+    ) {
+      throw new ForbiddenException(
+        'Direct messaging is blocked between these users.',
+      );
+    }
+
+    if (
       !this.authorizationService.canAccessDirectConversation(actor, targetUser)
     ) {
       throw new ForbiddenException(
@@ -1741,7 +1930,21 @@ export class ConversationsService {
       return;
     }
 
+    if (
+      await this.usersService.isInteractionBlocked(actor.id, targetUser.userId)
+    ) {
+      throw new ForbiddenException(
+        'Direct messaging is blocked between these users.',
+      );
+    }
+
     if (await this.usersService.canStartCitizenDm(actor, targetUser)) {
+      return;
+    }
+
+    if (
+      await this.hasExistingDirectConversationSummary(actor.id, conversationId)
+    ) {
       return;
     }
 
@@ -1840,6 +2043,7 @@ export class ConversationsService {
           participantId,
           effectiveMessages,
           lastReadAt,
+          existingConversation?.historyClearedAt ?? null,
         ),
         isGroup: false,
         isPinned: existingConversation?.isPinned ?? false,
@@ -1850,6 +2054,7 @@ export class ConversationsService {
         requestRequestedAt: state.requestRequestedAt,
         requestRespondedAt: state.requestRespondedAt,
         requestRespondedByUserId: state.requestRespondedByUserId,
+        historyClearedAt: existingConversation?.historyClearedAt ?? null,
         deletedAt: null,
         updatedAt: updatedAtOverride ?? effectiveLatestMessage.sentAt,
         lastReadAt,
@@ -2037,6 +2242,7 @@ export class ConversationsService {
       content: replyTarget.recalledAt
         ? this.getRecalledStructuredContent()
         : replyTarget.content,
+      callEvent: replyTarget.callEvent,
       attachmentAsset: replyTarget.recalledAt
         ? undefined
         : replyTarget.attachmentAsset,
@@ -2504,11 +2710,13 @@ export class ConversationsService {
     participantId: string,
     messages: StoredMessage[],
     lastReadAt: string | null,
+    historyClearedAt?: string | null,
   ): number {
     return this.conversationStateService.computeUnreadCount(
       participantId,
       messages,
       lastReadAt,
+      historyClearedAt,
     );
   }
 
@@ -2709,6 +2917,7 @@ export class ConversationsService {
     eventName: StoredChatOutboxEvent['eventName'],
     error: unknown,
   ): void {
+    this.chatOutboxService.requestDrain(eventName);
     const message = error instanceof Error ? error.message : 'Unknown error.';
     this.logger.warn(
       `Deferred ${eventName} replay to chat outbox for ${eventId}: ${message}`,
@@ -2907,6 +3116,64 @@ export class ConversationsService {
     };
   }
 
+  private async reconcileViewerConversationSummary(
+    actorId: string,
+    access: ResolvedConversationAccess,
+    visibleMessages?: StoredMessage[],
+    existingConversation?: StoredConversation,
+  ): Promise<void> {
+    const syncResult =
+      await this.conversationSummaryService.syncConversationSummaryForUser(
+        {
+          conversationKey: access.conversationKey,
+          participants: access.participants,
+        },
+        actorId,
+        visibleMessages,
+        existingConversation,
+      );
+
+    if (syncResult.removed) {
+      this.conversationDispatchService.emitConversationRemoved(
+        createUlid(),
+        actorId,
+        access.conversationKey,
+        nowIso(),
+        'message.deleted',
+      );
+      return;
+    }
+
+    if (syncResult.changed && syncResult.summary) {
+      this.conversationDispatchService.emitConversationSummaryUpdated(
+        createUlid(),
+        actorId,
+        access.conversationKey,
+        syncResult.summary,
+        'conversation.metadata.updated',
+        syncResult.summary.updatedAt,
+      );
+    }
+  }
+
+  private async isMessageVisibleToActor(
+    actorId: string,
+    conversationKey: string,
+    message: StoredMessage,
+  ): Promise<boolean> {
+    const summary =
+      await this.conversationSummaryService.getConversationSummary(
+        actorId,
+        conversationKey,
+      );
+
+    return this.conversationStateService.isMessageVisibleToUser(
+      message,
+      actorId,
+      summary?.historyClearedAt ?? null,
+    );
+  }
+
   private getMessageDeliveryState(
     message: StoredMessage,
     context?: MessageDeliveryContext,
@@ -2987,6 +3254,17 @@ export class ConversationsService {
     );
   }
 
+  private buildSystemMessageContent(
+    text: string,
+    callEvent?: CallEventInfo,
+  ): string {
+    return JSON.stringify({
+      text,
+      mention: [],
+      ...(callEvent ? { callEvent } : {}),
+    });
+  }
+
   private usesStructuredContent(type: SupportedMessageType): boolean {
     return this.conversationStateService.usesStructuredContent(type);
   }
@@ -3043,6 +3321,20 @@ export class ConversationsService {
     return this.conversationStateService.buildPreview(message);
   }
 
+  private getGroupMessagePolicyErrorMessage(
+    messagePolicy: GroupMessagePolicy,
+  ): string {
+    switch (messagePolicy) {
+      case 'OWNER_ONLY':
+        return 'Only the owner can send messages to this group.';
+      case 'OWNER_AND_DEPUTIES':
+        return 'Only owners and deputies can send messages to this group.';
+      case 'ALL_MEMBERS':
+      default:
+        return 'Only active members can send messages to this group.';
+    }
+  }
+
   private async resolveConversationParticipants(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -3050,11 +3342,23 @@ export class ConversationsService {
   ): Promise<string[]> {
     if (isGroupConversationId(conversationId)) {
       const groupId = conversationId.slice('GRP#'.length);
-      await this.groupsService.getGroup(actor, groupId);
+      const group = await this.groupsService.getGroup(actor, groupId);
+      const activeBan = await this.groupsService.getActiveBan(
+        groupId,
+        actor.id,
+      );
       const actorMembership = await this.groupsService.getMembership(
         groupId,
         actor.id,
       );
+      const actorRoleInGroup: GroupMemberRole | undefined =
+        actorMembership?.roleInGroup;
+      const groupMessagePolicy: GroupMessagePolicy =
+        group.messagePolicy ?? 'ALL_MEMBERS';
+
+      if (activeBan && actor.role !== 'ADMIN') {
+        throw new ForbiddenException('You are banned from this group.');
+      }
 
       if (!actorMembership || actorMembership.deletedAt) {
         if (actor.role !== 'ADMIN') {
@@ -3064,6 +3368,19 @@ export class ConversationsService {
               : 'Only active members can access this group conversation.',
           );
         }
+      }
+
+      if (
+        requireSendAccess &&
+        !this.authorizationService.canSendGroupMessage(
+          actor,
+          actorRoleInGroup,
+          groupMessagePolicy,
+        )
+      ) {
+        throw new ForbiddenException(
+          this.getGroupMessagePolicyErrorMessage(groupMessagePolicy),
+        );
       }
 
       const members = await this.groupsService.listMembers(actor, groupId);
@@ -3127,7 +3444,26 @@ export class ConversationsService {
       return true;
     }
 
+    if (
+      await this.hasExistingDirectConversationSummary(actor.id, conversationId)
+    ) {
+      return true;
+    }
+
     const directRequest = await this.getDirectMessageRequest(conversationId);
     return directRequest?.status === 'ACCEPTED';
+  }
+
+  private async hasExistingDirectConversationSummary(
+    userId: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    const summary =
+      await this.conversationSummaryService.getConversationSummary(
+        userId,
+        conversationId,
+      );
+
+    return Boolean(summary && !summary.deletedAt && !summary.requestStatus);
   }
 }

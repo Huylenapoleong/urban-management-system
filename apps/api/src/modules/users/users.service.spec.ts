@@ -9,6 +9,7 @@ import { UsersService } from './users.service';
 describe('UsersService', () => {
   const repository = {
     batchGet: jest.fn(),
+    delete: jest.fn(),
     get: jest.fn(),
     queryByPk: jest.fn(),
     queryByIndex: jest.fn(),
@@ -34,6 +35,8 @@ describe('UsersService', () => {
     getPresence: jest.fn(),
   };
   const chatRealtimeService = {
+    emitToUser: jest.fn(),
+    leaveConversationForUser: jest.fn(),
     disconnectUserSockets: jest.fn(),
   };
   const refreshSessionService = {
@@ -70,6 +73,7 @@ describe('UsersService', () => {
   };
   const config = {
     dynamodbUsersTableName: 'Users',
+    dynamodbConversationsTableName: 'Conversations',
     dynamodbUsersPhoneIndexName: 'GSI1-Phone',
     dynamodbUsersEmailIndexName: 'GSI2-Email',
   };
@@ -140,6 +144,7 @@ describe('UsersService', () => {
     repository.queryByPk.mockResolvedValue([]);
     repository.queryByIndex.mockResolvedValue([]);
     repository.batchGet.mockResolvedValue([]);
+    repository.delete.mockResolvedValue(undefined);
     repository.transactWrite.mockResolvedValue(undefined);
   });
 
@@ -786,7 +791,7 @@ describe('UsersService', () => {
     );
   });
 
-  it('accepts an incoming friend request and creates two friendship edges', async () => {
+  it('accepts an incoming friend request and creates two friendship edges with DM summaries', async () => {
     repository.get.mockImplementation(
       (tableName: string, pk: string, sk: string) => {
         if (tableName !== 'Users') {
@@ -862,11 +867,343 @@ describe('UsersService', () => {
             friendUserId: actor.id,
           }),
         }),
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Conversations',
+          item: expect.objectContaining({
+            entityType: 'CONVERSATION',
+            userId: actor.id,
+            conversationId: 'DM#user-1#user-2',
+            groupName: otherCitizen.fullName,
+            lastMessagePreview: '',
+            lastSenderName: '',
+            unreadCount: 0,
+            isGroup: false,
+            requestStatus: null,
+          }),
+        }),
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Conversations',
+          item: expect.objectContaining({
+            entityType: 'CONVERSATION',
+            userId: otherCitizen.userId,
+            conversationId: 'DM#user-1#user-2',
+            groupName: currentUser.fullName,
+            lastMessagePreview: '',
+            lastSenderName: '',
+            unreadCount: 0,
+            isGroup: false,
+            requestStatus: null,
+          }),
+        }),
       ]),
     );
     expect(result).toEqual(
       expect.objectContaining({
         userId: otherCitizen.userId,
+      }),
+    );
+  });
+
+  it('keeps an existing DM summary instead of overwriting it during friend acceptance', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (tableName !== 'Users') {
+          return undefined;
+        }
+
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === otherCitizen.PK && sk === otherCitizen.SK) {
+          return otherCitizen;
+        }
+
+        if (
+          pk === currentUser.PK &&
+          sk === `FRIEND_REQUEST#FROM#${otherCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_REQUEST',
+            requesterUserId: otherCitizen.userId,
+            targetUserId: currentUser.userId,
+            direction: 'INCOMING',
+            createdAt: '2026-03-20T00:05:00.000Z',
+            updatedAt: '2026-03-20T00:05:00.000Z',
+          };
+        }
+
+        if (
+          pk === otherCitizen.PK &&
+          sk === `FRIEND_REQUEST#TO#${currentUser.userId}`
+        ) {
+          return {
+            PK: otherCitizen.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_REQUEST',
+            requesterUserId: otherCitizen.userId,
+            targetUserId: currentUser.userId,
+            direction: 'OUTGOING',
+            createdAt: '2026-03-20T00:05:00.000Z',
+            updatedAt: '2026-03-20T00:05:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          options?.beginsWith === 'CONV#DM#user-1#user-2#LAST#'
+        ) {
+          if (pk === 'USER#user-1') {
+            return [
+              {
+                PK: 'USER#user-1',
+                SK: 'CONV#DM#user-1#user-2#LAST#2026-03-20T00:06:00.000Z',
+                entityType: 'CONVERSATION',
+                GSI1PK: 'INBOX_STATS#user-1#DM',
+                userId: 'user-1',
+                conversationId: 'DM#user-1#user-2',
+                groupName: otherCitizen.fullName,
+                lastMessagePreview: 'Hello there',
+                lastSenderName: otherCitizen.fullName,
+                unreadCount: 1,
+                isGroup: false,
+                isPinned: false,
+                archivedAt: null,
+                mutedUntil: null,
+                deletedAt: null,
+                updatedAt: '2026-03-20T00:06:00.000Z',
+                lastReadAt: null,
+              },
+            ];
+          }
+
+          return [];
+        }
+
+        return [];
+      },
+    );
+
+    await service.acceptFriendRequest(actor, otherCitizen.userId);
+
+    const [[transactionItems]] = repository.transactWrite.mock.calls;
+    expect(transactionItems).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Conversations',
+          item: expect.objectContaining({
+            userId: actor.id,
+            conversationId: 'DM#user-1#user-2',
+          }),
+        }),
+      ]),
+    );
+    expect(transactionItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tableName: 'Conversations',
+          item: expect.objectContaining({
+            userId: otherCitizen.userId,
+            conversationId: 'DM#user-1#user-2',
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('stores a private contact alias and updates the existing DM summary label', async () => {
+    repository.get.mockImplementation(
+      (_tableName: string, pk: string, sk: string) => {
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === otherCitizen.PK && sk === otherCitizen.SK) {
+          return otherCitizen;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-1' &&
+          options?.beginsWith === 'CONV#DM#user-1#user-2#LAST#'
+        ) {
+          return [
+            {
+              PK: 'USER#user-1',
+              SK: 'CONV#DM#user-1#user-2#LAST#2026-03-20T00:06:00.000Z',
+              entityType: 'CONVERSATION',
+              GSI1PK: 'INBOX_STATS#user-1#DM',
+              userId: 'user-1',
+              conversationId: 'DM#user-1#user-2',
+              groupName: otherCitizen.fullName,
+              lastMessagePreview: 'Hello there',
+              lastSenderName: otherCitizen.fullName,
+              unreadCount: 1,
+              isGroup: false,
+              isPinned: false,
+              archivedAt: null,
+              mutedUntil: null,
+              deletedAt: null,
+              updatedAt: '2026-03-20T00:06:00.000Z',
+              lastReadAt: null,
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.setContactAlias(actor, otherCitizen.userId, {
+      alias: 'Anh Hai',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: otherCitizen.userId,
+        alias: 'Anh Hai',
+      }),
+    );
+    expect(repository.put).toHaveBeenCalledWith(
+      'Users',
+      expect.objectContaining({
+        entityType: 'USER_CONTACT_ALIAS',
+        targetUserId: otherCitizen.userId,
+        alias: 'Anh Hai',
+      }),
+    );
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        conversationId: 'DM#user-1#user-2',
+        groupName: 'Anh Hai',
+      }),
+    );
+    expect(repository.queryByPk).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-1',
+      expect.objectContaining({
+        beginsWith: 'CONV#DM#user-1#user-2#LAST#',
+        limit: 1,
+        scanForward: false,
+      }),
+    );
+    expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
+      actor.id,
+      'conversation.updated',
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          conversationId: `dm:${otherCitizen.userId}`,
+          groupName: 'Anh Hai',
+        }),
+      }),
+    );
+  });
+
+  it('clears a private contact alias and restores the counterpart full name in DM summary', async () => {
+    repository.get.mockImplementation(
+      (_tableName: string, pk: string, sk: string) => {
+        if (pk === currentUser.PK && sk === currentUser.SK) {
+          return currentUser;
+        }
+
+        if (pk === otherCitizen.PK && sk === otherCitizen.SK) {
+          return otherCitizen;
+        }
+
+        if (
+          pk === currentUser.PK &&
+          sk === `CONTACT_ALIAS#${otherCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_CONTACT_ALIAS',
+            ownerUserId: currentUser.userId,
+            targetUserId: otherCitizen.userId,
+            alias: 'Anh Hai',
+            createdAt: '2026-03-20T00:06:00.000Z',
+            updatedAt: '2026-03-20T00:06:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-1' &&
+          options?.beginsWith === 'CONV#DM#user-1#user-2#LAST#'
+        ) {
+          return [
+            {
+              PK: 'USER#user-1',
+              SK: 'CONV#DM#user-1#user-2#LAST#2026-03-20T00:06:00.000Z',
+              entityType: 'CONVERSATION',
+              GSI1PK: 'INBOX_STATS#user-1#DM',
+              userId: 'user-1',
+              conversationId: 'DM#user-1#user-2',
+              groupName: 'Anh Hai',
+              lastMessagePreview: 'Hello there',
+              lastSenderName: otherCitizen.fullName,
+              unreadCount: 1,
+              isGroup: false,
+              isPinned: false,
+              archivedAt: null,
+              mutedUntil: null,
+              deletedAt: null,
+              updatedAt: '2026-03-20T00:06:00.000Z',
+              lastReadAt: null,
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.clearContactAlias(actor, otherCitizen.userId);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: otherCitizen.userId,
+      }),
+    );
+    expect(repository.delete).toHaveBeenCalledWith(
+      'Users',
+      currentUser.PK,
+      `CONTACT_ALIAS#${otherCitizen.userId}`,
+    );
+    expect(repository.queryByPk).toHaveBeenCalledWith(
+      'Conversations',
+      'USER#user-1',
+      expect.objectContaining({
+        beginsWith: 'CONV#DM#user-1#user-2#LAST#',
+        limit: 1,
+        scanForward: false,
+      }),
+    );
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        conversationId: 'DM#user-1#user-2',
+        groupName: otherCitizen.fullName,
       }),
     );
   });
@@ -1052,6 +1389,292 @@ describe('UsersService', () => {
 
     await expect(service.canStartCitizenDm(actor, otherCitizen)).resolves.toBe(
       false,
+    );
+  });
+
+  it('keeps existing DM summaries after removing a friend', async () => {
+    const remoteCitizen: StoredUser = {
+      ...otherCitizen,
+      PK: 'USER#user-9',
+      userId: 'user-9',
+      fullName: 'Citizen Remote',
+      email: 'citizen.remote@example.com',
+      locationCode: 'VN-HCM-BQ2-P01',
+    };
+    const conversationId = 'DM#user-1#user-9';
+    const actorSummary = {
+      PK: 'USER#user-1',
+      SK: `CONV#${conversationId}#LAST#2026-03-20T00:10:00.000Z`,
+      entityType: 'CONVERSATION' as const,
+      conversationId,
+      userId: 'user-1',
+      groupName: remoteCitizen.fullName,
+      lastMessagePreview: 'Xin chao',
+      lastSenderName: currentUser.fullName,
+      unreadCount: 0,
+      isGroup: false,
+      isPinned: false,
+      archivedAt: null,
+      mutedUntil: null,
+      requestStatus: null,
+      requestDirection: null,
+      requestRequestedAt: null,
+      requestRespondedAt: null,
+      requestRespondedByUserId: null,
+      deletedAt: null,
+      updatedAt: '2026-03-20T00:10:00.000Z',
+      lastReadAt: '2026-03-20T00:10:00.000Z',
+      GSI1PK: 'INBOXSTATS#user-1#DM',
+    };
+    const remoteSummary = {
+      ...actorSummary,
+      PK: 'USER#user-9',
+      userId: 'user-9',
+      groupName: currentUser.fullName,
+      lastSenderName: remoteCitizen.fullName,
+      GSI1PK: 'INBOXSTATS#user-9#DM',
+    };
+
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Users' &&
+          pk === currentUser.PK &&
+          sk === 'PROFILE'
+        ) {
+          return currentUser;
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === remoteCitizen.PK &&
+          sk === 'PROFILE'
+        ) {
+          return remoteCitizen;
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === currentUser.PK &&
+          sk === `FRIEND#${remoteCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_EDGE',
+            userId: currentUser.userId,
+            friendUserId: remoteCitizen.userId,
+            createdAt: '2026-03-20T00:04:00.000Z',
+            updatedAt: '2026-03-20T00:04:00.000Z',
+          };
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === remoteCitizen.PK &&
+          sk === `FRIEND#${currentUser.userId}`
+        ) {
+          return {
+            PK: remoteCitizen.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_EDGE',
+            userId: remoteCitizen.userId,
+            friendUserId: currentUser.userId,
+            createdAt: '2026-03-20T00:04:00.000Z',
+            updatedAt: '2026-03-20T00:04:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-1' &&
+          options?.beginsWith === `CONV#${conversationId}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === 'USER#user-9' &&
+          options?.beginsWith === `CONV#${conversationId}#LAST#`
+        ) {
+          return [remoteSummary];
+        }
+
+        return [];
+      },
+    );
+    authorizationService.canAccessDirectConversation.mockReturnValue(false);
+
+    const result = await service.removeFriend(actor, remoteCitizen.userId);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: remoteCitizen.userId,
+        removedAt: expect.any(String),
+      }),
+    );
+    expect(repository.delete).not.toHaveBeenCalled();
+    expect(chatRealtimeService.leaveConversationForUser).not.toHaveBeenCalled();
+    expect(chatRealtimeService.emitToUser).not.toHaveBeenCalled();
+  });
+
+  it('creates a user-level block and removes friendship and pending requests', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Users' &&
+          pk === currentUser.PK &&
+          sk === 'PROFILE'
+        ) {
+          return currentUser;
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === otherCitizen.PK &&
+          sk === 'PROFILE'
+        ) {
+          return otherCitizen;
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === currentUser.PK &&
+          sk === `FRIEND#${otherCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_EDGE',
+            userId: currentUser.userId,
+            friendUserId: otherCitizen.userId,
+            createdAt: '2026-03-20T00:04:00.000Z',
+            updatedAt: '2026-03-20T00:04:00.000Z',
+          };
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === otherCitizen.PK &&
+          sk === `FRIEND#${currentUser.userId}`
+        ) {
+          return {
+            PK: otherCitizen.PK,
+            SK: sk,
+            entityType: 'USER_FRIEND_EDGE',
+            userId: otherCitizen.userId,
+            friendUserId: currentUser.userId,
+            createdAt: '2026-03-20T00:04:00.000Z',
+            updatedAt: '2026-03-20T00:04:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.blockUser(actor, otherCitizen.userId);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        userId: otherCitizen.userId,
+        blockedAt: expect.any(String),
+      }),
+    );
+    expect(repository.transactWrite).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Users',
+          item: expect.objectContaining({
+            entityType: 'USER_BLOCK_EDGE',
+            blockerUserId: currentUser.userId,
+            blockedUserId: otherCitizen.userId,
+            direction: 'OUTGOING',
+          }),
+        }),
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Users',
+          item: expect.objectContaining({
+            entityType: 'USER_BLOCK_EDGE',
+            blockerUserId: currentUser.userId,
+            blockedUserId: otherCitizen.userId,
+            direction: 'INCOMING',
+          }),
+        }),
+        expect.objectContaining({
+          kind: 'delete',
+          tableName: 'Users',
+          key: {
+            PK: currentUser.PK,
+            SK: `FRIEND#${otherCitizen.userId}`,
+          },
+        }),
+        expect.objectContaining({
+          kind: 'delete',
+          tableName: 'Users',
+          key: {
+            PK: otherCitizen.PK,
+            SK: `FRIEND#${currentUser.userId}`,
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('blocks new friend requests when either side blocked the other', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Users' &&
+          pk === currentUser.PK &&
+          sk === 'PROFILE'
+        ) {
+          return currentUser;
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === otherCitizen.PK &&
+          sk === 'PROFILE'
+        ) {
+          return otherCitizen;
+        }
+
+        if (
+          tableName === 'Users' &&
+          pk === currentUser.PK &&
+          sk === `BLOCKED_BY#${otherCitizen.userId}`
+        ) {
+          return {
+            PK: currentUser.PK,
+            SK: sk,
+            entityType: 'USER_BLOCK_EDGE',
+            blockerUserId: otherCitizen.userId,
+            blockedUserId: currentUser.userId,
+            direction: 'INCOMING',
+            createdAt: '2026-03-20T00:04:00.000Z',
+            updatedAt: '2026-03-20T00:04:00.000Z',
+          };
+        }
+
+        return undefined;
+      },
+    );
+
+    await expect(
+      service.sendFriendRequest(actor, otherCitizen.userId),
+    ).rejects.toThrow(
+      new ForbiddenException(
+        'Friend requests are blocked between these users.',
+      ),
     );
   });
 
@@ -1278,5 +1901,40 @@ describe('UsersService', () => {
         canSendMessageRequest: false,
       }),
     ]);
+  });
+
+  it('hides blocked users from discovery results', async () => {
+    repository.scanAll.mockResolvedValue([currentUser, otherCitizen]);
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Users' &&
+          pk === 'USER#user-1' &&
+          options?.beginsWith === 'BLOCK#'
+        ) {
+          return [
+            {
+              PK: 'USER#user-1',
+              SK: 'BLOCK#user-2',
+              entityType: 'USER_BLOCK_EDGE',
+              blockerUserId: 'user-1',
+              blockedUserId: 'user-2',
+              direction: 'OUTGOING',
+              createdAt: '2026-03-20T00:08:00.000Z',
+              updatedAt: '2026-03-20T00:08:00.000Z',
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.searchUsersForChatAndFriend(actor, {
+      mode: 'all',
+      limit: '20',
+    });
+
+    expect(result.data).toEqual([]);
   });
 });

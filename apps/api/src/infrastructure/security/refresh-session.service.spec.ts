@@ -142,6 +142,54 @@ describe('RefreshSessionService', () => {
     );
   });
 
+  it('keeps mobile web sessions separate from native mobile sessions', async () => {
+    const claims = buildClaims({ sid: 'session-web-mobile-1' });
+    jwtTokenService.verifyRefreshToken.mockReturnValue(claims);
+    repository.get.mockResolvedValueOnce(undefined);
+
+    await expect(
+      service.persistIssuedRefreshToken('user-1', 'refresh-token', {
+        userAgent:
+          'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36',
+        deviceId: 'device-mobile-web-01',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        session: expect.objectContaining({
+          sessionId: 'session-web-mobile-1',
+          sessionScope: 'WEB_MOBILE',
+        }),
+        replacedSessionId: undefined,
+      }),
+    );
+
+    expect(repository.get).toHaveBeenCalledWith(
+      'Users',
+      'USER#user-1',
+      'SESSION_SLOT#WEB_MOBILE',
+    );
+    expect(repository.transactWrite).toHaveBeenCalledWith([
+      expect.objectContaining({
+        kind: 'put',
+        tableName: 'Users',
+        item: expect.objectContaining({
+          entityType: 'USER_REFRESH_SESSION',
+          sessionId: 'session-web-mobile-1',
+          sessionScope: 'WEB_MOBILE',
+        }),
+      }),
+      expect.objectContaining({
+        kind: 'put',
+        tableName: 'Users',
+        item: expect.objectContaining({
+          entityType: 'USER_SESSION_SLOT',
+          currentSessionId: 'session-web-mobile-1',
+          sessionScope: 'WEB_MOBILE',
+        }),
+      }),
+    ]);
+  });
+
   it('replaces the previous active session in the same session scope', async () => {
     const claims = buildClaims({ sid: 'session-2' });
     const metadata: SessionClientMetadata = {

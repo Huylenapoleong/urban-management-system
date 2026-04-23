@@ -1,5 +1,6 @@
 import type {
   GroupMemberRole,
+  GroupMessagePolicy,
   GroupType,
   MessageDeliveryState,
   MessageRecallScope,
@@ -105,6 +106,8 @@ export interface AuthenticatedUser {
 export interface UserFriendItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -116,6 +119,8 @@ export interface UserFriendItem {
 export interface UserFriendRequestItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -125,9 +130,24 @@ export interface UserFriendRequestItem {
   requestedAt: string;
 }
 
+export interface UserBlockedItem {
+  userId: string;
+  fullName: string;
+  displayName: string;
+  contactAlias?: string;
+  role: UserRole;
+  locationCode: string;
+  avatarAsset?: MediaAsset;
+  avatarUrl?: string;
+  status: UserStatus;
+  blockedAt: string;
+}
+
 export interface UserDirectoryItem {
   userId: string;
   fullName: string;
+  displayName: string;
+  contactAlias?: string;
   role: UserRole;
   locationCode: string;
   avatarAsset?: MediaAsset;
@@ -139,10 +159,17 @@ export interface UserDirectoryItem {
   canSendMessageRequest: boolean;
 }
 
+export interface UserContactAlias {
+  userId: string;
+  alias: string;
+  updatedAt: string;
+}
+
 export interface GroupMetadata {
   id: string;
   groupName: string;
   groupType: GroupType;
+  messagePolicy: GroupMessagePolicy;
   locationCode: string;
   createdBy: string;
   description?: string;
@@ -162,12 +189,55 @@ export interface GroupMembership {
   updatedAt: string;
 }
 
+export interface GroupBan {
+  groupId: string;
+  userId: string;
+  bannedByUserId: string;
+  reason?: string;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupInviteLink {
+  inviteId: string;
+  groupId: string;
+  code: string;
+  createdByUserId: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+  usedCount: number;
+  disabledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupOwnershipTransferResult {
+  groupId: string;
+  previousOwnerUserId: string;
+  previousOwnerRoleInGroup: GroupMemberRole;
+  ownerUserId: string;
+  transferredAt: string;
+}
+
+export interface CallEventInfo {
+  status: "REJECTED" | "ENDED" | "PARTICIPANT_LEFT";
+  isVideo: boolean;
+  startedAt: string;
+  acceptedAt?: string | null;
+  endedAt: string;
+  durationSeconds: number;
+  initiatedByUserId: string;
+  endedByUserId?: string;
+}
+
 export interface MessageReplyReference {
   id: string;
   senderId: string;
   senderName: string;
   type: MessageType;
   content: string;
+  callEvent?: CallEventInfo;
   attachmentAsset?: MediaAsset;
   attachmentUrl?: string;
   deletedAt: string | null;
@@ -184,6 +254,7 @@ export interface MessageItem {
   senderAvatarUrl?: string;
   type: MessageType;
   content: string;
+  callEvent?: CallEventInfo;
   attachmentAsset?: MediaAsset;
   attachmentUrl?: string;
   replyTo?: string;
@@ -220,8 +291,14 @@ export interface ConversationSummary {
   requestRequestedAt?: string | null;
   requestRespondedAt?: string | null;
   requestRespondedByUserId?: string | null;
+  historyClearedAt?: string | null;
   deletedAt: string | null;
   updatedAt: string;
+}
+
+export interface ConversationHistoryClearedResult {
+  conversationId: string;
+  clearedAt: string;
 }
 
 export interface ReportItem {
@@ -285,7 +362,7 @@ export interface PushDevice {
 
 export interface AuditEventItem {
   id: string;
-  scope: "REPORT" | "CONVERSATION";
+  scope: "REPORT" | "CONVERSATION" | "GROUP";
   action: string;
   actorUserId: string;
   occurredAt: string;
@@ -351,29 +428,48 @@ export interface ChatCallInitPayload extends ChatConversationCommandPayload {
   callerId: string;
   callerName: string;
   isVideo: boolean;
+  startedAt?: string;
 }
 
 export interface ChatCallAcceptPayload extends ChatConversationCommandPayload {
   calleeId: string;
+  acceptedAt?: string;
 }
 
 export interface ChatCallRejectPayload extends ChatConversationCommandPayload {
   calleeId: string;
+  startedAt?: string;
+  acceptedAt?: string | null;
+  endedAt?: string;
+  durationSeconds?: number;
 }
 
 export interface ChatCallEndPayload extends ChatConversationCommandPayload {
   userId: string;
+  endedByUserId?: string;
+  startedAt?: string;
+  acceptedAt?: string | null;
+  endedAt?: string;
+  durationSeconds?: number;
+  callStillActive?: boolean;
+}
+
+export interface ChatCallHeartbeatPayload extends ChatConversationCommandPayload {
+  userId: string;
 }
 
 export interface ChatWebRTCOfferPayload extends ChatConversationCommandPayload {
+  senderId?: string;
   offer: any;
 }
 
 export interface ChatWebRTCAnswerPayload extends ChatConversationCommandPayload {
+  senderId?: string;
   answer: any;
 }
 
 export interface ChatWebRTCIceCandidatePayload extends ChatConversationCommandPayload {
+  senderId?: string;
   candidate: any;
 }
 
@@ -501,6 +597,8 @@ export interface ChatConversationUpdatedEvent {
     | "message.created"
     | "message.updated"
     | "message.deleted"
+    | "conversation.metadata.updated"
+    | "conversation.history.cleared"
     | "conversation.read"
     | "conversation.preferences.updated"
     | "conversation.request.updated";

@@ -2,7 +2,7 @@
   "info": {
     "name": "Urban Management API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Smoke and integration test collection for the SmartCity Urban Management API. Updated to match the current apps/api contract."
+    "description": "Smoke and integration test collection for the SmartCity Urban Management API. Updated to match the current apps/api contract. This collection covers HTTP APIs only; Socket.IO chat/call payloads such as call.end and call.heartbeat are documented in apps/api/docs/FE_INTEGRATION.md and apps/api/docs/CHAT_REALTIME_OPERATIONS.md."
   },
   "auth": {
     "type": "bearer",
@@ -2100,6 +2100,55 @@
           ]
         },
         {
+          "name": "Set Contact Alias",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/contacts/{{friendUserId}}/alias",
+            "description": "Stores a private alias for a friend or existing DM counterpart. FE should render `displayName` from API payloads instead of recomputing it locally.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alias\": \"Postman Alias {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clear Contact Alias",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/contacts/{{friendUserId}}/alias",
+            "description": "Removes the private alias so API payloads fall back to the target full name in `displayName`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Remove Friend",
           "request": {
             "method": "DELETE",
@@ -2318,6 +2367,7 @@
             "method": "PATCH",
             "header": [],
             "url": "{{baseUrl}}/groups/{{groupId}}",
+            "description": "Only the current OWNER can rename a group by changing `groupName`. Other editable metadata still follows the standard group-management rules.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"groupName\": \"Postman Group Updated\",\n  \"description\": \"Updated from Postman\"\n}",
@@ -2379,7 +2429,82 @@
           ]
         },
         {
-          "name": "Manage Group Member",
+          "name": "Add Group Member",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"roleInGroup\": \"MEMBER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Group Member Role",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{userId}}/role",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleInGroup\": \"DEPUTY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove Group Member",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{userId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Manage Group Member (Deprecated)",
           "request": {
             "method": "PATCH",
             "header": [],

@@ -25,7 +25,8 @@ describe('AuthOtpService', () => {
   };
   const config = {
     authOtpProvider: 'disabled',
-    authOtpWebhookUrl: undefined,
+    authOtpWebhookUrl: undefined as string | undefined,
+    authOtpWebhookTimeoutMs: 5000,
     authOtpSmtpHost: undefined,
     authOtpSmtpPort: 465,
     authOtpSmtpSecure: true,
@@ -56,6 +57,10 @@ describe('AuthOtpService', () => {
       config as never,
       realtimeRedisService as never,
     );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('requests OTP and persists a challenge record', async () => {
@@ -297,6 +302,35 @@ describe('AuthOtpService', () => {
       'Users',
       expect.objectContaining({
         attemptCount: 2,
+      }),
+    );
+  });
+
+  it('passes an abort signal when dispatching OTP through the webhook provider', async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+    global.fetch = fetchMock as typeof fetch;
+    config.authOtpProvider = 'webhook';
+    config.authOtpWebhookUrl = 'https://otp.test/webhook';
+    repository.get.mockResolvedValue(undefined);
+
+    try {
+      await service.requestOtp({
+        purpose: 'LOGIN',
+        email: 'citizen.a@smartcity.local',
+      });
+    } finally {
+      global.fetch = originalFetch;
+      config.authOtpProvider = 'disabled';
+      config.authOtpWebhookUrl = undefined;
+    }
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://otp.test/webhook',
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
       }),
     );
   });

@@ -1,6 +1,8 @@
 import type {
   AuditEventItem,
   ConversationSummary,
+  GroupBan,
+  GroupInviteLink,
   GroupMembership,
   GroupMetadata,
   MessageItem,
@@ -18,6 +20,8 @@ export type StorageEntityType =
   | 'USER_IDENTITY_CLAIM'
   | 'USER_FRIEND_EDGE'
   | 'USER_FRIEND_REQUEST'
+  | 'USER_BLOCK_EDGE'
+  | 'USER_CONTACT_ALIAS'
   | 'USER_REFRESH_SESSION'
   | 'USER_SESSION_SLOT'
   | 'USER_REFRESH_TOKEN_REVOCATION'
@@ -25,9 +29,13 @@ export type StorageEntityType =
   | 'AUTH_EMAIL_OTP'
   | 'AUTH_REGISTER_DRAFT'
   | 'USER_PUSH_DEVICE'
+  | 'USER_PUSH_TOKEN_LOOKUP'
   | 'PUSH_OUTBOX_EVENT'
   | 'GROUP_METADATA'
   | 'GROUP_MEMBERSHIP'
+  | 'GROUP_BAN'
+  | 'GROUP_INVITE_LINK'
+  | 'GROUP_INVITE_CODE_LOOKUP'
   | 'GROUP_DELETE_CLEANUP_TASK'
   | 'MESSAGE'
   | 'MESSAGE_REF'
@@ -36,6 +44,7 @@ export type StorageEntityType =
   | 'DIRECT_MESSAGE_REQUEST'
   | 'CHAT_OUTBOX_EVENT'
   | 'CONVERSATION_AUDIT_EVENT'
+  | 'GROUP_AUDIT_EVENT'
   | 'REPORT'
   | 'REPORT_AUDIT_EVENT'
   | 'REPORT_CONVERSATION_LINK';
@@ -78,6 +87,24 @@ export interface StoredUserFriendRequest extends TableItemBase {
   requesterUserId: string;
   targetUserId: string;
   direction: 'INCOMING' | 'OUTGOING';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredUserBlockEdge extends TableItemBase {
+  entityType: 'USER_BLOCK_EDGE';
+  blockerUserId: string;
+  blockedUserId: string;
+  direction: 'OUTGOING' | 'INCOMING';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredUserContactAlias extends TableItemBase {
+  entityType: 'USER_CONTACT_ALIAS';
+  ownerUserId: string;
+  targetUserId: string;
+  alias: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -172,6 +199,14 @@ export interface StoredPushDevice
   pushToken: string;
 }
 
+export interface StoredPushTokenLookup extends TableItemBase {
+  entityType: 'USER_PUSH_TOKEN_LOOKUP';
+  userId: string;
+  deviceId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoredPushOutboxEvent extends TableItemBase {
   entityType: 'PUSH_OUTBOX_EVENT';
   eventId: string;
@@ -201,6 +236,29 @@ export interface StoredMembership
   entityType: 'GROUP_MEMBERSHIP';
   groupId: string;
   userId: string;
+}
+
+export interface StoredGroupBan
+  extends TableItemBase, Omit<GroupBan, 'groupId' | 'userId'> {
+  entityType: 'GROUP_BAN';
+  groupId: string;
+  userId: string;
+}
+
+export interface StoredGroupInviteLink
+  extends TableItemBase, Omit<GroupInviteLink, 'groupId' | 'inviteId'> {
+  entityType: 'GROUP_INVITE_LINK';
+  groupId: string;
+  inviteId: string;
+}
+
+export interface StoredGroupInviteCodeLookup extends TableItemBase {
+  entityType: 'GROUP_INVITE_CODE_LOOKUP';
+  code: string;
+  groupId: string;
+  inviteId: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StoredGroupDeleteCleanupTask extends TableItemBase {
@@ -296,6 +354,15 @@ export interface StoredConversationAuditEvent
   eventId: string;
   conversationId: string;
   messageId?: string;
+}
+
+export interface StoredGroupAuditEvent
+  extends TableItemBase, Omit<AuditEventItem, 'id' | 'scope'> {
+  entityType: 'GROUP_AUDIT_EVENT';
+  eventId: string;
+  groupId: string;
+  targetUserId?: string;
+  inviteId?: string;
 }
 
 export interface StoredReport extends TableItemBase, Omit<ReportItem, 'id'> {

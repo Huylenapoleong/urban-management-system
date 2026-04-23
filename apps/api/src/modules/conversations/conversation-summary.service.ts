@@ -2,20 +2,21 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   getConversationKind,
   isGroupConversationId,
+  makeGroupMetadataSk,
+  makeGroupPk,
   makeConversationPk,
   makeConversationSummarySk,
   makeInboxPk,
   makeInboxStatsKey,
 } from '@urban/shared-utils';
-import type { AuthenticatedUser } from '@urban/shared-types';
 import type {
   StoredConversation,
+  StoredGroup,
   StoredMessage,
 } from '../../common/storage-records';
 import { ConversationStateService } from '../../common/services/conversation-state.service';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
-import { GroupsService } from '../groups/groups.service';
 import { UsersService } from '../users/users.service';
 
 export interface ConversationSummaryAccess {
@@ -44,7 +45,6 @@ export class ConversationSummaryService {
     private readonly repository: UrbanTableRepository,
     private readonly conversationStateService: ConversationStateService,
     private readonly usersService: UsersService,
-    private readonly groupsService: GroupsService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -92,6 +92,7 @@ export class ConversationSummaryService {
         isPinned: existingConversation?.isPinned ?? false,
         archivedAt: null,
         mutedUntil: existingConversation?.mutedUntil ?? null,
+        historyClearedAt: existingConversation?.historyClearedAt ?? null,
         deletedAt: null,
         updatedAt: message.sentAt,
         lastReadAt,
@@ -163,6 +164,7 @@ export class ConversationSummaryService {
       access.participants,
     );
     const summariesByUser = new Map<string, StoredConversation>();
+    const removedUserIds: string[] = [];
     const changedUserIds: string[] = [];
 
     for (const participantId of participantIds) {
@@ -170,14 +172,58 @@ export class ConversationSummaryService {
         participantId,
         access.conversationKey,
       );
+      const visibleMessages =
+        this.conversationStateService.filterVisibleMessagesForUser(
+          activeMessages,
+          participantId,
+          existingConversation?.historyClearedAt ?? null,
+        );
 
       if (!existingConversation || existingConversation.deletedAt) {
         continue;
       }
 
+      if (visibleMessages.length === 0) {
+        if (!existingConversation.historyClearedAt) {
+          await this.repository.delete(
+            this.config.dynamodbConversationsTableName,
+            existingConversation.PK,
+            existingConversation.SK,
+          );
+          removedUserIds.push(participantId);
+          continue;
+        }
+
+        const nextConversation: StoredConversation = {
+          ...existingConversation,
+          lastMessagePreview: '',
+          lastSenderName: '',
+          unreadCount: 0,
+          deletedAt: null,
+        };
+
+        if (
+          this.conversationStateService.hasConversationSummaryChanged(
+            existingConversation,
+            nextConversation,
+          )
+        ) {
+          await this.repository.put(
+            this.config.dynamodbConversationsTableName,
+            nextConversation,
+          );
+          summariesByUser.set(participantId, nextConversation);
+          changedUserIds.push(participantId);
+        } else {
+          summariesByUser.set(participantId, existingConversation);
+        }
+
+        continue;
+      }
+
       const lastReadAt = this.conversationStateService.resolveStoredLastReadAt(
         existingConversation,
-        latestMessage.sentAt,
+        visibleMessages[0].sentAt,
       );
       const nextConversation: StoredConversation = {
         PK: makeInboxPk(participantId),
@@ -190,23 +236,30 @@ export class ConversationSummaryService {
         userId: participantId,
         conversationId: access.conversationKey,
         groupName:
-          existingConversation.groupName ??
-          labelMap.get(participantId) ??
-          participantId,
-        lastMessagePreview:
-          this.conversationStateService.buildPreview(latestMessage),
-        lastSenderName: latestMessage.senderName,
+          kind === 'GRP'
+            ? (labelMap.get(participantId) ??
+              existingConversation.groupName ??
+              participantId)
+            : (existingConversation.groupName ??
+              labelMap.get(participantId) ??
+              participantId),
+        lastMessagePreview: this.conversationStateService.buildPreview(
+          visibleMessages[0],
+        ),
+        lastSenderName: visibleMessages[0].senderName,
         unreadCount: this.conversationStateService.computeUnreadCount(
           participantId,
-          activeMessages,
+          visibleMessages,
           lastReadAt,
+          existingConversation.historyClearedAt ?? null,
         ),
         isGroup: kind === 'GRP',
         isPinned: existingConversation.isPinned ?? false,
         archivedAt: existingConversation.archivedAt ?? null,
         mutedUntil: existingConversation.mutedUntil ?? null,
+        historyClearedAt: existingConversation.historyClearedAt ?? null,
         deletedAt: null,
-        updatedAt: latestMessage.sentAt,
+        updatedAt: visibleMessages[0].sentAt,
         lastReadAt,
       };
 
@@ -255,6 +308,7 @@ export class ConversationSummaryService {
       {
         beginsWith: `CONV#${conversationId}#LAST#`,
         limit: 1,
+        scanForward: false,
       },
     );
 
@@ -283,29 +337,72 @@ export class ConversationSummaryService {
   async listVisibleMessagesForUser(
     conversationId: string,
     userId: string,
+    historyClearedAt?: string | null,
   ): Promise<StoredMessage[]> {
     const activeMessages = await this.listActiveMessages(conversationId);
 
     return this.conversationStateService.filterVisibleMessagesForUser(
       activeMessages,
       userId,
+      historyClearedAt,
     );
   }
 
   async syncConversationSummaryForUser(
     access: ConversationSummaryAccess,
     participantId: string,
+    visibleMessagesOverride?: StoredMessage[],
+    existingConversationOverride?: StoredConversation,
   ): Promise<SingleConversationSyncResult> {
-    const existingConversation = await this.getConversationSummary(
-      participantId,
-      access.conversationKey,
-    );
-    const visibleMessages = await this.listVisibleMessagesForUser(
-      access.conversationKey,
-      participantId,
-    );
+    const existingConversation =
+      existingConversationOverride ??
+      (await this.getConversationSummary(
+        participantId,
+        access.conversationKey,
+      ));
+    const visibleMessages =
+      visibleMessagesOverride ??
+      (await this.listVisibleMessagesForUser(
+        access.conversationKey,
+        participantId,
+        existingConversation?.historyClearedAt ?? null,
+      ));
 
     if (visibleMessages.length === 0) {
+      if (existingConversation?.historyClearedAt) {
+        const nextConversation: StoredConversation = {
+          ...existingConversation,
+          lastMessagePreview: '',
+          lastSenderName: '',
+          unreadCount: 0,
+          deletedAt: null,
+        };
+
+        if (
+          this.conversationStateService.hasConversationSummaryChanged(
+            existingConversation,
+            nextConversation,
+          )
+        ) {
+          await this.repository.put(
+            this.config.dynamodbConversationsTableName,
+            nextConversation,
+          );
+
+          return {
+            removed: false,
+            changed: true,
+            summary: nextConversation,
+          };
+        }
+
+        return {
+          removed: false,
+          changed: false,
+          summary: existingConversation,
+        };
+      }
+
       if (existingConversation) {
         await this.repository.delete(
           this.config.dynamodbConversationsTableName,
@@ -352,6 +449,7 @@ export class ConversationSummaryService {
         isPinned: false,
         archivedAt: null,
         mutedUntil: null,
+        historyClearedAt: null,
         deletedAt: null,
         updatedAt: latestMessage.sentAt,
         lastReadAt: latestMessage.sentAt,
@@ -361,9 +459,13 @@ export class ConversationSummaryService {
           {
             ...existingConversation,
             groupName:
-              existingConversation.groupName ??
-              labelMap.get(participantId) ??
-              participantId,
+              kind === 'GRP'
+                ? (labelMap.get(participantId) ??
+                  existingConversation.groupName ??
+                  participantId)
+                : (existingConversation.groupName ??
+                  labelMap.get(participantId) ??
+                  participantId),
           },
           visibleMessages,
         )
@@ -408,23 +510,33 @@ export class ConversationSummaryService {
     };
   }
 
-  private async resolveConversationSummaryParticipants(
+  private resolveConversationSummaryParticipants(
     access: ConversationSummaryAccess,
   ): Promise<string[]> {
-    const storedSummaries = await this.repository.scanAll<StoredConversation>(
-      this.config.dynamodbConversationsTableName,
-    );
-    const summaryUserIds = storedSummaries
-      .filter((summary) => summary.conversationId === access.conversationKey)
-      .map((summary) => summary.userId);
-
-    return Array.from(new Set([...access.participants, ...summaryUserIds]));
+    return Promise.resolve(Array.from(new Set(access.participants)));
   }
 
   private async buildConversationLabelMap(
     conversationId: string,
     participants: string[],
   ): Promise<Map<string, string>> {
+    if (isGroupConversationId(conversationId)) {
+      const groupId = conversationId.slice('GRP#'.length);
+      const group = await this.repository.get<StoredGroup>(
+        this.config.dynamodbGroupsTableName,
+        makeGroupPk(groupId),
+        makeGroupMetadataSk(),
+      );
+      const groupName = group?.groupName ?? groupId;
+      const labelMap = new Map<string, string>();
+
+      for (const participantId of participants) {
+        labelMap.set(participantId, groupName);
+      }
+
+      return labelMap;
+    }
+
     const userMap = new Map<
       string,
       Awaited<ReturnType<UsersService['getByIdOrThrow']>>
@@ -438,50 +550,18 @@ export class ConversationSummaryService {
     for (const participantId of participants) {
       labelMap.set(
         participantId,
-        await this.getConversationLabel(
-          participantId,
-          conversationId,
-          participants,
-          userMap,
-        ),
+        await this.getDmConversationLabel(participantId, participants, userMap),
       );
     }
 
     return labelMap;
   }
 
-  private async getConversationLabel(
+  private getDmConversationLabel(
     participantId: string,
-    conversationId: string,
     participants: string[],
     userMap: Map<string, Awaited<ReturnType<UsersService['getByIdOrThrow']>>>,
   ): Promise<string> {
-    if (isGroupConversationId(conversationId)) {
-      const user = userMap.get(participantId);
-
-      if (!user) {
-        throw new NotFoundException('Conversation participant not found.');
-      }
-
-      const group = await this.groupsService.getGroup(
-        {
-          id: participantId,
-          phone: user.phone,
-          email: user.email,
-          fullName: user.fullName,
-          role: user.role,
-          locationCode: user.locationCode,
-          unit: user.unit,
-          avatarUrl: user.avatarUrl,
-          status: user.status,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-        } satisfies AuthenticatedUser,
-        conversationId.slice('GRP#'.length),
-      );
-      return group.groupName;
-    }
-
     const otherParticipantId = participants.find(
       (userId) => userId !== participantId,
     );
@@ -490,6 +570,10 @@ export class ConversationSummaryService {
       throw new NotFoundException('Conversation participant not found.');
     }
 
-    return userMap.get(otherParticipantId)?.fullName ?? otherParticipantId;
+    return this.usersService.resolveContactDisplayName(
+      participantId,
+      otherParticipantId,
+      userMap.get(otherParticipantId)?.fullName ?? otherParticipantId,
+    );
   }
 }
