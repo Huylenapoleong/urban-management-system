@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus } from "lucide-react";
+import { Fragment, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
+import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile, SmilePlus, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useWebRTC } from "@/hooks/shared/useWebRTC";
-import { CallModal } from "@/components/CallModal";
+import { useWebRTCRuntime } from "@/providers/WebRTCProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useConversations, useMessages } from "@/hooks/shared/useChatData";
 import { format } from "date-fns";
@@ -11,14 +10,23 @@ import { useLocation } from "react-router-dom";
 import { uploadMedia } from "@/services/upload.api";
 import { getUserById, searchUserExactByContact, getUserPresence, type PresenceState } from "@/services/user.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { leaveGroup, listGroupMembers, manageGroupMember } from "@/services/group.api";
+import {
+  addGroupMember,
+  createGroupInviteLink,
+  leaveGroupWithPayload,
+  listGroupInviteLinks,
+  listGroupMembers,
+  removeGroupMember,
+  revokeGroupInviteLink,
+  updateGroup,
+  updateGroupMemberRole,
+} from "@/services/group.api";
 import { listMyFriendRequests, listMyFriends, sendFriendRequest } from "@/services/friends.api";
 import { toast } from "react-hot-toast";
-import type { MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
+import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
+import type { GroupInviteLink, MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
 import type { GroupMemberRole } from "@urban/shared-constants";
 import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
-import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
-import { socketClient } from "@/lib/socket-client";
 
 type ChatMessageType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
 
@@ -169,44 +177,46 @@ function resolveDmAvatarFromFriendMap(
   return friendAvatarByUserId[peerUserId];
 }
 
-function formatPresenceText(presence: PresenceState | null): string {
-  if (!presence) {
-    return "Không hoạt động";
-  }
-
-  if (presence.isActive) {
-    return "Đang hoạt động";
-  }
-
-  if (presence.lastSeenAt) {
-    return `Hoạt động lúc ${format(new Date(presence.lastSeenAt), "HH:mm dd/MM")}`;
-  }
-
-  return "Không hoạt động";
-}
-
-function formatLastSeenShort(presence?: PresenceState | null): string | null {
-  if (!presence || presence.isActive || !presence.lastSeenAt) {
+function formatLastSeenShort(presence?: PresenceState | null, fallbackLastSeenAt?: string | null): string | null {
+  if (presence?.isActive) {
     return null;
   }
 
-  const lastSeenMs = new Date(presence.lastSeenAt).getTime();
+  const lastSeenSource = presence?.lastSeenAt || fallbackLastSeenAt;
+  if (!lastSeenSource) {
+    return null;
+  }
+
+  const lastSeenMs = new Date(lastSeenSource).getTime();
   if (Number.isNaN(lastSeenMs)) {
     return null;
   }
 
   const diffMinutes = Math.max(1, Math.floor((Date.now() - lastSeenMs) / 60000));
   if (diffMinutes < 60) {
-    return `${diffMinutes}m`;
+    return `${diffMinutes} phút`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h`;
+    return `${diffHours} giờ`;
   }
 
   const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d`;
+  return `${diffDays} ngày`;
+}
+
+function formatPresenceText(presence: PresenceState | null, fallbackLastSeenAt?: string | null): string {
+  if (presence?.isActive) {
+    return "Đang hoạt động";
+  }
+
+  const relative = formatLastSeenShort(presence, fallbackLastSeenAt);
+  if (relative) {
+    return `Hoạt động ${relative} trước`;
+  }
+
+  return "Hoạt động vài phút trước";
 }
 
 type MentionCandidate = {
@@ -217,6 +227,12 @@ type MentionCandidate = {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?84|0)\d{9,10}$/;
 const GROUP_AVATAR_OVERRIDES_STORAGE_KEY = "web-app-group-avatar-overrides";
+const MESSAGE_REACTIONS_STORAGE_KEY = "web-app-message-reactions";
+const PRESENCE_POLL_INTERVAL_MS = 60_000;
+const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+const URL_PATTERN = /(https?:\/\/[^\s]+)/gi;
+const MESSAGE_BLOCK_GAP_MS = 10 * 60 * 1000;
+const USER_ID_PATTERN = /\b[0-9A-Z]{20,32}\b/g;
 
 function extractGroupIdFromConversationId(conversationId?: string | null): string | undefined {
   if (!conversationId) {
@@ -238,10 +254,45 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function sanitizeUrlToken(rawUrl: string): string {
+  return rawUrl.replace(/[),.!?;:]+$/g, "");
+}
+
+function extractFirstUrl(text: string): string | undefined {
+  const match = text.match(URL_PATTERN);
+  if (!match || match.length === 0) {
+    return undefined;
+  }
+
+  const sanitized = sanitizeUrlToken(match[0]);
+  if (!sanitized) {
+    return undefined;
+  }
+
+  return sanitized;
+}
+
+function buildLinkPreview(url: string): { href: string; host: string; path: string; faviconUrl: string } | null {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, "");
+    const path = `${parsed.pathname}${parsed.search}` || "/";
+    return {
+      href: parsed.toString(),
+      host,
+      path: path.length > 72 ? `${path.slice(0, 69)}...` : path,
+      faviconUrl: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(parsed.hostname)}&sz=64`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function ChatPage() {
   const location = useLocation();
   const chatState = (location.state ?? {}) as ChatNavigationState;
   const [activeChat, setActiveChat] = useState<string | null>(chatState.conversationId ?? null);
+  const failedPresenceUserIdsRef = useRef<Set<string>>(new Set());
   const [inputText, setInputText] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
   const [queuedAttachments, setQueuedAttachments] = useState<QueuedAttachment[]>([]);
@@ -267,12 +318,42 @@ export function ChatPage() {
   const [selectedMentions, setSelectedMentions] = useState<MentionCandidate[]>([]);
   const [leaveGroupError, setLeaveGroupError] = useState("");
   const [isLeaveGroupDialogOpen, setIsLeaveGroupDialogOpen] = useState(false);
+  const [leaveSuccessorUserId, setLeaveSuccessorUserId] = useState("");
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [inviteSearchText, setInviteSearchText] = useState("");
   const [selectedInviteUserIds, setSelectedInviteUserIds] = useState<string[]>([]);
+  const [renameGroupName, setRenameGroupName] = useState("");
+  const [inviteLinkError, setInviteLinkError] = useState("");
   const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<string | null>(null);
   const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<string | null>(null);
+  const [activeMemberActionUserId, setActiveMemberActionUserId] = useState<string | null>(null);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
+  const [messageReactionsByConversation, setMessageReactionsByConversation] = useState<
+    Record<string, Record<string, string[]>>
+  >(() => {
+    if (typeof window === "undefined") {
+      return {};
+    }
+
+    try {
+      const raw = window.localStorage.getItem(MESSAGE_REACTIONS_STORAGE_KEY);
+      if (!raw) {
+        return {};
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return {};
+      }
+
+      return parsed as Record<string, Record<string, string[]>>;
+    } catch {
+      return {};
+    }
+  });
   const [groupAvatarOverrides, setGroupAvatarOverrides] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined") {
       return {};
@@ -297,15 +378,17 @@ export function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const groupAvatarInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLInputElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
   const typingStopTimerRef = useRef<number | null>(null);
   const isTypingRef = useRef(false);
   const requestedDmAvatarIdsRef = useRef<Set<string>>(new Set());
   const [friendAvatarByUserId, setFriendAvatarByUserId] = useState<Record<string, string>>({});
+  const [friendIds, setFriendIds] = useState<Set<string> | null>(null);
   const [dmAvatarMap, setDmAvatarMap] = useState<Record<string, string>>({});
   const [activeDmPresence, setActiveDmPresence] = useState<PresenceState | null>(null);
   const [dmPresenceByUserId, setDmPresenceByUserId] = useState<Record<string, PresenceState>>({});
   const [callSummaries, setCallSummaries] = useState<CallEndedSummary[]>(() => loadCallSummaries());
-  const rtc = useWebRTC();
+  const rtc = useWebRTCRuntime();
   const {
     startCall,
     lastEndedCall,
@@ -318,6 +401,9 @@ export function ChatPage() {
   const {
     data: messages = [],
     isLoading: loadingMessages,
+    hasMore,
+    isLoadingMore,
+    loadMore,
     sendMessageAsync,
     isSending,
     markAsRead,
@@ -374,27 +460,40 @@ export function ChatPage() {
     (participant) => participant.isTyping && participant.userId !== user?.sub,
   );
   const typingIndicatorText = (() => {
-    if (activeTypingParticipants.length === 0) {
+    const typingCount = activeTypingParticipants.length;
+    if (typingCount === 0) {
       return "";
     }
 
-    const uniqueNames = Array.from(
-      new Set(
-        activeTypingParticipants.map((participant) => participant.fullName?.trim() || participant.userId),
-      ),
-    );
-
-    if (uniqueNames.length === 1) {
-      return `${uniqueNames[0]} đang soạn tin...`;
+    if (typingCount >= 3) {
+      return "Nhiều người đang soạn tin...";
     }
 
-    if (uniqueNames.length === 2) {
-      return `${uniqueNames[0]} và ${uniqueNames[1]} đang soạn tin...`;
+    const uniqueNames = Array.from(new Set(
+      activeTypingParticipants
+        .map((participant) => participant.fullName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ));
+
+    if (typingCount === 1) {
+      return `${uniqueNames[0] || "Một thành viên"} đang soạn tin...`;
     }
 
-    return `${uniqueNames[0]}, ${uniqueNames[1]} và ${uniqueNames.length - 2} người khác đang soạn tin...`;
+    if (typingCount === 2) {
+      if (uniqueNames.length >= 2) {
+        return `${uniqueNames[0]} và ${uniqueNames[1]} đang soạn tin...`;
+      }
+
+      return "Hai người đang soạn tin...";
+    }
+
+    return "Nhiều người đang soạn tin...";
   })();
   const normalizedForwardSearch = forwardSearch.trim().toLowerCase();
+  const activeMessageReactions = useMemo(
+    () => (activeChat ? messageReactionsByConversation[activeChat] || {} : {}),
+    [activeChat, messageReactionsByConversation],
+  );
   const forwardDestinationConversations = mergedConversations.filter((conversation) => {
     if (conversation.conversationId === activeChat) {
       return false;
@@ -417,11 +516,21 @@ export function ChatPage() {
     return haystack.includes(normalizedForwardSearch);
   });
   const cachedProfile = queryClient.getQueryData<UserProfile>(["profile"]);
+  const activeContactAvatarFromConversation = resolveConversationAvatarUrl(activeContact as ConversationAvatarLike | undefined);
+  const activeContactAvatarFromFriendMap = resolveDmAvatarFromFriendMap(
+    activeContact as ConversationAvatarLike | undefined,
+    friendAvatarByUserId,
+    user?.sub,
+  );
+  const activeContactAvatarFromDmMap = activeChat ? dmAvatarMap[activeChat] : undefined;
   const activeContactBaseAvatarUrl =
     (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarAsset?.resolvedUrl ||
     (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarUrl;
   const activeContactAvatarUrl =
     (activeGroupId ? groupAvatarOverrides[activeGroupId] : undefined) ||
+    activeContactAvatarFromConversation ||
+    activeContactAvatarFromFriendMap ||
+    activeContactAvatarFromDmMap ||
     activeContactBaseAvatarUrl ||
     chatState.avatarUrl;
   const activeDmUserId = extractDirectPeerUserId(activeContact as ConversationAvatarLike | undefined, user?.sub);
@@ -435,13 +544,20 @@ export function ChatPage() {
       return "Nhóm trò chuyện";
     }
 
-    return formatPresenceText(activePresence);
+    return formatPresenceText(activePresence, activeContact?.updatedAt);
   })();
   const activeStatusToneClass = activePresence?.isActive ? "text-green-600" : "text-gray-500 dark:text-slate-400";
-  const activeLastSeenBadge = formatLastSeenShort(activePresence);
+  const activeLastSeenBadge = formatLastSeenShort(activePresence, activeContact?.updatedAt);
   const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
   const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const messageFocusTimerRef = useRef<number | null>(null);
+  const previousMessageCountRef = useRef(0);
+  const loadingOlderMessagesRef = useRef(false);
+  const previousScrollHeightRef = useRef(0);
+  const lastMarkedReadRef = useRef<{ id: string; count: number } | null>(null);
   const {
     data: activeGroupMembers = [],
     isLoading: isLoadingGroupMembers,
@@ -476,6 +592,12 @@ export function ChatPage() {
   const { data: myFriends = [] } = useQuery({
     queryKey: ["friends", "list", "for-group-member-picker"],
     queryFn: () => listMyFriends({ limit: 200 }),
+    staleTime: 30 * 1000,
+  });
+  const { data: activeGroupInviteLinks = [] } = useQuery({
+    queryKey: ["group-invite-links", activeGroupId],
+    queryFn: () => listGroupInviteLinks(activeGroupId!),
+    enabled: Boolean(activeGroupId && isInfoOpen),
     staleTime: 30 * 1000,
   });
   const { data: outgoingFriendRequests = [] } = useQuery({
@@ -529,6 +651,47 @@ export function ChatPage() {
     cachedProfile?.fullName,
     memberProfilesById,
     messageSenderNameByUserId,
+    myFriends,
+    user?.sub,
+  ]);
+  const displayNameByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+
+    myFriends.forEach((friend) => {
+      if (friend.userId && friend.fullName?.trim()) {
+        map.set(friend.userId, friend.fullName.trim());
+      }
+    });
+
+    activeGroupMembers.forEach((member, index) => {
+      const profile = memberProfilesById[member.userId];
+      const displayName =
+        profile?.fullName ||
+        mentionNameByUserId.get(member.userId) ||
+        messageSenderNameByUserId.get(member.userId) ||
+        `Thành viên ${index + 1}`;
+
+      map.set(member.userId, displayName);
+    });
+
+    messages.forEach((message) => {
+      if (message.senderId && message.senderName?.trim() && !map.has(message.senderId)) {
+        map.set(message.senderId, message.senderName.trim());
+      }
+    });
+
+    if (user?.sub) {
+      map.set(user.sub, cachedProfile?.fullName || "Bạn");
+    }
+
+    return map;
+  }, [
+    activeGroupMembers,
+    cachedProfile?.fullName,
+    memberProfilesById,
+    mentionNameByUserId,
+    messageSenderNameByUserId,
+    messages,
     myFriends,
     user?.sub,
   ]);
@@ -600,21 +763,83 @@ export function ChatPage() {
   const isMentionMenuOpen = mentionStartIndex !== null && mentionCandidates.length > 0;
   const canManageGroupMembers =
     currentUserMembership?.roleInGroup === "OWNER" ||
-    currentUserMembership?.roleInGroup === "OFFICER";
+    currentUserMembership?.roleInGroup === "DEPUTY";
+  const isCurrentUserOwner = currentUserMembership?.roleInGroup === "OWNER";
   const canShowAddMemberSection =
     user?.role !== "CITIZEN" &&
     (canManageGroupMembers || user?.role === "ADMIN");
   const canViewGroupMemberList = Boolean(user?.sub);
   const canViewConversationCode = user?.role === "ADMIN";
+  const canViewSensitiveUserIds = user?.role === "ADMIN";
   const canInviteGroupFriends = Boolean(activeGroupId && user?.sub);
   const canUpdateGroupAvatar = Boolean(activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"));
+  const canRenameGroup = Boolean(activeGroupId && (isCurrentUserOwner || user?.role === "ADMIN"));
+  const canManageInviteLinks = Boolean(activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"));
+  const pendingRemoveMemberDisplayName = pendingRemoveMemberUserId
+    ? displayNameByUserId.get(pendingRemoveMemberUserId) || "Thành viên"
+    : "";
+
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ groupId, groupName }: { groupId: string; groupName: string }) =>
+      updateGroup(groupId, { groupName }),
+    onSuccess: (updatedGroup) => {
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      setRenameGroupName(updatedGroup.groupName || "");
+      toast.success("Đã đổi tên nhóm");
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || "Không thể đổi tên nhóm lúc này.");
+    },
+  });
+
+  const createInviteLinkMutation = useMutation({
+    mutationFn: ({ groupId }: { groupId: string }) => createGroupInviteLink(groupId),
+    onSuccess: () => {
+      setInviteLinkError("");
+      queryClient.invalidateQueries({ queryKey: ["group-invite-links", activeGroupId] });
+      toast.success("Đã tạo link tham gia nhóm");
+    },
+    onError: (error: any) => {
+      const message = error?.message || "Không thể tạo link tham gia.";
+      setInviteLinkError(message);
+      toast.error(message);
+    },
+  });
+
+  const revokeInviteLinkMutation = useMutation({
+    mutationFn: ({ groupId, inviteId }: { groupId: string; inviteId: string }) =>
+      revokeGroupInviteLink(groupId, inviteId),
+    onSuccess: () => {
+      setInviteLinkError("");
+      queryClient.invalidateQueries({ queryKey: ["group-invite-links", activeGroupId] });
+      toast.success("Đã vô hiệu hóa link mời");
+    },
+    onError: (error: any) => {
+      const message = error?.message || "Không thể vô hiệu hóa link mời.";
+      setInviteLinkError(message);
+      toast.error(message);
+    },
+  });
 
   const manageGroupMemberMutation = useMutation({
     mutationFn: ({ groupId, userId, action, roleInGroup }: { groupId: string; userId: string; action: "add" | "update" | "remove"; roleInGroup?: GroupMemberRole }) =>
-      manageGroupMember(groupId, userId, {
-        action,
-        roleInGroup,
-      }),
+      (async () => {
+        if (action === "add") {
+          return addGroupMember(groupId, {
+            userId,
+            roleInGroup: roleInGroup === "DEPUTY" ? "DEPUTY" : "MEMBER",
+          });
+        }
+
+        if (action === "update") {
+          return updateGroupMemberRole(groupId, userId, {
+            roleInGroup: roleInGroup === "DEPUTY" ? "DEPUTY" : "MEMBER",
+          });
+        }
+
+        return removeGroupMember(groupId, userId);
+      })(),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["group-members", variables.groupId] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
@@ -654,12 +879,14 @@ export function ChatPage() {
     },
   });
   const leaveGroupMutation = useMutation({
-    mutationFn: (groupId: string) => leaveGroup(groupId),
+    mutationFn: ({ groupId, successorUserId }: { groupId: string; successorUserId?: string }) =>
+      leaveGroupWithPayload(groupId, successorUserId ? { successorUserId } : undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       queryClient.invalidateQueries({ queryKey: ["group-members"] });
       setLeaveGroupError("");
+      setLeaveSuccessorUserId("");
       setIsInfoOpen(false);
       setIsLeaveGroupDialogOpen(false);
       setActiveChat(null);
@@ -713,7 +940,9 @@ export function ChatPage() {
         }
 
         const nextMap: Record<string, string> = {};
+        const idSet = new Set<string>();
         friends.forEach((friend) => {
+          idSet.add(friend.userId);
           const avatarUrl = friend.avatarAsset?.resolvedUrl || friend.avatarUrl;
           if (avatarUrl) {
             nextMap[friend.userId] = avatarUrl;
@@ -722,6 +951,7 @@ export function ChatPage() {
 
         if (!cancelled) {
           setFriendAvatarByUserId(nextMap);
+          setFriendIds(idSet);
         }
       } catch {
         // Keep silent; other avatar sources still apply.
@@ -794,33 +1024,57 @@ export function ChatPage() {
     );
   }, [mergedConversations, user?.sub]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const dmUserIds = Array.from(
+  const dmUserIdsString = useMemo(() => {
+    return Array.from(
       new Set(
         mergedConversations
           .filter((conversation) => !conversation.isGroup)
           .map((conversation) => extractDirectPeerUserId(conversation as ConversationAvatarLike, user?.sub))
           .filter((value): value is string => Boolean(value)),
       ),
-    );
+    ).slice(0, 30).sort().join(",");
+  }, [mergedConversations, user?.sub]);
 
-    if (dmUserIds.length === 0) {
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!dmUserIdsString || !friendIds) {
       return;
     }
 
+    const dmUserIds = dmUserIdsString.split(",").filter((id) => friendIds.has(id));
+    if (dmUserIds.length === 0) return;
+
     const loadDmPresence = async () => {
-      const results = await Promise.all(
-        dmUserIds.map(async (userId) => {
-          try {
-            const presence = await getUserPresence(userId);
-            return [userId, presence] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
+      const results: any[] = [];
+      
+      for (let i = 0; i < dmUserIds.length; i += 5) {
+        if (cancelled) return;
+        
+        const chunk = dmUserIds.slice(i, i + 5);
+        const chunkResults = await Promise.all(
+          chunk.map(async (userId) => {
+            if (failedPresenceUserIdsRef.current.has(userId)) {
+              return null;
+            }
+            try {
+              const presence = await getUserPresence(userId);
+              return [userId, presence] as const;
+            } catch (error: any) {
+              if (error?.status === 403 || error?.status === 404) {
+                failedPresenceUserIdsRef.current.add(userId);
+              }
+              return null;
+            }
+          }),
+        );
+        
+        results.push(...chunkResults);
+        
+        if (i + 5 < dmUserIds.length) {
+          await new Promise((resolve) => window.setTimeout(resolve, 300));
+        }
+      }
 
       if (cancelled) {
         return;
@@ -843,23 +1097,27 @@ export function ChatPage() {
     void loadDmPresence();
     const intervalId = window.setInterval(() => {
       void loadDmPresence();
-    }, 30000);
+    }, PRESENCE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [mergedConversations, user?.sub]);
+  }, [dmUserIdsString]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!activeDmUserId) {
+    if (!activeDmUserId || !friendIds || !friendIds.has(activeDmUserId)) {
       setActiveDmPresence(null);
       return;
     }
 
     const loadPresence = async () => {
+      if (failedPresenceUserIdsRef.current.has(activeDmUserId)) {
+        if (!cancelled) setActiveDmPresence(null);
+        return;
+      }
       try {
         const presence = await getUserPresence(activeDmUserId);
         if (!cancelled) {
@@ -869,7 +1127,10 @@ export function ChatPage() {
             [activeDmUserId]: presence,
           }));
         }
-      } catch {
+      } catch (error: any) {
+        if (error?.status === 403 || error?.status === 404) {
+          failedPresenceUserIdsRef.current.add(activeDmUserId);
+        }
         if (!cancelled) {
           setActiveDmPresence(null);
         }
@@ -879,7 +1140,7 @@ export function ChatPage() {
     void loadPresence();
     const intervalId = window.setInterval(() => {
       void loadPresence();
-    }, 30000);
+    }, PRESENCE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
@@ -887,57 +1148,60 @@ export function ChatPage() {
     };
   }, [activeDmUserId]);
 
+  // Auto scroll to bottom for new messages, preserve position while loading older pages.
   useEffect(() => {
-    const socket = socketClient.socket;
-    if (!socket || !activeDmUserId) {
+    const container = messagesContainerRef.current;
+
+    if (loadingOlderMessagesRef.current && container) {
+      const delta = container.scrollHeight - previousScrollHeightRef.current;
+      container.scrollTop = container.scrollTop + Math.max(0, delta);
+      loadingOlderMessagesRef.current = false;
+      previousScrollHeightRef.current = 0;
+      previousMessageCountRef.current = messages.length;
       return;
     }
 
-    const handlePresenceSnapshot = (payload: { participants?: PresenceState[] }) => {
-      const participant = payload?.participants?.find((entry) => entry.userId === activeDmUserId);
-      if (participant) {
-        setActiveDmPresence(participant);
-        setDmPresenceByUserId((prev) => ({
-          ...prev,
-          [participant.userId]: participant,
-        }));
-      }
-    };
+    const previousCount = previousMessageCountRef.current;
+    const isFirstLoad = previousCount === 0 && messages.length > 0;
+    const hasNewMessage = previousCount > 0 && messages.length > previousCount;
 
-    const handlePresenceUpdated = (payload: { presence?: PresenceState }) => {
-      const updatedPresence = payload?.presence;
-      if (updatedPresence?.userId === activeDmUserId) {
-        setActiveDmPresence(updatedPresence);
-        setDmPresenceByUserId((prev) => ({
-          ...prev,
-          [updatedPresence.userId]: updatedPresence,
-        }));
-      }
-    };
+    if (isFirstLoad || hasNewMessage) {
+      messagesEndRef.current?.scrollIntoView({ behavior: isFirstLoad ? "auto" : "smooth" });
+    }
 
-    socket.on(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
-    socket.on(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
-
-    return () => {
-      socket.off(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
-      socket.off(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
-    };
-  }, [activeDmUserId]);
-
-  // Auto scroll to bottom when messages load or new messages appear
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    previousMessageCountRef.current = messages.length;
   }, [messages]);
+
+  const handleLoadMoreMessages = async () => {
+    const container = messagesContainerRef.current;
+    if (!container || !hasMore || isLoadingMore) {
+      return;
+    }
+
+    previousScrollHeightRef.current = container.scrollHeight;
+    loadingOlderMessagesRef.current = true;
+    await loadMore();
+  };
 
   useEffect(() => {
     if (!activeChat) {
       return;
     }
 
-    if ((activeContact?.unreadCount ?? 0) <= 0) {
+    const unreadCount = activeContact?.unreadCount ?? 0;
+    if (unreadCount <= 0) {
+      lastMarkedReadRef.current = null;
       return;
     }
 
+    if (
+      lastMarkedReadRef.current?.id === activeChat &&
+      lastMarkedReadRef.current?.count === unreadCount
+    ) {
+      return;
+    }
+
+    lastMarkedReadRef.current = { id: activeChat, count: unreadCount };
     markAsRead();
   }, [activeChat, activeContact?.unreadCount, markAsRead]);
 
@@ -946,6 +1210,15 @@ export function ChatPage() {
       setIsInfoOpen(false);
     }
   }, [activeChat]);
+
+  useEffect(() => {
+    if (!activeContact?.isGroup) {
+      setRenameGroupName("");
+      return;
+    }
+
+    setRenameGroupName(activeContact.groupName || "");
+  }, [activeContact?.groupName, activeContact?.isGroup]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -961,6 +1234,25 @@ export function ChatPage() {
       // Ignore storage quota or privacy mode failures.
     }
   }, [groupAvatarOverrides]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        MESSAGE_REACTIONS_STORAGE_KEY,
+        JSON.stringify(messageReactionsByConversation),
+      );
+    } catch {
+      // Ignore persistence issues.
+    }
+  }, [messageReactionsByConversation]);
+
+  useEffect(() => {
+    setReactionPickerMessageId(null);
+  }, [activeChat]);
 
   useEffect(() => {
     setActiveMessageMenuId(null);
@@ -981,17 +1273,102 @@ export function ChatPage() {
     setMentionStartIndex(null);
     setSelectedMentions([]);
     setLeaveGroupError("");
+    setLeaveSuccessorUserId("");
     setIsLeaveGroupDialogOpen(false);
     setIsInviteDialogOpen(false);
     setInviteSearchText("");
     setSelectedInviteUserIds([]);
+    setRenameGroupName("");
+    setInviteLinkError("");
     setPendingRemoveMemberUserId(null);
+    setActiveMemberActionUserId(null);
+    setFocusedMessageId(null);
+    previousMessageCountRef.current = 0;
+    loadingOlderMessagesRef.current = false;
+    previousScrollHeightRef.current = 0;
   }, [activeChat]);
+
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setActiveMemberActionUserId(null);
+    };
+
+    if (!activeMemberActionUserId) {
+      return;
+    }
+
+    window.addEventListener("click", handleClickOutside);
+    return () => {
+      window.removeEventListener("click", handleClickOutside);
+    };
+  }, [activeMemberActionUserId]);
+
+  useEffect(() => {
+    return () => {
+      if (messageFocusTimerRef.current !== null) {
+        window.clearTimeout(messageFocusTimerRef.current);
+      }
+    };
+  }, []);
 
   const toggleInviteSelection = (userId: string) => {
     setSelectedInviteUserIds((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
     );
+  };
+
+  const buildInviteJoinUrl = (invite: GroupInviteLink): string => {
+    if (typeof window === "undefined") {
+      return invite.code;
+    }
+
+    return `${window.location.origin}/groups/invite/${invite.code}`;
+  };
+
+  const handleCopyInviteLink = async (invite: GroupInviteLink) => {
+    const inviteUrl = buildInviteJoinUrl(invite);
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(inviteUrl);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = inviteUrl;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
+      toast.success("Đã sao chép link tham gia");
+    } catch {
+      toast.error("Không thể sao chép link tham gia.");
+    }
+  };
+
+  const handleRenameGroup = async () => {
+    if (!activeGroupId) {
+      return;
+    }
+
+    const nextName = renameGroupName.trim();
+    if (!nextName) {
+      toast.error("Tên nhóm không được để trống.");
+      return;
+    }
+
+    if (nextName === (activeContact?.groupName || "").trim()) {
+      toast("Tên nhóm chưa thay đổi.");
+      return;
+    }
+
+    await renameGroupMutation.mutateAsync({
+      groupId: activeGroupId,
+      groupName: nextName,
+    });
   };
 
   const handleConfirmInviteMembers = async () => {
@@ -1113,7 +1490,7 @@ export function ChatPage() {
       return;
     }
 
-    const nextRole: GroupMemberRole = currentRole === "OFFICER" ? "MEMBER" : "OFFICER";
+    const nextRole: GroupMemberRole = currentRole === "DEPUTY" ? "MEMBER" : "DEPUTY";
 
     await manageGroupMemberMutation.mutateAsync({
       groupId: activeGroupId,
@@ -1128,7 +1505,15 @@ export function ChatPage() {
       return;
     }
 
-    await leaveGroupMutation.mutateAsync(activeGroupId);
+    if (isCurrentUserOwner && !leaveSuccessorUserId.trim()) {
+      setLeaveGroupError("Bạn là chủ nhóm, vui lòng chọn người kế nhiệm trước khi rời nhóm.");
+      return;
+    }
+
+    await leaveGroupMutation.mutateAsync({
+      groupId: activeGroupId,
+      successorUserId: isCurrentUserOwner ? leaveSuccessorUserId.trim() : undefined,
+    });
   };
 
   const handleSendFriendRequest = async (targetUserId: string) => {
@@ -1258,8 +1643,7 @@ export function ChatPage() {
     
     startCall({
       isVideo,
-      // Target User ID temporarily set to conversationId for group-based room joining
-      targetUserId: activeContact.conversationId,
+    targetUserId: activeDmUserId,
       callerId: user?.sub,
       callerName: callerDisplayName,
       callerAvatarUrl,
@@ -1385,6 +1769,55 @@ export function ChatPage() {
     return Array.from(uniqueNames);
   };
 
+  const renderMessageTextWithLinks = (text: string, isMe: boolean, keyPrefix: string): ReactNode => {
+    const urlMatches = Array.from(text.matchAll(URL_PATTERN));
+    if (urlMatches.length === 0) {
+      return text;
+    }
+
+    const nodes: ReactNode[] = [];
+    let cursor = 0;
+
+    urlMatches.forEach((match, urlIndex) => {
+      const matched = match[0];
+      const start = match.index ?? 0;
+      const end = start + matched.length;
+
+      if (start > cursor) {
+        nodes.push(
+          <span key={`${keyPrefix}-plain-${urlIndex}`}>{text.slice(cursor, start)}</span>,
+        );
+      }
+
+      const sanitized = sanitizeUrlToken(matched);
+      const trailing = matched.slice(sanitized.length);
+
+      nodes.push(
+        <a
+          key={`${keyPrefix}-url-${urlIndex}`}
+          href={sanitized}
+          target="_blank"
+          rel="noreferrer"
+          className={isMe ? "font-medium underline break-all text-blue-100" : "font-medium underline break-all text-blue-600 dark:text-blue-400"}
+        >
+          {sanitized}
+        </a>,
+      );
+
+      if (trailing) {
+        nodes.push(<span key={`${keyPrefix}-tail-${urlIndex}`}>{trailing}</span>);
+      }
+
+      cursor = end;
+    });
+
+    if (cursor < text.length) {
+      nodes.push(<span key={`${keyPrefix}-rest`}>{text.slice(cursor)}</span>);
+    }
+
+    return nodes;
+  };
+
   const renderMessageTextWithMentions = (content: string, isMe: boolean) => {
     let parsedMentionPayload: unknown;
     let textValue = content;
@@ -1407,7 +1840,7 @@ export function ChatPage() {
       .sort((left, right) => right.length - left.length);
 
     if (mentionTokens.length === 0) {
-      return normalizedText;
+      return renderMessageTextWithLinks(normalizedText, isMe, "no-mention");
     }
 
     const mentionPattern = new RegExp(
@@ -1418,34 +1851,57 @@ export function ChatPage() {
     const mentionTokenSet = new Set(mentionTokens);
 
     return parts.map((part, index) => {
-      if (!mentionTokenSet.has(part)) {
-        return <span key={`plain-${index}`}>{part}</span>;
+      if (mentionTokenSet.has(part)) {
+        return (
+          <span
+            key={`mention-${index}`}
+            className={isMe ? "font-bold text-blue-100" : "font-bold text-blue-600 dark:text-blue-400"}
+          >
+            {part}
+          </span>
+        );
       }
 
-      return (
-        <span
-          key={`mention-${index}`}
-          className={isMe ? "font-bold text-blue-100" : "font-bold text-blue-600 dark:text-blue-400"}
-        >
-          {part}
-        </span>
-      );
+      return <Fragment key={`mixed-${index}`}>{renderMessageTextWithLinks(part, isMe, `mention-part-${index}`)}</Fragment>;
     });
   };
 
-  const extractMessageText = (content: string): string => {
+  const formatSystemMessageText = (text: string): string => {
+    if (!text.trim()) {
+      return text;
+    }
+
+    return text.replace(USER_ID_PATTERN, (token) => {
+      const displayName = displayNameByUserId.get(token);
+      if (displayName) {
+        return canViewSensitiveUserIds ? `${displayName} (${token})` : displayName;
+      }
+
+      return canViewSensitiveUserIds ? token : "một thành viên";
+    });
+  };
+
+  const extractMessageText = (content: string, messageType?: ChatMessageType): string => {
+    const normalizeText = (value: string) => {
+      if (messageType === "SYSTEM") {
+        return formatSystemMessageText(value);
+      }
+
+      return value;
+    };
+
     try {
       const parsed = JSON.parse(content);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const text = typeof (parsed as { text?: unknown }).text === "string"
           ? (parsed as { text: string }).text
           : content;
-        return replaceMentionIdsWithNames(text, (parsed as { mention?: unknown }).mention);
+        return normalizeText(replaceMentionIdsWithNames(text, (parsed as { mention?: unknown }).mention));
       }
 
-      return content;
+      return normalizeText(content);
     } catch {
-      return content;
+      return normalizeText(content);
     }
   };
 
@@ -1459,24 +1915,23 @@ export function ChatPage() {
 
   const resolveCallSummary = (
     msg: MessageItem,
-    expectedDirection: CallEndedSummary["direction"],
     expectedIsVideo: boolean,
   ): CallEndedSummary | null => {
-    const candidates = callSummaries.filter((item) => item.conversationId === msg.conversationId);
+    const candidates = callSummaries.filter(
+      (item) => 
+        (item.conversationId === msg.conversationId || item.peerUserId === activeDmUserId) &&
+        item.peerUserId === activeDmUserId
+    );
+
     if (candidates.length === 0) {
       return null;
     }
 
-    const byDirectionAndType = candidates.filter(
-      (item) => item.direction === expectedDirection && item.isVideo === expectedIsVideo,
-    );
-    const byDirection = candidates.filter((item) => item.direction === expectedDirection);
-    const scopedCandidates = byDirectionAndType.length > 0
-      ? byDirectionAndType
-      : (byDirection.length > 0 ? byDirection : candidates);
+    const scopedCandidates = candidates.filter((item) => item.isVideo === expectedIsVideo);
+    const finalCandidates = scopedCandidates.length > 0 ? scopedCandidates : candidates;
 
     const messageTime = new Date(msg.sentAt).getTime();
-    const nearest = scopedCandidates
+    const nearest = finalCandidates
       .map((item) => ({
         item,
         diff: Math.abs(new Date(item.endedAt).getTime() - messageTime),
@@ -1495,7 +1950,7 @@ export function ChatPage() {
       return "Tin nhắn đã được thu hồi";
     }
 
-    const text = extractMessageText(message.content).trim();
+    const text = extractMessageText(message.content, message.type).trim();
     if (text) {
       return text;
     }
@@ -1543,6 +1998,30 @@ export function ChatPage() {
     setReplyingMessage(normalizeQuotedMessage(message));
     setActiveMessageMenuId(null);
     setMessageActionError("");
+  };
+
+  const handleFocusMessageById = (messageId?: string) => {
+    if (!messageId) {
+      return;
+    }
+
+    const target = messageItemRefs.current[messageId];
+    if (!target) {
+      toast("Tin nhắn gốc chưa được tải. Hãy kéo lên để tải thêm.");
+      return;
+    }
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFocusedMessageId(messageId);
+
+    if (messageFocusTimerRef.current !== null) {
+      window.clearTimeout(messageFocusTimerRef.current);
+    }
+
+    messageFocusTimerRef.current = window.setTimeout(() => {
+      setFocusedMessageId(null);
+      messageFocusTimerRef.current = null;
+    }, 1800);
   };
 
   const handleCancelReplyMessage = () => {
@@ -1763,6 +2242,96 @@ export function ChatPage() {
     enqueueAttachments(pastedFiles);
   };
 
+  const handleToggleMessageReaction = (messageId: string, emoji: string) => {
+    if (!activeChat) {
+      return;
+    }
+
+    setMessageReactionsByConversation((prev) => {
+      const currentConversation = prev[activeChat] || {};
+      const currentReactions = currentConversation[messageId] || [];
+      const hasReaction = currentReactions.includes(emoji);
+      const nextReactions = hasReaction
+        ? currentReactions.filter((item) => item !== emoji)
+        : [...currentReactions, emoji];
+
+      const nextConversation = { ...currentConversation };
+      if (nextReactions.length === 0) {
+        delete nextConversation[messageId];
+      } else {
+        nextConversation[messageId] = nextReactions;
+      }
+
+      return {
+        ...prev,
+        [activeChat]: nextConversation,
+      };
+    });
+  };
+
+  const handleEmojiSelect = (emojiData: EmojiClickData) => {
+    const emoji = emojiData.emoji;
+    const input = composerInputRef.current;
+
+    if (!input) {
+      const nextText = `${inputText}${emoji}`;
+      handleComposerInputChange(nextText, nextText.length);
+      return;
+    }
+
+    const cursorStart = input.selectionStart ?? inputText.length;
+    const cursorEnd = input.selectionEnd ?? cursorStart;
+    const nextText = `${inputText.slice(0, cursorStart)}${emoji}${inputText.slice(cursorEnd)}`;
+    const nextCursor = cursorStart + emoji.length;
+
+    handleComposerInputChange(nextText, nextCursor);
+
+    window.requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(nextCursor, nextCursor);
+    });
+
+    if (!activeChat) {
+      return;
+    }
+
+    if (!nextText.trim()) {
+      stopTyping();
+      return;
+    }
+
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      void sendTyping(true);
+    }
+
+    scheduleTypingStop();
+  };
+
+  useEffect(() => {
+    if (!isEmojiPickerOpen) {
+      return;
+    }
+
+    const handleOutsideEmojiPicker = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+
+      if (emojiPickerRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsEmojiPickerOpen(false);
+    };
+
+    document.addEventListener("mousedown", handleOutsideEmojiPicker);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideEmojiPicker);
+    };
+  }, [isEmojiPickerOpen]);
+
   useEffect(() => {
     return () => {
       stopTyping();
@@ -1814,10 +2383,15 @@ export function ChatPage() {
       )];
       let sentAny = false;
       const replyTo = replyingMessage?.id;
-      setIsUploading(true);
       closeMentionMenu();
 
       if (queuedAttachments.length === 0) {
+        setInputText("");
+        setSelectedMentions([]);
+        setReplyingMessage(null);
+        stopTyping();
+        focusComposer();
+
         await sendMessageAsync({
           text: pendingText,
           type: "TEXT",
@@ -1828,6 +2402,7 @@ export function ChatPage() {
         pendingMentions = [];
         sentAny = true;
       } else {
+        setIsUploading(true);
         for (const item of queuedAttachments) {
           setQueuedAttachments((prev) =>
             prev.map((entry) =>
@@ -1889,7 +2464,9 @@ export function ChatPage() {
         fileInputRef.current.value = "";
       }
     } finally {
-      setIsUploading(false);
+      if (queuedAttachments.length > 0) {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -1900,7 +2477,6 @@ export function ChatPage() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <CallModal rtc={rtc} />
       {isDragOver ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-blue-600/10 border-2 border-dashed border-blue-400 pointer-events-none">
           <div className="rounded-xl bg-white dark:bg-slate-900 px-5 py-3 text-sm font-medium text-blue-700 dark:text-blue-300 shadow border border-slate-200 dark:border-slate-700">
@@ -1940,7 +2516,7 @@ export function ChatPage() {
                 ? undefined
                 : extractDirectPeerUserId(chat as ConversationAvatarLike, user?.sub);
               const chatPresence = chatDmUserId ? dmPresenceByUserId[chatDmUserId] : undefined;
-              const chatLastSeenBadge = formatLastSeenShort(chatPresence);
+              const chatLastSeenBadge = formatLastSeenShort(chatPresence, chat.updatedAt);
               const chatGroupId = extractGroupIdFromConversationId(chat.conversationId);
               const chatAvatarFromConversation = resolveConversationAvatarUrl(chat as ConversationAvatarLike);
               const chatAvatarFromFriendMap = resolveDmAvatarFromFriendMap(
@@ -1975,7 +2551,7 @@ export function ChatPage() {
                 ) : null}
                 {!chat.isGroup && !chatPresence?.isActive ? (
                   <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
-                    {chatLastSeenBadge || "off"}
+                    {chatLastSeenBadge || "1m"}
                   </span>
                 ) : null}
               </div>
@@ -2027,7 +2603,6 @@ export function ChatPage() {
                 </button>
                 <Avatar className="h-10 w-10">
                     {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Avatar"} /> : null}
-                    {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Avatar nhóm"} /> : null}
                   <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
                       {activeContact?.groupName?.charAt(0).toUpperCase() || "U"}
                     </AvatarFallback>
@@ -2037,7 +2612,7 @@ export function ChatPage() {
                   ) : null}
                   {!activeContact?.isGroup && !activePresence?.isActive ? (
                     <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
-                      {activeLastSeenBadge || "off"}
+                      {activeLastSeenBadge || "1m"}
                     </span>
                   ) : null}
                 </div>
@@ -2099,6 +2674,25 @@ export function ChatPage() {
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Tên hiển thị</p>
                   <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{activeContact?.groupName || "Không rõ tên"}</p>
+                  {activeGroupId && canRenameGroup ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        value={renameGroupName}
+                        onChange={(event) => setRenameGroupName(event.target.value)}
+                        placeholder="Nhập tên nhóm mới"
+                        className="h-8 flex-1 rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900"
+                        maxLength={100}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleRenameGroup()}
+                        disabled={renameGroupMutation.isPending}
+                        className="rounded bg-blue-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {renameGroupMutation.isPending ? "Đang lưu..." : "Đổi tên"}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 {activeGroupId ? (
                   <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -2148,14 +2742,14 @@ export function ChatPage() {
                     <p className="mt-1 break-all text-xs text-slate-600 dark:text-slate-300">{activeContact?.conversationId || "-"}</p>
                   </div>
                 ) : null}
-                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                {/* <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Tin nhắn mới</p>
                   <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{activeContact?.unreadCount ?? 0}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Cập nhật gần nhất</p>
                   <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{activeContact?.updatedAt ? format(new Date(activeContact.updatedAt), "HH:mm dd/MM/yyyy") : "-"}</p>
-                </div>
+                </div> */}
 
                 {activeGroupId ? (
                   <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -2195,7 +2789,7 @@ export function ChatPage() {
                             activeGroupMembers.map((member, index) => (
                               <div
                                 key={member.userId}
-                                className="flex items-center justify-between rounded-md px-2 py-1 text-xs text-slate-700 dark:text-slate-200"
+                                className="flex items-start justify-between rounded-lg border border-slate-200 bg-white/80 px-2.5 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200"
                               >
                                 <div className="min-w-0">
                                   {(() => {
@@ -2218,38 +2812,64 @@ export function ChatPage() {
                                   <p className="text-[11px] text-slate-500 dark:text-slate-400">Vai trò: {member.roleInGroup}</p>
                                 </div>
                                 {member.userId !== user?.sub ? (
-                                  <div className="ml-2 flex flex-col items-end gap-1">
+                                  <div className="ml-2 flex flex-col items-end gap-1.5">
                                     {canManageGroupMembers ? (
-                                      <div className="flex items-center gap-1">
-                                        {member.roleInGroup !== "OWNER" ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => void handleToggleMemberRole(member.userId, member.roleInGroup)}
-                                            className="rounded px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-50"
-                                          >
-                                            {member.roleInGroup === "OFFICER" ? "Hạ quyền" : "Nâng quyền"}
-                                          </button>
-                                        ) : null}
+                                      <div className="relative">
                                         <button
                                           type="button"
-                                          onClick={() => void handleRemoveGroupMember(member.userId)}
-                                          className="rounded px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setActiveMemberActionUserId((prev) => prev === member.userId ? null : member.userId);
+                                          }}
+                                          className="rounded-full p-1.5 text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700"
+                                          title="Tùy chọn thành viên"
                                         >
-                                          Xóa
+                                          <MoreHorizontal size={14} />
                                         </button>
+
+                                        {activeMemberActionUserId === member.userId ? (
+                                          <div
+                                            className="absolute right-0 top-7 z-20 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+                                            onClick={(event) => event.stopPropagation()}
+                                          >
+                                            {member.roleInGroup !== "OWNER" ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setActiveMemberActionUserId(null);
+                                                  void handleToggleMemberRole(member.userId, member.roleInGroup);
+                                                }}
+                                                className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800"
+                                              >
+                                                {member.roleInGroup === "DEPUTY" ? "Hạ quyền" : "Nâng quyền"}
+                                              </button>
+                                            ) : null}
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setActiveMemberActionUserId(null);
+                                                void handleRemoveGroupMember(member.userId);
+                                              }}
+                                              className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-red-600 hover:bg-red-50 dark:hover:bg-slate-800"
+                                            >
+                                              Xóa thành viên
+                                            </button>
+                                            <div className="px-3 py-1.5 text-[10px] text-slate-500 dark:text-slate-400">Sẽ thêm chức năng mới</div>
+                                          </div>
+                                        ) : null}
                                       </div>
                                     ) : null}
 
                                     {friendUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                                      <span className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
                                         Bạn bè
                                       </span>
                                     ) : outgoingFriendRequestUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
+                                      <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
                                         Đã gửi lời mời
                                       </span>
                                     ) : incomingFriendRequestUserIds.has(member.userId) ? (
-                                      <span className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+                                      <span className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
                                         Đã nhận lời mời
                                       </span>
                                     ) : (
@@ -2291,7 +2911,7 @@ export function ChatPage() {
                           className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         >
                           <option value="MEMBER">MEMBER</option>
-                          <option value="OFFICER">OFFICER</option>
+                          <option value="DEPUTY">DEPUTY</option>
                         </select>
                         <button
                           type="submit"
@@ -2324,14 +2944,91 @@ export function ChatPage() {
                       )}
                     </div>
 
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Link tham gia nhóm</p>
+                        {canManageInviteLinks ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!activeGroupId) return;
+                              void createInviteLinkMutation.mutateAsync({ groupId: activeGroupId });
+                            }}
+                            disabled={createInviteLinkMutation.isPending}
+                            className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                          >
+                            {createInviteLinkMutation.isPending ? "Đang tạo..." : "Tạo link"}
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {activeGroupInviteLinks.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Chưa có link tham gia nào.</p>
+                      ) : (
+                        <div className="max-h-36 space-y-1 overflow-y-auto rounded border border-slate-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
+                          {activeGroupInviteLinks
+                            .filter((invite) => !invite.disabledAt)
+                            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                            .slice(0, 5)
+                            .map((invite) => (
+                              <div
+                                key={invite.inviteId}
+                                className="rounded border border-slate-200 px-2 py-1.5 text-[11px] dark:border-slate-700"
+                              >
+                                <p className="truncate font-medium text-slate-700 dark:text-slate-200">
+                                  {buildInviteJoinUrl(invite)}
+                                </p>
+                                <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                                  Đã dùng: {invite.usedCount}{invite.maxUses ? `/${invite.maxUses}` : ""}
+                                </p>
+                                <div className="mt-1 flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCopyInviteLink(invite)}
+                                    className="inline-flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                                  >
+                                    <Copy size={10} />
+                                    Sao chép
+                                  </button>
+                                  {canManageInviteLinks ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!activeGroupId) return;
+                                        void revokeInviteLinkMutation.mutateAsync({
+                                          groupId: activeGroupId,
+                                          inviteId: invite.inviteId,
+                                        });
+                                      }}
+                                      disabled={revokeInviteLinkMutation.isPending}
+                                      className="rounded border border-red-300 px-1.5 py-0.5 text-[10px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                                    >
+                                      Thu hồi
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+
                     {memberActionError ? (
                       <p className="text-xs text-red-500">{memberActionError}</p>
+                    ) : null}
+
+                    {inviteLinkError ? (
+                      <p className="text-xs text-red-500">{inviteLinkError}</p>
                     ) : null}
 
                     <div className="pt-1">
                       <button
                         type="button"
-                        onClick={() => setIsLeaveGroupDialogOpen(true)}
+                        onClick={() => {
+                          setLeaveGroupError("");
+                          setLeaveSuccessorUserId("");
+                          setIsLeaveGroupDialogOpen(true);
+                        }}
                         disabled={leaveGroupMutation.isPending}
                         className="w-full rounded bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
                       >
@@ -2348,31 +3045,102 @@ export function ChatPage() {
             </aside>
 
             {/* Nội dung tin nhắn */}
-            <div className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar">
               {loadingMessages && <div className="text-center py-4 text-sm text-gray-500 dark:text-slate-400">Đang tải tin nhắn...</div>}
               
               <div className="flex flex-col gap-3 pb-4">
+                {hasMore ? (
+                  <div className="flex justify-center py-1">
+                    <button
+                      type="button"
+                      onClick={() => void handleLoadMoreMessages()}
+                      disabled={isLoadingMore}
+                      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {isLoadingMore ? "Đang tải thêm..." : "Tải thêm tin nhắn cũ"}
+                    </button>
+                  </div>
+                ) : null}
                 {/* Đảo ngược array nếu API trả về tin mới nhất trước (thường thấy nếu limit offset) */}
-                {[...messages].reverse().map((msg) => {
+                {[...messages].reverse().map((msg, index, orderedMessages) => {
                   const isMe = msg.senderId === user?.sub;
+                  const previousMessage = orderedMessages[index - 1];
+                  const nextMessage = orderedMessages[index + 1];
+                  const isGroupIncoming = Boolean(activeContact?.isGroup && !isMe);
+                  const messageSentAtMs = new Date(msg.sentAt).getTime();
+                  const previousSentAtMs = previousMessage ? new Date(previousMessage.sentAt).getTime() : Number.NaN;
+                  const nextSentAtMs = nextMessage ? new Date(nextMessage.sentAt).getTime() : Number.NaN;
+                  const startsSenderBlock =
+                    !previousMessage ||
+                    previousMessage.senderId !== msg.senderId ||
+                    Number.isNaN(previousSentAtMs) ||
+                    Number.isNaN(messageSentAtMs) ||
+                    messageSentAtMs - previousSentAtMs > MESSAGE_BLOCK_GAP_MS;
+                  const endsSenderBlock =
+                    !nextMessage ||
+                    nextMessage.senderId !== msg.senderId ||
+                    Number.isNaN(nextSentAtMs) ||
+                    Number.isNaN(messageSentAtMs) ||
+                    nextSentAtMs - messageSentAtMs > MESSAGE_BLOCK_GAP_MS;
+                  const shouldShowSenderMeta = msg.type !== "SYSTEM" && isGroupIncoming && startsSenderBlock;
+                  const senderProfile = msg.senderId ? memberProfilesById[msg.senderId] : undefined;
+                  const senderAvatarUrl =
+                    senderProfile?.avatarAsset?.resolvedUrl ||
+                    senderProfile?.avatarUrl ||
+                    (msg.senderId ? friendAvatarByUserId[msg.senderId] : undefined);
+                  const senderDisplayName =
+                    (msg.senderId ? mentionNameByUserId.get(msg.senderId) : undefined) ||
+                    msg.senderName ||
+                    "Thành viên";
                   const isEditing = editingMessageId === msg.id;
                   const canEditMessage = msg.type === "TEXT" || msg.type === "EMOJI" || msg.type === "SYSTEM";
                   const canRecallEveryone = isMe;
                   const replyPreview = msg.replyMessage;
                   const isForwardedMessage = Boolean(msg.forwardedFromMessageId);
-                  const forwardedLabel = msg.forwardedFromSenderName
-                    ? `${msg.forwardedFromSenderName} đã chuyển tiếp`
-                    : "Đã chuyển tiếp";
-                  const messageText = extractMessageText(msg.content).trim();
+                  const forwardedLabel = isMe
+                    ? "Bạn đã chuyển tiếp"
+                    : `${senderDisplayName} đã chuyển tiếp`;
+                  const messageText = extractMessageText(msg.content, msg.type).trim();
+                  const firstUrl = extractFirstUrl(messageText);
+                  const linkPreview = firstUrl ? buildLinkPreview(firstUrl) : null;
+                  const messageReactions = activeMessageReactions[msg.id] || [];
+                  const reactionSummary = Array.from(
+                    messageReactions.reduce((acc, emoji) => {
+                      acc.set(emoji, (acc.get(emoji) || 0) + 1);
+                      return acc;
+                    }, new Map<string, number>()),
+                  );
                   const isCallMessage = msg.type === "SYSTEM" && /cuộc gọi|call/i.test(messageText);
                   const isVideoCallByMessage = /video/i.test(messageText);
-                  const callDirectionByMessage: CallEndedSummary["direction"] = isMe ? "outgoing" : "incoming";
                   const callSummary = isCallMessage
-                    ? resolveCallSummary(msg, callDirectionByMessage, isVideoCallByMessage)
+                    ? resolveCallSummary(msg, isVideoCallByMessage)
                     : null;
+                  const isSystemNotificationMessage = msg.type === "SYSTEM" && !isCallMessage;
 
                   if (isCallMessage) {
-                    const summaryIsOutgoing = isMe;
+                    if (activeContact?.isGroup) {
+                      const isVideoCall = callSummary?.isVideo ?? isVideoCallByMessage;
+                      
+                      return (
+                        <div key={msg.id} className="flex w-full justify-center py-3 flex-col items-center">
+                          <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-100/80 border border-slate-200 px-5 py-3 shadow-sm dark:bg-slate-800/80 dark:border-slate-700">
+                            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-slate-900 shadow-sm">
+                                {isVideoCall ? <Video size={14} className="text-blue-500" /> : <Phone size={14} className="text-blue-500" />}
+                              </div>
+                              <p className="text-sm font-medium">
+                                Cuộc gọi nhóm kết thúc ({formatCallDuration(callSummary?.durationSeconds ?? 0)})
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-gray-400 dark:text-slate-500 mt-1">
+                            {format(new Date(msg.sentAt), "HH:mm")}
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    const summaryIsOutgoing = callSummary ? callSummary.direction === "outgoing" : isMe;
                     const summaryAlignClass = summaryIsOutgoing ? "self-end" : "self-start";
                     const summaryBubbleClass = summaryIsOutgoing
                       ? "border-blue-500/30 bg-blue-600 text-white"
@@ -2391,7 +3159,7 @@ export function ChatPage() {
                         <div className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${summaryBubbleClass}`}>
                           <div className="flex items-start gap-3">
                             <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${summaryIconClass}`}>
-                              <Phone size={18} />
+                              {isVideoCall ? <Video size={18} /> : <Phone size={18} />}
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-semibold">{titleText}</p>
@@ -2403,8 +3171,26 @@ export function ChatPage() {
                     );
                   }
 
+                  if (isSystemNotificationMessage) {
+                    return (
+                      <div key={msg.id} className="flex w-full justify-center py-2">
+                        <div className="rounded-full bg-slate-100 px-4 py-2 dark:bg-slate-800">
+                          <p className="text-center text-sm text-slate-600 dark:text-slate-300">
+                            {renderMessageTextWithMentions(msg.content, false)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
-                    <div key={msg.id} className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col`}>
+                    <div
+                      key={msg.id}
+                      ref={(element) => {
+                        messageItemRefs.current[msg.id] = element;
+                      }}
+                      className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col rounded-2xl transition-all ${focusedMessageId === msg.id ? "ring-2 ring-amber-300/80 ring-offset-2 ring-offset-slate-100 dark:ring-amber-400/70 dark:ring-offset-slate-950" : ""}`}
+                    >
                       {!isEditing ? (
                         <div
                           className={`absolute ${isMe ? "-left-24" : "-right-24"} bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${
@@ -2433,6 +3219,39 @@ export function ChatPage() {
                           >
                             <Share2 size={14} />
                           </button>
+
+                          <div className="relative">
+                            <button
+                              type="button"
+                              className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                              title="Bày tỏ cảm xúc"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setReactionPickerMessageId((prev) => (prev === msg.id ? null : msg.id));
+                              }}
+                            >
+                              <SmilePlus size={14} />
+                            </button>
+
+                            {reactionPickerMessageId === msg.id ? (
+                              <div className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}>
+                                {QUICK_REACTION_EMOJIS.map((emoji) => (
+                                  <button
+                                    key={`${msg.id}-${emoji}`}
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleToggleMessageReaction(msg.id, emoji);
+                                      setReactionPickerMessageId(null);
+                                    }}
+                                    className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
 
                           <div className="relative">
                             <button
@@ -2501,14 +3320,34 @@ export function ChatPage() {
                         </div>
                       ) : null}
 
-                      <div
-                        onClick={(event) => event.stopPropagation()}
-                        className={`px-4 py-2 rounded-2xl shadow-sm ${
-                          isMe 
-                            ? "bg-blue-600 text-white rounded-br-sm" 
-                            : "bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 rounded-bl-sm"
-                        }`}
-                      >
+                      {shouldShowSenderMeta ? (
+                        <p className="mb-1 ml-10 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                          {senderDisplayName}
+                        </p>
+                      ) : null}
+
+                      <div className={`flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
+                        {isGroupIncoming ? (
+                          shouldShowSenderMeta ? (
+                            <Avatar className="h-8 w-8 shrink-0 border border-slate-200 dark:border-slate-700">
+                              {senderAvatarUrl ? <AvatarImage src={senderAvatarUrl} alt={senderDisplayName} /> : null}
+                              <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
+                                {senderDisplayName.charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                          ) : (
+                            <div className="h-8 w-8 shrink-0" />
+                          )
+                        ) : null}
+
+                        <div
+                          onClick={(event) => event.stopPropagation()}
+                          className={`px-4 py-2 rounded-2xl shadow-sm ${
+                            isMe 
+                              ? "bg-blue-600 text-white rounded-br-sm" 
+                              : "bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 rounded-bl-sm"
+                          }`}
+                        >
                         <div className="relative">
                           {isForwardedMessage ? (
                             <div className={`mb-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isMe ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
@@ -2516,12 +3355,16 @@ export function ChatPage() {
                             </div>
                           ) : null}
                           {replyPreview ? (
-                            <div className={`mb-2 rounded-lg border-l-2 px-3 py-2 text-xs ${isMe ? "border-white/50 bg-white/10 text-white/90" : "border-blue-500 bg-blue-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
+                            <button
+                              type="button"
+                              onClick={() => handleFocusMessageById(replyPreview.id)}
+                              className={`mb-2 w-full rounded-lg border-l-2 px-3 py-2 text-left text-xs transition ${isMe ? "border-white/50 bg-white/10 text-white/90 hover:bg-white/15" : "border-blue-500 bg-blue-50 text-slate-600 hover:bg-blue-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+                            >
                               <p className="font-medium">Trả lời {replyPreview.senderName}</p>
                               <p className="mt-0.5 line-clamp-2 break-words opacity-90">
                                 {getReplyPreviewText(replyPreview)}
                               </p>
-                            </div>
+                            </button>
                           ) : null}
                           {isEditing ? (
                             <div className="space-y-2">
@@ -2562,7 +3405,7 @@ export function ChatPage() {
                               </div>
                             </div>
                           ) : (
-                            <p className="text-[15px]">{renderMessageTextWithMentions(msg.content, isMe)}</p>
+                            <p className="text-[15px] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{renderMessageTextWithMentions(msg.content, isMe)}</p>
                           )}
                         </div>
                         {msg.attachmentUrl ? (
@@ -2595,10 +3438,57 @@ export function ChatPage() {
                             </a>
                           )
                         ) : null}
+                        {linkPreview ? (
+                          <a
+                            href={linkPreview.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`mt-2 block rounded-xl border px-3 py-2 text-left transition ${
+                              isMe
+                                ? "border-white/25 bg-white/10 hover:bg-white/15"
+                                : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <img
+                                src={linkPreview.faviconUrl}
+                                alt="favicon"
+                                className="mt-0.5 h-4 w-4 rounded-sm"
+                              />
+                              <div className="min-w-0">
+                                <p className={`truncate text-xs font-semibold ${isMe ? "text-white" : "text-slate-800 dark:text-slate-100"}`}>
+                                  {linkPreview.host}
+                                </p>
+                                <p className={`truncate text-[11px] ${isMe ? "text-white/85" : "text-slate-500 dark:text-slate-400"}`}>
+                                  {linkPreview.path}
+                                </p>
+                              </div>
+                            </div>
+                          </a>
+                        ) : null}
+                        </div>
                       </div>
-                      <span className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"}`}>
-                        {format(new Date(msg.sentAt), "HH:mm")}
-                      </span>
+                      {reactionSummary.length > 0 ? (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end" : "justify-start"} ${isGroupIncoming ? "pl-10" : ""}`}>
+                          {reactionSummary.map(([emoji, count]) => (
+                            <button
+                              key={`${msg.id}-reaction-${emoji}`}
+                              type="button"
+                              onClick={() => handleToggleMessageReaction(msg.id, emoji)}
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                              title="Bỏ cảm xúc"
+                            >
+                              <span>{emoji}</span>
+                              <span>{count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {endsSenderBlock ? (
+                        <span className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"} ${isGroupIncoming ? "pl-10" : ""}`}>
+                          {format(new Date(msg.sentAt), "HH:mm")}
+                        </span>
+                      ) : null}
                       {messageActionError && (editingMessageId === msg.id || activeMessageMenuId === msg.id) ? (
                         <span className="mt-1 text-[11px] text-red-500">{messageActionError}</span>
                       ) : null}
@@ -2608,6 +3498,44 @@ export function ChatPage() {
                     </div>
                   );
                 })}
+
+                {activeContact?.isGroup && activeChat && (rtc.activeGroupCalls.has(activeChat) || (rtc.callState !== "IDLE" && rtc.activeConfig?.conversationId === activeChat)) ? (
+                  <div className="flex w-full justify-center py-3">
+                    <div className="flex flex-col items-center gap-2 rounded-xl bg-blue-50/80 border border-blue-200 px-5 py-3 shadow-sm dark:bg-blue-900/20 dark:border-blue-800">
+                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-blue-950 shadow-sm relative">
+                          {(rtc.activeConfig?.conversationId === activeChat && rtc.activeConfig.isVideo) ? <Video size={14} className="text-blue-500" /> : <Phone size={14} className="text-blue-500" />}
+                          <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium">
+                          Cuộc gọi nhóm đang diễn ra
+                        </p>
+                      </div>
+                      {rtc.callState !== "CONNECTED" && (
+                        <div className="mt-1 flex w-full gap-2">
+                          <button 
+                            type="button"
+                            onClick={() => handleStartCall(false)}
+                            className="flex-1 rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-slate-300 transition dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+                          >
+                            Tham gia thoại
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleStartCall(true)}
+                            className="flex-1 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700 transition"
+                          >
+                            Tham gia video
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div ref={messagesEndRef} />
               </div>
             </div>
@@ -2753,7 +3681,9 @@ export function ChatPage() {
                                     <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
                                       {friend.fullName || "Không rõ tên"}
                                     </p>
-                                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{friend.userId}</p>
+                                    {canViewSensitiveUserIds ? (
+                                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">{friend.userId}</p>
+                                    ) : null}
                                   </div>
                                 </label>
                               </li>
@@ -2810,6 +3740,39 @@ export function ChatPage() {
                     <p className="text-sm text-slate-600 dark:text-slate-300">
                       Bạn sẽ không còn nhận tin nhắn mới từ nhóm này. Bạn có chắc muốn tiếp tục?
                     </p>
+                    {isCurrentUserOwner ? (
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                          Bạn là chủ nhóm, cần chọn người kế nhiệm trước khi rời nhóm.
+                        </p>
+                        <select
+                          value={leaveSuccessorUserId}
+                          onChange={(event) => {
+                            setLeaveSuccessorUserId(event.target.value);
+                            setLeaveGroupError("");
+                          }}
+                          className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                        >
+                          <option value="">Chọn thành viên kế nhiệm</option>
+                          {activeGroupMembers
+                            .filter((member) => member.userId !== user?.sub && !member.deletedAt)
+                            .map((member, index) => {
+                              const profile = memberProfilesById[member.userId];
+                              const displayName =
+                                profile?.fullName ||
+                                myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
+                                messageSenderNameByUserId.get(member.userId) ||
+                                `Thành viên ${index + 1}`;
+
+                              return (
+                                <option key={`successor-${member.userId}`} value={member.userId}>
+                                  {displayName} ({member.roleInGroup})
+                                </option>
+                              );
+                            })}
+                        </select>
+                      </div>
+                    ) : null}
                     {leaveGroupError ? (
                       <p className="text-xs text-red-500">{leaveGroupError}</p>
                     ) : null}
@@ -2913,38 +3876,81 @@ export function ChatPage() {
               >
                 <Paperclip size={18} />
               </button>
-              <Input 
-                type="text" 
-                placeholder="Nhập tin nhắn..." 
-                className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
-                ref={composerInputRef}
-                value={inputText}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  setInputText(nextValue);
+              <div className="relative" ref={emojiPickerRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
+                  className="h-11 w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
+                  title="Chọn emoji"
+                >
+                  <Smile size={18} />
+                </button>
+                {isEmojiPickerOpen ? (
+                  <div className="absolute bottom-12 left-0 z-50 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                    <EmojiPicker
+                      onEmojiClick={handleEmojiSelect}
+                      theme={document.documentElement.classList.contains("dark") ? Theme.DARK : Theme.LIGHT}
+                      autoFocusSearch={false}
+                      lazyLoadEmojis
+                    />
+                  </div>
+                ) : null}
+              </div>
+              <div className="relative flex-1">
+                <Input 
+                  type="text" 
+                  placeholder={activeGroupId ? "Nhập tin nhắn... gõ @ để tag thành viên" : "Nhập tin nhắn..."}
+                  className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
+                  ref={composerInputRef}
+                  value={inputText}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    handleComposerInputChange(nextValue, e.target.selectionStart);
 
-                  if (!activeChat) {
-                    return;
+                    if (!activeChat) {
+                      return;
+                    }
+
+                    if (!nextValue.trim()) {
+                      stopTyping();
+                      return;
+                    }
+
+                    if (!isTypingRef.current) {
+                      isTypingRef.current = true;
+                      void sendTyping(true);
+                    }
+
+                    scheduleTypingStop();
+                  }}
+                  onClick={(event) =>
+                    syncMentionContext(inputText, event.currentTarget.selectionStart)
                   }
-
-                  if (!nextValue.trim()) {
-                    stopTyping();
-                    return;
+                  onKeyUp={(event) =>
+                    syncMentionContext(inputText, event.currentTarget.selectionStart)
                   }
-
-                  if (!isTypingRef.current) {
-                    isTypingRef.current = true;
-                    void sendTyping(true);
-                  }
-
-                  scheduleTypingStop();
-                }}
-                disabled={isSending || isUploading}
-                onPaste={handleComposerPaste}
-              />
+                  onKeyDown={handleComposerKeyDown}
+                  disabled={isUploading}
+                  onPaste={handleComposerPaste}
+                />
+                {isMentionMenuOpen ? (
+                  <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
+                    {mentionCandidates.map((candidate) => (
+                      <button
+                        key={candidate.userId}
+                        type="button"
+                        onClick={() => handleInsertMention(candidate)}
+                        className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        <span className="truncate font-medium">{candidate.displayName}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <button 
                 type="submit" 
-                disabled={isSending || isUploading || (!inputText.trim() && queuedAttachments.length === 0)}
+                disabled={isUploading || (!inputText.trim() && queuedAttachments.length === 0)}
                 className="h-11 w-11 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
                 title="Gửi"
               >
@@ -2980,7 +3986,10 @@ export function ChatPage() {
 
                   <div className="space-y-2 p-4 text-sm text-slate-700 dark:text-slate-300">
                     <p>Bạn có chắc muốn xóa thành viên này khỏi nhóm?</p>
-                    <p className="break-all text-xs text-slate-500 dark:text-slate-400">{pendingRemoveMemberUserId}</p>
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{pendingRemoveMemberDisplayName}</p>
+                    {canViewSensitiveUserIds ? (
+                      <p className="break-all text-xs text-slate-500 dark:text-slate-400">{pendingRemoveMemberUserId}</p>
+                    ) : null}
                   </div>
 
                   <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">

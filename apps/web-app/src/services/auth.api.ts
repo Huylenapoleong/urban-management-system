@@ -1,4 +1,4 @@
-import client, { request, writeAccessToken, clearAccessToken } from "@/lib/api-client";
+import client, { request, writeAccessToken, writeRefreshToken, clearStoredTokens } from "@/lib/api-client";
 import type { UserProfile } from "@urban/shared-types";
 
 export type LoginRequest = {
@@ -38,6 +38,7 @@ export async function login(params: LoginRequest) {
   }>(client.post("/auth/login", params));
 
   writeAccessToken(data.tokens.accessToken);
+  writeRefreshToken(data.tokens.refreshToken);
   return data;
 }
 
@@ -48,6 +49,7 @@ export async function register(params: RegisterRequest) {
   }>(client.post("/auth/register", params));
 
   writeAccessToken(data.tokens.accessToken);
+  writeRefreshToken(data.tokens.refreshToken);
   return data;
 }
 
@@ -87,5 +89,5 @@ export async function changePasswordWithOtp(params: ChangePasswordWithOtpRequest
 }
 
 export async function logout() {
-  clearAccessToken();
+  clearStoredTokens();
 }

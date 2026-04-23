@@ -2,13 +2,16 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { toast } from "react-hot-toast";
 import {
   acceptFriendRequest,
+  blockUser,
   cancelFriendRequest,
   discoverFriendCandidates,
+  listMyBlockedUsersPage,
   listMyFriendRequestsPage,
   listMyFriendsPage,
   rejectFriendRequest,
   removeFriend,
   sendFriendRequest,
+  unblockUser,
 } from "@/services/friends.api";
 
 export const friendsQueryKeys = {
@@ -17,10 +20,12 @@ export const friendsQueryKeys = {
   requests: ["friends", "requests"] as const,
   incoming: ["friends", "requests", "incoming"] as const,
   outgoing: ["friends", "requests", "outgoing"] as const,
+  blocked: ["friends", "blocked"] as const,
   discover: (q: string) => ["friends", "discover", q] as const,
   friendsPage: (limit: number) => ["friends", "list", "page", limit] as const,
   incomingPage: (limit: number) => ["friends", "requests", "incoming", "page", limit] as const,
   outgoingPage: (limit: number) => ["friends", "requests", "outgoing", "page", limit] as const,
+  blockedPage: (limit: number) => ["friends", "blocked", "page", limit] as const,
 };
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -70,6 +75,15 @@ export function useFriendDiscover(searchTerm: string) {
   });
 }
 
+export function useBlockedUsers(limit = 20) {
+  return useInfiniteQuery({
+    queryKey: friendsQueryKeys.blockedPage(limit),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => listMyBlockedUsersPage({ limit, cursor: pageParam }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+  });
+}
+
 export function useFriendActions() {
   const queryClient = useQueryClient();
 
@@ -77,6 +91,7 @@ export function useFriendActions() {
     queryClient.invalidateQueries({ queryKey: friendsQueryKeys.list });
     queryClient.invalidateQueries({ queryKey: friendsQueryKeys.incoming });
     queryClient.invalidateQueries({ queryKey: friendsQueryKeys.outgoing });
+    queryClient.invalidateQueries({ queryKey: friendsQueryKeys.blocked });
     queryClient.invalidateQueries({ queryKey: friendsQueryKeys.all });
   };
 
@@ -137,11 +152,38 @@ export function useFriendActions() {
     },
   });
 
+  const block = useMutation({
+    mutationFn: blockUser,
+    onSuccess: () => {
+      toast.success("Da chan nguoi dung");
+      refreshFriendData();
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["messages"] });
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, "Khong the chan nguoi dung"));
+    },
+  });
+
+  const unblock = useMutation({
+    mutationFn: unblockUser,
+    onSuccess: () => {
+      toast.success("Da bo chan nguoi dung");
+      refreshFriendData();
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, "Khong the bo chan nguoi dung"));
+    },
+  });
+
   return {
     sendRequest,
     acceptRequest,
     rejectRequest,
     cancelRequest,
     unfriend,
+    block,
+    unblock,
   };
 }

@@ -21,7 +21,13 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: (failureCount, error: any) => {
+        if (error?.status === 429) {
+          return false;
+        }
+
+        return failureCount < 1;
+      },
       refetchOnWindowFocus: false,
     },
   },

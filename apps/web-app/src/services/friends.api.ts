@@ -1,6 +1,8 @@
 import ApiClient from "@/lib/api-client";
 import { readAccessToken } from "@/lib/api-client";
+import { buildSessionMetadataHeaders } from "@/lib/api-client";
 import type {
+  UserBlockedItem,
   UserDirectoryItem,
   UserFriendItem,
   UserFriendRequestItem,
@@ -20,6 +22,12 @@ export interface CursorPage<T> {
 export interface FriendListParams {
   cursor?: string;
   limit?: number;
+}
+
+export interface BlockActionResult {
+  userId: string;
+  blockedAt?: string;
+  unblockedAt?: string;
 }
 
 function buildQuery(params?: Record<string, string | number | undefined>): string {
@@ -45,6 +53,7 @@ async function getCursorPage<T>(path: string): Promise<CursorPage<T>> {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "GET",
     headers: {
+      ...buildSessionMetadataHeaders(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
@@ -125,6 +134,21 @@ export async function listMyFriendRequestsPage(params?: {
   return await getCursorPage<UserFriendRequestItem>(`/users/me/friend-requests${query}`);
 }
 
+export async function listMyBlockedUsers(params?: FriendListParams): Promise<UserBlockedItem[]> {
+  const page = await listMyBlockedUsersPage(params);
+  return page.items;
+}
+
+export async function listMyBlockedUsersPage(
+  params?: FriendListParams,
+): Promise<CursorPage<UserBlockedItem>> {
+  const query = buildQuery({
+    cursor: params?.cursor,
+    limit: params?.limit ?? 50,
+  });
+  return await getCursorPage<UserBlockedItem>(`/users/me/blocks${query}`);
+}
+
 export async function sendFriendRequest(userId: string): Promise<UserFriendRequestItem> {
   return await ApiClient.post(`/users/me/friends/${encodeURIComponent(userId)}/request`);
 }
@@ -143,4 +167,12 @@ export async function cancelFriendRequest(userId: string): Promise<{ success: bo
 
 export async function removeFriend(userId: string): Promise<{ success: boolean }> {
   return await ApiClient.delete(`/users/me/friends/${encodeURIComponent(userId)}`);
+}
+
+export async function blockUser(userId: string): Promise<BlockActionResult> {
+  return await ApiClient.post(`/users/me/blocks/${encodeURIComponent(userId)}`);
+}
+
+export async function unblockUser(userId: string): Promise<BlockActionResult> {
+  return await ApiClient.delete(`/users/me/blocks/${encodeURIComponent(userId)}`);
 }
