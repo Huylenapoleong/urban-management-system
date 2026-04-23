@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Modal, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform } from 'react-native';
 import { Text, Surface, Button, TextInput, useTheme, IconButton } from 'react-native-paper';
+import colors from '@/constants/colors';
 
 interface OtpVerificationModalProps {
   visible: boolean;
@@ -156,7 +157,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   container: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     borderRadius: 24,
     padding: 24,
   },
@@ -167,10 +168,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontWeight: '800',
+    fontWeight: '700',
   },
   subtitle: {
-    color: '#667085',
+    color: colors.textSecondary,
     marginBottom: 24,
   },
   input: {

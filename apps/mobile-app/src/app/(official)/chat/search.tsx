@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
-import { Text, TextInput, Button, Surface, useTheme, Avatar, IconButton } from 'react-native-paper';
+import { Text, TextInput, Button, Surface, Avatar, IconButton } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,9 +8,9 @@ import { ApiClient } from '../../../lib/api-client';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../providers/AuthProvider';
 import { prefetchConversationMessages } from '@/services/prefetch';
+import colors from '@/constants/colors';
 
 export default function SearchUserScreen() {
-  const theme = useTheme();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -48,7 +48,7 @@ export default function SearchUserScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Custom Header */}
       <View style={styles.header}>
         <IconButton icon="close" size={24} onPress={() => router.back()} />
@@ -58,7 +58,7 @@ export default function SearchUserScreen() {
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.content}>
         <Surface style={styles.searchCard} elevation={2}>
-          <Text variant="bodyLarge" style={styles.label}>Nhập <Text style={{ fontWeight: 'bold' }}>Số điện thoại</Text> hoặc <Text style={{ fontWeight: 'bold' }}>Email</Text>:</Text>
+          <Text variant="bodyLarge" style={styles.label}>Nhập <Text style={{ fontWeight: '700' }}>Số điện thoại</Text> hoặc <Text style={{ fontWeight: '700' }}>Email</Text>:</Text>
           <View style={styles.searchRow}>
             <TextInput
               mode="outlined"
@@ -67,7 +67,7 @@ export default function SearchUserScreen() {
               onChangeText={setQuery}
               style={styles.input}
               outlineColor="#e0e0e0"
-              activeOutlineColor={theme.colors.primary}
+              activeOutlineColor={colors.secondary}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
@@ -128,20 +128,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: colors.border,
   },
-  headerTitle: { fontWeight: 'bold' },
+  headerTitle: { fontWeight: '700', color: colors.text },
   content: { flex: 1, padding: 20 },
   searchCard: {
     padding: 20,
     borderRadius: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
   },
-  label: { marginBottom: 12, color: '#424242' },
+  label: { marginBottom: 12, color: colors.text },
   searchRow: { flexDirection: 'row', alignItems: 'center' },
-  input: { flex: 1, backgroundColor: '#fff', fontSize: 16 },
+  input: { flex: 1, backgroundColor: colors.card, fontSize: 16 },
   searchBtn: { marginTop: 16, borderRadius: 8 },
   errorText: { color: '#d32f2f', marginTop: 16, textAlign: 'center', fontSize: 14 },
   
@@ -149,9 +149,9 @@ const styles = StyleSheet.create({
     marginTop: 24,
     padding: 16,
     borderRadius: 12,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: colors.border,
   },
   resultInfo: {
     flexDirection: 'row',
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   resultTextCol: { marginLeft: 16, flex: 1 },
-  resultName: { fontWeight: 'bold', fontSize: 18, color: '#1a1a1a' },
-  resultRole: { color: '#666', marginTop: 2 },
+  resultName: { fontWeight: '700', fontSize: 18, color: colors.text },
+  resultRole: { color: colors.textSecondary, marginTop: 2 },
   chatBtn: { borderRadius: 8 },
 });

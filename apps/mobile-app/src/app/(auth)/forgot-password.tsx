@@ -5,6 +5,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { useRouter } from 'expo-router';
 import { OtpVerificationModal } from '@/components/auth/OtpVerificationModal';
 import * as SecureStore from 'expo-secure-store';
+import colors from '@/constants/colors';
 
 type ForgotPasswordStep = 'IDENTITY' | 'RESET';
 const GENERATED_PASSWORD_STORAGE_KEY = 'auth.forgotPassword.generated.latest';
@@ -280,7 +281,7 @@ export default function ForgotPasswordScreen() {
         <IconButton 
           icon="arrow-left" 
           onPress={() => router.back()} 
-          iconColor="#111827"
+          iconColor={colors.text}
         />
         <Text variant="titleLarge" style={styles.headerTitle}>Quên mật khẩu</Text>
       </View>
@@ -403,7 +404,7 @@ export default function ForgotPasswordScreen() {
                   style={styles.actionButton}
                   contentStyle={styles.actionButtonContent}
                   labelStyle={styles.actionButtonLabel}
-                  buttonColor="green"
+                  buttonColor={colors.secondary}
                 >
                   XÁC NHẬN ĐẶT LẠI
                 </Button>
@@ -429,46 +430,46 @@ export default function ForgotPasswordScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#e5e7eb' },
+  container: { flex: 1, backgroundColor: colors.background },
   header: { 
     flexDirection: 'row', 
     alignItems: 'center', 
     paddingTop: Platform.OS === 'ios' ? 54 : 34,
     paddingBottom: 14,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     elevation: 6,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.14,
     shadowRadius: 6,
   },
-  headerTitle: { fontWeight: '900', marginLeft: 4, color: '#0f172a' },
+  headerTitle: { fontWeight: '700', marginLeft: 4, color: colors.text },
   keyboardView: { flex: 1 },
   scrollContent: { padding: 20 },
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     borderRadius: 20,
     padding: 20,
     marginTop: 10,
     borderWidth: 1,
-    borderColor: '#cbd5e1',
+    borderColor: colors.border,
   },
   instruction: {
-    color: '#1f2937',
+    color: colors.text,
     marginBottom: 16,
     lineHeight: 22,
-    fontWeight: '700',
+    fontWeight: '600',
     fontSize: 14,
   },
-  input: { marginBottom: 12, backgroundColor: '#ffffff' },
+  input: { marginBottom: 12, backgroundColor: colors.card },
   passwordHintTitle: {
-    fontWeight: '800',
-    color: '#111827',
+    fontWeight: '700',
+    color: colors.text,
     marginBottom: 6,
     fontSize: 14,
   },
   passwordHint: {
-    color: '#334155',
+    color: colors.textSecondary,
     fontSize: 13,
     marginBottom: 3,
     fontWeight: '600',
@@ -480,7 +481,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   passwordGeneratedNote: {
-    color: '#1d4ed8',
+    color: colors.secondary,
     fontSize: 12,
     marginBottom: 4,
     fontWeight: '700',
@@ -495,7 +496,7 @@ const styles = StyleSheet.create({
     height: 52,
   },
   actionButtonLabel: {
-    fontWeight: '900',
-    letterSpacing: 0.4,
+    fontWeight: '700',
+    letterSpacing: 0,
   },
 });

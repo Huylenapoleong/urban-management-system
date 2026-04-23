@@ -123,6 +123,8 @@ export const useChatConversation = (
 ) => {
   const queryClient = useQueryClient();
   const messagesQueryKey = useMemo(() => queryKeys.messages(conversationId), [conversationId]);
+  const cachedInitialMessages = queryClient.getQueryData<any[]>(messagesQueryKey);
+  const hasInitialMessagesCache = Array.isArray(cachedInitialMessages);
 
   const looksLikeRecallText = useCallback((value: unknown) => {
     if (typeof value !== 'string') {
@@ -180,8 +182,12 @@ export const useChatConversation = (
     }
   }, [conversationId]);
 
-  const [messages, setMessages] = useState<any[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [messages, setMessages] = useState<any[]>(() =>
+    hasInitialMessagesCache
+      ? (cachedInitialMessages ?? []).map((message) => normalizeRecalledMessage(message))
+      : [],
+  );
+  const [isLoadingHistory, setIsLoadingHistory] = useState(() => Boolean(conversationId) && !hasInitialMessagesCache);
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(true);
   const [typingUsers, setTypingUsers] = useState<Record<string, { fullName: string; isTyping: boolean }>>({});
@@ -899,17 +905,22 @@ export const useChatConversation = (
     [],
   );
 
-  // Fetch only once when opening conversation if realtime socket is not ready.
+  // Fetch only once when opening conversation if realtime socket is not ready and no cache is visible yet.
   useEffect(() => {
     if (!conversationId || isReady) {
       return;
     }
 
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     const fetchOnce = async () => {
       try {
         const latestMessages = messagesRef.current;
+        if (latestMessages.length > 0) {
+          return;
+        }
+
         const latest = latestMessages[latestMessages.length - 1];
         const after = latest?.sentAt || latest?.createdAt;
         const data = await ApiClient.get<MessageItem[]>(
@@ -949,10 +960,15 @@ export const useChatConversation = (
       }
     };
 
-    void fetchOnce();
+    timer = setTimeout(() => {
+      void fetchOnce();
+    }, 900);
 
     return () => {
       cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, [conversationId, isReady, normalizeRecalledMessage, updateMessageCache]);
 

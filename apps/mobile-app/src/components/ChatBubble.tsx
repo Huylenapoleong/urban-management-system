@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { Image } from "expo-image";
+import { LinearGradient } from "@/components/shared/SafeLinearGradient";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import colors from "@/constants/colors";
 import { convertToS3Url } from "@/constants/s3";
@@ -22,6 +23,7 @@ function ChatBubble({
 }: ChatBubbleProps) {
   const correctedAttachmentUrl = attachmentUrl ? convertToS3Url(attachmentUrl) : null;
   const isImageMessage = messageType === "IMAGE";
+  const showOwnGradient = isOwn && !isImageMessage;
 
   return (
     <View style={[styles.container, isOwn ? styles.right : styles.left]}>
@@ -30,6 +32,14 @@ function ChatBubble({
         isOwn ? styles.bubbleRight : styles.bubbleLeft,
         isImageMessage && styles.bubbleFull
       ]}>
+        {showOwnGradient ? (
+          <LinearGradient
+            colors={colors.gradient.primary}
+            start={colors.gradient.start}
+            end={colors.gradient.end}
+            style={StyleSheet.absoluteFillObject}
+          />
+        ) : null}
         {correctedAttachmentUrl && isImageMessage ? (
           <>
             <Image
@@ -59,7 +69,11 @@ function ChatBubble({
             )}
           </>
         )}
-        <Text style={[styles.timestamp, isOwn && styles.timestampWhite]}>{time}</Text>
+        <Text style={[
+          styles.timestamp,
+          isOwn && styles.timestampWhite,
+          isImageMessage && styles.timestampImage
+        ]}>{time}</Text>
       </View>
     </View>
   );
@@ -87,28 +101,33 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 1,
+    overflow: "hidden",
   },
   bubbleFull: {
     maxWidth: "95%",
     padding: 0,
     overflow: "hidden",
+    backgroundColor: "transparent",
+    shadowOpacity: 0.12,
   },
   bubbleLeft: {
-    backgroundColor: "white",
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 4,
   },
   bubbleRight: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.secondary,
     borderTopRightRadius: 4,
   },
   imageAttachment: {
     width: "100%",
     height: 280,
-    backgroundColor: "#e2e8f0",
+    borderRadius: 14,
+    backgroundColor: colors.border,
   },
   text: {
     color: colors.text,
     fontSize: 14,
+    lineHeight: 20,
     marginBottom: 4,
     marginTop: 8,
     marginHorizontal: 8,
@@ -144,5 +163,8 @@ const styles = StyleSheet.create({
   },
   timestampWhite: {
     color: "rgba(255,255,255,0.8)",
+  },
+  timestampImage: {
+    color: colors.textSecondary,
   },
 });

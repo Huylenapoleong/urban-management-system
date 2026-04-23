@@ -1,10 +1,11 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Card, Text, Chip, useTheme } from 'react-native-paper';
+import { Card, Text, Chip } from 'react-native-paper';
 import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ReportItem } from '@urban/shared-types';
 import { convertToS3Url } from '@/constants/s3';
+import colors from '@/constants/colors';
 
 interface ReportCardProps {
   report: ReportItem;
@@ -19,7 +20,6 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }>
 };
 
 const ReportCardComponent: React.FC<ReportCardProps> = ({ report, onPress }) => {
-  const theme = useTheme();
   const statusConfig = STATUS_CONFIG[report.status] || { bg: '#f5f5f5', text: '#666', label: report.status };
   const coverImageUrl = report.mediaUrls?.[0] ? convertToS3Url(report.mediaUrls[0]) : null;
 
@@ -46,7 +46,7 @@ const ReportCardComponent: React.FC<ReportCardProps> = ({ report, onPress }) => 
             {report.title}
           </Text>
           <Chip
-            textStyle={{ color: statusConfig.text, fontSize: 11, fontWeight: '900' }}
+            textStyle={{ color: statusConfig.text, fontSize: 11, fontWeight: '700' }}
             style={{ backgroundColor: statusConfig.bg, height: 26, borderRadius: 12, borderWidth: 0 }}
             compact
           >
@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
     marginVertical: 6,
     marginHorizontal: 16,
     borderRadius: 20,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     overflow: 'hidden',
   },
   coverImage: {
@@ -105,8 +105,8 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     marginRight: 12,
-    fontWeight: '800',
-    color: '#2c3e50',
+    fontWeight: '700',
+    color: colors.text,
     fontSize: 16,
   },
   row: {

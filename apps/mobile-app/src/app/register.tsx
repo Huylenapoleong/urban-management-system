@@ -4,6 +4,7 @@ import { Text, TextInput, Button, Surface, HelperText, Chip } from 'react-native
 import { useRouter } from 'expo-router';
 import { useAuth } from '../providers/AuthProvider';
 import { OtpVerificationModal } from '../components/auth/OtpVerificationModal';
+import colors from '@/constants/colors';
 
 type WardOption = {
   code: string;
@@ -356,7 +357,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f3f6fb',
+    backgroundColor: colors.background,
   },
   content: {
     padding: 18,
@@ -364,15 +365,15 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: 18,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     padding: 18,
   },
   title: {
-    fontWeight: '800',
+    fontWeight: '700',
     marginBottom: 6,
   },
   subtitle: {
-    color: '#5f6b7a',
+    color: colors.textSecondary,
     marginBottom: 16,
   },
   input: {
@@ -381,13 +382,13 @@ const styles = StyleSheet.create({
   sectionLabel: {
     marginTop: 4,
     marginBottom: 6,
-    color: '#344054',
+    color: colors.text,
     fontWeight: '700',
   },
   optionLabel: {
     marginTop: 6,
     marginBottom: 8,
-    color: '#475467',
+    color: colors.textSecondary,
     fontWeight: '600',
     fontSize: 13,
   },
@@ -398,10 +399,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   optionChip: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
   },
   optionHint: {
-    color: '#667085',
+    color: colors.textSecondary,
     fontSize: 12,
   },
   button: {
@@ -415,7 +416,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   link: {
-    color: '#1976D2',
+    color: colors.secondary,
     fontWeight: '700',
   },
 });

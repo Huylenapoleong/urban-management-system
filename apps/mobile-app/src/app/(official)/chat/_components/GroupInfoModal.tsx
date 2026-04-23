@@ -108,9 +108,11 @@ export function GroupInfoModal({
   );
 }
 
+export default GroupInfoModal;
+
 const styles = StyleSheet.create({
   modalContainer: { margin: 20, borderRadius: 8, paddingVertical: 16 },
-  title: { marginHorizontal: 16, marginBottom: 16, fontWeight: 'bold' },
+  title: { marginHorizontal: 16, marginBottom: 16, fontWeight: '700' },
   list: { maxHeight: 400, paddingHorizontal: 16 },
   item: { paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: '#0000001a' },
 });

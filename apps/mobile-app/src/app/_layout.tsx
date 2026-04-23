@@ -1,8 +1,8 @@
 import React from "react";
-import { AppState, LogBox } from "react-native";
+import { AppState, LogBox, Platform } from "react-native";
 import { Stack, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { PaperProvider } from "react-native-paper";
+import { MD3LightTheme, PaperProvider } from "react-native-paper";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
@@ -12,6 +12,7 @@ import { socketClient } from "@/lib/socket-client";
 import FloatingAiChatbot from "@/components/shared/FloatingAiChatbot";
 import { ApiClient } from "@/lib/api-client";
 import { queryKeys } from "@/services/query-keys";
+import colors from "@/constants/colors";
 
 import { WebRTCProvider } from '../providers/WebRTCProvider';
 
@@ -36,6 +37,23 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+const paperTheme = {
+  ...MD3LightTheme,
+  colors: {
+    ...MD3LightTheme.colors,
+    primary: colors.primary,
+    secondary: colors.secondary,
+    background: colors.background,
+    surface: colors.card,
+    surfaceVariant: colors.surface,
+    primaryContainer: "rgba(10,207,254,0.14)",
+    secondaryContainer: "rgba(73,90,255,0.14)",
+    outline: colors.border,
+    onSurface: colors.text,
+    onSurfaceVariant: colors.textSecondary,
+  },
+};
 
 queryClient.setQueryDefaults(['messages'], {
   staleTime: Infinity,
@@ -101,7 +119,7 @@ async function hideSplashOnce() {
 }
 
 function installWebRuntimeGuards() {
-  if (typeof window === 'undefined') {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
     return;
   }
 
@@ -449,7 +467,7 @@ export default function RootLayout() {
       <NavigationQueryLifecycleManager />
       <SocketLifecycleManager />
       <WebRuntimeSafetyManager />
-      <PaperProvider>
+      <PaperProvider theme={paperTheme}>
         <AuthProvider>
           <SplashPreloadManager queryHydrated={queryHydrated} />
           <WebRTCProvider>

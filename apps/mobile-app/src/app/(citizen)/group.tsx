@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { LinearGradient } from "@/components/shared/SafeLinearGradient";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { GROUP_TYPES } from "@urban/shared-constants";
 import type { GroupMetadata } from "@urban/shared-types";
@@ -235,6 +236,12 @@ export default function GroupsScreen() {
             </Text>
           </View>
           <Pressable style={styles.heroButton} onPress={() => setShowCreateModal(true)}>
+            <LinearGradient
+              colors={colors.gradient.primary}
+              start={colors.gradient.start}
+              end={colors.gradient.end}
+              style={StyleSheet.absoluteFillObject}
+            />
             <Ionicons name="add" size={18} color="white" />
             <Text style={styles.heroButtonText}>Tạo</Text>
           </Pressable>
@@ -264,7 +271,7 @@ export default function GroupsScreen() {
         </View>
 
         <View style={styles.noticeCard}>
-          <Ionicons name="information-circle-outline" size={18} color="#1d4ed8" />
+          <Ionicons name="information-circle-outline" size={18} color={colors.secondary} />
           <Text style={styles.noticeText}>
             Nhóm do citizen tạo sẽ là PRIVATE. Cán bộ cùng địa bàn sẽ không tự thấy nhóm này nếu chưa được thêm vào.
           </Text>
@@ -375,6 +382,14 @@ export default function GroupsScreen() {
                 onPress={() => void handleCreateGroup()}
                 disabled={!groupName.trim() || !user?.locationCode || saving}
               >
+                {!groupName.trim() || !user?.locationCode || saving ? null : (
+                  <LinearGradient
+                    colors={colors.gradient.primary}
+                    start={colors.gradient.start}
+                    end={colors.gradient.end}
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                )}
                 <Text style={styles.modalPrimaryText}>{saving ? "Đang tạo..." : "Tạo nhóm"}</Text>
               </Pressable>
             </View>
@@ -386,7 +401,7 @@ export default function GroupsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f4f8ff" },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 16, paddingBottom: 120 },
   heroCard: {
     backgroundColor: "rgba(255,255,255,0.88)",
@@ -402,14 +417,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   heroText: { marginBottom: 16 },
-  heroTitle: { fontSize: 24, fontWeight: "800", color: "#0f172a" },
+  heroTitle: { fontSize: 24, fontWeight: "700", color: colors.text },
   heroSubtitle: { marginTop: 8, color: colors.textSecondary, lineHeight: 21, fontSize: 14 },
   heroButton: {
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#1d4ed8",
+    overflow: "hidden",
+    backgroundColor: colors.secondary,
     borderRadius: 18,
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -423,7 +439,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
     marginBottom: 14,
   },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 15, color: colors.text },
@@ -437,22 +453,22 @@ const styles = StyleSheet.create({
   },
   legendItem: { flexDirection: "row", alignItems: "center" },
   legendText: { marginLeft: 6, color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
-  legendSummary: { color: "#0f172a", fontWeight: "700", fontSize: 12 },
+  legendSummary: { color: colors.text, fontWeight: "700", fontSize: 12 },
   noticeCard: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 10,
-    backgroundColor: "#eff6ff",
+    backgroundColor: "rgba(10,207,254,0.1)",
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: "rgba(73,90,255,0.18)",
     marginBottom: 14,
   },
   noticeText: {
     flex: 1,
-    color: "#1e3a8a",
+    color: colors.text,
     fontSize: 13,
     lineHeight: 19,
     fontWeight: "600",
@@ -467,16 +483,16 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
-  emptyTitle: { marginTop: 10, fontSize: 18, fontWeight: "700", color: "#0f172a" },
+  emptyTitle: { marginTop: 10, fontSize: 18, fontWeight: "700", color: colors.text },
   emptyText: { marginTop: 6, color: colors.textSecondary, textAlign: "center", lineHeight: 20 },
   groupCard: {
     backgroundColor: "rgba(255,255,255,0.9)",
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
     shadowColor: "#0f172a",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.06,
@@ -487,12 +503,12 @@ const styles = StyleSheet.create({
   groupCardTop: { flexDirection: "row", alignItems: "flex-start" },
   groupMain: { flex: 1, paddingRight: 12 },
   groupTitleRow: { flexDirection: "row", alignItems: "center" },
-  groupName: { marginLeft: 8, fontSize: 18, fontWeight: "800", color: "#0f172a", flex: 1 },
+  groupName: { marginLeft: 8, fontSize: 18, fontWeight: "700", color: colors.text, flex: 1 },
   groupMeta: { marginTop: 6, color: colors.textSecondary, fontSize: 13, fontWeight: "600" },
   groupLocation: { marginTop: 4, color: "#64748b", fontSize: 12 },
   groupDescription: { marginTop: 12, color: colors.text, lineHeight: 20, fontSize: 14 },
   joinButton: {
-    backgroundColor: "#dbeafe",
+    backgroundColor: "rgba(73,90,255,0.12)",
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -510,15 +526,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
   chatButtonDisabled: {
     backgroundColor: "#f8fafc",
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
   chatButtonText: {
-    color: "#0f172a",
-    fontWeight: "800",
+    color: colors.text,
+    fontWeight: "700",
     fontSize: 13,
   },
   chatButtonTextDisabled: {
@@ -526,8 +542,8 @@ const styles = StyleSheet.create({
   },
   leaveButton: { backgroundColor: "#eef2ff" },
   ownerButton: { backgroundColor: "#e2e8f0" },
-  joinButtonText: { color: "#1d4ed8", fontWeight: "800", fontSize: 13 },
-  leaveButtonText: { color: "#4338ca" },
+  joinButtonText: { color: colors.secondary, fontWeight: "700", fontSize: 13 },
+  leaveButtonText: { color: colors.secondary },
   ownerButtonText: { color: "#475569" },
   modalOverlay: {
     flex: 1,
@@ -542,7 +558,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     padding: 20,
   },
-  modalTitle: { fontSize: 22, fontWeight: "800", color: "#0f172a" },
+  modalTitle: { fontSize: 22, fontWeight: "700", color: colors.text },
   modalText: { marginTop: 8, color: colors.textSecondary, lineHeight: 20 },
   modalInput: {
     backgroundColor: "#f8fafc",
@@ -551,7 +567,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
   modalTextarea: { minHeight: 96, textAlignVertical: "top" },
   modalActions: { flexDirection: "row", gap: 10, marginTop: 18 },
@@ -562,16 +578,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#f8fafc",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
-  modalGhostText: { color: "#0f172a", fontWeight: "700" },
+  modalGhostText: { color: colors.text, fontWeight: "700" },
   modalPrimaryButton: {
     flex: 1,
     borderRadius: 16,
     paddingVertical: 12,
     alignItems: "center",
-    backgroundColor: "#1d4ed8",
+    overflow: "hidden",
+    backgroundColor: colors.secondary,
   },
   modalPrimaryDisabled: { backgroundColor: "#bfd3fb" },
-  modalPrimaryText: { color: "white", fontWeight: "800" },
+  modalPrimaryText: { color: "white", fontWeight: "700" },
 });

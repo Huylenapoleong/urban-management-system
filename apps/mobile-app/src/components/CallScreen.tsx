@@ -1,8 +1,8 @@
 import { View, StyleSheet, Modal, SafeAreaView, Dimensions } from 'react-native';
 import { Text, IconButton, useTheme, Avatar } from 'react-native-paper';
-import { BlurView } from 'expo-blur';
 import { useWebRTCContext } from '../providers/WebRTCContext';
 import { VideoView } from './VideoView';
+import colors from '@/constants/colors';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -96,10 +96,10 @@ export default function CallScreen() {
                   label={callerName.substring(0, 2).toUpperCase()} 
                   style={{ backgroundColor: theme.colors.secondaryContainer }}
                 />
-                <Text variant="headlineSmall" style={{ color: '#fff', marginTop: 24, fontWeight: 'bold' }}>
+                <Text variant="headlineSmall" style={{ color: '#fff', marginTop: 24, fontWeight: '700' }}>
                   {callerName}
                 </Text>
-                <Text style={{ color: '#00d2ff', marginTop: 8, fontSize: 16 }}>
+                <Text style={{ color: colors.primary, marginTop: 8, fontSize: 16 }}>
                   {callState === 'CALLING' ? 'Đang gọi...' : 'Đã kết nối'}
                 </Text>
               </View>
@@ -187,8 +187,8 @@ const styles = StyleSheet.create({
   incomingTitle: {
     marginTop: 10,
     marginBottom: 8,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
+    fontWeight: '700',
+    letterSpacing: 0,
   },
   actionRow: {
     flexDirection: 'row',

@@ -79,3 +79,5 @@ export function ChatMediaPanels({
     </NativeModal>
   );
 }
+
+export default ChatMediaPanels;

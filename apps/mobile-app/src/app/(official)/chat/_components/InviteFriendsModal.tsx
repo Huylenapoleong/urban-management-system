@@ -74,7 +74,7 @@ export function InviteFriendsModal({
               >
                 <Avatar.Text size={40} label={(friend.fullName || 'U').substring(0,2).toUpperCase()} style={{ marginRight: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text variant="bodyLarge" style={{ color: colors.textOnSurface, fontWeight: 'bold' }}>{friend.fullName}</Text>
+                  <Text variant="bodyLarge" style={{ color: colors.textOnSurface, fontWeight: '700' }}>{friend.fullName}</Text>
                   <Text variant="bodySmall" style={{ color: colors.mutedOnSurface }}>{(alreadyInGroup) ? 'Đã trong nhóm' : 'Nhấn để thêm'}</Text>
                 </View>
               </TouchableOpacity>
@@ -88,9 +88,11 @@ export function InviteFriendsModal({
   );
 }
 
+export default InviteFriendsModal;
+
 const styles = StyleSheet.create({
   modalContainer: { margin: 20, padding: 20, borderRadius: 8 },
-  title: { marginBottom: 12, fontWeight: 'bold' },
+  title: { marginBottom: 12, fontWeight: '700' },
   searchInput: { marginBottom: 16 },
   list: { maxHeight: 400 },
   item: { paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: '#ccc' },

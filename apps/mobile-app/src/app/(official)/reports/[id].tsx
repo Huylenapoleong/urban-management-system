@@ -10,6 +10,7 @@ import { useUserSearch } from '../../../hooks/shared/useUsers';
 import { convertToS3Url } from '@/constants/s3';
 import { ListSkeleton, SkeletonDetail } from '@/components/skeleton/Skeleton';
 import { prefetchConversationMessages } from '@/services/prefetch';
+import colors from '@/constants/colors';
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   NEW: { color: '#f44336', label: 'Chờ xử lý' },
@@ -303,14 +304,14 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   headerSurface: { padding: 16, marginBottom: 8 },
-  title: { fontWeight: 'bold', marginBottom: 12 },
+  title: { fontWeight: '700', marginBottom: 12 },
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   date: { color: '#666' },
   divider: { marginVertical: 12 },
   iconRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   iconText: { marginLeft: 8, color: '#444' },
   descSurface: { padding: 16, marginBottom: 8 },
-  sectionTitle: { fontWeight: 'bold', marginBottom: 8 },
+  sectionTitle: { fontWeight: '700', marginBottom: 8 },
   mediaSurface: { paddingVertical: 14, marginBottom: 8 },
   mediaHeader: {
     flexDirection: 'row',
@@ -338,7 +339,7 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0'
   },
   assignedLabel: { color: '#666', marginBottom: 4 },
-  officerName: { fontWeight: '700', color: '#1976D2' },
+  officerName: { fontWeight: '700', color: colors.secondary },
   auditSurface: { 
     borderRadius: 12, 
     marginBottom: 16, 

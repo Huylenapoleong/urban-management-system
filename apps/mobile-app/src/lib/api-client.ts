@@ -2,11 +2,9 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { readWebToken } from './web-token-storage';
 import { ENV_CONFIG } from '@/constants/env';
+import { resolveApiBaseUrl } from './network-url';
 
-const rawUrl = ENV_CONFIG.API_BASE_URL;
-// Ensure no trailing slash and has /api prefix
-const API_BASE_URL = rawUrl.endsWith('/') ? rawUrl.slice(0, -1) : rawUrl;
-const FINAL_API_URL = API_BASE_URL.endsWith('/api') ? API_BASE_URL : `${API_BASE_URL}/api`;
+const FINAL_API_URL = resolveApiBaseUrl(ENV_CONFIG.API_BASE_URL);
 
 if (__DEV__) {
   console.log('[ApiClient] Base URL configured as:', FINAL_API_URL);

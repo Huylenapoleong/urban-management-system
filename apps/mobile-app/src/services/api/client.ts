@@ -2,6 +2,7 @@ import axios from "axios";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { AUTH_TOKEN_KEY, readWebToken } from "@/lib/web-token-storage";
+import { resolveApiBaseUrl } from "@/lib/network-url";
 
 export interface Envelope<T = any> {
   success: boolean;
@@ -17,9 +18,7 @@ const rawBaseURL =
   process.env.API_BASE_URL ||
   "http://localhost:3001";
 
-// Ensure no trailing slash and has /api prefix
-const normalizedBaseURL = rawBaseURL.endsWith('/') ? rawBaseURL.slice(0, -1) : rawBaseURL;
-const finalBaseURL = normalizedBaseURL.endsWith('/api') ? normalizedBaseURL : `${normalizedBaseURL}/api`;
+const finalBaseURL = resolveApiBaseUrl(rawBaseURL);
 
 console.log('[AxiosClient] Base URL configured as:', finalBaseURL);
 

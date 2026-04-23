@@ -2,12 +2,11 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useTheme } from 'react-native-paper';
 import { useAuth } from '../../providers/AuthProvider';
 import { SkeletonDetail } from '@/components/skeleton/Skeleton';
+import colors from '@/constants/colors';
 
 export default function OfficialLayout() {
-  const theme = useTheme();
   const router = useRouter();
   const { user, isLoading } = useAuth();
 
@@ -36,7 +35,9 @@ export default function OfficialLayout() {
 
   return (
     <Tabs screenOptions={{
-      tabBarActiveTintColor: theme.colors.primary,
+      tabBarActiveTintColor: colors.secondary,
+      tabBarInactiveTintColor: colors.muted,
+      tabBarActiveBackgroundColor: 'rgba(73,90,255,0.12)',
       headerShown: false,
     }}>
       <Tabs.Screen 

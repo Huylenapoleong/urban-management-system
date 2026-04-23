@@ -5,6 +5,7 @@ import { Text, TextInput, Button, Surface, HelperText, Portal, Modal } from 'rea
 import { useAuth } from '../providers/AuthProvider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import colors from '@/constants/colors';
 const LOGIN_HERO_IMAGE =
   'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop';
 
@@ -121,7 +122,7 @@ export default function LoginScreen() {
             contentStyle={styles.inputContent}
             disabled={loading}
             outlineColor="#e0e0e0"
-            activeOutlineColor="#1976D2"
+            activeOutlineColor={colors.secondary}
             left={<TextInput.Icon icon="account-outline" color="#9e9e9e" />}
             placeholder="Nhập email hoặc số điện thoại"
             placeholderTextColor="#6b7280"
@@ -137,7 +138,7 @@ export default function LoginScreen() {
             contentStyle={styles.inputContent}
             disabled={loading}
             outlineColor="#e0e0e0"
-            activeOutlineColor="#1976D2"
+            activeOutlineColor={colors.secondary}
             left={<TextInput.Icon icon="lock-outline" color="#9e9e9e" />}
             right={
               <TextInput.Icon
@@ -162,7 +163,7 @@ export default function LoginScreen() {
             style={styles.loginButton}
             contentStyle={styles.buttonContent}
             labelStyle={styles.buttonLabel}
-            buttonColor="#1976D2"
+            buttonColor={colors.secondary}
           >
             ĐĂNG NHẬP
           </Button>
@@ -217,7 +218,7 @@ export default function LoginScreen() {
                 mode="contained" 
                 onPress={handleRequestUnlock} 
                 disabled={unlockLoading}
-                buttonColor="#1976D2"
+                buttonColor={colors.secondary}
                 style={styles.unlockBtn}
                 contentStyle={styles.unlockBtnContent}
               >
@@ -251,7 +252,7 @@ export default function LoginScreen() {
                 keyboardType="number-pad"
                 style={styles.otpInput}
                 disabled={unlockLoading}
-                activeOutlineColor="#1976D2"
+                activeOutlineColor={colors.secondary}
                 maxLength={6}
               />
 
@@ -263,7 +264,7 @@ export default function LoginScreen() {
                 mode="contained" 
                 onPress={handleConfirmUnlock} 
                 disabled={unlockLoading}
-                buttonColor="#1976D2"
+                buttonColor={colors.secondary}
                 style={styles.unlockBtn}
                 contentStyle={styles.unlockBtnContent}
               >
@@ -290,39 +291,39 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f7fa' },
-  headerImage: { width: '100%', height: 350, backgroundColor: '#024285', overflow: 'hidden' },
+  container: { flex: 1, backgroundColor: colors.background },
+  headerImage: { width: '100%', height: 350, backgroundColor: colors.backgroundDark, overflow: 'hidden' },
   headerPhoto: { ...StyleSheet.absoluteFillObject },
-  headerOverlay: { flex: 1, backgroundColor: 'rgba(0,35,90,0.65)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  headerOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
   logo: { marginBottom: 16 },
-  brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '900', letterSpacing: 2, textAlign: 'center', lineHeight: 38 },
-  brandSubtitle: { color: 'rgba(255,255,255,0.92)', fontSize: 14, marginTop: 12, letterSpacing: 0.5, fontWeight: '700' },
+  brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '700', letterSpacing: 0, textAlign: 'center', lineHeight: 38 },
+  brandSubtitle: { color: 'rgba(255,255,255,0.92)', fontSize: 14, marginTop: 12, letterSpacing: 0, fontWeight: '600' },
   
   keyboardView: { flex: 1, marginTop: -60 },
   loginCard: {
     marginHorizontal: 20,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     borderRadius: 24,
     padding: 24,
     paddingTop: 32,
     borderWidth: 1,
-    borderColor: '#dbe4ee',
-    shadowColor: '#000',
+    borderColor: colors.border,
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.1,
     shadowRadius: 15,
   },
-  cardTitle: { fontWeight: '900', textAlign: 'center', color: '#0f172a', marginBottom: 6 },
-  cardSubtitle: { textAlign: 'center', color: '#374151', marginBottom: 28, fontWeight: '700' },
+  cardTitle: { fontWeight: '700', textAlign: 'center', color: colors.text, marginBottom: 6 },
+  cardSubtitle: { textAlign: 'center', color: colors.textSecondary, marginBottom: 28, fontWeight: '600' },
   
-  input: { marginBottom: 16, backgroundColor: '#fafafa' },
-  inputContent: { fontWeight: '800', color: '#111827' },
+  input: { marginBottom: 16, backgroundColor: colors.background },
+  inputContent: { fontWeight: '600', color: colors.text },
   
   errorText: { paddingHorizontal: 0, marginTop: -8, marginBottom: 8, fontSize: 13, fontWeight: '700' },
   
   loginButton: { marginTop: 8, borderRadius: 12 },
   buttonContent: { height: 50 },
-  buttonLabel: { fontSize: 15, fontWeight: '900', letterSpacing: 1 },
+  buttonLabel: { fontSize: 15, fontWeight: '700', letterSpacing: 0 },
   
   forgotPasswordContainer: {
     marginTop: 12,
@@ -331,13 +332,13 @@ const styles = StyleSheet.create({
   forgotPasswordLink: {
     color: '#334155',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
     textDecorationLine: 'underline',
   },
   
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
   footerText: { color: '#334155', fontSize: 14, fontWeight: '700' },
-  footerLink: { color: '#1976D2', fontSize: 14, fontWeight: '900' },
+  footerLink: { color: colors.secondary, fontSize: 14, fontWeight: '700' },
   
   unlockModal: {
     backgroundColor: 'white',
@@ -370,14 +371,14 @@ const styles = StyleSheet.create({
   },
   unlockTitle: {
     fontSize: 22,
-    fontWeight: '900',
-    color: '#0f172a',
+    fontWeight: '700',
+    color: colors.text,
     marginBottom: 8,
     textAlign: 'center'
   },
   unlockDescription: {
     fontSize: 14,
-    color: '#475569',
+    color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: 20,
     lineHeight: 22
@@ -407,6 +408,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 20,
     letterSpacing: 8,
-    fontWeight: '800'
+    fontWeight: '700'
   }
 });

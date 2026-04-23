@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, FlatList, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { Text, Avatar, Badge, Searchbar, useTheme, Divider, SegmentedButtons, IconButton, Card, Portal, Modal, Button } from 'react-native-paper';
+import { Text, Avatar, Badge, Searchbar, Divider, SegmentedButtons, IconButton, Card, Portal, Modal, Button } from 'react-native-paper';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useConversations, type ConversationSummaryItem } from '../../../hooks/shared/useConversations';
@@ -13,6 +13,7 @@ import { CHAT_SOCKET_EVENTS } from '@urban/shared-constants';
 import { convertToS3Url } from '../../../constants/s3';
 import { ListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
 import { prefetchConversationMessages } from '@/services/prefetch';
+import colors from '@/constants/colors';
 
 const PRESENCE_OFFLINE_GRACE_MS = 120000;
 const OFFICIAL_DM_PRESENCE_CACHE: Record<string, any> = {};
@@ -219,7 +220,6 @@ const resolveConversationPathId = (conversationId: string) => {
 export default function ChatListScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const theme = useTheme();
   const { user: currentUser } = useAuth();
   const currentUserId = String((currentUser as any)?.sub || (currentUser as any)?.id || '');
   
@@ -637,7 +637,7 @@ export default function ChatListScreen() {
   }, [selectedConversation, updateConversationPreference]);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header / Search */}
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -696,13 +696,13 @@ export default function ChatListScreen() {
                       <Avatar.Image
                         size={48}
                         source={{ uri: resolveConversationAvatarUrl(item) as string }}
-                        style={{ backgroundColor: item.isGroup ? theme.colors.secondaryContainer : theme.colors.primaryContainer }}
+                        style={{ backgroundColor: colors.surface }}
                       />
                     ) : (
                       <Avatar.Icon 
                         icon={item.isGroup ? "account-group" : "account"} 
                         size={48} 
-                        style={{ backgroundColor: item.isGroup ? theme.colors.secondaryContainer : theme.colors.primaryContainer }} 
+                        style={{ backgroundColor: colors.surface }}
                       />
                     )}
                     {!item.isGroup && displayPresence?.isActive ? (
@@ -713,7 +713,7 @@ export default function ChatListScreen() {
                   <View style={styles.textContainer}>
                     <View style={styles.row}>
                       <View style={styles.nameWithPresenceWrap}>
-                        <Text variant="titleMedium" style={[styles.groupName, item.unreadCount > 0 && { fontWeight: 'bold' }]} numberOfLines={1}>
+                        <Text variant="titleMedium" style={[styles.groupName, item.unreadCount > 0 && { fontWeight: '700' }]} numberOfLines={1}>
                           {item.groupName || 'Hội thoại'}
                         </Text>
                         {presenceLabel ? (
@@ -731,12 +731,12 @@ export default function ChatListScreen() {
                       </View>
                       <View style={styles.trailingActions}>
                         {isConversationMuted(item.mutedUntil) ? (
-                          <MaterialCommunityIcons name="bell-off-outline" size={14} color="#9e9e9e" style={styles.muteIcon} />
+                          <MaterialCommunityIcons name="bell-off-outline" size={14} color={colors.muted} style={styles.muteIcon} />
                         ) : null}
                         <Text variant="labelSmall" style={styles.timeText}>{formatConversationTime(item)}</Text>
                       </View>
                     </View>
-                    <Text variant="bodySmall" style={[styles.description, item.unreadCount > 0 && { fontWeight: '600', color: '#000' }]} numberOfLines={1}>
+                    <Text variant="bodySmall" style={[styles.description, item.unreadCount > 0 && { fontWeight: '600', color: colors.text }]} numberOfLines={1}>
                       {[
                         item.lastMessagePreview || 'Bắt đầu trò chuyện...',
                       ].filter(Boolean).join(' • ')}
@@ -756,8 +756,8 @@ export default function ChatListScreen() {
           }}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <MaterialCommunityIcons name="message-text-outline" size={60} color="#e0e0e0" />
-              <Text variant="bodyLarge" style={{ color: '#9e9e9e', fontWeight: 'bold', marginTop: 8 }}>
+              <MaterialCommunityIcons name="message-text-outline" size={60} color={colors.border} />
+              <Text variant="bodyLarge" style={{ color: colors.textSecondary, fontWeight: '700', marginTop: 8 }}>
                 Không có cuộc hội thoại nào.
               </Text>
             </View>
@@ -840,21 +840,21 @@ export default function ChatListScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f7fa' },
+  container: { flex: 1, backgroundColor: colors.background },
   header: { 
     padding: 16, 
-    backgroundColor: '#fff', 
+    backgroundColor: colors.card,
     borderBottomLeftRadius: 24, 
     borderBottomRightRadius: 24, 
     elevation: 4,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
     shadowRadius: 10,
     zIndex: 10,
   },
-  headerTitle: { fontWeight: '900', color: '#1a1a1a' },
-  searchBar: { borderRadius: 12, backgroundColor: '#f2f3f5', elevation: 0 },
+  headerTitle: { fontWeight: '700', color: colors.text },
+  searchBar: { borderRadius: 12, backgroundColor: colors.surface, elevation: 0 },
   filterRow: { marginTop: 12 },
   
   listContent: { paddingVertical: 12 },
@@ -862,7 +862,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 4,
     borderRadius: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
   },
   cardContent: {
     flexDirection: 'row',
@@ -884,9 +884,9 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: '#22c55e',
     borderWidth: 2,
-    borderColor: '#ffffff',
+    borderColor: colors.card,
   },
-  badge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#E53935' },
+  badge: { position: 'absolute', top: -4, right: -4, backgroundColor: colors.secondary },
   
   textContainer: {
     flex: 1,
@@ -904,7 +904,7 @@ const styles = StyleSheet.create({
   },
   presenceInline: {
     marginTop: 1,
-    color: '#6b7280',
+    color: colors.textSecondary,
   },
   presenceInlineActive: {
     color: '#16a34a',
@@ -924,21 +924,21 @@ const styles = StyleSheet.create({
   },
   groupName: {
     flex: 1,
-    color: '#212121',
+    color: colors.text,
   },
   timeText: {
-    color: '#9e9e9e',
+    color: colors.muted,
     fontWeight: '500',
   },
   description: {
-    color: '#757575',
+    color: colors.textSecondary,
   },
   settingsModalSheet: {
     justifyContent: 'flex-end',
     margin: 0,
   },
   settingsModalContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     padding: 16,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -948,21 +948,21 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   settingsSubtitle: {
-    color: '#6b7280',
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   settingsActionContent: {
     justifyContent: 'flex-start',
   },
   settingsActionLabel: {
-    color: '#111827',
+    color: colors.text,
   },
   settingsDangerLabel: {
     color: '#b91c1c',
   },
   muteOptionsBox: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 4,
     marginBottom: 8,

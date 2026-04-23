@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Text, Button, Avatar, Card, List, useTheme, IconButton, Portal, Dialog, TextInput } from 'react-native-paper';
+import { Text, Button, Avatar, Card, List, IconButton, Portal, Dialog, TextInput } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../../providers/AuthProvider';
 import {
@@ -14,6 +14,7 @@ import {
 } from '../../../hooks/shared/useProfile';
 import { convertToS3Url } from '../../../constants/s3';
 import { ListSkeleton, Skeleton, SkeletonProfile } from '@/components/skeleton/Skeleton';
+import colors from '@/constants/colors';
 
 export default function ProfileScreen() {
   const { logout } = useAuth();
@@ -24,8 +25,6 @@ export default function ProfileScreen() {
   const { mutateAsync: setCurrentAvatar, isPending: isSettingAvatar } = useSetCurrentAvatar();
   const { mutateAsync: removeCurrentAvatar, isPending: isRemovingAvatar } = useRemoveCurrentAvatar();
   const { mutateAsync: deleteAvatarFile, isPending: isDeletingAvatarFile } = useDeleteAvatarFile();
-  const theme = useTheme();
-
   const [editVisible, setEditVisible] = useState(false);
   const [editForm, setEditForm] = useState({ fullName: '', phone: '', email: '', locationCode: '' });
   const [avatarLibraryVisible, setAvatarLibraryVisible] = useState(false);
@@ -139,7 +138,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: '#f5f7fa' }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
         {/* Header Profile Section */}
         <View style={styles.avatarSection}>
@@ -161,13 +160,13 @@ export default function ProfileScreen() {
               onPress={handlePickAvatar}
               disabled={isUploading}
               style={styles.editAvatarBtn}
-              containerColor="#1976D2"
+              containerColor={colors.secondary}
               iconColor="#fff"
             />
           </View>
           <Text variant="headlineSmall" style={styles.userName}>{profile?.fullName || 'Cán bộ'}</Text>
           <View style={styles.roleBadge}>
-            <Text variant="labelSmall" style={{ color: '#1976D2', fontWeight: 'bold' }}>
+            <Text variant="labelSmall" style={{ color: colors.secondary, fontWeight: '700' }}>
               {profile?.role === 'PROVINCE_OFFICER' ? 'Cán bộ Tỉnh' : profile?.role === 'WARD_OFFICER' ? 'Cán bộ Phường' : 'Quản trị viên'}
             </Text>
           </View>
@@ -177,7 +176,7 @@ export default function ProfileScreen() {
         <Card style={styles.infoCard} elevation={2}>
           <Card.Content style={{ paddingVertical: 12 }}>
             <View style={styles.infoHeader}>
-              <Text variant="titleMedium" style={{ fontWeight: '800', color: '#1a1a1a' }}>Thông tin chi tiết</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '700', color: colors.text }}>Thông tin chi tiết</Text>
               <Button mode="text" icon="pencil" onPress={handleOpenEdit} compact labelStyle={{ fontWeight: '700' }}>Sửa</Button>
             </View>
             <List.Item
@@ -185,21 +184,21 @@ export default function ProfileScreen() {
               description={profile?.phone || 'Chưa cập nhật'}
               titleStyle={styles.listTitle}
               descriptionStyle={styles.listDesc}
-              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="phone" color="#1976D2" /></View>}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="phone" color={colors.secondary} /></View>}
             />
             <List.Item
               title="Email"
               description={profile?.email || 'Chưa cập nhật'}
               titleStyle={styles.listTitle}
               descriptionStyle={styles.listDesc}
-              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="email" color="#1976D2" /></View>}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="email" color={colors.secondary} /></View>}
             />
             <List.Item
               title="Khu vực phụ trách"
               description={profile?.locationCode || 'Chưa cập nhật'}
               titleStyle={styles.listTitle}
               descriptionStyle={styles.listDesc}
-              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="map-marker" color="#1976D2" /></View>}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="map-marker" color={colors.secondary} /></View>}
             />
           </Card.Content>
         </Card>
@@ -207,7 +206,7 @@ export default function ProfileScreen() {
         <Card style={styles.infoCard} elevation={2}>
           <Card.Content style={{ paddingVertical: 12 }}>
             <View style={styles.infoHeader}>
-              <Text variant="titleMedium" style={{ fontWeight: '800', color: '#1a1a1a' }}>Quản lý avatar</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '700', color: colors.text }}>Quản lý avatar</Text>
             </View>
             <List.Item
               title="Thư viện avatar"
@@ -215,7 +214,7 @@ export default function ProfileScreen() {
               titleStyle={styles.listTitle}
               descriptionStyle={styles.listDesc}
               onPress={() => setAvatarLibraryVisible(true)}
-              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="image-multiple" color="#1976D2" /></View>}
+              left={props => <View style={styles.iconCircle}><List.Icon {...props} icon="image-multiple" color={colors.secondary} /></View>}
               right={props => <List.Icon {...props} icon="chevron-right" />}
             />
 
@@ -237,7 +236,7 @@ export default function ProfileScreen() {
           buttonColor="#D32F2F" 
           style={styles.logoutBtn} 
           contentStyle={{ height: 48 }}
-          labelStyle={{ fontWeight: 'bold', letterSpacing: 1 }}
+          labelStyle={{ fontWeight: '700', letterSpacing: 0 }}
           icon="logout"
         >
           ĐĂNG XUẤT TÀI KHOẢN
@@ -351,30 +350,30 @@ const styles = StyleSheet.create({
   avatarSection: { 
     alignItems: 'center', 
     paddingVertical: 36, 
-    backgroundColor: '#ffffff', 
+    backgroundColor: colors.card,
     borderBottomLeftRadius: 32, 
     borderBottomRightRadius: 32, 
     elevation: 3,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
     shadowRadius: 10,
     marginBottom: 20,
   },
   avatarWrapper: { position: 'relative', marginBottom: 12 },
-  avatarBorder: { borderWidth: 3, borderColor: '#1976D2', backgroundColor: '#fff' },
-  avatarPlaceholder: { backgroundColor: '#E3F2FD' },
+  avatarBorder: { borderWidth: 3, borderColor: colors.secondary, backgroundColor: colors.card },
+  avatarPlaceholder: { backgroundColor: 'rgba(73,90,255,0.12)' },
   avatarOverlay: { backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 50, justifyContent: 'center', alignItems: 'center' },
   editAvatarBtn: { position: 'absolute', bottom: -4, right: -4, elevation: 3 },
-  userName: { fontWeight: '900', color: '#1a1a1a', marginBottom: 6 },
-  roleBadge: { backgroundColor: '#E3F2FD', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  userName: { fontWeight: '700', color: colors.text, marginBottom: 6 },
+  roleBadge: { backgroundColor: 'rgba(73,90,255,0.12)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   
-  infoCard: { backgroundColor: '#ffffff', marginHorizontal: 16, borderRadius: 20, marginBottom: 24, paddingVertical: 4 },
+  infoCard: { backgroundColor: colors.card, marginHorizontal: 16, borderRadius: 20, marginBottom: 24, paddingVertical: 4 },
   infoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 12 },
   
   iconCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f0f4f8', justifyContent: 'center', alignItems: 'center', alignSelf: 'center' },
-  listTitle: { fontWeight: '700', color: '#424242', fontSize: 14 },
-  listDesc: { color: '#757575', marginTop: 2, fontSize: 13 },
+  listTitle: { fontWeight: '700', color: colors.text, fontSize: 14 },
+  listDesc: { color: colors.textSecondary, marginTop: 2, fontSize: 13 },
   avatarActionButton: { marginHorizontal: 12, marginTop: 8 },
   avatarLibraryList: { maxHeight: 360 },
   avatarLibraryRow: {
@@ -390,5 +389,5 @@ const styles = StyleSheet.create({
   avatarLibraryActions: { alignItems: 'flex-end', justifyContent: 'center' },
   
   logoutBtn: { marginHorizontal: 16, borderRadius: 16, marginTop: 8 },
-  input: { marginBottom: 12, backgroundColor: '#fff' }
+  input: { marginBottom: 12, backgroundColor: colors.card }
 });

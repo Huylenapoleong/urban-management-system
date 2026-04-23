@@ -380,7 +380,9 @@ export const useWebRTC = (conversationId?: string) => {
 
   // Listen for Socket Events
   useEffect(() => {
-    console.log('[useWebRTC] Listeners mounted for conv:', conversationId);
+    if (__DEV__ && conversationId) {
+      console.log('[useWebRTC] Listeners mounted for conv:', conversationId);
+    }
 
     const onCallInit = (data: any) => {
       // If we are not the caller
@@ -467,7 +469,7 @@ export const useWebRTC = (conversationId?: string) => {
       socketClient.off(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, onAnswer);
       socketClient.off(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIceCandidate);
     };
-  }, [callState, activeConfig, user?.sub, setupPeerConnection, cleanup, flushPendingIceCandidates, safeEmit]);
+  }, [callState, activeConfig, user?.sub, conversationId, setupPeerConnection, cleanup, flushPendingIceCandidates, safeEmit]);
 
   return {
     callState,

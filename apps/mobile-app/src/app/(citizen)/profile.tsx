@@ -27,6 +27,7 @@ import {
 } from '@/hooks/shared/useProfile';
 import { OtpVerificationModal } from '@/components/auth/OtpVerificationModal';
 import { convertToS3Url } from '@/constants/s3';
+import colors from '@/constants/colors';
 import { ListSkeleton, Skeleton, SkeletonProfile } from '@/components/skeleton/Skeleton';
 import { readTempCache, writeTempCache } from '@/lib/page-temp-cache';
 
@@ -471,7 +472,7 @@ export default function ProfilePage() {
               onPress={handlePickAvatar}
               disabled={isUploading}
               style={styles.editAvatarBtn}
-              containerColor="#1976D2"
+              containerColor={colors.secondary}
               iconColor="#fff"
             />
           </View>
@@ -503,7 +504,7 @@ export default function ProfilePage() {
               descriptionStyle={styles.listDesc}
               left={(props) => (
                 <View style={styles.iconCircle}>
-                  <List.Icon {...props} icon="phone" color="#1976D2" />
+                  <List.Icon {...props} icon="phone" color={colors.secondary} />
                 </View>
               )}
             />
@@ -514,7 +515,7 @@ export default function ProfilePage() {
               descriptionStyle={styles.listDesc}
               left={(props) => (
                 <View style={styles.iconCircle}>
-                  <List.Icon {...props} icon="email" color="#1976D2" />
+                  <List.Icon {...props} icon="email" color={colors.secondary} />
                 </View>
               )}
             />
@@ -525,7 +526,7 @@ export default function ProfilePage() {
               descriptionStyle={styles.listDesc}
               left={(props) => (
                 <View style={styles.iconCircle}>
-                  <List.Icon {...props} icon="map-marker" color="#1976D2" />
+                  <List.Icon {...props} icon="map-marker" color={colors.secondary} />
                 </View>
               )}
             />
@@ -537,7 +538,7 @@ export default function ProfilePage() {
               onPress={() => router.push('/(citizen)/friends' as any)}
               left={(props) => (
                 <View style={styles.iconCircle}>
-                  <List.Icon {...props} icon="account-group" color="#1976D2" />
+                  <List.Icon {...props} icon="account-group" color={colors.secondary} />
                 </View>
               )}
               right={(props) => <List.Icon {...props} icon="chevron-right" />}
@@ -549,7 +550,7 @@ export default function ProfilePage() {
               descriptionStyle={styles.listDesc}
               left={(props) => (
                 <View style={styles.iconCircle}>
-                  <List.Icon {...props} icon="shield-account" color="#1976D2" />
+                  <List.Icon {...props} icon="shield-account" color={colors.secondary} />
                 </View>
               )}
             />
@@ -568,7 +569,7 @@ export default function ProfilePage() {
               descriptionStyle={styles.listDesc}
               left={(props) => (
                 <View style={styles.iconCircle}>
-                  <List.Icon {...props} icon="chat-processing" color="#1976D2" />
+                  <List.Icon {...props} icon="chat-processing" color={colors.secondary} />
                 </View>
               )}
               right={() => (
@@ -592,7 +593,7 @@ export default function ProfilePage() {
               onPress={() => setAvatarLibraryVisible(true)}
               left={(props) => (
                 <View style={styles.iconCircle}>
-                  <List.Icon {...props} icon="image-multiple" color="#1976D2" />
+                  <List.Icon {...props} icon="image-multiple" color={colors.secondary} />
                 </View>
               )}
               right={(props) => <List.Icon {...props} icon="chevron-right" />}
@@ -624,7 +625,7 @@ export default function ProfilePage() {
                 key={session.sessionId}
                 title={session.userAgent || 'Thiết bị không xác định'}
                 description={`Lần cuối: ${new Date(session.lastUsedAt).toLocaleString('vi-VN')}${session.isCurrent ? ' (Hiện tại)' : ''}`}
-                titleStyle={[styles.listTitle, session.isCurrent && { color: '#1976D2' }]}
+                titleStyle={[styles.listTitle, session.isCurrent && { color: colors.secondary }]}
                 descriptionStyle={styles.listDesc}
                 left={(props) => <List.Icon {...props} icon="cellphone" />}
                 right={(props) => !session.isCurrent ? (
@@ -947,13 +948,13 @@ export default function ProfilePage() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f5f7fa',
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f7fa',
+    backgroundColor: colors.background,
   },
   emptyText: {
     color: '#d32f2f',
@@ -964,11 +965,11 @@ const styles = StyleSheet.create({
   avatarSection: {
     alignItems: 'center',
     paddingVertical: 36,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     elevation: 3,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
     shadowRadius: 10,
@@ -980,11 +981,11 @@ const styles = StyleSheet.create({
   },
   avatarBorder: {
     borderWidth: 3,
-    borderColor: '#1976D2',
-    backgroundColor: '#fff',
+    borderColor: colors.secondary,
+    backgroundColor: colors.card,
   },
   avatarPlaceholder: {
-    backgroundColor: '#E3F2FD',
+    backgroundColor: 'rgba(73,90,255,0.12)',
   },
   avatarOverlay: {
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -999,22 +1000,22 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   userName: {
-    fontWeight: '900',
-    color: '#1a1a1a',
+    fontWeight: '700',
+    color: colors.text,
     marginBottom: 6,
   },
   roleBadge: {
-    backgroundColor: '#E3F2FD',
+    backgroundColor: 'rgba(73,90,255,0.12)',
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
   },
   roleBadgeText: {
-    color: '#1976D2',
-    fontWeight: 'bold',
+    color: colors.secondary,
+    fontWeight: '700',
   },
   infoCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     marginHorizontal: 16,
     borderRadius: 20,
     marginBottom: 24,
@@ -1031,8 +1032,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   infoTitle: {
-    fontWeight: '800',
-    color: '#1a1a1a',
+    fontWeight: '700',
+    color: colors.text,
   },
   editButtonLabel: {
     fontWeight: '700',
@@ -1048,11 +1049,11 @@ const styles = StyleSheet.create({
   },
   listTitle: {
     fontWeight: '700',
-    color: '#424242',
+    color: colors.text,
     fontSize: 14,
   },
   listDesc: {
-    color: '#757575',
+    color: colors.textSecondary,
     marginTop: 2,
     fontSize: 13,
   },
@@ -1065,12 +1066,12 @@ const styles = StyleSheet.create({
     height: 48,
   },
   logoutLabel: {
-    fontWeight: 'bold',
+    fontWeight: '700',
     letterSpacing: 1,
   },
   input: {
     marginBottom: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
   },
   avatarActionButton: {
     marginHorizontal: 12,

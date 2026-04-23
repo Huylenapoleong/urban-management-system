@@ -3,6 +3,7 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable
 import { Text, Surface, Button, TextInput, useTheme } from 'react-native-paper';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../providers/AuthProvider';
+import colors from '@/constants/colors';
 
 export default function OtpVerifyScreen() {
   const theme = useTheme();
@@ -140,7 +141,7 @@ export default function OtpVerifyScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f3f6fb',
+    backgroundColor: colors.background,
   },
   content: {
     padding: 24,
@@ -149,15 +150,15 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 24,
     padding: 24,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
   },
   title: {
-    fontWeight: '800',
+    fontWeight: '700',
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    color: '#667085',
+    color: colors.textSecondary,
     marginBottom: 32,
     textAlign: 'center',
     lineHeight: 20,
@@ -194,6 +195,6 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   backLabel: {
-    color: '#667085',
+    color: colors.textSecondary,
   },
 });
