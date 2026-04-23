@@ -14,16 +14,24 @@ import type {
 import {
   createUlid,
   makeInboxPk,
-  makePushTokenLookupPk,
-  makePushTokenLookupSk,
   makePushOutboxPk,
   makePushOutboxSk,
   makeUserPk,
   makeUserPushDeviceSk,
   nowIso,
 } from '@urban/shared-utils';
+import { createHash } from 'crypto';
 import { buildPaginatedResponse } from '../../common/pagination';
 import { toPushDevice } from '../../common/mappers';
+
+export function makePushTokenLookupPk(pushToken: string): string {
+  const digest = createHash('sha256').update(pushToken).digest('hex');
+  return `PUSH_TOKEN#${digest}`;
+}
+
+export function makePushTokenLookupSk(): string {
+  return 'LOOKUP';
+}
 import type {
   StoredConversation,
   StoredPushDevice,

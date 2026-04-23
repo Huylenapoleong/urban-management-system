@@ -401,6 +401,60 @@ export class UsersService {
     );
   }
 
+  async unlockOwnAccount(userId: string): Promise<StoredUser> {
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = await this.getByIdOrThrow(userId);
+
+      if (current.status === 'ACTIVE') {
+        return current;
+      }
+
+      if (current.status !== 'LOCKED') {
+        throw new BadRequestException(
+          'Only locked accounts can be unlocked.',
+        );
+      }
+
+      const nextUser: StoredUser = {
+        ...current,
+        status: 'ACTIVE',
+        deletedAt: null,
+        updatedAt: nowIso(),
+      };
+
+      try {
+        await this.repository.transactPut([
+          {
+            tableName: this.config.dynamodbUsersTableName,
+            item: nextUser,
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+            expressionAttributeValues: {
+              ':expectedUpdatedAt': current.updatedAt,
+            },
+          },
+        ]);
+        return nextUser;
+      } catch (error) {
+        if (!this.isConditionalWriteConflict(error)) {
+          throw error;
+        }
+
+        if (attempt === maxAttempts - 1) {
+          throw new ConflictException(
+            'User profile was changed by another request. Please retry.',
+          );
+        }
+      }
+    }
+
+    throw new ConflictException(
+      'User profile was changed by another request. Please retry.',
+    );
+  }
+
   async deleteOwnAccountPermanently(userId: string): Promise<StoredUser> {
     const maxAttempts = 3;
 

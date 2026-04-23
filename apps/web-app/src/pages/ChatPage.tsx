@@ -1638,19 +1638,25 @@ export function ChatPage() {
     };
   }, [activeMessageMenuId]);
 
-  const handleStartCall = (isVideo: boolean) => {
+  const handleStartCall = (isVideo: boolean, isJoining = false) => {
     if (!activeContact) return;
     
-    startCall({
+    const config = {
       isVideo,
-    targetUserId: activeDmUserId,
+      conversationId: activeContact.conversationId,
+      targetUserId: activeDmUserId,
       callerId: user?.sub,
       callerName: callerDisplayName,
       callerAvatarUrl,
       peerName: activeContact.groupName || activeContact.conversationId,
       peerAvatarUrl: activeContactAvatarUrl,
-      conversationId: activeContact.conversationId,
-    });
+    };
+
+    if (isJoining && rtc.joinCall) {
+      rtc.joinCall(config);
+    } else {
+      startCall(config);
+    }
   };
 
   const resolveMessageType = (file?: File | null): ChatMessageType => {
@@ -3518,14 +3524,14 @@ export function ChatPage() {
                         <div className="mt-1 flex w-full gap-2">
                           <button 
                             type="button"
-                            onClick={() => handleStartCall(false)}
+                            onClick={() => handleStartCall(false, true)}
                             className="flex-1 rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-slate-300 transition dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
                           >
                             Tham gia thoại
                           </button>
                           <button 
                             type="button"
-                            onClick={() => handleStartCall(true)}
+                            onClick={() => handleStartCall(true, true)}
                             className="flex-1 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700 transition"
                           >
                             Tham gia video

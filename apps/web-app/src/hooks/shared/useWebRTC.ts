@@ -452,6 +452,18 @@ export function useWebRTC() {
         callStateRef.current = 'CONNECTED';
         callStartedAtRef.current = Date.now();
         setCallError(null);
+
+        try {
+          await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
+            conversationId: signalConversationId,
+            calleeId: user?.sub,
+          });
+        } catch (acceptErr) {
+          console.error('[WebRTC] Lỗi tham gia cuộc gọi nhóm đang diễn ra', acceptErr);
+          setCallError('Lỗi tham gia cuộc gọi nhóm đang diễn ra.');
+          cleanup();
+          return;
+        }
         
         emitSignal(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT, {
           conversationId: signalConversationId,
@@ -465,6 +477,48 @@ export function useWebRTC() {
       cleanup();
     }
   }, [emitSignal, cleanup, resolveSignalConversationId, user?.sub, isGroupCall, requestLocalMediaStream]);
+
+  const joinCall = useCallback(async (config: CallConfig) => {
+    if (callStateRef.current !== 'IDLE') return;
+
+    setLastEndedCall(null);
+    setActiveConfig(config);
+    activeConfigRef.current = config;
+    setCallError(null);
+
+    const signalConversationId = resolveSignalConversationId(config);
+    if (!signalConversationId) {
+      cleanup();
+      return;
+    }
+
+    try {
+      await requestLocalMediaStream(config.isVideo);
+    } catch (err) {
+      console.error('[WebRTC] Local media stream failed', err);
+    }
+
+    setCallState('CONNECTED');
+    callStateRef.current = 'CONNECTED';
+    callStartedAtRef.current = Date.now();
+    
+    try {
+      await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
+        conversationId: signalConversationId,
+        calleeId: user?.sub,
+      });
+    } catch (acceptErr) {
+      console.error('[WebRTC] Lỗi tham gia cuộc gọi nhóm đang diễn ra', acceptErr);
+      setCallError('Lỗi tham gia cuộc gọi nhóm đang diễn ra.');
+      cleanup();
+      return;
+    }
+    
+    emitSignal(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT, {
+      conversationId: signalConversationId,
+      userId: user?.sub,
+    }).catch(() => {});
+  }, [emitSignal, cleanup, resolveSignalConversationId, user?.sub, requestLocalMediaStream]);
 
   const acceptCall = useCallback(async () => {
     if (callStateRef.current !== 'INCOMING' || !activeConfigRef.current) return;
@@ -790,6 +844,7 @@ useEffect(() => {
     callError,
     setCallError,
     startCall,
+    joinCall,
     acceptCall,
     rejectCall,
     endCall,

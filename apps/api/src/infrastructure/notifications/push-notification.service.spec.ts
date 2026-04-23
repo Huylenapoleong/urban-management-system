@@ -3,10 +3,10 @@ import type {
   StoredPushOutboxEvent,
 } from '../../common/storage-records';
 import {
+  PushNotificationService,
   makePushTokenLookupPk,
   makePushTokenLookupSk,
-} from '@urban/shared-utils';
-import { PushNotificationService } from './push-notification.service';
+} from './push-notification.service';
 
 describe('PushNotificationService', () => {
   const repository = {

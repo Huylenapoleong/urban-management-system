@@ -1,4 +1,4 @@
-const { createHash } = require("crypto");
+
 const { monotonicFactory } = require("ulid");
 
 let createMonotonicUlid;
@@ -87,14 +87,7 @@ function makeUserContactAliasSk(targetUserId) {
   return `CONTACT_ALIAS#${targetUserId}`;
 }
 
-function makePushTokenLookupPk(pushToken) {
-  const digest = createHash("sha256").update(pushToken).digest("hex");
-  return `PUSH_TOKEN#${digest}`;
-}
 
-function makePushTokenLookupSk() {
-  return "LOOKUP";
-}
 
 function makeAuthEmailOtpPk(email) {
   return `AUTH#EMAIL#${email}`;
@@ -271,8 +264,7 @@ module.exports = {
   makeMembershipSk,
   makeMessageSk,
   makePhoneLookupKey,
-  makePushTokenLookupPk,
-  makePushTokenLookupSk,
+
   makePushOutboxPk,
   makePushOutboxSk,
   makeReportAuditSk,

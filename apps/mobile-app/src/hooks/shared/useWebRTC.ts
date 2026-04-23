@@ -43,6 +43,23 @@ export const useWebRTC = (conversationId?: string) => {
       console.warn(`[useWebRTC] ${event} skipped: socket unavailable`, error);
     });
   }, []);
+
+  const resolveSignalConversationId = useCallback((config?: CallConfig | null, fallbackConvId?: string) => {
+    const rawConversationId = (config?.conversationId ?? fallbackConvId)?.trim();
+    if (!rawConversationId) return '';
+
+    const isGroupConversation = /^(group:|grp#|group#)/i.test(rawConversationId);
+    const isIncomingDmCall =
+      !isGroupConversation &&
+      Boolean(config?.callerId) &&
+      config?.callerId !== user?.sub;
+
+    if (isIncomingDmCall) {
+      return `dm:${config!.callerId}`;
+    }
+
+    return rawConversationId;
+  }, [user?.sub]);
   
   const [callState, setCallState] = useState<CallState>('IDLE');
   const [activeConfig, setActiveConfig] = useState<CallConfig | null>(null);
@@ -199,14 +216,15 @@ export const useWebRTC = (conversationId?: string) => {
   }, [localStream, remoteStream, user?.sub]);
 
   const setupPeerConnection = useCallback(async (isCaller: boolean, config: CallConfig) => {
+    if (peerConnection.current) return peerConnection.current;
     console.log('[useWebRTC] Setting up PeerConnection');
     const pc = new RTCPeerConnection(getIceServers());
     peerConnection.current = pc;
 
     // @ts-ignore
     pc.onicecandidate = (event: any) => {
-      if (event.candidate && config.conversationId) {
-        const targetConvId = !isCaller && config.callerId ? `dm:${config.callerId}` : config.conversationId;
+      const targetConvId = resolveSignalConversationId(config);
+      if (event.candidate && targetConvId) {
         safeEmit(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
           conversationId: targetConvId,
           candidate: event.candidate,
@@ -287,9 +305,41 @@ export const useWebRTC = (conversationId?: string) => {
         callerName: (user as any)?.fullName || 'Người gọi',
         isVideo,
       });
-    } catch (error) {
+    } catch (error: any) {
+      const isGroupConversation = /^(group:|grp#|group#)/i.test(convId || '');
+      if (error?.statusCode === 409 && isGroupConversation) {
+        console.log('[useWebRTC] Group call already active, joining mesh directly...');
+        setCallState('CONNECTED');
+        
+        try {
+          await socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
+            conversationId: resolveSignalConversationId(config),
+            calleeId: user?.sub,
+          });
+        } catch (acceptErr) {
+          console.error('[useWebRTC] Failed to join active call', acceptErr);
+          Alert.alert('Thông báo', 'Không thể tham gia cuộc gọi nhóm đang diễn ra.');
+          cleanup();
+          return;
+        }
+
+        // Emit heartbeat just in case (though we don't listen to it yet on mobile)
+        safeEmit(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT, {
+          conversationId: resolveSignalConversationId(config),
+          userId: user?.sub,
+        });
+
+        // Setup the local stream and peer connection. For group mesh, since we are late joiners, 
+        // we should probably act as offer creator if our ID > caller ID. But since we just joined, 
+        // we might not know who else is here. For simplicity, we just set up PC and let onCallAccept handle others.
+        // Wait, since we are the ones who clicked "call", we should just set up the local media.
+        // And when others answer our CALL_ACCEPT, we'll get CALL_ACCEPT from them.
+        await setupPeerConnection(true, config);
+        return;
+      }
+
       console.error('[useWebRTC] CALL_INIT failed', error);
-      Alert.alert('Thong bao', 'Khong the bat dau cuoc goi luc nay. Vui long thu lai.');
+      Alert.alert('Thông báo', 'Không thể bắt đầu cuộc gọi lúc này. Vui lòng thử lại.');
       cleanup();
     }
   };
@@ -299,22 +349,30 @@ export const useWebRTC = (conversationId?: string) => {
     if (callState !== 'INCOMING' || !activeConfig) return;
     setCallState('CONNECTED');
     
-    // For incoming call, the signalling target is the Caller
-    const targetConvId = activeConfig.callerId ? `dm:${activeConfig.callerId}` : activeConfig.conversationId;
+    const targetConvId = resolveSignalConversationId(activeConfig);
 
     safeEmit(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
       conversationId: targetConvId,
       calleeId: user?.sub,
     });
 
+    const isGroupConversation = /^(group:|grp#|group#)/i.test(activeConfig.conversationId || '');
+    let isOfferCreator = false;
+    if (isGroupConversation) {
+      const callerId = activeConfig.callerId;
+      if (callerId && user?.sub && user.sub > callerId) {
+        isOfferCreator = true;
+      }
+    }
+
     // Create RTCPeerConnection (Callee)
-    await setupPeerConnection(false, activeConfig);
+    await setupPeerConnection(isOfferCreator, activeConfig);
   };
 
   // Reject a Call
   const rejectCall = () => {
-    if (activeConfig?.conversationId) {
-      const targetConvId = activeConfig.callerId ? `dm:${activeConfig.callerId}` : activeConfig.conversationId;
+    const targetConvId = resolveSignalConversationId(activeConfig);
+    if (targetConvId) {
       safeEmit(CHAT_SOCKET_EVENTS.CALL_REJECT, {
         conversationId: targetConvId,
         calleeId: user?.sub,
@@ -326,12 +384,12 @@ export const useWebRTC = (conversationId?: string) => {
   // End an Active Call
   const endCall = () => {
     const config = activeConfigRef.current;
-    if (config?.conversationId) {
+    const targetConvId = resolveSignalConversationId(config);
+    if (targetConvId) {
       const startedAt = callStartedAtRef.current;
       const durationSeconds = startedAt
         ? Math.max(0, Math.round((Date.now() - startedAt) / 1000))
         : 0;
-      const targetConvId = config.callerId ? `dm:${config.callerId}` : config.conversationId;
       safeEmit(CHAT_SOCKET_EVENTS.CALL_END, {
         conversationId: targetConvId,
         userId: user?.sub,
@@ -404,7 +462,15 @@ export const useWebRTC = (conversationId?: string) => {
 
       if (isMatch && callState === 'CALLING') {
         setCallState('CONNECTED');
-        await setupPeerConnection(true, activeConfig!);
+        const isGroupConversation = /^(group:|grp#|group#)/i.test(activeConfig!.conversationId || '');
+        let isOfferCreator = true;
+        if (isGroupConversation) {
+          const calleeId = data.calleeId;
+          if (calleeId && user?.sub && user.sub < calleeId) {
+            isOfferCreator = false;
+          }
+        }
+        await setupPeerConnection(isOfferCreator, activeConfig!);
       }
     };
 
@@ -417,13 +483,17 @@ export const useWebRTC = (conversationId?: string) => {
     };
 
     const onOffer = async (data: any) => {
-      if (!peerConnection.current) return;
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+      let pc = peerConnection.current;
+      if (!pc) {
+        pc = await setupPeerConnection(false, activeConfig!);
+      }
+      if (!pc) return;
+      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
       await flushPendingIceCandidates();
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
       
-      const targetConvId = activeConfig?.callerId ? `dm:${activeConfig.callerId}` : data.conversationId;
+      const targetConvId = resolveSignalConversationId(activeConfig, data.conversationId);
 
       safeEmit(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, {
         conversationId: targetConvId,

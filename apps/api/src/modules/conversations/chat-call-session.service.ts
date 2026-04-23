@@ -67,13 +67,6 @@ export class ChatCallSessionService {
     const existingSession = await this.getSession(access.conversationKey);
 
     if (existingSession) {
-      if (existingSession.initiatedByUserId === callerUserId) {
-        return {
-          shouldEmit: false,
-          session: existingSession,
-        };
-      }
-
       throw new ConflictException(
         'Another call is already active in this conversation.',
       );
@@ -103,13 +96,6 @@ export class ChatCallSessionService {
 
     if (!created) {
       const concurrentSession = await this.getSession(access.conversationKey);
-
-      if (concurrentSession?.initiatedByUserId === callerUserId) {
-        return {
-          shouldEmit: false,
-          session: concurrentSession,
-        };
-      }
 
       throw new ConflictException(
         'Another call is already active in this conversation.',

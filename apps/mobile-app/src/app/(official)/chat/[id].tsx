@@ -769,11 +769,11 @@ export default function OfficialChatScreen() {
   };
 
   const handleStartAudioCall = () => {
-    startCall(false, decodedId, decodedId);
+    startCall(false, decodedId, getPeerIdFromConversationId(decodedId));
   };
 
   const handleStartVideoCall = () => {
-    startCall(true, decodedId, decodedId);
+    startCall(true, decodedId, getPeerIdFromConversationId(decodedId));
   };
 
   // â”€â”€ Media Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
