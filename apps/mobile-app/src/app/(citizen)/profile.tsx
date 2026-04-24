@@ -1,5 +1,26 @@
+import { OtpVerificationModal } from '@/components/auth/OtpVerificationModal';
+import { ListSkeleton, Skeleton, SkeletonProfile } from '@/components/skeleton/Skeleton';
+import colors from '@/constants/colors';
+import { convertToS3Url } from '@/constants/s3';
+import {
+  useAvatarLibrary,
+  useDeleteAvatarFile,
+  useProfile,
+  useRemoveCurrentAvatar,
+  useSetCurrentAvatar,
+  useUpdateProfile,
+  useUploadAvatar,
+} from '@/hooks/shared/useProfile';
+import {
+  getResolvedLocationLabel,
+  useResolvedLocations,
+} from '@/hooks/shared/useResolvedLocations';
+import { readTempCache, writeTempCache } from '@/lib/page-temp-cache';
 import { useAuth } from "@/providers/AuthProvider";
-import React, { useEffect, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
 import {
   Avatar,
@@ -13,23 +34,6 @@ import {
   Text,
   TextInput,
 } from 'react-native-paper';
-import { useRouter } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
-import * as SecureStore from 'expo-secure-store';
-import {
-  useAvatarLibrary,
-  useDeleteAvatarFile,
-  useProfile,
-  useRemoveCurrentAvatar,
-  useSetCurrentAvatar,
-  useUpdateProfile,
-  useUploadAvatar,
-} from '@/hooks/shared/useProfile';
-import { OtpVerificationModal } from '@/components/auth/OtpVerificationModal';
-import { convertToS3Url } from '@/constants/s3';
-import colors from '@/constants/colors';
-import { ListSkeleton, Skeleton, SkeletonProfile } from '@/components/skeleton/Skeleton';
-import { readTempCache, writeTempCache } from '@/lib/page-temp-cache';
 
 const CHAT_BUBBLE_SETTING_KEY = "citizen.chatBubble.enabled";
 const PROFILE_SESSIONS_CACHE_KEY = 'citizen.profile.sessions';
@@ -284,6 +288,8 @@ export default function ProfilePage() {
     (profile?.avatarAsset?.resolvedUrl && convertToS3Url(profile.avatarAsset.resolvedUrl)) ||
     (profile?.avatarUrl ? convertToS3Url(profile.avatarUrl) : undefined);
   const currentAvatarKey = profile?.avatarAsset?.key || profile?.avatarKey || undefined;
+  const { data: locationMap } = useResolvedLocations([profile?.locationCode]);
+  const locationLabel = getResolvedLocationLabel(locationMap, profile?.locationCode);
 
   useEffect(() => {
     readChatBubbleSetting()
@@ -300,7 +306,7 @@ export default function ProfilePage() {
     await writeChatBubbleSetting(String(enabled));
   };
 
-  const fetchSessions = async (signal?: AbortSignal) => {
+  const fetchSessions = useCallback(async (signal?: AbortSignal) => {
     try {
       setLoadingSessions(true);
       const data = await listSessions({ signal });
@@ -315,7 +321,7 @@ export default function ProfilePage() {
     } finally {
       setLoadingSessions(false);
     }
-  };
+  }, [listSessions]);
 
   const displayedSessions = showAllSessions ? sessions : sessions.slice(0, 3);
 
@@ -333,7 +339,7 @@ export default function ProfilePage() {
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [fetchSessions]);
 
   const handleOpenEdit = () => {
     if (!profile) {
@@ -521,7 +527,7 @@ export default function ProfilePage() {
             />
             <List.Item
               title="Khu vực"
-              description={profile.locationCode || 'Chưa cập nhật'}
+              description={locationLabel}
               titleStyle={styles.listTitle}
               descriptionStyle={styles.listDesc}
               left={(props) => (
@@ -767,7 +773,7 @@ export default function ProfilePage() {
               keyboardType="email-address"
               autoCapitalize="none"
             />
-            <Text style={styles.locationHint}>{`Mã khu vực hiện tại: ${profile.locationCode}`}</Text>
+            <Text style={styles.locationHint}>{`Dia ban hien tai: ${locationLabel}`}</Text>
             <Text style={styles.locationSubHint}>Công dân không thay đổi khu vực trong ứng dụng.</Text>
           </Dialog.Content>
           <Dialog.Actions>

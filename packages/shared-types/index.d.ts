@@ -427,13 +427,16 @@ export interface ChatTypingCommandPayload {
 export interface ChatCallInitPayload extends ChatConversationCommandPayload {
   callerId: string;
   callerName: string;
+  callerAvatarUrl?: string;
   isVideo: boolean;
   startedAt?: string;
+  serverTimestamp?: string;
 }
 
 export interface ChatCallAcceptPayload extends ChatConversationCommandPayload {
   calleeId: string;
   acceptedAt?: string;
+  serverTimestamp?: string;
 }
 
 export interface ChatCallRejectPayload extends ChatConversationCommandPayload {
@@ -456,6 +459,8 @@ export interface ChatCallEndPayload extends ChatConversationCommandPayload {
 
 export interface ChatCallHeartbeatPayload extends ChatConversationCommandPayload {
   userId: string;
+  acceptedAt?: string;
+  serverTimestamp?: string;
 }
 
 export interface ChatWebRTCOfferPayload extends ChatConversationCommandPayload {

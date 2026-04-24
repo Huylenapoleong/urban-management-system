@@ -13,12 +13,6 @@ import {
   CHAT_SOCKET_EVENTS,
   CHAT_SOCKET_NAMESPACE,
 } from '@urban/shared-constants';
-import {
-  isDmConversationId,
-  isGroupConversationId,
-  makeDmConversationId,
-  nowIso,
-} from '@urban/shared-utils';
 import type {
   AuthenticatedUser,
   CallEventInfo,
@@ -40,7 +34,6 @@ import type {
   ChatMessageUpdatePayload,
   ChatPresenceSnapshotEvent,
   ChatPresenceUpdatedEvent,
-  RecallMessageResult,
   ChatReadAccepted,
   ChatSocketAck,
   ChatSocketError,
@@ -51,17 +44,24 @@ import type {
   ChatWebRTCAnswerPayload,
   ChatWebRTCIceCandidatePayload,
   ChatWebRTCOfferPayload,
+  RecallMessageResult,
 } from '@urban/shared-types';
+import {
+  isDmConversationId,
+  isGroupConversationId,
+  makeDmConversationId,
+  nowIso,
+} from '@urban/shared-utils';
 import type { Server, Socket } from 'socket.io';
 import { Public } from '../../common/decorators/public.decorator';
 import {
   ensureObject,
-  requiredBoolean,
   optionalString,
+  requiredBoolean,
   requiredString,
 } from '../../common/validation';
-import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
 import { ObservabilityService } from '../../infrastructure/observability/observability.service';
+import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
 import { ChatCallSessionService } from './chat-call-session.service';
 import { ChatRealtimeService } from './chat-realtime.service';
 import { ChatSocketAuthService } from './chat-socket-auth.service';
@@ -549,9 +549,11 @@ export class ConversationsGateway
           requiredBoolean(body, 'isVideo'),
         );
         const signalPayload = this.buildCallInitPayload(
-          access.conversationId,
+          access.conversationKey,
           result.session,
           user,
+          body.callerName as string | undefined,
+          body.callerAvatarUrl as string | undefined,
         );
 
         if (result.shouldEmit) {
@@ -564,7 +566,12 @@ export class ConversationsGateway
           );
         }
 
-        return { success: true };
+        return {
+          success: true,
+          startedAt: result.session?.createdAt,
+          acceptedAt: result.session?.acceptedAt,
+          serverTimestamp: nowIso(),
+        };
       },
       'CHAT_CALL_INIT_FAILED',
       CHAT_SOCKET_EVENTS.CALL_INIT,
@@ -581,13 +588,14 @@ export class ConversationsGateway
         const { access, user } = await this.resolveSignalAccess(
           client,
           payload,
+          true, // Use call-session fast path: bypass canAccessDmConversation for active sessions
         );
         const result = await this.chatCallSessionService.acceptCall(
           access,
           user.id,
         );
         const signalPayload = this.buildCallAcceptPayload(
-          access.conversationId,
+          access.conversationKey,
           result.session,
           user,
         );
@@ -604,7 +612,12 @@ export class ConversationsGateway
           );
         }
 
-        return { success: true };
+        return {
+          success: true,
+          acceptedAt: result.session?.acceptedAt,
+          startedAt: result.session?.createdAt,
+          serverTimestamp: nowIso(),
+        };
       },
       'CHAT_CALL_ACCEPT_FAILED',
       CHAT_SOCKET_EVENTS.CALL_ACCEPT,
@@ -621,6 +634,7 @@ export class ConversationsGateway
         const { access, user } = await this.resolveSignalAccess(
           client,
           payload,
+          true, // Use call-session fast path: bypass canAccessDmConversation for active sessions
         );
         const result = await this.chatCallSessionService.rejectCall(
           access,
@@ -630,7 +644,7 @@ export class ConversationsGateway
           ? this.buildCallEventInfo(result.session, 'REJECTED', user.id)
           : undefined;
         const signalPayload = this.buildCallRejectPayload(
-          access.conversationId,
+          access.conversationKey,
           user,
           callEvent,
         );
@@ -642,6 +656,8 @@ export class ConversationsGateway
             signalPayload,
             client.id,
             user.id,
+            undefined, // no specific recipients — broadcast to all participants
+            true, // P1: includeActor=true → actor's other devices dismiss their popup
           );
           void this.persistBestEffortCallSystemMessage(
             user,
@@ -669,6 +685,7 @@ export class ConversationsGateway
         const { access, user } = await this.resolveSignalAccess(
           client,
           payload,
+          true, // Use call-session fast path: bypass canAccessDmConversation for active sessions
         );
         const result = await this.chatCallSessionService.endCall(
           access,
@@ -686,7 +703,7 @@ export class ConversationsGateway
             )
           : undefined;
         const signalPayload = this.buildCallEndPayload(
-          access.conversationId,
+          access.conversationKey,
           user,
           callEvent,
           callStillActive,
@@ -699,6 +716,8 @@ export class ConversationsGateway
             signalPayload,
             client.id,
             user.id,
+            // includeActor=false (default): only notify the OTHER party.
+            // The sender cleans up locally on the client side immediately.
           );
           void this.persistBestEffortCallSystemMessage(
             user,
@@ -728,12 +747,13 @@ export class ConversationsGateway
           payload,
           true,
         );
-        await this.chatCallSessionService.touchSignalingSession(
+        const session = await this.chatCallSessionService.touchSignalingSession(
           access,
           user.id,
         );
         const heartbeatPayload = this.buildCallHeartbeatPayload(
-          access.conversationId,
+          access.conversationKey,
+          session,
           user,
         );
 
@@ -820,7 +840,7 @@ export class ConversationsGateway
             user.id,
           );
         const signalPayload = this.buildWebRtcPayload(
-          access.conversationId,
+          access.conversationKey,
           body,
           field,
           user,
@@ -925,6 +945,8 @@ export class ConversationsGateway
         }
       | undefined,
     user: AuthenticatedUser,
+    clientCallerName?: string,
+    clientCallerAvatarUrl?: string,
   ): ChatCallInitPayload {
     if (!session) {
       throw new HttpException('Active call session is required.', 409);
@@ -933,9 +955,11 @@ export class ConversationsGateway
     return {
       conversationId,
       callerId: user.id,
-      callerName: user.fullName,
+      callerName: clientCallerName || user.fullName || 'Người dùng',
+      callerAvatarUrl: clientCallerAvatarUrl || user.avatarUrl,
       isVideo: session.isVideo,
       startedAt: session.createdAt,
+      serverTimestamp: nowIso(),
     };
   }
 
@@ -956,6 +980,7 @@ export class ConversationsGateway
       conversationId,
       calleeId: user.id,
       acceptedAt: session.acceptedAt ?? undefined,
+      serverTimestamp: nowIso(),
     };
   }
 
@@ -994,11 +1019,14 @@ export class ConversationsGateway
 
   private buildCallHeartbeatPayload(
     conversationId: string,
+    session: { acceptedAt: string | null },
     user: AuthenticatedUser,
   ): ChatCallHeartbeatPayload {
     return {
       conversationId,
       userId: user.id,
+      acceptedAt: session.acceptedAt ?? undefined,
+      serverTimestamp: nowIso(),
     };
   }
 

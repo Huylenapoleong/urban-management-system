@@ -1,4 +1,4 @@
-import { apiClient, ApiResponse, ListResponse } from "./api-client";
+import { apiClient, ApiResponse, ListResponse } from './api-client';
 
 export interface Region {
   id: string;
@@ -24,29 +24,29 @@ export interface UpdateRegionRequest {
 class RegionsService {
   async getRegions(
     page: number = 1,
-    limit: number = 10
+    limit: number = 10,
   ): Promise<ApiResponse<ListResponse<Region>>> {
     // Note: /regions endpoint doesn't exist in the backend
     // Returning mock data for UI development
     const mockRegions: Region[] = [
       {
-        id: "region-1",
-        name: "District 1",
-        description: "Central district",
+        id: 'region-1',
+        name: 'District 1',
+        description: 'Central district',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
       {
-        id: "region-2",
-        name: "District 2",
-        description: "East district",
+        id: 'region-2',
+        name: 'District 2',
+        description: 'East district',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
       {
-        id: "region-3",
-        name: "District 3",
-        description: "South district",
+        id: 'region-3',
+        name: 'District 3',
+        description: 'South district',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -70,10 +70,13 @@ class RegionsService {
   }
 
   async createRegion(data: CreateRegionRequest): Promise<ApiResponse<Region>> {
-    return apiClient.post<Region>("/regions", data);
+    return apiClient.post<Region>('/regions', data);
   }
 
-  async updateRegion(id: string, data: UpdateRegionRequest): Promise<ApiResponse<Region>> {
+  async updateRegion(
+    id: string,
+    data: UpdateRegionRequest,
+  ): Promise<ApiResponse<Region>> {
     return apiClient.patch<Region>(`/regions/${id}`, data);
   }
 

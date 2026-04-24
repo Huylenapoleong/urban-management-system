@@ -31,6 +31,9 @@ describe('UsersService', () => {
     canManageUser: jest.fn(),
     canReadUser: jest.fn(),
   };
+  const locationsService = {
+    ensureKnownLocationCode: jest.fn((value: string) => value),
+  };
   const chatPresenceService = {
     getPresence: jest.fn(),
   };
@@ -125,6 +128,7 @@ describe('UsersService', () => {
       passwordService as never,
       passwordPolicyService as never,
       authorizationService as never,
+      locationsService as never,
       chatPresenceService as never,
       chatRealtimeService as never,
       refreshSessionService as never,

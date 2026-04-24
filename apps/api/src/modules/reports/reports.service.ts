@@ -28,11 +28,11 @@ import {
   nowIso,
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
+import { toReport, toReportConversationLink } from '../../common/mappers';
 import {
   buildPaginatedResponse,
   paginateSortedItems,
 } from '../../common/pagination';
-import { toReport, toReportConversationLink } from '../../common/mappers';
 import type {
   StoredPushOutboxEvent,
   StoredReport,
@@ -40,13 +40,11 @@ import type {
   StoredReportConversationLink,
 } from '../../common/storage-records';
 import {
-  ensureLocationCode,
   ensureObject,
   optionalEnum,
   optionalQueryString,
   optionalString,
   optionalStringArray,
-  parseLocationCodeQuery,
   parseBooleanQuery,
   parseEnumQuery,
   parseIsoDateQuery,
@@ -60,6 +58,7 @@ import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.
 import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
 import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { GroupsService } from '../groups/groups.service';
+import { LocationsService } from '../locations/locations.service';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
@@ -67,6 +66,7 @@ export class ReportsService {
   constructor(
     private readonly repository: UrbanTableRepository,
     private readonly authorizationService: AuthorizationService,
+    private readonly locationsService: LocationsService,
     private readonly usersService: UsersService,
     private readonly groupsService: GroupsService,
     private readonly auditTrailService: AuditTrailService,
@@ -89,7 +89,7 @@ export class ReportsService {
     });
     const category = requiredEnum(body, 'category', REPORT_CATEGORIES);
     const priority = requiredEnum(body, 'priority', REPORT_PRIORITIES);
-    const locationCode = ensureLocationCode(
+    const locationCode = this.locationsService.ensureKnownLocationCode(
       requiredString(body, 'locationCode'),
     );
     const mediaInput = this.resolveReportMediaInput(body, actor.id);
@@ -181,10 +181,16 @@ export class ReportsService {
       query.assignedOfficerId,
       'assignedOfficerId',
     );
-    const locationCode = parseLocationCodeQuery(
+    const locationCodeInput = optionalQueryString(
       query.locationCode,
       'locationCode',
     );
+    const locationCode = locationCodeInput
+      ? this.locationsService.ensureKnownLocationCode(
+          locationCodeInput,
+          'locationCode',
+        )
+      : undefined;
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const createdFrom = parseIsoDateQuery(query.createdFrom, 'createdFrom');
     const createdTo = parseIsoDateQuery(query.createdTo, 'createdTo');
@@ -233,7 +239,7 @@ export class ReportsService {
       );
     }
 
-        const filtered = reports
+    const filtered = reports
       .filter((report) => report.entityType === 'REPORT')
       .filter((report) => !report.deletedAt)
       .filter((report) =>
@@ -483,7 +489,7 @@ export class ReportsService {
     const category = optionalEnum(body, 'category', REPORT_CATEGORIES);
     const locationCodeInput = optionalString(body, 'locationCode');
     const nextLocationCode = locationCodeInput
-      ? ensureLocationCode(locationCodeInput)
+      ? this.locationsService.ensureKnownLocationCode(locationCodeInput)
       : report.locationCode;
 
     if (!canManage && (category || locationCodeInput)) {

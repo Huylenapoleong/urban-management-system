@@ -59,17 +59,23 @@ interface EmbeddingService {
 // ─── Step 1: Xóa table cũ nếu đang tồn tại ───────────────────────────────────
 async function dropTableIfExists(): Promise<void> {
   try {
-    const describeResult = await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+    const describeResult = await client.send(
+      new DescribeTableCommand({ TableName: TABLE_NAME }),
+    );
     const status = describeResult.Table?.TableStatus;
     console.log(`[INFO] Table "${TABLE_NAME}" exists (status: ${status})`);
 
     // Nếu table đang CREATING/UPDATING, đợi nó xong trước
     if (status !== 'ACTIVE') {
-      console.log('[INFO] Waiting for table to become ACTIVE before deleting...');
+      console.log(
+        '[INFO] Waiting for table to become ACTIVE before deleting...',
+      );
       for (let i = 0; i < 30; i++) {
         await sleep(3000);
         try {
-          const res = await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+          const res = await client.send(
+            new DescribeTableCommand({ TableName: TABLE_NAME }),
+          );
           if (res.Table?.TableStatus === 'ACTIVE') {
             console.log('[OK] Table is now ACTIVE.');
             break;
@@ -102,7 +108,9 @@ async function dropTableIfExists(): Promise<void> {
     throw new Error('Table deletion timed out.');
   } catch (err) {
     if (err instanceof ResourceNotFoundException) {
-      console.log(`[OK] Table "${TABLE_NAME}" does not exist — skipping delete.`);
+      console.log(
+        `[OK] Table "${TABLE_NAME}" does not exist — skipping delete.`,
+      );
     } else {
       throw err;
     }
@@ -120,7 +128,7 @@ async function createTable(): Promise<void> {
         { AttributeName: 'PK', AttributeType: 'S' },
         { AttributeName: 'SK', AttributeType: 'S' },
         { AttributeName: 'category', AttributeType: 'S' }, // field thật
-        { AttributeName: 'docId', AttributeType: 'S' },   // field thật
+        { AttributeName: 'docId', AttributeType: 'S' }, // field thật
       ],
       KeySchema: [
         { AttributeName: 'PK', KeyType: 'HASH' },
@@ -143,7 +151,9 @@ async function createTable(): Promise<void> {
   console.log('[INFO] Waiting for table to become ACTIVE...');
   for (let i = 0; i < 30; i++) {
     await sleep(2000);
-    const res = await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+    const res = await client.send(
+      new DescribeTableCommand({ TableName: TABLE_NAME }),
+    );
     if (res.Table?.TableStatus === 'ACTIVE') {
       console.log('[OK] Table is ACTIVE.');
       return;
@@ -183,7 +193,9 @@ async function initEmbeddingService(): Promise<EmbeddingService | null> {
 }
 
 // ─── Step 3: Đọc file JSON và nạp dữ liệu (with embeddings) ──────────────────
-async function seedData(embeddingService: EmbeddingService | null): Promise<void> {
+async function seedData(
+  embeddingService: EmbeddingService | null,
+): Promise<void> {
   const dataPath = path.join(__dirname, 'knowledge-seed-data.json');
   const raw: SeedDocument[] = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
 
@@ -205,7 +217,9 @@ async function seedData(embeddingService: EmbeddingService | null): Promise<void
       );
     }
   } else {
-    console.log('[WARN] No embedding service — documents will be saved without embeddings.');
+    console.log(
+      '[WARN] No embedding service — documents will be saved without embeddings.',
+    );
     raw.forEach(() => embeddings.push(undefined));
   }
 
@@ -216,9 +230,9 @@ async function seedData(embeddingService: EmbeddingService | null): Promise<void
       PutRequest: {
         Item: {
           PK: 'KNOWLEDGE_DOCUMENT', // constant entity type
-          SK: doc.docId,            // docId trực tiếp, không cần prefix
-          category: doc.category,   // field thật → GSI partition key
-          docId: doc.docId,         // field thật → GSI sort key
+          SK: doc.docId, // docId trực tiếp, không cần prefix
+          category: doc.category, // field thật → GSI partition key
+          docId: doc.docId, // field thật → GSI sort key
           title: doc.title,
           content: doc.content,
           source: doc.source,
@@ -247,7 +261,9 @@ function sleep(ms: number): Promise<void> {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
-  console.log(`\n=== Knowledge Base Seed Script (Phase 2 — with embeddings) ===`);
+  console.log(
+    `\n=== Knowledge Base Seed Script (Phase 2 — with embeddings) ===`,
+  );
   console.log(`Table : ${TABLE_NAME}`);
   console.log(`Region: ${REGION}`);
   console.log(`Endpoint: ${ENDPOINT ?? 'AWS (production)'}\n`);

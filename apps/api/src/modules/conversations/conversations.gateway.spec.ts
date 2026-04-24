@@ -1,6 +1,6 @@
 import {
-  ConflictException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '@urban/shared-types';
@@ -269,7 +269,7 @@ describe('ConversationsGateway', () => {
       isVideo: true,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       success: true,
       data: { success: true },
     });
@@ -277,11 +277,13 @@ describe('ConversationsGateway', () => {
       ['user-2'],
       'call.init',
       {
-        conversationId: 'dm:user-2',
+        conversationId: 'DM#user-1#user-2',
         callerId: actor.id,
         callerName: actor.fullName,
+        callerAvatarUrl: actor.avatarUrl,
         isVideo: true,
         startedAt: '2026-04-22T14:00:00.000Z',
+        serverTimestamp: expect.any(String),
       },
     );
     expect(observabilityService.recordRealtimeAck).toHaveBeenCalledWith(
@@ -324,7 +326,7 @@ describe('ConversationsGateway', () => {
       isVideo: true,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       success: true,
       data: { success: true },
     });
@@ -359,7 +361,7 @@ describe('ConversationsGateway', () => {
       conversationId: 'group:group-1',
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       success: true,
       data: { success: true },
     });
@@ -367,9 +369,10 @@ describe('ConversationsGateway', () => {
       ['user-1', 'user-2', 'user-3'],
       'call.accept',
       {
-        conversationId: 'group:group-1',
+        conversationId: 'GRP#group-1',
         calleeId: actor.id,
         acceptedAt: '2026-04-22T14:00:08.000Z',
+        serverTimestamp: expect.any(String),
       },
     );
     expect(chatRealtimeService.emitToConversation).not.toHaveBeenCalled();
@@ -456,7 +459,7 @@ describe('ConversationsGateway', () => {
       ['user-2'],
       'call.end',
       {
-        conversationId: 'dm:user-2',
+        conversationId: 'DM#user-1#user-2',
         userId: actor.id,
         endedByUserId: actor.id,
         startedAt: '2026-04-22T14:00:00.000Z',
@@ -533,7 +536,7 @@ describe('ConversationsGateway', () => {
       ['user-2'],
       'webrtc.offer',
       {
-        conversationId: 'dm:user-2',
+        conversationId: 'DM#user-1#user-2',
         senderId: actor.id,
         offer: { sdp: 'offer-sdp', type: 'offer' },
       },
@@ -585,6 +588,48 @@ describe('ConversationsGateway', () => {
       'call.heartbeat',
       expect.any(Number),
       'success',
+    );
+  });
+
+  it('broadcasts group call heartbeats with synchronization data to other participants', async () => {
+    const { client } = createSocketClient();
+
+    chatSocketAuthService.authenticate.mockResolvedValue({
+      user: actor,
+      sessionId: 'session-1',
+      token: 'access-token',
+      claims: {
+        exp: Math.floor(Date.now() / 1000) + 300,
+      },
+    });
+    conversationsService.resolveConversationAccess.mockResolvedValue({
+      conversationId: 'group:group-1',
+      conversationKey: 'GRP#group-1',
+      participants: ['user-1', 'user-2', 'user-3'],
+      isGroup: true,
+    });
+    chatCallSessionService.touchSignalingSession.mockResolvedValue({
+      acceptedAt: '2026-04-22T14:00:08.000Z',
+      status: 'ACTIVE',
+    });
+
+    const result = await gateway.handleCallHeartbeat(client, {
+      conversationId: 'group:group-1',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { success: true },
+    });
+    expect(chatRealtimeService.emitToUsers).toHaveBeenCalledWith(
+      ['user-2', 'user-3'],
+      'call.heartbeat',
+      {
+        conversationId: 'GRP#group-1',
+        userId: actor.id,
+        acceptedAt: '2026-04-22T14:00:08.000Z',
+        serverTimestamp: expect.any(String),
+      },
     );
   });
 });

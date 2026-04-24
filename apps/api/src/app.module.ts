@@ -5,13 +5,15 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { GroupsModule } from './modules/groups/groups.module';
+import { LocationsModule } from './modules/locations/locations.module';
 import { ReportsModule } from './modules/reports/reports.module';
-import { UsersModule } from './modules/users/users.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
     InfrastructureModule,
+    LocationsModule,
     UsersModule,
     AuthModule,
     GroupsModule,

@@ -1,10 +1,10 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type {
+  StoredGroup,
   StoredGroupBan,
+  StoredGroupDeleteCleanupTask,
   StoredGroupInviteCodeLookup,
   StoredGroupInviteLink,
-  StoredGroup,
-  StoredGroupDeleteCleanupTask,
   StoredMembership,
 } from '../../common/storage-records';
 import { GroupsService } from './groups.service';
@@ -31,6 +31,9 @@ describe('GroupsService', () => {
     canRenameGroup: jest.fn(),
     canReadGroup: jest.fn(),
     canTransferGroupOwnership: jest.fn(),
+  };
+  const locationsService = {
+    ensureKnownLocationCode: jest.fn((value: string) => value),
   };
   const usersService = {
     areFriends: jest.fn(),
@@ -191,6 +194,7 @@ describe('GroupsService', () => {
     service = new GroupsService(
       repository as never,
       authorizationService as never,
+      locationsService as never,
       usersService as never,
       groupCleanupService as never,
       auditTrailService as never,

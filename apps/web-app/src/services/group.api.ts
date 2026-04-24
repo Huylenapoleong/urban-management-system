@@ -4,7 +4,21 @@ import type {
   GroupMessagePolicy,
   GroupType,
 } from "@urban/shared-constants";
-import type { GroupBan, GroupInviteLink, GroupMembership, GroupMetadata } from "@urban/shared-types";
+import type {
+  GroupBan,
+  GroupInviteLink,
+  GroupMembership,
+  GroupMetadata,
+} from "@urban/shared-types";
+
+export type AuditEventItem = {
+  eventId: string;
+  eventType: string;
+  actorId?: string;
+  targetId?: string;
+  occurredAt: string;
+  metadata?: Record<string, unknown>;
+};
 
 type ManageMemberAction = "add" | "update" | "remove";
 
@@ -63,24 +77,43 @@ export interface BanGroupMemberInput {
   expiresAt?: string;
 }
 
-export async function getGroups(params?: GroupListParams): Promise<GroupMetadata[]> {
+export interface TransferOwnershipInput {
+  newOwnerUserId: string;
+}
+
+export async function getGroups(
+  params?: GroupListParams,
+): Promise<GroupMetadata[]> {
   const qParams = new URLSearchParams();
-  if (params?.mine !== undefined) qParams.append('mine', String(params.mine));
-  if (params?.q) qParams.append('q', params.q);
-  if (params?.groupType) qParams.append('groupType', params.groupType);
-  if (params?.locationCode) qParams.append('locationCode', params.locationCode);
-  if (params?.cursor) qParams.append('cursor', params.cursor);
-  if (typeof params?.limit === 'number') qParams.append('limit', String(params.limit));
-  
+  if (params?.mine !== undefined) qParams.append("mine", String(params.mine));
+  if (params?.q) qParams.append("q", params.q);
+  if (params?.groupType) qParams.append("groupType", params.groupType);
+  if (params?.locationCode) qParams.append("locationCode", params.locationCode);
+  if (params?.cursor) qParams.append("cursor", params.cursor);
+  if (typeof params?.limit === "number")
+    qParams.append("limit", String(params.limit));
+
   return await ApiClient.get(`/groups?${qParams.toString()}`);
 }
 
-export async function createGroup(payload: CreateGroupInput): Promise<GroupMetadata> {
+export async function createGroup(
+  payload: CreateGroupInput,
+): Promise<GroupMetadata> {
   return await ApiClient.post("/groups", payload);
 }
 
-export async function updateGroup(groupId: string, payload: UpdateGroupInput): Promise<GroupMetadata> {
-  return await ApiClient.patch(`/groups/${encodeURIComponent(groupId)}`, payload);
+export async function getGroup(groupId: string): Promise<GroupMetadata> {
+  return await ApiClient.get(`/groups/${encodeURIComponent(groupId)}`);
+}
+
+export async function updateGroup(
+  groupId: string,
+  payload: UpdateGroupInput,
+): Promise<GroupMetadata> {
+  return await ApiClient.patch(
+    `/groups/${encodeURIComponent(groupId)}`,
+    payload,
+  );
 }
 
 export async function joinGroup(groupId: string): Promise<GroupMembership> {
@@ -91,11 +124,19 @@ export async function leaveGroup(groupId: string): Promise<GroupMembership> {
   return await leaveGroupWithPayload(groupId);
 }
 
-export async function leaveGroupWithPayload(groupId: string, payload?: LeaveGroupInput): Promise<GroupMembership> {
-  return await ApiClient.post(`/groups/${encodeURIComponent(groupId)}/leave`, payload ?? {});
+export async function leaveGroupWithPayload(
+  groupId: string,
+  payload?: LeaveGroupInput,
+): Promise<GroupMembership> {
+  return await ApiClient.post(
+    `/groups/${encodeURIComponent(groupId)}/leave`,
+    payload ?? {},
+  );
 }
 
-export async function listGroupMembers(groupId: string): Promise<GroupMembership[]> {
+export async function listGroupMembers(
+  groupId: string,
+): Promise<GroupMembership[]> {
   return await ApiClient.get(`/groups/${encodeURIComponent(groupId)}/members`);
 }
 
@@ -130,7 +171,10 @@ export async function addGroupMember(
   groupId: string,
   payload: AddGroupMemberInput,
 ): Promise<GroupMembership> {
-  return await ApiClient.post(`/groups/${encodeURIComponent(groupId)}/members`, payload);
+  return await ApiClient.post(
+    `/groups/${encodeURIComponent(groupId)}/members`,
+    payload,
+  );
 }
 
 export async function updateGroupMemberRole(
@@ -168,29 +212,81 @@ export async function banGroupMember(
   );
 }
 
-export async function unbanGroupMember(groupId: string, userId: string): Promise<GroupBan> {
+export async function unbanGroupMember(
+  groupId: string,
+  userId: string,
+): Promise<GroupBan> {
   return await ApiClient.delete(
     `/groups/${encodeURIComponent(groupId)}/bans/${encodeURIComponent(userId)}`,
   );
 }
 
-export async function listGroupInviteLinks(groupId: string): Promise<GroupInviteLink[]> {
-  return await ApiClient.get(`/groups/${encodeURIComponent(groupId)}/invite-links`);
+export async function listGroupInviteLinks(
+  groupId: string,
+): Promise<GroupInviteLink[]> {
+  return await ApiClient.get(
+    `/groups/${encodeURIComponent(groupId)}/invite-links`,
+  );
 }
 
 export async function createGroupInviteLink(
   groupId: string,
   payload?: CreateInviteLinkInput,
 ): Promise<GroupInviteLink> {
-  return await ApiClient.post(`/groups/${encodeURIComponent(groupId)}/invite-links`, payload ?? {});
+  return await ApiClient.post(
+    `/groups/${encodeURIComponent(groupId)}/invite-links`,
+    payload ?? {},
+  );
 }
 
-export async function revokeGroupInviteLink(groupId: string, inviteId: string): Promise<GroupInviteLink> {
+export async function revokeGroupInviteLink(
+  groupId: string,
+  inviteId: string,
+): Promise<GroupInviteLink> {
   return await ApiClient.delete(
     `/groups/${encodeURIComponent(groupId)}/invite-links/${encodeURIComponent(inviteId)}`,
   );
 }
 
-export async function joinGroupByInvite(code: string): Promise<GroupMembership> {
-  return await ApiClient.post(`/groups/invite-links/${encodeURIComponent(code)}/join`);
+export async function joinGroupByInvite(
+  code: string,
+): Promise<GroupMembership> {
+  return await ApiClient.post(
+    `/groups/invite-links/${encodeURIComponent(code)}/join`,
+  );
+}
+
+/** Production-safe deletion. Prefer over deleteGroup in most cases. */
+export async function dissolveGroup(groupId: string): Promise<GroupMetadata> {
+  return await ApiClient.post(
+    `/groups/${encodeURIComponent(groupId)}/dissolve`,
+  );
+}
+
+export async function deleteGroup(groupId: string): Promise<GroupMetadata> {
+  return await ApiClient.delete(`/groups/${encodeURIComponent(groupId)}`);
+}
+
+export async function transferOwnership(
+  groupId: string,
+  payload: TransferOwnershipInput,
+): Promise<{ previousOwner: GroupMembership; newOwner: GroupMembership }> {
+  return await ApiClient.post(
+    `/groups/${encodeURIComponent(groupId)}/ownership-transfer`,
+    payload,
+  );
+}
+
+export async function listAuditEvents(
+  groupId: string,
+  params?: { cursor?: string; limit?: number },
+): Promise<AuditEventItem[]> {
+  const qs = new URLSearchParams();
+  if (params?.cursor) qs.append("cursor", params.cursor);
+  if (typeof params?.limit === "number")
+    qs.append("limit", String(params.limit));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return await ApiClient.get(
+    `/groups/${encodeURIComponent(groupId)}/audit${query}`,
+  );
 }

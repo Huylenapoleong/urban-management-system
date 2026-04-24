@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsEnum } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 
 export class OfficerGenerateReportDto {
   @ApiPropertyOptional({
@@ -12,14 +12,15 @@ export class OfficerGenerateReportDto {
 
   @ApiPropertyOptional({
     description: 'Lọc theo locationCode',
-    example: 'VN-HCM-Q1-P01',
+    example: 'VN-79-25747',
   })
   @IsOptional()
   @IsString()
   locationCode?: string;
 
   @ApiPropertyOptional({
-    description: 'Lọc theo category (INFRASTRUCTURE, ENVIRONMENT, SECURITY, ADMIN)',
+    description:
+      'Lọc theo category (INFRASTRUCTURE, ENVIRONMENT, SECURITY, ADMIN)',
     example: 'ENVIRONMENT',
   })
   @IsOptional()

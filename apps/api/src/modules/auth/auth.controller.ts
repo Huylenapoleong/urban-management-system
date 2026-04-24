@@ -16,12 +16,11 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
 import type { AuthenticatedUser, JwtClaims } from '@urban/shared-types';
+import type { Request } from 'express';
 import { CurrentAuthClaims } from '../../common/decorators/current-auth-claims.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { extractSessionClientMetadata } from '../../common/request-session-metadata';
 import {
   ApiCreatedEnvelopeResponse,
   ApiOkEnvelopeResponse,
@@ -36,9 +35,9 @@ import {
 import {
   AccountLifecycleOtpVerifyRequestDto,
   AccountLifecycleResultDto,
+  AuthOtpChallengeResultDto,
   AuthSessionDto,
   AuthSessionInfoDto,
-  AuthOtpChallengeResultDto,
   ChangePasswordRequestDto,
   ChangePasswordResultDto,
   DeleteAccountConfirmRequestDto,
@@ -57,13 +56,14 @@ import {
   LogoutResultDto,
   ReactivateAccountOtpRequestDto,
   ReactivateAccountOtpVerifyRequestDto,
+  RefreshRequestDto,
   RegisterOtpRequestDto,
   RegisterOtpVerifyRequestDto,
-  RefreshRequestDto,
   RegisterRequestDto,
   RevokeSessionResultDto,
   UserProfileDto,
 } from '../../common/openapi/swagger.models';
+import { extractSessionClientMetadata } from '../../common/request-session-metadata';
 import { AuthService } from './auth.service';
 
 @ApiTags('Auth')
@@ -414,7 +414,8 @@ export class AuthController {
   @Post('unlock/request-otp')
   @ApiOperation({
     summary: 'Request OTP to unlock account',
-    description: 'Provide login and password to verify, then sends OTP to account email to unlock a LOCKED account.',
+    description:
+      'Provide login and password to verify, then sends OTP to account email to unlock a LOCKED account.',
   })
   @ApiBody({ type: LoginOtpRequestDto })
   @ApiOkEnvelopeResponse(AuthOtpChallengeResultDto)
@@ -426,7 +427,8 @@ export class AuthController {
   @Post('unlock/confirm')
   @ApiOperation({
     summary: 'Confirm OTP to unlock account and login',
-    description: 'Verify the OTP. If valid, unlocks the account and returns tokens to login.',
+    description:
+      'Verify the OTP. If valid, unlocks the account and returns tokens to login.',
   })
   @ApiBody({ type: LoginOtpVerifyRequestDto })
   @ApiOkEnvelopeResponse(AuthSessionDto)

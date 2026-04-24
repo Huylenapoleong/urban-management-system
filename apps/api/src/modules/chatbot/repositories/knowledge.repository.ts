@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../../infrastructure/dynamodb/urban-table.repository';
-import type { KnowledgeDocument, StoredKnowledgeDocument } from '../types/knowledge-document.types';
+import type {
+  KnowledgeDocument,
+  StoredKnowledgeDocument,
+} from '../types/knowledge-document.types';
 
 @Injectable()
 export class KnowledgeRepository {
@@ -31,7 +34,7 @@ export class KnowledgeRepository {
       { limit: maxDocs },
     );
 
-    return records.map(KnowledgeRepository.toDocument);
+    return records.map((record) => KnowledgeRepository.toDocument(record));
   }
 
   /**
@@ -44,7 +47,7 @@ export class KnowledgeRepository {
 
     return records
       .slice(0, this.config.chatbotMaxContextDocs * 2)
-      .map(KnowledgeRepository.toDocument);
+      .map((record) => KnowledgeRepository.toDocument(record));
   }
 
   /**
@@ -75,7 +78,8 @@ export class KnowledgeRepository {
 
     // Lọc documents có embedding
     const withEmbeddings = records.filter(
-      (r) => r.embedding && Array.isArray(r.embedding) && r.embedding.length > 0,
+      (r) =>
+        r.embedding && Array.isArray(r.embedding) && r.embedding.length > 0,
     );
 
     if (withEmbeddings.length === 0) {
@@ -141,4 +145,3 @@ export class KnowledgeRepository {
     };
   }
 }
-

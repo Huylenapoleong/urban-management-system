@@ -1,6 +1,7 @@
-import ApiClient from "@/lib/api-client";
-import { readAccessToken } from "@/lib/api-client";
-import { buildSessionMetadataHeaders } from "@/lib/api-client";
+import ApiClient, {
+  buildSessionMetadataHeaders,
+  readAccessToken,
+} from "@/lib/api-client";
 import type {
   UserBlockedItem,
   UserDirectoryItem,
@@ -30,7 +31,9 @@ export interface BlockActionResult {
   unblockedAt?: string;
 }
 
-function buildQuery(params?: Record<string, string | number | undefined>): string {
+function buildQuery(
+  params?: Record<string, string | number | undefined>,
+): string {
   const search = new URLSearchParams();
   if (!params) {
     return "";
@@ -88,16 +91,18 @@ export async function discoverFriendCandidates(params?: {
     cursor: params?.cursor,
     limit: params?.limit ?? 20,
   });
-  return await ApiClient.get(`/users/discover${query}`, {
+  return (await ApiClient.get(`/users/discover${query}`, {
     headers: {
       "Cache-Control": "no-cache, no-store, max-age=0",
       Pragma: "no-cache",
       Expires: "0",
     },
-  }) as DiscoverFriendItem[];
+  })) as DiscoverFriendItem[];
 }
 
-export async function listMyFriends(params?: FriendListParams): Promise<UserFriendItem[]> {
+export async function listMyFriends(
+  params?: FriendListParams,
+): Promise<UserFriendItem[]> {
   const page = await listMyFriendsPage(params);
   return page.items;
 }
@@ -131,10 +136,14 @@ export async function listMyFriendRequestsPage(params?: {
     cursor: params?.cursor,
     limit: params?.limit ?? 50,
   });
-  return await getCursorPage<UserFriendRequestItem>(`/users/me/friend-requests${query}`);
+  return await getCursorPage<UserFriendRequestItem>(
+    `/users/me/friend-requests${query}`,
+  );
 }
 
-export async function listMyBlockedUsers(params?: FriendListParams): Promise<UserBlockedItem[]> {
+export async function listMyBlockedUsers(
+  params?: FriendListParams,
+): Promise<UserBlockedItem[]> {
   const page = await listMyBlockedUsersPage(params);
   return page.items;
 }
@@ -149,24 +158,44 @@ export async function listMyBlockedUsersPage(
   return await getCursorPage<UserBlockedItem>(`/users/me/blocks${query}`);
 }
 
-export async function sendFriendRequest(userId: string): Promise<UserFriendRequestItem> {
-  return await ApiClient.post(`/users/me/friends/${encodeURIComponent(userId)}/request`);
+export async function sendFriendRequest(
+  userId: string,
+): Promise<UserFriendRequestItem> {
+  return await ApiClient.post(
+    `/users/me/friends/${encodeURIComponent(userId)}/request`,
+  );
 }
 
-export async function acceptFriendRequest(userId: string): Promise<UserFriendItem> {
-  return await ApiClient.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/accept`);
+export async function acceptFriendRequest(
+  userId: string,
+): Promise<UserFriendItem> {
+  return await ApiClient.post(
+    `/users/me/friend-requests/${encodeURIComponent(userId)}/accept`,
+  );
 }
 
-export async function rejectFriendRequest(userId: string): Promise<{ success: boolean }> {
-  return await ApiClient.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/reject`);
+export async function rejectFriendRequest(
+  userId: string,
+): Promise<{ success: boolean }> {
+  return await ApiClient.post(
+    `/users/me/friend-requests/${encodeURIComponent(userId)}/reject`,
+  );
 }
 
-export async function cancelFriendRequest(userId: string): Promise<{ success: boolean }> {
-  return await ApiClient.post(`/users/me/friend-requests/${encodeURIComponent(userId)}/cancel`);
+export async function cancelFriendRequest(
+  userId: string,
+): Promise<{ success: boolean }> {
+  return await ApiClient.post(
+    `/users/me/friend-requests/${encodeURIComponent(userId)}/cancel`,
+  );
 }
 
-export async function removeFriend(userId: string): Promise<{ success: boolean }> {
-  return await ApiClient.delete(`/users/me/friends/${encodeURIComponent(userId)}`);
+export async function removeFriend(
+  userId: string,
+): Promise<{ success: boolean }> {
+  return await ApiClient.delete(
+    `/users/me/friends/${encodeURIComponent(userId)}`,
+  );
 }
 
 export async function blockUser(userId: string): Promise<BlockActionResult> {
@@ -174,5 +203,7 @@ export async function blockUser(userId: string): Promise<BlockActionResult> {
 }
 
 export async function unblockUser(userId: string): Promise<BlockActionResult> {
-  return await ApiClient.delete(`/users/me/blocks/${encodeURIComponent(userId)}`);
+  return await ApiClient.delete(
+    `/users/me/blocks/${encodeURIComponent(userId)}`,
+  );
 }

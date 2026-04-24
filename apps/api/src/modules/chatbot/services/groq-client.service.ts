@@ -50,7 +50,9 @@ export class GroqClientService {
       const content = response.choices[0]?.message?.content ?? '';
 
       if (!content.trim()) {
-        this.logger.warn('Groq returned an empty response — using fallback message');
+        this.logger.warn(
+          'Groq returned an empty response — using fallback message',
+        );
         return 'Xin lỗi, tôi không thể tạo câu trả lời vào lúc này. Vui lòng thử lại sau.';
       }
 

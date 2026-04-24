@@ -1,5 +1,30 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import Button from "@/components/Button";
+import Header from "@/components/Header";
+import CitizenReportCard from "@/components/shared/CitizenReportCard";
+import { CardListSkeleton } from "@/components/skeleton/Skeleton";
+import colors from "@/constants/colors";
+import { ENV_CONFIG } from "@/constants/env";
+import { convertToS3Url } from "@/constants/s3";
+import {
+  getResolvedLocation,
+  getResolvedLocationLabel,
+  useResolvedLocations,
+} from "@/hooks/shared/useResolvedLocations";
+import { ApiClient } from "@/lib/api-client";
+import { useAuth } from "@/providers/AuthProvider";
+import { listReports } from "@/services/api/report.api";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQueryClient } from "@tanstack/react-query";
+import { REPORT_CATEGORIES, REPORT_PRIORITIES } from "@urban/shared-constants";
+import type {
+  MediaAsset,
+  ReportItem,
+  UploadedAsset,
+} from "@urban/shared-types";
+import { Image } from "expo-image";
+import type { ImagePickerAsset } from "expo-image-picker";
+import * as ImagePicker from "expo-image-picker";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Platform,
@@ -11,23 +36,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import * as ImagePicker from "expo-image-picker";
-import { Image } from "expo-image";
-import { CardListSkeleton } from "@/components/skeleton/Skeleton";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { REPORT_CATEGORIES, REPORT_PRIORITIES } from "@urban/shared-constants";
-import type { ImagePickerAsset } from "expo-image-picker";
-import type { MediaAsset, ReportItem, UploadedAsset } from "@urban/shared-types";
-import { parseLocationCode } from "@urban/shared-utils";
-import Header from "@/components/Header";
-import Button from "@/components/Button";
-import CitizenReportCard from "@/components/shared/CitizenReportCard";
-import { ApiClient } from "@/lib/api-client";
-import { ENV_CONFIG } from "@/constants/env";
-import colors from "@/constants/colors";
-import { convertToS3Url } from "@/constants/s3";
-import { useAuth } from "@/providers/AuthProvider";
-import { listReports } from "@/services/api/report.api";
 
 type LocationOption = {
   key: string;
@@ -52,12 +60,20 @@ type CreateReportPayload = {
   mediaUrls?: string[];
 };
 
-const API_REPORT_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const API_REPORT_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
 
 function toSelectedImage(asset: ImagePickerAsset): SelectedImage {
   return {
     uri: asset.uri,
-    fileName: asset.fileName || asset.uri.split("/").pop() || `report-${Date.now()}.jpg`,
+    fileName:
+      asset.fileName ||
+      asset.uri.split("/").pop() ||
+      `report-${Date.now()}.jpg`,
     fileSize: asset.fileSize,
     mimeType: asset.mimeType || undefined,
     webFile: (asset as ImagePickerAsset & { file?: File }).file,
@@ -96,11 +112,16 @@ function inferReportImageMimeType(image: SelectedImage): string {
   return "image/jpeg";
 }
 
-async function appendReportUploadFile(formData: FormData, image: SelectedImage) {
+async function appendReportUploadFile(
+  formData: FormData,
+  image: SelectedImage,
+) {
   const contentType = inferReportImageMimeType(image);
 
   if (!API_REPORT_IMAGE_MIME_TYPES.has(contentType)) {
-    throw new Error("API chỉ nhận ảnh JPEG, PNG, WEBP hoặc GIF. Vui lòng chọn ảnh khác.");
+    throw new Error(
+      "API chỉ nhận ảnh JPEG, PNG, WEBP hoặc GIF. Vui lòng chọn ảnh khác.",
+    );
   }
 
   if (Platform.OS === "web") {
@@ -109,7 +130,9 @@ async function appendReportUploadFile(formData: FormData, image: SelectedImage) 
       : await fetch(image.uri).then((response) => response.blob());
 
     if (sourceBlob.size <= 0) {
-      throw new Error("Tệp ảnh đang rỗng. Vui lòng chọn lại ảnh khác.");
+      throw new Error(
+        "Tệp ảnh đang rỗng. Vui lòng chọn lại ảnh khác.",
+      );
     }
 
     const uploadBlob =
@@ -125,14 +148,11 @@ async function appendReportUploadFile(formData: FormData, image: SelectedImage) 
     return;
   }
 
-  formData.append(
-    "file",
-    {
-      uri: image.uri,
-      name: image.fileName,
-      type: contentType,
-    } as any,
-  );
+  formData.append("file", {
+    uri: image.uri,
+    name: image.fileName,
+    type: contentType,
+  } as any);
 }
 
 function resolveReportMediaUrl(value?: string | null): string | null {
@@ -160,7 +180,9 @@ function resolveReportMediaUrl(value?: string | null): string | null {
 
 function normalizeReportMedia(report: ReportItem): ReportItem {
   const fallbackUrls = (report.mediaAssets ?? [])
-    .map((asset: MediaAsset) => resolveReportMediaUrl(asset.resolvedUrl || asset.key))
+    .map((asset: MediaAsset) =>
+      resolveReportMediaUrl(asset.resolvedUrl || asset.key),
+    )
     .filter((value): value is string => Boolean(value));
 
   const mediaUrls = (report.mediaUrls ?? [])
@@ -177,40 +199,55 @@ export default function ReportPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<(typeof REPORT_CATEGORIES)[number]>(REPORT_CATEGORIES[0]);
-  const [priority, setPriority] = useState<(typeof REPORT_PRIORITIES)[number]>(REPORT_PRIORITIES[1]);
+  const [category, setCategory] = useState<(typeof REPORT_CATEGORIES)[number]>(
+    REPORT_CATEGORIES[0],
+  );
+  const [priority, setPriority] = useState<(typeof REPORT_PRIORITIES)[number]>(
+    REPORT_PRIORITIES[1],
+  );
   const [description, setDescription] = useState("");
-  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(
+    null,
+  );
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const locationSegments = useMemo(() => {
-    if (!user?.locationCode) {
-      return null;
-    }
-
-    try {
-      return parseLocationCode(user.locationCode);
-    } catch {
-      return null;
-    }
-  }, [user?.locationCode]);
+  const { data: locationMap } = useResolvedLocations([user?.locationCode]);
+  const resolvedLocation = getResolvedLocation(locationMap, user?.locationCode);
+  const locationLabel = getResolvedLocationLabel(
+    locationMap,
+    user?.locationCode,
+    "",
+  );
 
   const locationOptions = useMemo<LocationOption[]>(() => {
-    if (!locationSegments) {
+    if (!resolvedLocation) {
       return [];
     }
 
-    return [
-      { key: "country", label: "Quốc gia", value: locationSegments.country },
-      { key: "province", label: "Tỉnh/Thành", value: locationSegments.province },
-      { key: "district", label: "Quận/Huyện", value: locationSegments.district },
-      { key: "ward", label: "Phường/Xã", value: locationSegments.ward },
-    ];
-  }, [locationSegments]);
+    const next: LocationOption[] = [];
+
+    if (resolvedLocation.province?.fullName) {
+      next.push({
+        key: "province",
+        label: "Tinh/Thanh",
+        value: resolvedLocation.province.fullName,
+      });
+    }
+
+    if (resolvedLocation.ward?.fullName) {
+      next.push({
+        key: "ward",
+        label: "Phuong/Xa",
+        value: resolvedLocation.ward.fullName,
+      });
+    }
+
+    return next;
+  }, [resolvedLocation]);
 
   const uploadReportMedia = useCallback(
     async (image: SelectedImage): Promise<UploadedAsset> => {
@@ -232,12 +269,16 @@ export default function ReportPage() {
         [...data]
           .map((report) => normalizeReportMedia(report))
           .sort(
-          (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+            (left, right) =>
+              new Date(right.createdAt).getTime() -
+              new Date(left.createdAt).getTime(),
           ),
       );
       setError(null);
     } catch (err: unknown) {
-      setError((err as Error)?.message ?? "Không thể tải danh sách phản ánh");
+      setError(
+        (err as Error)?.message ?? "Không thể tải danh sách phản ánh",
+      );
     } finally {
       setLoadingReports(false);
     }
@@ -251,7 +292,10 @@ export default function ReportPage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("Cần quyền truy cập", "Vui lòng cấp quyền thư viện ảnh để đính kèm tệp.");
+      Alert.alert(
+        "Cần quyền truy cập",
+        "Vui lòng cấp quyền thư viện ảnh để đính kèm tệp.",
+      );
       return;
     }
 
@@ -270,7 +314,10 @@ export default function ReportPage() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("Cần quyền camera", "Vui lòng cấp quyền camera để chụp ảnh mới.");
+      Alert.alert(
+        "Cần quyền camera",
+        "Vui lòng cấp quyền camera để chụp ảnh mới.",
+      );
       return;
     }
 
@@ -292,7 +339,9 @@ export default function ReportPage() {
     }
 
     if (!title.trim() || !description.trim()) {
-      setError("Vui lòng nhập đầy đủ tiêu đề và nội dung phản ánh");
+      setError(
+        "Vui lòng nhập đầy đủ tiêu đề và nội dung phản ánh",
+      );
       return;
     }
 
@@ -304,10 +353,14 @@ export default function ReportPage() {
 
       if (selectedImage) {
         const uploadedAsset = await uploadReportMedia(selectedImage);
-        const uploadedUrl = resolveReportMediaUrl(uploadedAsset.url) || resolveReportMediaUrl(uploadedAsset.key);
+        const uploadedUrl =
+          resolveReportMediaUrl(uploadedAsset.url) ||
+          resolveReportMediaUrl(uploadedAsset.key);
 
         if (!uploadedUrl) {
-          throw new Error("Upload thành công nhưng không nhận được URL ảnh.");
+          throw new Error(
+            "Upload thành công nhưng không nhận được URL ảnh.",
+          );
         }
 
         mediaUrls.push(uploadedUrl);
@@ -325,7 +378,9 @@ export default function ReportPage() {
         payload.mediaUrls = mediaUrls;
       }
 
-      const createdReport = normalizeReportMedia(await ApiClient.post<ReportItem>("/reports", payload));
+      const createdReport = normalizeReportMedia(
+        await ApiClient.post<ReportItem>("/reports", payload),
+      );
 
       setReports((prev) => [createdReport, ...prev]);
       setTitle("");
@@ -333,11 +388,12 @@ export default function ReportPage() {
       setSelectedImage(null);
       setError(null);
       setSuccessMessage("Đã gửi phản ánh thành công");
-      
+
       // Invalidate queries để home page auto-refresh
-      await queryClient.invalidateQueries({ queryKey: ['reports'] });
+      await queryClient.invalidateQueries({ queryKey: ["reports"] });
     } catch (err: unknown) {
-      const message = (err as Error)?.message ?? "Không thể gửi phản ánh";
+      const message =
+        (err as Error)?.message ?? "Không thể gửi phản ánh";
       setError(message);
       Alert.alert("Lỗi gửi phản ánh", message);
     } finally {
@@ -347,12 +403,16 @@ export default function ReportPage() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Header title="Gửi phản ánh" subtitle="Thêm ảnh đính kèm, gửi đúng địa bàn, và theo dõi lịch sử đã gửi" />
+      <Header
+        title="Gửi phản ánh"
+        subtitle="Thêm ảnh đính kèm, gửi đúng địa bàn, và theo dõi lịch sử đã gửi"
+      />
 
       <View style={styles.locationCard}>
         <Text style={styles.cardTitle}>Vị trí phản ánh</Text>
         <Text style={styles.cardHint}>
-          Tài khoản công dân chỉ được tạo phản ánh trong đúng địa bàn đã đăng ký.
+          Tài khoản công dân chỉ được tạo phản ánh trong đúng
+          địa bàn đã đăng ký.
         </Text>
         <View style={styles.locationGrid}>
           {locationOptions.map((item) => (
@@ -363,9 +423,14 @@ export default function ReportPage() {
           ))}
         </View>
         {user?.locationCode ? (
-          <Text style={styles.helperText}>{`Location code: ${user.locationCode}`}</Text>
+          <Text style={styles.helperText}>
+            {locationLabel ||
+              "Dia ban cua tai khoan se duoc dung cho bao cao nay."}
+          </Text>
         ) : (
-          <Text style={styles.errorText}>Không tải được locationCode của tài khoản.</Text>
+          <Text style={styles.errorText}>
+            Khong tai duoc thong tin dia ban cua tai khoan.
+          </Text>
         )}
       </View>
 
@@ -386,7 +451,14 @@ export default function ReportPage() {
             style={[styles.tag, item === category && styles.tagActive]}
             onPress={() => setCategory(item)}
           >
-            <Text style={[styles.tagText, item === category && styles.tagTextActive]}>{item}</Text>
+            <Text
+              style={[
+                styles.tagText,
+                item === category && styles.tagTextActive,
+              ]}
+            >
+              {item}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -399,7 +471,14 @@ export default function ReportPage() {
             style={[styles.tag, item === priority && styles.tagActive]}
             onPress={() => setPriority(item)}
           >
-            <Text style={[styles.tagText, item === priority && styles.tagTextActive]}>{item}</Text>
+            <Text
+              style={[
+                styles.tagText,
+                item === priority && styles.tagTextActive,
+              ]}
+            >
+              {item}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -417,11 +496,17 @@ export default function ReportPage() {
 
       <Text style={styles.label}>Ảnh đính kèm</Text>
       <View style={styles.imageActionRow}>
-        <Pressable style={styles.imageActionButton} onPress={() => void handlePickImage()}>
+        <Pressable
+          style={styles.imageActionButton}
+          onPress={() => void handlePickImage()}
+        >
           <Ionicons name="images-outline" size={18} color={colors.primary} />
           <Text style={styles.imageActionText}>Chọn từ thư viện</Text>
         </Pressable>
-        <Pressable style={styles.imageActionButton} onPress={() => void handleTakePhoto()}>
+        <Pressable
+          style={styles.imageActionButton}
+          onPress={() => void handleTakePhoto()}
+        >
           <Ionicons name="camera-outline" size={18} color={colors.primary} />
           <Text style={styles.imageActionText}>Chụp ảnh mới</Text>
         </Pressable>
@@ -439,44 +524,72 @@ export default function ReportPage() {
           />
           <View style={styles.previewContent}>
             <Text style={styles.previewTitle}>{selectedImage.fileName}</Text>
-            <Text style={styles.previewSubtitle}>Ảnh này sẽ được upload lên hệ thống khi gửi phản ánh.</Text>
+            <Text style={styles.previewSubtitle}>
+              Ảnh này sẽ được upload lên hệ thống khi gửi phản
+              ánh.
+            </Text>
           </View>
-          <Pressable style={styles.removeImageButton} onPress={() => setSelectedImage(null)}>
+          <Pressable
+            style={styles.removeImageButton}
+            onPress={() => setSelectedImage(null)}
+          >
             <Ionicons name="close" size={16} color="#b91c1c" />
           </Pressable>
         </View>
       ) : (
         <View style={styles.emptyUploadCard}>
-          <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
-          <Text style={styles.emptyUploadText}>Bạn có thể chọn ảnh hoặc chụp ảnh mới để gửi kèm.</Text>
+          <Ionicons
+            name="image-outline"
+            size={18}
+            color={colors.textSecondary}
+          />
+          <Text style={styles.emptyUploadText}>
+            Bạn có thể chọn ảnh hoặc chụp ảnh mới để gửi
+            kèm.
+          </Text>
         </View>
       )}
 
       <Button
         onPress={() => void submit()}
-        disabled={!title.trim() || !description.trim() || !user?.locationCode || submitting}
+        disabled={
+          !title.trim() ||
+          !description.trim() ||
+          !user?.locationCode ||
+          submitting
+        }
       >
         {submitting ? "Đang gửi..." : "Gửi phản ánh"}
       </Button>
 
-      {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
+      {successMessage ? (
+        <Text style={styles.successText}>{successMessage}</Text>
+      ) : null}
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <View style={styles.historyHeader}>
         <View>
           <Text style={styles.historyTitle}>Phản ánh đã gửi</Text>
-          <Text style={styles.historySubtitle}>Đầy đủ ảnh, nội dung, trạng thái và thời gian gửi</Text>
+          <Text style={styles.historySubtitle}>
+            Đầy đủ ảnh, nội dung, trạng thái và thời gian gửi
+          </Text>
         </View>
       </View>
 
       {loadingReports ? (
         <CardListSkeleton count={3} />
       ) : reports.length > 0 ? (
-        reports.map((report) => <CitizenReportCard key={report.id} report={report} />)
+        reports.map((report) => (
+          <CitizenReportCard key={report.id} report={report} />
+        ))
       ) : (
         <View style={styles.emptyHistoryCard}>
-          <Text style={styles.emptyHistoryTitle}>Chưa có lịch sử phản ánh</Text>
-          <Text style={styles.emptyHistoryText}>Phản ánh vừa gửi sẽ xuất hiện trong danh sách này.</Text>
+          <Text style={styles.emptyHistoryTitle}>
+            Chưa có lịch sử phản ánh
+          </Text>
+          <Text style={styles.emptyHistoryText}>
+            Phản ánh vừa gửi sẽ xuất hiện trong danh sách này.
+          </Text>
         </View>
       )}
     </ScrollView>

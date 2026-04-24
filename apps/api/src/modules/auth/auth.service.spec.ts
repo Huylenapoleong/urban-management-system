@@ -4,11 +4,11 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { JwtClaims } from '@urban/shared-types';
+import type { SessionClientMetadata } from '../../common/request-session-metadata';
 import type {
   StoredRefreshSession,
   StoredUser,
 } from '../../common/storage-records';
-import type { SessionClientMetadata } from '../../common/request-session-metadata';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
@@ -69,6 +69,9 @@ describe('AuthService', () => {
   };
   const mediaAssetService = {
     resolveAvatarFields: jest.fn((value: unknown) => Promise.resolve(value)),
+  };
+  const locationsService = {
+    ensureKnownLocationCode: jest.fn((value: string) => value),
   };
   const config = {
     dynamodbUsersTableName: 'Users',
@@ -150,6 +153,7 @@ describe('AuthService', () => {
       repository as never,
       mediaAssetService as never,
       config as never,
+      locationsService as never,
     );
     passwordPolicyService.validateOrThrow.mockImplementation(() => undefined);
     usersService.getByIdOrThrow.mockResolvedValue(storedUser);

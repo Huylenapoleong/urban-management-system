@@ -1,15 +1,14 @@
-import { Fragment, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { Search, Phone, Video, Info, UserRound, Send, Paperclip, X, FileText, MoreHorizontal, Pencil, Trash2, Quote, Share2, ImagePlus, Smile, SmilePlus, Copy } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useWebRTCRuntime } from "@/providers/WebRTCProvider";
-import { useAuth } from "@/providers/AuthProvider";
+import { Input } from "@/components/ui/input";
 import { useConversations, useMessages } from "@/hooks/shared/useChatData";
-import { format } from "date-fns";
-import { useLocation } from "react-router-dom";
-import { uploadMedia } from "@/services/upload.api";
-import { getUserById, searchUserExactByContact, getUserPresence, type PresenceState } from "@/services/user.api";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
+import { useAuth } from "@/providers/auth-context";
+import { useWebRTCRuntime } from "@/providers/webrtc-context";
+import {
+  listMyFriendRequests,
+  listMyFriends,
+  sendFriendRequest,
+} from "@/services/friends.api";
 import {
   addGroupMember,
   createGroupInviteLink,
@@ -21,14 +20,63 @@ import {
   updateGroup,
   updateGroupMemberRole,
 } from "@/services/group.api";
-import { listMyFriendRequests, listMyFriends, sendFriendRequest } from "@/services/friends.api";
-import { toast } from "react-hot-toast";
-import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
-import type { GroupInviteLink, MessageItem, MessageReplyReference, UserProfile } from "@urban/shared-types";
+import { uploadMedia } from "@/services/upload.api";
+import {
+  getUserById,
+  getUserPresence,
+  searchUserExactByContact,
+  type PresenceState,
+} from "@/services/user.api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GroupMemberRole } from "@urban/shared-constants";
-import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
+import type {
+  GroupInviteLink,
+  MessageItem,
+  MessageReplyReference,
+  UserProfile,
+} from "@urban/shared-types";
+import { format } from "date-fns";
+import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
+import {
+  Copy,
+  FileText,
+  ImagePlus,
+  Info,
+  MoreHorizontal,
+  Paperclip,
+  Pencil,
+  Phone,
+  Quote,
+  Search,
+  Send,
+  Share2,
+  Smile,
+  SmilePlus,
+  Trash2,
+  UserRound,
+  Video,
+  X,
+} from "lucide-react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { toast } from "react-hot-toast";
+import { useLocation } from "react-router-dom";
 
-type ChatMessageType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOC" | "EMOJI" | "SYSTEM";
+type ChatMessageType =
+  | "TEXT"
+  | "IMAGE"
+  | "VIDEO"
+  | "AUDIO"
+  | "DOC"
+  | "EMOJI"
+  | "SYSTEM";
 
 type ChatNavigationState = {
   conversationId?: string;
@@ -63,7 +111,9 @@ function loadCallSummaries(): CallEndedSummary[] {
       return [];
     }
 
-    return parsed.filter((item): item is CallEndedSummary => Boolean(item && item.conversationId && item.endedAt));
+    return parsed.filter((item): item is CallEndedSummary =>
+      Boolean(item && item.conversationId && item.endedAt),
+    );
   } catch {
     return [];
   }
@@ -74,7 +124,10 @@ function saveCallSummaries(summaries: CallEndedSummary[]): void {
     return;
   }
 
-  window.localStorage.setItem(CALL_SUMMARY_STORAGE_KEY, JSON.stringify(summaries));
+  window.localStorage.setItem(
+    CALL_SUMMARY_STORAGE_KEY,
+    JSON.stringify(summaries),
+  );
 }
 
 type ConversationAvatarLike = {
@@ -92,7 +145,9 @@ type ConversationAvatarLike = {
   userAvatarUrl?: string;
 };
 
-function resolveConversationAvatarUrl(conversation?: ConversationAvatarLike | null): string | undefined {
+function resolveConversationAvatarUrl(
+  conversation?: ConversationAvatarLike | null,
+): string | undefined {
   if (!conversation) {
     return undefined;
   }
@@ -118,9 +173,7 @@ function extractDirectPeerUserId(
   }
 
   const explicitId =
-    conversation.peerUserId ||
-    conversation.userId ||
-    conversation.targetUserId;
+    conversation.peerUserId || conversation.userId || conversation.targetUserId;
   if (explicitId && explicitId !== currentUserId) {
     return explicitId;
   }
@@ -177,7 +230,40 @@ function resolveDmAvatarFromFriendMap(
   return friendAvatarByUserId[peerUserId];
 }
 
-function formatLastSeenShort(presence?: PresenceState | null, fallbackLastSeenAt?: string | null): string | null {
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  if ("status" in error && typeof error.status === "number") {
+    return error.status;
+  }
+
+  return undefined;
+}
+
+function formatLastSeenShort(
+  presence?: PresenceState | null,
+  fallbackLastSeenAt?: string | null,
+): string | null {
   if (presence?.isActive) {
     return null;
   }
@@ -192,7 +278,10 @@ function formatLastSeenShort(presence?: PresenceState | null, fallbackLastSeenAt
     return null;
   }
 
-  const diffMinutes = Math.max(1, Math.floor((Date.now() - lastSeenMs) / 60000));
+  const diffMinutes = Math.max(
+    1,
+    Math.floor((Date.now() - lastSeenMs) / 60000),
+  );
   if (diffMinutes < 60) {
     return `${diffMinutes} phút`;
   }
@@ -206,7 +295,10 @@ function formatLastSeenShort(presence?: PresenceState | null, fallbackLastSeenAt
   return `${diffDays} ngày`;
 }
 
-function formatPresenceText(presence: PresenceState | null, fallbackLastSeenAt?: string | null): string {
+function formatPresenceText(
+  presence: PresenceState | null,
+  fallbackLastSeenAt?: string | null,
+): string {
   if (presence?.isActive) {
     return "Đang hoạt động";
   }
@@ -234,7 +326,9 @@ const URL_PATTERN = /(https?:\/\/[^\s]+)/gi;
 const MESSAGE_BLOCK_GAP_MS = 10 * 60 * 1000;
 const USER_ID_PATTERN = /\b[0-9A-Z]{20,32}\b/g;
 
-function extractGroupIdFromConversationId(conversationId?: string | null): string | undefined {
+function extractGroupIdFromConversationId(
+  conversationId?: string | null,
+): string | undefined {
   if (!conversationId) {
     return undefined;
   }
@@ -272,7 +366,9 @@ function extractFirstUrl(text: string): string | undefined {
   return sanitized;
 }
 
-function buildLinkPreview(url: string): { href: string; host: string; path: string; faviconUrl: string } | null {
+function buildLinkPreview(
+  url: string,
+): { href: string; host: string; path: string; faviconUrl: string } | null {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.replace(/^www\./i, "");
@@ -291,76 +387,106 @@ function buildLinkPreview(url: string): { href: string; host: string; path: stri
 export function ChatPage() {
   const location = useLocation();
   const chatState = (location.state ?? {}) as ChatNavigationState;
-  const [activeChat, setActiveChat] = useState<string | null>(chatState.conversationId ?? null);
+  const [activeChat, setActiveChat] = useState<string | null>(
+    chatState.conversationId ?? null,
+  );
   const failedPresenceUserIdsRef = useRef<Set<string>>(new Set());
   const [inputText, setInputText] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
-  const [queuedAttachments, setQueuedAttachments] = useState<QueuedAttachment[]>([]);
+  const [queuedAttachments, setQueuedAttachments] = useState<
+    QueuedAttachment[]
+  >([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
-  const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
-  const [messageMenuPlacement, setMessageMenuPlacement] = useState<"up" | "down">("down");
+  const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(
+    null,
+  );
+  const [messageMenuPlacement, setMessageMenuPlacement] = useState<
+    "up" | "down"
+  >("down");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
-  const [replyingMessage, setReplyingMessage] = useState<MessageReplyReference | null>(null);
+  const [replyingMessage, setReplyingMessage] =
+    useState<MessageReplyReference | null>(null);
   const [messageActionError, setMessageActionError] = useState("");
   const [isForwardDialogOpen, setIsForwardDialogOpen] = useState(false);
-  const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null);
-  const [selectedForwardConversationIds, setSelectedForwardConversationIds] = useState<string[]>([]);
+  const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(
+    null,
+  );
+  const [selectedForwardConversationIds, setSelectedForwardConversationIds] =
+    useState<string[]>([]);
   const [forwardSearch, setForwardSearch] = useState("");
   const [forwardActionError, setForwardActionError] = useState("");
   const [memberLookupInput, setMemberLookupInput] = useState("");
-  const [memberRoleInput, setMemberRoleInput] = useState<GroupMemberRole>("MEMBER");
+  const [memberRoleInput, setMemberRoleInput] =
+    useState<GroupMemberRole>("MEMBER");
   const [memberActionError, setMemberActionError] = useState("");
   const [mentionQuery, setMentionQuery] = useState("");
-  const [mentionStartIndex, setMentionStartIndex] = useState<number | null>(null);
-  const [selectedMentions, setSelectedMentions] = useState<MentionCandidate[]>([]);
+  const [mentionStartIndex, setMentionStartIndex] = useState<number | null>(
+    null,
+  );
+  const [selectedMentions, setSelectedMentions] = useState<MentionCandidate[]>(
+    [],
+  );
   const [leaveGroupError, setLeaveGroupError] = useState("");
   const [isLeaveGroupDialogOpen, setIsLeaveGroupDialogOpen] = useState(false);
   const [leaveSuccessorUserId, setLeaveSuccessorUserId] = useState("");
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [inviteSearchText, setInviteSearchText] = useState("");
-  const [selectedInviteUserIds, setSelectedInviteUserIds] = useState<string[]>([]);
+  const [selectedInviteUserIds, setSelectedInviteUserIds] = useState<string[]>(
+    [],
+  );
   const [renameGroupName, setRenameGroupName] = useState("");
   const [inviteLinkError, setInviteLinkError] = useState("");
-  const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<string | null>(null);
-  const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<string | null>(null);
-  const [activeMemberActionUserId, setActiveMemberActionUserId] = useState<string | null>(null);
+  const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<
+    string | null
+  >(null);
+  const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<
+    string | null
+  >(null);
+  const [activeMemberActionUserId, setActiveMemberActionUserId] = useState<
+    string | null
+  >(null);
   const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
-  const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
-  const [messageReactionsByConversation, setMessageReactionsByConversation] = useState<
-    Record<string, Record<string, string[]>>
+  const [reactionPickerMessageId, setReactionPickerMessageId] = useState<
+    string | null
+  >(null);
+  const [messageReactionsByConversation, setMessageReactionsByConversation] =
+    useState<Record<string, Record<string, string[]>>>(() => {
+      if (typeof window === "undefined") {
+        return {};
+      }
+
+      try {
+        const raw = window.localStorage.getItem(MESSAGE_REACTIONS_STORAGE_KEY);
+        if (!raw) {
+          return {};
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") {
+          return {};
+        }
+
+        return parsed as Record<string, Record<string, string[]>>;
+      } catch {
+        return {};
+      }
+    });
+  const [groupAvatarOverrides, setGroupAvatarOverrides] = useState<
+    Record<string, string>
   >(() => {
     if (typeof window === "undefined") {
       return {};
     }
 
     try {
-      const raw = window.localStorage.getItem(MESSAGE_REACTIONS_STORAGE_KEY);
-      if (!raw) {
-        return {};
-      }
-
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") {
-        return {};
-      }
-
-      return parsed as Record<string, Record<string, string[]>>;
-    } catch {
-      return {};
-    }
-  });
-  const [groupAvatarOverrides, setGroupAvatarOverrides] = useState<Record<string, string>>(() => {
-    if (typeof window === "undefined") {
-      return {};
-    }
-
-    try {
-      const raw = window.localStorage.getItem(GROUP_AVATAR_OVERRIDES_STORAGE_KEY);
+      const raw = window.localStorage.getItem(
+        GROUP_AVATAR_OVERRIDES_STORAGE_KEY,
+      );
       if (!raw) {
         return {};
       }
@@ -382,22 +508,26 @@ export function ChatPage() {
   const typingStopTimerRef = useRef<number | null>(null);
   const isTypingRef = useRef(false);
   const requestedDmAvatarIdsRef = useRef<Set<string>>(new Set());
-  const [friendAvatarByUserId, setFriendAvatarByUserId] = useState<Record<string, string>>({});
-  const [friendIds, setFriendIds] = useState<Set<string> | null>(null);
+  const [friendAvatarByUserId, setFriendAvatarByUserId] = useState<
+    Record<string, string>
+  >({});
   const [dmAvatarMap, setDmAvatarMap] = useState<Record<string, string>>({});
-  const [activeDmPresence, setActiveDmPresence] = useState<PresenceState | null>(null);
-  const [dmPresenceByUserId, setDmPresenceByUserId] = useState<Record<string, PresenceState>>({});
-  const [callSummaries, setCallSummaries] = useState<CallEndedSummary[]>(() => loadCallSummaries());
+  const [activeDmPresence, setActiveDmPresence] =
+    useState<PresenceState | null>(null);
+  const [dmPresenceByUserId, setDmPresenceByUserId] = useState<
+    Record<string, PresenceState>
+  >({});
+  const [callSummaries, setCallSummaries] = useState<CallEndedSummary[]>(() =>
+    loadCallSummaries(),
+  );
   const rtc = useWebRTCRuntime();
-  const {
-    startCall,
-    lastEndedCall,
-  } = rtc;
+  const { startCall, lastEndedCall } = rtc;
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  
+
   // Data fetching
-  const { data: conversations = [], isLoading: loadingConversations } = useConversations(conversationSearch);
+  const { data: conversations = [], isLoading: loadingConversations } =
+    useConversations(conversationSearch);
   const {
     data: messages = [],
     isLoading: loadingMessages,
@@ -417,26 +547,37 @@ export function ChatPage() {
     sendTyping,
   } = useMessages(activeChat || undefined);
 
-  const syntheticConversation =
-    chatState.conversationId && chatState.displayName
-      ? {
-          conversationId: chatState.conversationId,
-          groupName: chatState.displayName,
-          avatarUrl: chatState.avatarUrl,
-          updatedAt: new Date().toISOString(),
-          unreadCount: 0,
-          lastMessagePreview: "",
-          lastSenderName: "",
-          isGroup: false,
-        }
-      : null;
+  const syntheticConversation = useMemo(
+    () =>
+      chatState.conversationId && chatState.displayName
+        ? {
+            conversationId: chatState.conversationId,
+            groupName: chatState.displayName,
+            avatarUrl: chatState.avatarUrl,
+            updatedAt: new Date().toISOString(),
+            unreadCount: 0,
+            lastMessagePreview: "",
+            lastSenderName: "",
+            isGroup: false,
+          }
+        : null,
+    [chatState.avatarUrl, chatState.conversationId, chatState.displayName],
+  );
 
-  const mergedConversations = syntheticConversation
-    ? [
-        syntheticConversation,
-        ...conversations.filter((c) => c.conversationId !== syntheticConversation.conversationId),
-      ]
-    : conversations;
+  const mergedConversations = useMemo(
+    () =>
+      syntheticConversation
+        ? [
+            syntheticConversation,
+            ...conversations.filter(
+              (conversation) =>
+                conversation.conversationId !==
+                syntheticConversation.conversationId,
+            ),
+          ]
+        : conversations,
+    [conversations, syntheticConversation],
+  );
 
   const normalizedSearch = conversationSearch.trim().toLowerCase();
   const renderedConversations = normalizedSearch
@@ -454,7 +595,9 @@ export function ChatPage() {
       })
     : mergedConversations;
 
-  const activeContact = renderedConversations.find((c) => c.conversationId === activeChat);
+  const activeContact = renderedConversations.find(
+    (c) => c.conversationId === activeChat,
+  );
   const activeGroupId = extractGroupIdFromConversationId(activeChat);
   const activeTypingParticipants = Object.values(typingUsers).filter(
     (participant) => participant.isTyping && participant.userId !== user?.sub,
@@ -469,11 +612,13 @@ export function ChatPage() {
       return "Nhiều người đang soạn tin...";
     }
 
-    const uniqueNames = Array.from(new Set(
-      activeTypingParticipants
-        .map((participant) => participant.fullName?.trim())
-        .filter((name): name is string => Boolean(name)),
-    ));
+    const uniqueNames = Array.from(
+      new Set(
+        activeTypingParticipants
+          .map((participant) => participant.fullName?.trim())
+          .filter((name): name is string => Boolean(name)),
+      ),
+    );
 
     if (typingCount === 1) {
       return `${uniqueNames[0] || "Một thành viên"} đang soạn tin...`;
@@ -494,38 +639,52 @@ export function ChatPage() {
     () => (activeChat ? messageReactionsByConversation[activeChat] || {} : {}),
     [activeChat, messageReactionsByConversation],
   );
-  const forwardDestinationConversations = mergedConversations.filter((conversation) => {
-    if (conversation.conversationId === activeChat) {
-      return false;
-    }
+  const forwardDestinationConversations = mergedConversations.filter(
+    (conversation) => {
+      if (conversation.conversationId === activeChat) {
+        return false;
+      }
 
-    if (!normalizedForwardSearch) {
-      return true;
-    }
+      if (!normalizedForwardSearch) {
+        return true;
+      }
 
-    const haystack = [
-      conversation.groupName,
-      conversation.lastMessagePreview,
-      conversation.lastSenderName,
-      conversation.conversationId,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+      const haystack = [
+        conversation.groupName,
+        conversation.lastMessagePreview,
+        conversation.lastSenderName,
+        conversation.conversationId,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-    return haystack.includes(normalizedForwardSearch);
-  });
+      return haystack.includes(normalizedForwardSearch);
+    },
+  );
   const cachedProfile = queryClient.getQueryData<UserProfile>(["profile"]);
-  const activeContactAvatarFromConversation = resolveConversationAvatarUrl(activeContact as ConversationAvatarLike | undefined);
+  const activeContactAvatarFromConversation = resolveConversationAvatarUrl(
+    activeContact as ConversationAvatarLike | undefined,
+  );
   const activeContactAvatarFromFriendMap = resolveDmAvatarFromFriendMap(
     activeContact as ConversationAvatarLike | undefined,
     friendAvatarByUserId,
     user?.sub,
   );
-  const activeContactAvatarFromDmMap = activeChat ? dmAvatarMap[activeChat] : undefined;
+  const activeContactAvatarFromDmMap = activeChat
+    ? dmAvatarMap[activeChat]
+    : undefined;
   const activeContactBaseAvatarUrl =
-    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarAsset?.resolvedUrl ||
-    (activeContact as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string } | undefined)?.avatarUrl;
+    (
+      activeContact as
+        | { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }
+        | undefined
+    )?.avatarAsset?.resolvedUrl ||
+    (
+      activeContact as
+        | { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }
+        | undefined
+    )?.avatarUrl;
   const activeContactAvatarUrl =
     (activeGroupId ? groupAvatarOverrides[activeGroupId] : undefined) ||
     activeContactAvatarFromConversation ||
@@ -533,8 +692,13 @@ export function ChatPage() {
     activeContactAvatarFromDmMap ||
     activeContactBaseAvatarUrl ||
     chatState.avatarUrl;
-  const activeDmUserId = extractDirectPeerUserId(activeContact as ConversationAvatarLike | undefined, user?.sub);
-  const activePresence = activeDmUserId ? dmPresenceByUserId[activeDmUserId] || activeDmPresence : null;
+  const activeDmUserId = extractDirectPeerUserId(
+    activeContact as ConversationAvatarLike | undefined,
+    user?.sub,
+  );
+  const activePresence = activeDmUserId
+    ? dmPresenceByUserId[activeDmUserId] || activeDmPresence
+    : null;
   const activeStatusText = (() => {
     if (!activeContact) {
       return "";
@@ -546,10 +710,16 @@ export function ChatPage() {
 
     return formatPresenceText(activePresence, activeContact?.updatedAt);
   })();
-  const activeStatusToneClass = activePresence?.isActive ? "text-green-600" : "text-gray-500 dark:text-slate-400";
-  const activeLastSeenBadge = formatLastSeenShort(activePresence, activeContact?.updatedAt);
+  const activeStatusToneClass = activePresence?.isActive
+    ? "text-green-600"
+    : "text-gray-500 dark:text-slate-400";
+  const activeLastSeenBadge = formatLastSeenShort(
+    activePresence,
+    activeContact?.updatedAt,
+  );
   const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
-  const callerAvatarUrl = cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
+  const callerAvatarUrl =
+    cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -569,9 +739,16 @@ export function ChatPage() {
     queryFn: () => listGroupMembers(activeGroupId!),
     enabled: Boolean(activeGroupId),
   });
-  const currentUserMembership = activeGroupMembers.find((membership) => membership.userId === user?.sub);
+  const currentUserMembership = activeGroupMembers.find(
+    (membership) => membership.userId === user?.sub,
+  );
   const { data: memberProfilesById = {} } = useQuery({
-    queryKey: ["group-members", "profiles", activeGroupId, activeGroupMembers.map((item) => item.userId).join("|")],
+    queryKey: [
+      "group-members",
+      "profiles",
+      activeGroupId,
+      activeGroupMembers.map((item) => item.userId).join("|"),
+    ],
     queryFn: async () => {
       const entries = await Promise.all(
         activeGroupMembers.map(async (member) => {
@@ -584,7 +761,10 @@ export function ChatPage() {
         }),
       );
 
-      return Object.fromEntries(entries) as Record<string, UserProfile | undefined>;
+      return Object.fromEntries(entries) as Record<
+        string,
+        UserProfile | undefined
+      >;
     },
     enabled: Boolean(activeGroupId) && activeGroupMembers.length > 0,
     staleTime: 60 * 1000,
@@ -675,7 +855,11 @@ export function ChatPage() {
     });
 
     messages.forEach((message) => {
-      if (message.senderId && message.senderName?.trim() && !map.has(message.senderId)) {
+      if (
+        message.senderId &&
+        message.senderName?.trim() &&
+        !map.has(message.senderId)
+      ) {
         map.set(message.senderId, message.senderName.trim());
       }
     });
@@ -696,11 +880,17 @@ export function ChatPage() {
     user?.sub,
   ]);
   const outgoingFriendRequestUserIds = useMemo(
-    () => new Set(outgoingFriendRequests.map((friendRequest) => friendRequest.userId)),
+    () =>
+      new Set(
+        outgoingFriendRequests.map((friendRequest) => friendRequest.userId),
+      ),
     [outgoingFriendRequests],
   );
   const incomingFriendRequestUserIds = useMemo(
-    () => new Set(incomingFriendRequests.map((friendRequest) => friendRequest.userId)),
+    () =>
+      new Set(
+        incomingFriendRequests.map((friendRequest) => friendRequest.userId),
+      ),
     [incomingFriendRequests],
   );
   const memberIdsInCurrentGroup = useMemo(
@@ -745,9 +935,7 @@ export function ChatPage() {
 
     const filtered = keyword
       ? candidates.filter((candidate) =>
-          `${candidate.displayName}`
-            .toLowerCase()
-            .includes(keyword),
+          `${candidate.displayName}`.toLowerCase().includes(keyword),
         )
       : candidates;
 
@@ -760,7 +948,8 @@ export function ChatPage() {
     mentionQuery,
     user?.sub,
   ]);
-  const isMentionMenuOpen = mentionStartIndex !== null && mentionCandidates.length > 0;
+  const isMentionMenuOpen =
+    mentionStartIndex !== null && mentionCandidates.length > 0;
   const canManageGroupMembers =
     currentUserMembership?.roleInGroup === "OWNER" ||
     currentUserMembership?.roleInGroup === "DEPUTY";
@@ -772,35 +961,49 @@ export function ChatPage() {
   const canViewConversationCode = user?.role === "ADMIN";
   const canViewSensitiveUserIds = user?.role === "ADMIN";
   const canInviteGroupFriends = Boolean(activeGroupId && user?.sub);
-  const canUpdateGroupAvatar = Boolean(activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"));
-  const canRenameGroup = Boolean(activeGroupId && (isCurrentUserOwner || user?.role === "ADMIN"));
-  const canManageInviteLinks = Boolean(activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"));
+  const canUpdateGroupAvatar = Boolean(
+    activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"),
+  );
+  const canRenameGroup = Boolean(
+    activeGroupId && (isCurrentUserOwner || user?.role === "ADMIN"),
+  );
+  const canManageInviteLinks = Boolean(
+    activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"),
+  );
   const pendingRemoveMemberDisplayName = pendingRemoveMemberUserId
     ? displayNameByUserId.get(pendingRemoveMemberUserId) || "Thành viên"
     : "";
 
   const renameGroupMutation = useMutation({
-    mutationFn: ({ groupId, groupName }: { groupId: string; groupName: string }) =>
-      updateGroup(groupId, { groupName }),
+    mutationFn: ({
+      groupId,
+      groupName,
+    }: {
+      groupId: string;
+      groupName: string;
+    }) => updateGroup(groupId, { groupName }),
     onSuccess: (updatedGroup) => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       setRenameGroupName(updatedGroup.groupName || "");
       toast.success("Đã đổi tên nhóm");
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       toast.error(error?.message || "Không thể đổi tên nhóm lúc này.");
     },
   });
 
   const createInviteLinkMutation = useMutation({
-    mutationFn: ({ groupId }: { groupId: string }) => createGroupInviteLink(groupId),
+    mutationFn: ({ groupId }: { groupId: string }) =>
+      createGroupInviteLink(groupId),
     onSuccess: () => {
       setInviteLinkError("");
-      queryClient.invalidateQueries({ queryKey: ["group-invite-links", activeGroupId] });
+      queryClient.invalidateQueries({
+        queryKey: ["group-invite-links", activeGroupId],
+      });
       toast.success("Đã tạo link tham gia nhóm");
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       const message = error?.message || "Không thể tạo link tham gia.";
       setInviteLinkError(message);
       toast.error(message);
@@ -808,14 +1011,21 @@ export function ChatPage() {
   });
 
   const revokeInviteLinkMutation = useMutation({
-    mutationFn: ({ groupId, inviteId }: { groupId: string; inviteId: string }) =>
-      revokeGroupInviteLink(groupId, inviteId),
+    mutationFn: ({
+      groupId,
+      inviteId,
+    }: {
+      groupId: string;
+      inviteId: string;
+    }) => revokeGroupInviteLink(groupId, inviteId),
     onSuccess: () => {
       setInviteLinkError("");
-      queryClient.invalidateQueries({ queryKey: ["group-invite-links", activeGroupId] });
+      queryClient.invalidateQueries({
+        queryKey: ["group-invite-links", activeGroupId],
+      });
       toast.success("Đã vô hiệu hóa link mời");
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       const message = error?.message || "Không thể vô hiệu hóa link mời.";
       setInviteLinkError(message);
       toast.error(message);
@@ -823,7 +1033,17 @@ export function ChatPage() {
   });
 
   const manageGroupMemberMutation = useMutation({
-    mutationFn: ({ groupId, userId, action, roleInGroup }: { groupId: string; userId: string; action: "add" | "update" | "remove"; roleInGroup?: GroupMemberRole }) =>
+    mutationFn: ({
+      groupId,
+      userId,
+      action,
+      roleInGroup,
+    }: {
+      groupId: string;
+      userId: string;
+      action: "add" | "update" | "remove";
+      roleInGroup?: GroupMemberRole;
+    }) =>
       (async () => {
         if (action === "add") {
           return addGroupMember(groupId, {
@@ -841,7 +1061,9 @@ export function ChatPage() {
         return removeGroupMember(groupId, userId);
       })(),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["group-members", variables.groupId] });
+      queryClient.invalidateQueries({
+        queryKey: ["group-members", variables.groupId],
+      });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       setMemberActionError("");
       if (variables.action === "remove") {
@@ -855,8 +1077,10 @@ export function ChatPage() {
         toast.success("Đã thêm thành viên vào nhóm");
       }
     },
-    onError: (error: any) => {
-      setMemberActionError(error?.message || "Không thể cập nhật thành viên nhóm.");
+    onError: (error: { message?: string }) => {
+      setMemberActionError(
+        error?.message || "Không thể cập nhật thành viên nhóm.",
+      );
     },
   });
   const sendFriendRequestMutation = useMutation({
@@ -869,7 +1093,7 @@ export function ChatPage() {
       toast.success("Đã gửi lời mời kết bạn");
       queryClient.invalidateQueries({ queryKey: ["friends"] });
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       const message = error?.message || "Không thể gửi lời mời kết bạn.";
       setMemberActionError(message);
       toast.error(message);
@@ -879,8 +1103,17 @@ export function ChatPage() {
     },
   });
   const leaveGroupMutation = useMutation({
-    mutationFn: ({ groupId, successorUserId }: { groupId: string; successorUserId?: string }) =>
-      leaveGroupWithPayload(groupId, successorUserId ? { successorUserId } : undefined),
+    mutationFn: ({
+      groupId,
+      successorUserId,
+    }: {
+      groupId: string;
+      successorUserId?: string;
+    }) =>
+      leaveGroupWithPayload(
+        groupId,
+        successorUserId ? { successorUserId } : undefined,
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -892,7 +1125,7 @@ export function ChatPage() {
       setActiveChat(null);
       toast.success("Đã rời nhóm");
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       setLeaveGroupError(error?.message || "Không thể rời nhóm lúc này.");
     },
   });
@@ -912,13 +1145,16 @@ export function ChatPage() {
         String(lastEndedCall.durationSeconds),
       ].join("|");
 
-      const hasDuplicate = next.some((item) => [
-        item.conversationId,
-        item.endedAt,
-        item.peerUserId || "",
-        item.direction,
-        String(item.durationSeconds),
-      ].join("|") === nextKey);
+      const hasDuplicate = next.some(
+        (item) =>
+          [
+            item.conversationId,
+            item.endedAt,
+            item.peerUserId || "",
+            item.direction,
+            String(item.durationSeconds),
+          ].join("|") === nextKey,
+      );
 
       if (!hasDuplicate) {
         next.push(lastEndedCall);
@@ -930,40 +1166,21 @@ export function ChatPage() {
   }, [lastEndedCall]);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!Array.isArray(myFriends) || myFriends.length === 0) {
+      setFriendAvatarByUserId({});
+      return;
+    }
 
-    const hydrateFriendAvatars = async () => {
-      try {
-        const friends = await listMyFriends({ limit: 200 });
-        if (cancelled || !Array.isArray(friends) || friends.length === 0) {
-          return;
-        }
-
-        const nextMap: Record<string, string> = {};
-        const idSet = new Set<string>();
-        friends.forEach((friend) => {
-          idSet.add(friend.userId);
-          const avatarUrl = friend.avatarAsset?.resolvedUrl || friend.avatarUrl;
-          if (avatarUrl) {
-            nextMap[friend.userId] = avatarUrl;
-          }
-        });
-
-        if (!cancelled) {
-          setFriendAvatarByUserId(nextMap);
-          setFriendIds(idSet);
-        }
-      } catch {
-        // Keep silent; other avatar sources still apply.
+    const nextMap: Record<string, string> = {};
+    myFriends.forEach((friend) => {
+      const avatarUrl = friend.avatarAsset?.resolvedUrl || friend.avatarUrl;
+      if (avatarUrl) {
+        nextMap[friend.userId] = avatarUrl;
       }
-    };
+    });
 
-    void hydrateFriendAvatars();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    setFriendAvatarByUserId(nextMap);
+  }, [myFriends]);
 
   useEffect(() => {
     const dmTargets = mergedConversations
@@ -988,7 +1205,9 @@ export function ChatPage() {
           peerUserId,
         };
       })
-      .filter((item): item is { conversationId: string; peerUserId: string } => Boolean(item));
+      .filter((item): item is { conversationId: string; peerUserId: string } =>
+        Boolean(item),
+      );
 
     if (dmTargets.length === 0) {
       return;
@@ -1002,7 +1221,8 @@ export function ChatPage() {
       dmTargets.map(async ({ conversationId, peerUserId }) => {
         try {
           const profile = await getUserById(peerUserId);
-          const avatarUrl = profile.avatarAsset?.resolvedUrl || profile.avatarUrl;
+          const avatarUrl =
+            profile.avatarAsset?.resolvedUrl || profile.avatarUrl;
           if (!avatarUrl) {
             return;
           }
@@ -1029,28 +1249,38 @@ export function ChatPage() {
       new Set(
         mergedConversations
           .filter((conversation) => !conversation.isGroup)
-          .map((conversation) => extractDirectPeerUserId(conversation as ConversationAvatarLike, user?.sub))
+          .map((conversation) =>
+            extractDirectPeerUserId(
+              conversation as ConversationAvatarLike,
+              user?.sub,
+            ),
+          )
           .filter((value): value is string => Boolean(value)),
       ),
-    ).slice(0, 30).sort().join(",");
+    )
+      .slice(0, 30)
+      .sort()
+      .join(",");
   }, [mergedConversations, user?.sub]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!dmUserIdsString || !friendIds) {
+    if (!dmUserIdsString || friendUserIds.size === 0) {
       return;
     }
 
-    const dmUserIds = dmUserIdsString.split(",").filter((id) => friendIds.has(id));
+    const dmUserIds = dmUserIdsString
+      .split(",")
+      .filter((id) => friendUserIds.has(id));
     if (dmUserIds.length === 0) return;
 
     const loadDmPresence = async () => {
-      const results: any[] = [];
-      
+      const results: Array<readonly [string, PresenceState] | null> = [];
+
       for (let i = 0; i < dmUserIds.length; i += 5) {
         if (cancelled) return;
-        
+
         const chunk = dmUserIds.slice(i, i + 5);
         const chunkResults = await Promise.all(
           chunk.map(async (userId) => {
@@ -1060,17 +1290,18 @@ export function ChatPage() {
             try {
               const presence = await getUserPresence(userId);
               return [userId, presence] as const;
-            } catch (error: any) {
-              if (error?.status === 403 || error?.status === 404) {
+            } catch (error: unknown) {
+              const status = getErrorStatus(error);
+              if (status === 403 || status === 404) {
                 failedPresenceUserIdsRef.current.add(userId);
               }
               return null;
             }
           }),
         );
-        
+
         results.push(...chunkResults);
-        
+
         if (i + 5 < dmUserIds.length) {
           await new Promise((resolve) => window.setTimeout(resolve, 300));
         }
@@ -1103,12 +1334,12 @@ export function ChatPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [dmUserIdsString]);
+  }, [dmUserIdsString, friendUserIds]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!activeDmUserId || !friendIds || !friendIds.has(activeDmUserId)) {
+    if (!activeDmUserId || !friendUserIds.has(activeDmUserId)) {
       setActiveDmPresence(null);
       return;
     }
@@ -1127,8 +1358,9 @@ export function ChatPage() {
             [activeDmUserId]: presence,
           }));
         }
-      } catch (error: any) {
-        if (error?.status === 403 || error?.status === 404) {
+      } catch (error: unknown) {
+        const status = getErrorStatus(error);
+        if (status === 403 || status === 404) {
           failedPresenceUserIdsRef.current.add(activeDmUserId);
         }
         if (!cancelled) {
@@ -1146,7 +1378,7 @@ export function ChatPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeDmUserId]);
+  }, [activeDmUserId, friendUserIds]);
 
   // Auto scroll to bottom for new messages, preserve position while loading older pages.
   useEffect(() => {
@@ -1166,7 +1398,9 @@ export function ChatPage() {
     const hasNewMessage = previousCount > 0 && messages.length > previousCount;
 
     if (isFirstLoad || hasNewMessage) {
-      messagesEndRef.current?.scrollIntoView({ behavior: isFirstLoad ? "auto" : "smooth" });
+      messagesEndRef.current?.scrollIntoView({
+        behavior: isFirstLoad ? "auto" : "smooth",
+      });
     }
 
     previousMessageCountRef.current = messages.length;
@@ -1313,7 +1547,9 @@ export function ChatPage() {
 
   const toggleInviteSelection = (userId: string) => {
     setSelectedInviteUserIds((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
+      prev.includes(userId)
+        ? prev.filter((id) => id !== userId)
+        : [...prev, userId],
     );
   };
 
@@ -1392,7 +1628,9 @@ export function ChatPage() {
       ),
     );
 
-    const successCount = results.filter((result) => result.status === "fulfilled").length;
+    const successCount = results.filter(
+      (result) => result.status === "fulfilled",
+    ).length;
     const failedCount = results.length - successCount;
 
     if (successCount > 0) {
@@ -1426,25 +1664,34 @@ export function ChatPage() {
     const isEmail = EMAIL_REGEX.test(lookupValue);
     const isPhone = PHONE_REGEX.test(lookupValue);
     if (!isEmail && !isPhone) {
-      setMemberActionError("Định dạng không hợp lệ. Hãy nhập đúng số điện thoại hoặc email.");
+      setMemberActionError(
+        "Định dạng không hợp lệ. Hãy nhập đúng số điện thoại hoặc email.",
+      );
       return;
     }
 
     let resolvedUser: UserProfile;
     try {
       resolvedUser = await searchUserExactByContact(lookupValue);
-    } catch (error: any) {
-      setMemberActionError(error?.message || "Không tìm thấy người dùng theo số điện thoại/email.");
+    } catch (error: unknown) {
+      setMemberActionError(
+        getErrorMessage(
+          error,
+          "Khong the tim thay nguoi dung theo so dien thoai/email.",
+        ),
+      );
       return;
     }
 
     if (resolvedUser.id === user?.sub) {
-      setMemberActionError("Bạn đã là thành viên của nhóm này.");
+      setMemberActionError(
+        "Không tìm thấy người dùng theo số điện thoại/email.",
+      );
       return;
     }
 
     if (memberIdsInCurrentGroup.has(resolvedUser.id)) {
-      setMemberActionError("Người dùng này đã có trong nhóm.");
+      setMemberActionError("Bạn đã là thành viên của nhóm này.");
       return;
     }
 
@@ -1490,7 +1737,8 @@ export function ChatPage() {
       return;
     }
 
-    const nextRole: GroupMemberRole = currentRole === "DEPUTY" ? "MEMBER" : "DEPUTY";
+    const nextRole: GroupMemberRole =
+      currentRole === "DEPUTY" ? "MEMBER" : "DEPUTY";
 
     await manageGroupMemberMutation.mutateAsync({
       groupId: activeGroupId,
@@ -1506,13 +1754,17 @@ export function ChatPage() {
     }
 
     if (isCurrentUserOwner && !leaveSuccessorUserId.trim()) {
-      setLeaveGroupError("Bạn là chủ nhóm, vui lòng chọn người kế nhiệm trước khi rời nhóm.");
+      setLeaveGroupError(
+        "Bạn là chủ nhóm, vui lòng chọn người kế nhiệm trước khi rời nhóm.",
+      );
       return;
     }
 
     await leaveGroupMutation.mutateAsync({
       groupId: activeGroupId,
-      successorUserId: isCurrentUserOwner ? leaveSuccessorUserId.trim() : undefined,
+      successorUserId: isCurrentUserOwner
+        ? leaveSuccessorUserId.trim()
+        : undefined,
     });
   };
 
@@ -1537,7 +1789,10 @@ export function ChatPage() {
     setMentionQuery("");
   };
 
-  const syncMentionContext = (nextValue: string, cursorPosition: number | null) => {
+  const syncMentionContext = (
+    nextValue: string,
+    cursorPosition: number | null,
+  ) => {
     if (!activeGroupId || cursorPosition === null) {
       closeMentionMenu();
       return;
@@ -1567,7 +1822,10 @@ export function ChatPage() {
     setMentionQuery(keyword);
   };
 
-  const handleComposerInputChange = (nextValue: string, cursorPosition: number | null) => {
+  const handleComposerInputChange = (
+    nextValue: string,
+    cursorPosition: number | null,
+  ) => {
     setInputText(nextValue);
     setSelectedMentions((prev) =>
       prev.filter((mention) => nextValue.includes(`@${mention.displayName}`)),
@@ -1603,7 +1861,9 @@ export function ChatPage() {
     });
   };
 
-  const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleComposerKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
     if (!isMentionMenuOpen) {
       return;
     }
@@ -1640,7 +1900,7 @@ export function ChatPage() {
 
   const handleStartCall = (isVideo: boolean, isJoining = false) => {
     if (!activeContact) return;
-    
+
     const config = {
       isVideo,
       conversationId: activeContact.conversationId,
@@ -1699,8 +1959,15 @@ export function ChatPage() {
     return /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(url);
   };
 
-  const replaceMentionIdsWithNames = (text: string, mentionPayload: unknown): string => {
-    if (!text || !Array.isArray(mentionPayload) || mentionPayload.length === 0) {
+  const replaceMentionIdsWithNames = (
+    text: string,
+    mentionPayload: unknown,
+  ): string => {
+    if (
+      !text ||
+      !Array.isArray(mentionPayload) ||
+      mentionPayload.length === 0
+    ) {
       return text;
     }
 
@@ -1775,7 +2042,11 @@ export function ChatPage() {
     return Array.from(uniqueNames);
   };
 
-  const renderMessageTextWithLinks = (text: string, isMe: boolean, keyPrefix: string): ReactNode => {
+  const renderMessageTextWithLinks = (
+    text: string,
+    isMe: boolean,
+    keyPrefix: string,
+  ): ReactNode => {
     const urlMatches = Array.from(text.matchAll(URL_PATTERN));
     if (urlMatches.length === 0) {
       return text;
@@ -1791,7 +2062,9 @@ export function ChatPage() {
 
       if (start > cursor) {
         nodes.push(
-          <span key={`${keyPrefix}-plain-${urlIndex}`}>{text.slice(cursor, start)}</span>,
+          <span key={`${keyPrefix}-plain-${urlIndex}`}>
+            {text.slice(cursor, start)}
+          </span>,
         );
       }
 
@@ -1804,14 +2077,20 @@ export function ChatPage() {
           href={sanitized}
           target="_blank"
           rel="noreferrer"
-          className={isMe ? "font-medium underline break-all text-blue-100" : "font-medium underline break-all text-blue-600 dark:text-blue-400"}
+          className={
+            isMe
+              ? "font-medium underline break-all text-blue-100"
+              : "font-medium underline break-all text-blue-600 dark:text-blue-400"
+          }
         >
           {sanitized}
         </a>,
       );
 
       if (trailing) {
-        nodes.push(<span key={`${keyPrefix}-tail-${urlIndex}`}>{trailing}</span>);
+        nodes.push(
+          <span key={`${keyPrefix}-tail-${urlIndex}`}>{trailing}</span>,
+        );
       }
 
       cursor = end;
@@ -1831,16 +2110,20 @@ export function ChatPage() {
     try {
       const parsed = JSON.parse(content);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        textValue = typeof (parsed as { text?: unknown }).text === "string"
-          ? (parsed as { text: string }).text
-          : content;
+        textValue =
+          typeof (parsed as { text?: unknown }).text === "string"
+            ? (parsed as { text: string }).text
+            : content;
         parsedMentionPayload = (parsed as { mention?: unknown }).mention;
       }
     } catch {
       textValue = content;
     }
 
-    const normalizedText = replaceMentionIdsWithNames(textValue, parsedMentionPayload);
+    const normalizedText = replaceMentionIdsWithNames(
+      textValue,
+      parsedMentionPayload,
+    );
     const mentionTokens = extractMentionDisplayNames(parsedMentionPayload)
       .map((name) => `@${name}`)
       .sort((left, right) => right.length - left.length);
@@ -1861,14 +2144,22 @@ export function ChatPage() {
         return (
           <span
             key={`mention-${index}`}
-            className={isMe ? "font-bold text-blue-100" : "font-bold text-blue-600 dark:text-blue-400"}
+            className={
+              isMe
+                ? "font-bold text-blue-100"
+                : "font-bold text-blue-600 dark:text-blue-400"
+            }
           >
             {part}
           </span>
         );
       }
 
-      return <Fragment key={`mixed-${index}`}>{renderMessageTextWithLinks(part, isMe, `mention-part-${index}`)}</Fragment>;
+      return (
+        <Fragment key={`mixed-${index}`}>
+          {renderMessageTextWithLinks(part, isMe, `mention-part-${index}`)}
+        </Fragment>
+      );
     });
   };
 
@@ -1880,14 +2171,19 @@ export function ChatPage() {
     return text.replace(USER_ID_PATTERN, (token) => {
       const displayName = displayNameByUserId.get(token);
       if (displayName) {
-        return canViewSensitiveUserIds ? `${displayName} (${token})` : displayName;
+        return canViewSensitiveUserIds
+          ? `${displayName} (${token})`
+          : displayName;
       }
 
       return canViewSensitiveUserIds ? token : "một thành viên";
     });
   };
 
-  const extractMessageText = (content: string, messageType?: ChatMessageType): string => {
+  const extractMessageText = (
+    content: string,
+    messageType?: ChatMessageType,
+  ): string => {
     const normalizeText = (value: string) => {
       if (messageType === "SYSTEM") {
         return formatSystemMessageText(value);
@@ -1899,10 +2195,16 @@ export function ChatPage() {
     try {
       const parsed = JSON.parse(content);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const text = typeof (parsed as { text?: unknown }).text === "string"
-          ? (parsed as { text: string }).text
-          : content;
-        return normalizeText(replaceMentionIdsWithNames(text, (parsed as { mention?: unknown }).mention));
+        const text =
+          typeof (parsed as { text?: unknown }).text === "string"
+            ? (parsed as { text: string }).text
+            : content;
+        return normalizeText(
+          replaceMentionIdsWithNames(
+            text,
+            (parsed as { mention?: unknown }).mention,
+          ),
+        );
       }
 
       return normalizeText(content);
@@ -1924,17 +2226,21 @@ export function ChatPage() {
     expectedIsVideo: boolean,
   ): CallEndedSummary | null => {
     const candidates = callSummaries.filter(
-      (item) => 
-        (item.conversationId === msg.conversationId || item.peerUserId === activeDmUserId) &&
-        item.peerUserId === activeDmUserId
+      (item) =>
+        (item.conversationId === msg.conversationId ||
+          item.peerUserId === activeDmUserId) &&
+        item.peerUserId === activeDmUserId,
     );
 
     if (candidates.length === 0) {
       return null;
     }
 
-    const scopedCandidates = candidates.filter((item) => item.isVideo === expectedIsVideo);
-    const finalCandidates = scopedCandidates.length > 0 ? scopedCandidates : candidates;
+    const scopedCandidates = candidates.filter(
+      (item) => item.isVideo === expectedIsVideo,
+    );
+    const finalCandidates =
+      scopedCandidates.length > 0 ? scopedCandidates : candidates;
 
     const messageTime = new Date(msg.sentAt).getTime();
     const nearest = finalCandidates
@@ -1980,7 +2286,9 @@ export function ChatPage() {
     return "Tin nhắn";
   };
 
-  const normalizeQuotedMessage = (message: MessageItem): MessageReplyReference => ({
+  const normalizeQuotedMessage = (
+    message: MessageItem,
+  ): MessageReplyReference => ({
     id: message.id,
     senderId: message.senderId,
     senderName: message.senderName,
@@ -2052,16 +2360,19 @@ export function ChatPage() {
       setEditingMessageId(null);
       setEditingText("");
       setMessageActionError("");
-    } catch (err: any) {
-      setMessageActionError(err?.message || "Không thể sửa tin nhắn");
+    } catch (error: unknown) {
+      setMessageActionError(getErrorMessage(error, "Khong the sua tin nhan"));
     }
   };
 
-  const handleDeleteMessage = async (messageId: string, scope: RecallScope = "SELF") => {
+  const handleDeleteMessage = async (
+    messageId: string,
+    scope: RecallScope = "SELF",
+  ) => {
     const shouldDelete = window.confirm(
       scope === "EVERYONE"
         ? "Thu hồi tin nhắn này với mọi người?"
-        : "Xoá tin nhắn này chỉ với bạn?",
+        : "Xóa tin nhắn này chỉ với bạn?",
     );
     if (!shouldDelete) {
       return;
@@ -2071,8 +2382,10 @@ export function ChatPage() {
       await deleteMessageAsync({ messageId, scope });
       setActiveMessageMenuId(null);
       setMessageActionError("");
-    } catch (err: any) {
-      setMessageActionError(err?.message || "Không thể xử lý xoá tin nhắn");
+    } catch (error: unknown) {
+      setMessageActionError(
+        getErrorMessage(error, "Khong the xu ly xoa tin nhan"),
+      );
     }
   };
 
@@ -2103,14 +2416,14 @@ export function ChatPage() {
     });
   };
 
-  const clearTypingTimer = () => {
+  const clearTypingTimer = useCallback(() => {
     if (typingStopTimerRef.current !== null) {
       window.clearTimeout(typingStopTimerRef.current);
       typingStopTimerRef.current = null;
     }
-  };
+  }, []);
 
-  const stopTyping = () => {
+  const stopTyping = useCallback(() => {
     clearTypingTimer();
 
     if (!isTypingRef.current) {
@@ -2119,9 +2432,9 @@ export function ChatPage() {
 
     isTypingRef.current = false;
     void sendTyping(false);
-  };
+  }, [clearTypingTimer, sendTyping]);
 
-  const scheduleTypingStop = () => {
+  const scheduleTypingStop = useCallback(() => {
     clearTypingTimer();
 
     typingStopTimerRef.current = window.setTimeout(() => {
@@ -2133,7 +2446,7 @@ export function ChatPage() {
       isTypingRef.current = false;
       void sendTyping(false);
     }, 1200);
-  };
+  }, [clearTypingTimer, sendTyping]);
 
   const handleToggleForwardTarget = (conversationId: string) => {
     setSelectedForwardConversationIds((prev) =>
@@ -2160,8 +2473,10 @@ export function ChatPage() {
         conversationIds: selectedForwardConversationIds,
       });
       handleCloseForwardDialog();
-    } catch (err: any) {
-      setForwardActionError(err?.message || "Không thể chuyển tiếp tin nhắn.");
+    } catch (error: unknown) {
+      setForwardActionError(
+        getErrorMessage(error, "Khong the chuyen tiep tin nhan."),
+      );
     }
   };
 
@@ -2200,7 +2515,9 @@ export function ChatPage() {
     setQueuedAttachments((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleGroupAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleGroupAvatarFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     event.target.value = "";
 
@@ -2226,8 +2543,10 @@ export function ChatPage() {
         [activeGroupId]: uploaded.url,
       }));
       toast.success("Đã cập nhật ảnh nhóm.");
-    } catch (error: any) {
-      toast.error(error?.message || "Không thể cập nhật ảnh nhóm lúc này.");
+    } catch (error: unknown) {
+      toast.error(
+        getErrorMessage(error, "Khong the cap nhat anh nhom luc nay."),
+      );
     } finally {
       setIsUpdatingGroupAvatar(false);
     }
@@ -2342,7 +2661,7 @@ export function ChatPage() {
     return () => {
       stopTyping();
     };
-  }, [activeChat, sendTyping]);
+  }, [activeChat, stopTyping]);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     if (!activeChat) {
@@ -2382,11 +2701,13 @@ export function ChatPage() {
 
     try {
       let pendingText = inputText;
-      let pendingMentions = [...new Set(
-        selectedMentions
-          .filter((mention) => inputText.includes(`@${mention.displayName}`))
-          .map((mention) => mention.userId),
-      )];
+      let pendingMentions = [
+        ...new Set(
+          selectedMentions
+            .filter((mention) => inputText.includes(`@${mention.displayName}`))
+            .map((mention) => mention.userId),
+        ),
+      ];
       let sentAny = false;
       const replyTo = replyingMessage?.id;
       closeMentionMenu();
@@ -2445,13 +2766,13 @@ export function ChatPage() {
             pendingText = "";
             pendingMentions = [];
             sentAny = true;
-            setQueuedAttachments((prev) => prev.filter((entry) => entry.id !== item.id));
+            setQueuedAttachments((prev) =>
+              prev.filter((entry) => entry.id !== item.id),
+            );
           } catch {
             setQueuedAttachments((prev) =>
               prev.map((entry) =>
-                entry.id === item.id
-                  ? { ...entry, status: "failed" }
-                  : entry,
+                entry.id === item.id ? { ...entry, status: "failed" } : entry,
               ),
             );
           }
@@ -2490,7 +2811,7 @@ export function ChatPage() {
           </div>
         </div>
       ) : null}
-      
+
       {/* Cột trái: Master (Danh sách hội thoại) */}
       <div
         className={`${activeChat ? "hidden md:flex" : "flex"} w-full md:w-[340px] md:flex-shrink-0 border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex-col h-full overflow-hidden`}
@@ -2498,33 +2819,54 @@ export function ChatPage() {
         <div className="p-4 border-b border-gray-100 dark:border-slate-700 flex items-center justify-between shrink-0">
           <div className="relative w-full">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500 dark:text-slate-400" />
-            <Input 
-              type="text" 
-              placeholder="Tìm kiếm danh bạ, tin nhắn..." 
-              className="pl-9 h-9 bg-gray-100 border-none focus-visible:ring-1 focus-visible:ring-blue-500" 
+            <Input
+              type="text"
+              placeholder="Tìm kiếm danh bạ, tin nhắn..."
+              className="pl-9 h-9 bg-gray-100 border-none focus-visible:ring-1 focus-visible:ring-blue-500"
               value={conversationSearch}
               onChange={(e) => setConversationSearch(e.target.value)}
             />
           </div>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto min-h-0 hide-scrollbar">
-          {loadingConversations && <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">Đang tải cuộc trò chuyện...</div>}
-           {!loadingConversations && renderedConversations.length === 0 && (
-             <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">
-              {conversationSearch.trim() ? "Không tìm thấy hội thoại phù hợp" : "Chưa có hội thoại nào"}
-             </div>
+          {loadingConversations && (
+            <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">
+              Đang tải cuộc trò chuyện...
+            </div>
           )}
-          {renderedConversations.map((chat) => (
+          {!loadingConversations && renderedConversations.length === 0 && (
+            <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">
+              {conversationSearch.trim()
+                ? "Không tìm thấy hội thoại phù hợp"
+                : "Chưa có hội thoại nào"}
+            </div>
+          )}
+          {renderedConversations.map((chat) =>
             (() => {
-              const effectiveUnreadCount = chat.conversationId === activeChat ? 0 : (chat.unreadCount ?? 0);
+              const effectiveUnreadCount =
+                chat.conversationId === activeChat
+                  ? 0
+                  : (chat.unreadCount ?? 0);
               const chatDmUserId = chat.isGroup
                 ? undefined
-                : extractDirectPeerUserId(chat as ConversationAvatarLike, user?.sub);
-              const chatPresence = chatDmUserId ? dmPresenceByUserId[chatDmUserId] : undefined;
-              const chatLastSeenBadge = formatLastSeenShort(chatPresence, chat.updatedAt);
-              const chatGroupId = extractGroupIdFromConversationId(chat.conversationId);
-              const chatAvatarFromConversation = resolveConversationAvatarUrl(chat as ConversationAvatarLike);
+                : extractDirectPeerUserId(
+                    chat as ConversationAvatarLike,
+                    user?.sub,
+                  );
+              const chatPresence = chatDmUserId
+                ? dmPresenceByUserId[chatDmUserId]
+                : undefined;
+              const chatLastSeenBadge = formatLastSeenShort(
+                chatPresence,
+                chat.updatedAt,
+              );
+              const chatGroupId = extractGroupIdFromConversationId(
+                chat.conversationId,
+              );
+              const chatAvatarFromConversation = resolveConversationAvatarUrl(
+                chat as ConversationAvatarLike,
+              );
               const chatAvatarFromFriendMap = resolveDmAvatarFromFriendMap(
                 chat as ConversationAvatarLike,
                 friendAvatarByUserId,
@@ -2535,59 +2877,91 @@ export function ChatPage() {
                 chatAvatarFromConversation ||
                 chatAvatarFromFriendMap ||
                 dmAvatarMap[chat.conversationId] ||
-                (chat as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }).avatarAsset?.resolvedUrl ||
-                (chat as { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }).avatarUrl;
+                (
+                  chat as {
+                    avatarAsset?: { resolvedUrl?: string };
+                    avatarUrl?: string;
+                  }
+                ).avatarAsset?.resolvedUrl ||
+                (
+                  chat as {
+                    avatarAsset?: { resolvedUrl?: string };
+                    avatarUrl?: string;
+                  }
+                ).avatarUrl;
               return (
-            <div 
-              key={chat.conversationId} 
-              onClick={() => setActiveChat(chat.conversationId)}
-              className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-lg cursor-pointer transition-colors ${
-                activeChat === chat.conversationId ? "bg-blue-50 dark:bg-blue-950/40" : "hover:bg-gray-50 dark:hover:bg-slate-800"
-              }`}
-            >
-              <div className="relative">
-                <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
-                  {chatAvatarUrl ? <AvatarImage src={chatAvatarUrl} alt={chat.groupName || "Avatar"} /> : null}
-                  <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
-                    {chat.groupName ? chat.groupName.charAt(0).toUpperCase() : "U"}
-                  </AvatarFallback>
-                </Avatar>
-                {!chat.isGroup && chatPresence?.isActive ? (
-                  <span className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
-                ) : null}
-                {!chat.isGroup && !chatPresence?.isActive ? (
-                  <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
-                    {chatLastSeenBadge || "1m"}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex-1 min-w-0 pr-1">
-                <div className="flex justify-between items-baseline mb-1">
-                  <span className="font-medium text-[15px] truncate">{chat.groupName || "Không rõ tên"}</span>
-                  <span className="text-xs text-gray-500 dark:text-slate-400 flex-shrink-0">
-                    {chat.updatedAt ? format(new Date(chat.updatedAt), 'HH:mm') : ''}
-                  </span>
+                <div
+                  key={chat.conversationId}
+                  onClick={() => setActiveChat(chat.conversationId)}
+                  className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-lg cursor-pointer transition-colors ${
+                    activeChat === chat.conversationId
+                      ? "bg-blue-50 dark:bg-blue-950/40"
+                      : "hover:bg-gray-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="relative">
+                    <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
+                      {chatAvatarUrl ? (
+                        <AvatarImage
+                          src={chatAvatarUrl}
+                          alt={chat.groupName || "Avatar"}
+                        />
+                      ) : null}
+                      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                        {chat.groupName
+                          ? chat.groupName.charAt(0).toUpperCase()
+                          : "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                    {!chat.isGroup && chatPresence?.isActive ? (
+                      <span className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
+                    ) : null}
+                    {!chat.isGroup && !chatPresence?.isActive ? (
+                      <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
+                        {chatLastSeenBadge || "1m"}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex-1 min-w-0 pr-1">
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="font-medium text-[15px] truncate">
+                        {chat.groupName || "Không rõ tên"}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-slate-400 flex-shrink-0">
+                        {chat.updatedAt
+                          ? format(new Date(chat.updatedAt), "HH:mm")
+                          : ""}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span
+                        className={
+                          "text-sm truncate " +
+                          (effectiveUnreadCount > 0
+                            ? "font-semibold text-slate-800 dark:text-slate-100"
+                            : "text-gray-500 dark:text-slate-400")
+                        }
+                      >
+                        {chat.lastMessagePreview || "Chưa có tin nhắn"}
+                      </span>
+                      {effectiveUnreadCount > 0 && (
+                        <span className="bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                          {effectiveUnreadCount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className={"text-sm truncate " + (effectiveUnreadCount > 0 ? "font-semibold text-slate-800 dark:text-slate-100" : "text-gray-500 dark:text-slate-400")}>
-                    {chat.lastMessagePreview || "Chưa có tin nhắn"}
-                  </span>
-                  {effectiveUnreadCount > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
-                      {effectiveUnreadCount}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
               );
-            })()
-          ))}
+            })(),
+          )}
         </div>
       </div>
 
-      {/* Cột phải: Detail (Chi tiết Chat) */}
-      <div className={`${activeChat ? "flex" : "hidden md:flex"} flex-1 flex-col bg-[#f3f6fb] dark:bg-slate-950 relative overflow-hidden h-full lg:transition-[padding] lg:duration-200 ${isInfoOpen ? "lg:pr-[356px]" : ""}`}>
+      {/* Cột phải: Detail (Chi tiết chat) */}
+      <div
+        className={`${activeChat ? "flex" : "hidden md:flex"} flex-1 flex-col bg-[#f3f6fb] dark:bg-slate-950 relative overflow-hidden h-full lg:transition-[padding] lg:duration-200 ${isInfoOpen ? "lg:pr-[356px]" : ""}`}
+      >
         {!activeChat ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-slate-500 gap-4 mt-20">
             <UserRound size={60} className="opacity-20" />
@@ -2600,16 +2974,21 @@ export function ChatPage() {
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <button
-                  type="button"
-                  onClick={() => setActiveChat(null)}
-                  className="md:hidden rounded-full p-2 text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                  title="Quay lại danh sách hội thoại"
-                >
-                  <X size={18} />
-                </button>
-                <Avatar className="h-10 w-10">
-                    {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Avatar"} /> : null}
-                  <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                    type="button"
+                    onClick={() => setActiveChat(null)}
+                    className="md:hidden rounded-full p-2 text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                    title="Quay lại danh sách hội thoại"
+                  >
+                    <X size={18} />
+                  </button>
+                  <Avatar className="h-10 w-10">
+                    {activeContactAvatarUrl ? (
+                      <AvatarImage
+                        src={activeContactAvatarUrl}
+                        alt={activeContact?.groupName || "Avatar"}
+                      />
+                    ) : null}
+                    <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
                       {activeContact?.groupName?.charAt(0).toUpperCase() || "U"}
                     </AvatarFallback>
                   </Avatar>
@@ -2626,19 +3005,23 @@ export function ChatPage() {
                   <h2 className="font-semibold text-base leading-none">
                     {activeContact?.groupName || "Không rõ tên"}
                   </h2>
-                  <span className={`text-xs font-medium ${activeStatusToneClass}`}>{activeStatusText}</span>
+                  <span
+                    className={`text-xs font-medium ${activeStatusToneClass}`}
+                  >
+                    {activeStatusText}
+                  </span>
                 </div>
               </div>
               <div className="flex items-center text-gray-600 dark:text-slate-300">
-                <button 
-                  className="rounded-full p-2 transition hover:bg-gray-100 dark:hover:bg-slate-800" 
+                <button
+                  className="rounded-full p-2 transition hover:bg-gray-100 dark:hover:bg-slate-800"
                   onClick={() => handleStartCall(false)}
                   title="Gọi thoại"
                 >
                   <Phone size={20} />
                 </button>
-                <button 
-                  className="rounded-full p-2 transition hover:bg-gray-100 dark:hover:bg-slate-800" 
+                <button
+                  className="rounded-full p-2 transition hover:bg-gray-100 dark:hover:bg-slate-800"
                   onClick={() => handleStartCall(true)}
                   title="Gọi video"
                 >
@@ -2668,7 +3051,9 @@ export function ChatPage() {
               className={`absolute right-0 top-16 z-30 flex h-[calc(100%-4rem)] w-full max-w-full flex-col border-l border-slate-200 bg-[#eef3fb] shadow-xl transition-transform duration-200 dark:border-slate-700 dark:bg-slate-900 sm:w-[360px] sm:max-w-[90%] md:w-[340px] lg:right-0 lg:top-0 lg:h-full lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-slate-200 dark:lg:border-slate-700 lg:shadow-none ${isInfoOpen ? "translate-x-0" : "translate-x-full"}`}
             >
               <div className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 dark:border-slate-700 dark:bg-slate-900">
-                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Thông tin cuộc trò chuyện</h3>
+                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Thông tin cuộc trò chuyện
+                </h3>
                 <button
                   onClick={() => setIsInfoOpen(false)}
                   className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -2678,13 +3063,19 @@ export function ChatPage() {
               </div>
               <div className="flex-1 space-y-3 overflow-y-auto p-3 text-sm text-slate-700 dark:text-slate-300 hide-scrollbar">
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Tên hiển thị</p>
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{activeContact?.groupName || "Không rõ tên"}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Tên hiển thị
+                  </p>
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                    {activeContact?.groupName || "Không rõ tên"}
+                  </p>
                   {activeGroupId && canRenameGroup ? (
                     <div className="mt-2 flex items-center gap-2">
                       <input
                         value={renameGroupName}
-                        onChange={(event) => setRenameGroupName(event.target.value)}
+                        onChange={(event) =>
+                          setRenameGroupName(event.target.value)
+                        }
                         placeholder="Nhập tên nhóm mới"
                         className="h-8 flex-1 rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-900"
                         maxLength={100}
@@ -2695,24 +3086,35 @@ export function ChatPage() {
                         disabled={renameGroupMutation.isPending}
                         className="rounded bg-blue-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                       >
-                        {renameGroupMutation.isPending ? "Đang lưu..." : "Đổi tên"}
+                        {renameGroupMutation.isPending
+                          ? "Đang lưu..."
+                          : "Đổi tên"}
                       </button>
                     </div>
                   ) : null}
                 </div>
                 {activeGroupId ? (
                   <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Ảnh nhóm</p>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Ảnh nhóm
+                    </p>
                     <div className="mt-2 flex items-center gap-3">
                       <Avatar className="h-14 w-14">
-                        {activeContactAvatarUrl ? <AvatarImage src={activeContactAvatarUrl} alt={activeContact?.groupName || "Ảnh nhóm"} /> : null}
+                        {activeContactAvatarUrl ? (
+                          <AvatarImage
+                            src={activeContactAvatarUrl}
+                            alt={activeContact?.groupName || "Ảnh nhóm"}
+                          />
+                        ) : null}
                         <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold text-lg">
-                          {activeContact?.groupName?.charAt(0).toUpperCase() || "G"}
+                          {activeContact?.groupName?.charAt(0).toUpperCase() ||
+                            "G"}
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0 flex-1">
                         <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Tải ảnh nhóm để hiển thị ngay trên giao diện chat.
+                          Tải ảnh nhóm để hiển thị ngay trong giao diện chat của
+                          cuộc trò chuyện.
                         </p>
                         {canUpdateGroupAvatar ? (
                           <>
@@ -2721,16 +3123,22 @@ export function ChatPage() {
                               type="file"
                               accept="image/*"
                               className="hidden"
-                              onChange={(event) => void handleGroupAvatarFileChange(event)}
+                              onChange={(event) =>
+                                void handleGroupAvatarFileChange(event)
+                              }
                             />
                             <button
                               type="button"
-                              onClick={() => groupAvatarInputRef.current?.click()}
+                              onClick={() =>
+                                groupAvatarInputRef.current?.click()
+                              }
                               disabled={isUpdatingGroupAvatar}
                               className="mt-2 inline-flex items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               <ImagePlus size={12} />
-                              {isUpdatingGroupAvatar ? "Đang tải..." : "Đổi ảnh nhóm"}
+                              {isUpdatingGroupAvatar
+                                ? "Đang tải..."
+                                : "Đổi ảnh nhóm"}
                             </button>
                           </>
                         ) : null}
@@ -2739,13 +3147,21 @@ export function ChatPage() {
                   </div>
                 ) : null}
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Loại cuộc trò chuyện</p>
-                  <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{activeContact?.isGroup ? "Nhóm" : "Trực tiếp"}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Loại cuộc trò chuyện
+                  </p>
+                  <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">
+                    {activeContact?.isGroup ? "Nhóm" : "Trực tiếp"}
+                  </p>
                 </div>
                 {canViewConversationCode ? (
                   <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Mã hội thoại</p>
-                    <p className="mt-1 break-all text-xs text-slate-600 dark:text-slate-300">{activeContact?.conversationId || "-"}</p>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Mã hội thoại
+                    </p>
+                    <p className="mt-1 break-all text-xs text-slate-600 dark:text-slate-300">
+                      {activeContact?.conversationId || "-"}
+                    </p>
                   </div>
                 ) : null}
                 {/* <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -2760,8 +3176,12 @@ export function ChatPage() {
                 {activeGroupId ? (
                   <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Thành viên nhóm</p>
-                      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{activeGroupMembers.length}</span>
+                      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Thành viên nhóm
+                      </p>
+                      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        {activeGroupMembers.length}
+                      </span>
                     </div>
 
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -2786,11 +3206,15 @@ export function ChatPage() {
 
                     {canViewGroupMemberList ? (
                       isLoadingGroupMembers ? (
-                        <p className="text-xs text-slate-500">Đang tải danh sách thành viên...</p>
+                        <p className="text-xs text-slate-500">
+                          Đang tải danh sách thành viên...
+                        </p>
                       ) : (
                         <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
                           {activeGroupMembers.length === 0 ? (
-                            <p className="px-1 py-1 text-xs text-slate-500 dark:text-slate-400">Chưa có thành viên hiển thị.</p>
+                            <p className="px-1 py-1 text-xs text-slate-500 dark:text-slate-400">
+                              Chưa có thành viên hiển thị.
+                            </p>
                           ) : (
                             activeGroupMembers.map((member, index) => (
                               <div
@@ -2799,23 +3223,33 @@ export function ChatPage() {
                               >
                                 <div className="min-w-0">
                                   {(() => {
-                                    const profile = memberProfilesById[member.userId];
+                                    const profile =
+                                      memberProfilesById[member.userId];
                                     const displayName =
                                       profile?.fullName ||
-                                      myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
-                                      messageSenderNameByUserId.get(member.userId) ||
+                                      myFriends.find(
+                                        (friend) =>
+                                          friend.userId === member.userId,
+                                      )?.fullName ||
+                                      messageSenderNameByUserId.get(
+                                        member.userId,
+                                      ) ||
                                       `Thành viên ${index + 1}`;
 
                                     return (
                                       <>
                                         <p className="truncate font-medium">
                                           {displayName}
-                                          {member.userId === user?.sub ? " (Bạn)" : ""}
+                                          {member.userId === user?.sub
+                                            ? " (Bạn)"
+                                            : ""}
                                         </p>
                                       </>
                                     );
                                   })()}
-                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Vai trò: {member.roleInGroup}</p>
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    Vai trò: {member.roleInGroup}
+                                  </p>
                                 </div>
                                 {member.userId !== user?.sub ? (
                                   <div className="ml-2 flex flex-col items-end gap-1.5">
@@ -2825,7 +3259,12 @@ export function ChatPage() {
                                           type="button"
                                           onClick={(event) => {
                                             event.stopPropagation();
-                                            setActiveMemberActionUserId((prev) => prev === member.userId ? null : member.userId);
+                                            setActiveMemberActionUserId(
+                                              (prev) =>
+                                                prev === member.userId
+                                                  ? null
+                                                  : member.userId,
+                                            );
                                           }}
                                           className="rounded-full p-1.5 text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700"
                                           title="Tùy chọn thành viên"
@@ -2833,34 +3272,50 @@ export function ChatPage() {
                                           <MoreHorizontal size={14} />
                                         </button>
 
-                                        {activeMemberActionUserId === member.userId ? (
+                                        {activeMemberActionUserId ===
+                                        member.userId ? (
                                           <div
                                             className="absolute right-0 top-7 z-20 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
-                                            onClick={(event) => event.stopPropagation()}
+                                            onClick={(event) =>
+                                              event.stopPropagation()
+                                            }
                                           >
                                             {member.roleInGroup !== "OWNER" ? (
                                               <button
                                                 type="button"
                                                 onClick={() => {
-                                                  setActiveMemberActionUserId(null);
-                                                  void handleToggleMemberRole(member.userId, member.roleInGroup);
+                                                  setActiveMemberActionUserId(
+                                                    null,
+                                                  );
+                                                  void handleToggleMemberRole(
+                                                    member.userId,
+                                                    member.roleInGroup,
+                                                  );
                                                 }}
                                                 className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800"
                                               >
-                                                {member.roleInGroup === "DEPUTY" ? "Hạ quyền" : "Nâng quyền"}
+                                                {member.roleInGroup === "DEPUTY"
+                                                  ? "Hạ quyền"
+                                                  : "Nâng quyền"}
                                               </button>
                                             ) : null}
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                setActiveMemberActionUserId(null);
-                                                void handleRemoveGroupMember(member.userId);
+                                                setActiveMemberActionUserId(
+                                                  null,
+                                                );
+                                                void handleRemoveGroupMember(
+                                                  member.userId,
+                                                );
                                               }}
                                               className="flex w-full items-center px-3 py-2 text-left text-[11px] font-medium text-red-600 hover:bg-red-50 dark:hover:bg-slate-800"
                                             >
                                               Xóa thành viên
                                             </button>
-                                            <div className="px-3 py-1.5 text-[10px] text-slate-500 dark:text-slate-400">Sẽ thêm chức năng mới</div>
+                                            <div className="px-3 py-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                                              Sẽ thêm chức năng mới
+                                            </div>
                                           </div>
                                         ) : null}
                                       </div>
@@ -2870,22 +3325,36 @@ export function ChatPage() {
                                       <span className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
                                         Bạn bè
                                       </span>
-                                    ) : outgoingFriendRequestUserIds.has(member.userId) ? (
+                                    ) : outgoingFriendRequestUserIds.has(
+                                        member.userId,
+                                      ) ? (
                                       <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
                                         Đã gửi lời mời
                                       </span>
-                                    ) : incomingFriendRequestUserIds.has(member.userId) ? (
+                                    ) : incomingFriendRequestUserIds.has(
+                                        member.userId,
+                                      ) ? (
                                       <span className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
                                         Đã nhận lời mời
                                       </span>
                                     ) : (
                                       <button
                                         type="button"
-                                        onClick={() => void handleSendFriendRequest(member.userId)}
-                                        disabled={sendFriendRequestMutation.isPending && sendingFriendRequestUserId === member.userId}
+                                        onClick={() =>
+                                          void handleSendFriendRequest(
+                                            member.userId,
+                                          )
+                                        }
+                                        disabled={
+                                          sendFriendRequestMutation.isPending &&
+                                          sendingFriendRequestUserId ===
+                                            member.userId
+                                        }
                                         className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                                       >
-                                        {sendFriendRequestMutation.isPending && sendingFriendRequestUserId === member.userId
+                                        {sendFriendRequestMutation.isPending &&
+                                        sendingFriendRequestUserId ===
+                                          member.userId
                                           ? "Đang gửi..."
                                           : "Kết bạn"}
                                       </button>
@@ -2900,20 +3369,32 @@ export function ChatPage() {
                     ) : null}
 
                     {canShowAddMemberSection ? (
-                      <form onSubmit={handleAddGroupMember} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Thêm thành viên</p>
+                      <form
+                        onSubmit={handleAddGroupMember}
+                        className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          Thêm thành viên
+                        </p>
                         <input
                           value={memberLookupInput}
-                          onChange={(event) => setMemberLookupInput(event.target.value)}
+                          onChange={(event) =>
+                            setMemberLookupInput(event.target.value)
+                          }
                           placeholder="Nhập số điện thoại hoặc email"
                           className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         />
                         <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                          Hệ thống sẽ tra cứu chính xác người dùng theo số điện thoại/email rồi thêm vào nhóm.
+                          Hệ thống sẽ tra cứu chính xác người dùng theo số điện
+                          thoại/email rồi thêm vào nhóm.
                         </p>
                         <select
                           value={memberRoleInput}
-                          onChange={(event) => setMemberRoleInput(event.target.value as GroupMemberRole)}
+                          onChange={(event) =>
+                            setMemberRoleInput(
+                              event.target.value as GroupMemberRole,
+                            )
+                          }
                           className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         >
                           <option value="MEMBER">MEMBER</option>
@@ -2924,13 +3405,17 @@ export function ChatPage() {
                           disabled={manageGroupMemberMutation.isPending}
                           className="w-full rounded bg-blue-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                         >
-                          {manageGroupMemberMutation.isPending ? "Đang xử lý..." : "Thêm thành viên"}
+                          {manageGroupMemberMutation.isPending
+                            ? "Đang xử lý..."
+                            : "Thêm thành viên"}
                         </button>
                       </form>
                     ) : null}
 
                     <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Mời bạn bè</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Mời bạn bè
+                      </p>
                       <button
                         type="button"
                         onClick={() => setIsInviteDialogOpen(true)}
@@ -2952,29 +3437,41 @@ export function ChatPage() {
 
                     <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Link tham gia nhóm</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          Link tham gia nhóm
+                        </p>
                         {canManageInviteLinks ? (
                           <button
                             type="button"
                             onClick={() => {
                               if (!activeGroupId) return;
-                              void createInviteLinkMutation.mutateAsync({ groupId: activeGroupId });
+                              void createInviteLinkMutation.mutateAsync({
+                                groupId: activeGroupId,
+                              });
                             }}
                             disabled={createInviteLinkMutation.isPending}
                             className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60"
                           >
-                            {createInviteLinkMutation.isPending ? "Đang tạo..." : "Tạo link"}
+                            {createInviteLinkMutation.isPending
+                              ? "Đang tạo..."
+                              : "Tạo link"}
                           </button>
                         ) : null}
                       </div>
 
                       {activeGroupInviteLinks.length === 0 ? (
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Chưa có link tham gia nào.</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Chưa có link tham gia nào.
+                        </p>
                       ) : (
                         <div className="max-h-36 space-y-1 overflow-y-auto rounded border border-slate-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
                           {activeGroupInviteLinks
                             .filter((invite) => !invite.disabledAt)
-                            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                            .sort(
+                              (a, b) =>
+                                new Date(b.createdAt).getTime() -
+                                new Date(a.createdAt).getTime(),
+                            )
                             .slice(0, 5)
                             .map((invite) => (
                               <div
@@ -2985,28 +3482,35 @@ export function ChatPage() {
                                   {buildInviteJoinUrl(invite)}
                                 </p>
                                 <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
-                                  Đã dùng: {invite.usedCount}{invite.maxUses ? `/${invite.maxUses}` : ""}
+                                  Đã dùng: {invite.usedCount}
+                                  {invite.maxUses ? `/${invite.maxUses}` : ""}
                                 </p>
                                 <div className="mt-1 flex items-center gap-1.5">
                                   <button
                                     type="button"
-                                    onClick={() => void handleCopyInviteLink(invite)}
+                                    onClick={() =>
+                                      void handleCopyInviteLink(invite)
+                                    }
                                     className="inline-flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                                   >
                                     <Copy size={10} />
-                                    Sao chép
+                                    Sao ch?p
                                   </button>
                                   {canManageInviteLinks ? (
                                     <button
                                       type="button"
                                       onClick={() => {
                                         if (!activeGroupId) return;
-                                        void revokeInviteLinkMutation.mutateAsync({
-                                          groupId: activeGroupId,
-                                          inviteId: invite.inviteId,
-                                        });
+                                        void revokeInviteLinkMutation.mutateAsync(
+                                          {
+                                            groupId: activeGroupId,
+                                            inviteId: invite.inviteId,
+                                          },
+                                        );
                                       }}
-                                      disabled={revokeInviteLinkMutation.isPending}
+                                      disabled={
+                                        revokeInviteLinkMutation.isPending
+                                      }
                                       className="rounded border border-red-300 px-1.5 py-0.5 text-[10px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
                                     >
                                       Thu hồi
@@ -3020,7 +3524,9 @@ export function ChatPage() {
                     </div>
 
                     {memberActionError ? (
-                      <p className="text-xs text-red-500">{memberActionError}</p>
+                      <p className="text-xs text-red-500">
+                        {memberActionError}
+                      </p>
                     ) : null}
 
                     {inviteLinkError ? (
@@ -3038,7 +3544,9 @@ export function ChatPage() {
                         disabled={leaveGroupMutation.isPending}
                         className="w-full rounded bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
                       >
-                        {leaveGroupMutation.isPending ? "Đang rời nhóm..." : "Rời nhóm"}
+                        {leaveGroupMutation.isPending
+                          ? "Đang rời nhóm..."
+                          : "Rời nhóm"}
                       </button>
                     </div>
 
@@ -3051,9 +3559,16 @@ export function ChatPage() {
             </aside>
 
             {/* Nội dung tin nhắn */}
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar">
-              {loadingMessages && <div className="text-center py-4 text-sm text-gray-500 dark:text-slate-400">Đang tải tin nhắn...</div>}
-              
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar"
+            >
+              {loadingMessages && (
+                <div className="text-center py-4 text-sm text-gray-500 dark:text-slate-400">
+                  Đang tải tin nhắn...
+                </div>
+              )}
+
               <div className="flex flex-col gap-3 pb-4">
                 {hasMore ? (
                   <div className="flex justify-center py-1">
@@ -3063,7 +3578,9 @@ export function ChatPage() {
                       disabled={isLoadingMore}
                       className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
-                      {isLoadingMore ? "Đang tải thêm..." : "Tải thêm tin nhắn cũ"}
+                      {isLoadingMore
+                        ? "Đang tải thêm..."
+                        : "Tải thêm tin nhắn cũ"}
                     </button>
                   </div>
                 ) : null}
@@ -3072,10 +3589,16 @@ export function ChatPage() {
                   const isMe = msg.senderId === user?.sub;
                   const previousMessage = orderedMessages[index - 1];
                   const nextMessage = orderedMessages[index + 1];
-                  const isGroupIncoming = Boolean(activeContact?.isGroup && !isMe);
+                  const isGroupIncoming = Boolean(
+                    activeContact?.isGroup && !isMe,
+                  );
                   const messageSentAtMs = new Date(msg.sentAt).getTime();
-                  const previousSentAtMs = previousMessage ? new Date(previousMessage.sentAt).getTime() : Number.NaN;
-                  const nextSentAtMs = nextMessage ? new Date(nextMessage.sentAt).getTime() : Number.NaN;
+                  const previousSentAtMs = previousMessage
+                    ? new Date(previousMessage.sentAt).getTime()
+                    : Number.NaN;
+                  const nextSentAtMs = nextMessage
+                    ? new Date(nextMessage.sentAt).getTime()
+                    : Number.NaN;
                   const startsSenderBlock =
                     !previousMessage ||
                     previousMessage.senderId !== msg.senderId ||
@@ -3088,27 +3611,46 @@ export function ChatPage() {
                     Number.isNaN(nextSentAtMs) ||
                     Number.isNaN(messageSentAtMs) ||
                     nextSentAtMs - messageSentAtMs > MESSAGE_BLOCK_GAP_MS;
-                  const shouldShowSenderMeta = msg.type !== "SYSTEM" && isGroupIncoming && startsSenderBlock;
-                  const senderProfile = msg.senderId ? memberProfilesById[msg.senderId] : undefined;
+                  const shouldShowSenderMeta =
+                    msg.type !== "SYSTEM" &&
+                    isGroupIncoming &&
+                    startsSenderBlock;
+                  const senderProfile = msg.senderId
+                    ? memberProfilesById[msg.senderId]
+                    : undefined;
                   const senderAvatarUrl =
                     senderProfile?.avatarAsset?.resolvedUrl ||
                     senderProfile?.avatarUrl ||
-                    (msg.senderId ? friendAvatarByUserId[msg.senderId] : undefined);
+                    (msg.senderId
+                      ? friendAvatarByUserId[msg.senderId]
+                      : undefined);
                   const senderDisplayName =
-                    (msg.senderId ? mentionNameByUserId.get(msg.senderId) : undefined) ||
+                    (msg.senderId
+                      ? mentionNameByUserId.get(msg.senderId)
+                      : undefined) ||
                     msg.senderName ||
                     "Thành viên";
                   const isEditing = editingMessageId === msg.id;
-                  const canEditMessage = msg.type === "TEXT" || msg.type === "EMOJI" || msg.type === "SYSTEM";
+                  const canEditMessage =
+                    msg.type === "TEXT" ||
+                    msg.type === "EMOJI" ||
+                    msg.type === "SYSTEM";
                   const canRecallEveryone = isMe;
                   const replyPreview = msg.replyMessage;
-                  const isForwardedMessage = Boolean(msg.forwardedFromMessageId);
+                  const isForwardedMessage = Boolean(
+                    msg.forwardedFromMessageId,
+                  );
                   const forwardedLabel = isMe
                     ? "Bạn đã chuyển tiếp"
                     : `${senderDisplayName} đã chuyển tiếp`;
-                  const messageText = extractMessageText(msg.content, msg.type).trim();
+                  const messageText = extractMessageText(
+                    msg.content,
+                    msg.type,
+                  ).trim();
                   const firstUrl = extractFirstUrl(messageText);
-                  const linkPreview = firstUrl ? buildLinkPreview(firstUrl) : null;
+                  const linkPreview = firstUrl
+                    ? buildLinkPreview(firstUrl)
+                    : null;
                   const messageReactions = activeMessageReactions[msg.id] || [];
                   const reactionSummary = Array.from(
                     messageReactions.reduce((acc, emoji) => {
@@ -3116,26 +3658,40 @@ export function ChatPage() {
                       return acc;
                     }, new Map<string, number>()),
                   );
-                  const isCallMessage = msg.type === "SYSTEM" && /cuộc gọi|call/i.test(messageText);
+                  const isCallMessage =
+                    msg.type === "SYSTEM" && /cuộc gọi|call/i.test(messageText);
                   const isVideoCallByMessage = /video/i.test(messageText);
                   const callSummary = isCallMessage
                     ? resolveCallSummary(msg, isVideoCallByMessage)
                     : null;
-                  const isSystemNotificationMessage = msg.type === "SYSTEM" && !isCallMessage;
+                  const isSystemNotificationMessage =
+                    msg.type === "SYSTEM" && !isCallMessage;
 
                   if (isCallMessage) {
                     if (activeContact?.isGroup) {
-                      const isVideoCall = callSummary?.isVideo ?? isVideoCallByMessage;
-                      
+                      const isVideoCall =
+                        callSummary?.isVideo ?? isVideoCallByMessage;
+
                       return (
-                        <div key={msg.id} className="flex w-full justify-center py-3 flex-col items-center">
+                        <div
+                          key={msg.id}
+                          className="flex w-full justify-center py-3 flex-col items-center"
+                        >
                           <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-100/80 border border-slate-200 px-5 py-3 shadow-sm dark:bg-slate-800/80 dark:border-slate-700">
                             <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-slate-900 shadow-sm">
-                                {isVideoCall ? <Video size={14} className="text-blue-500" /> : <Phone size={14} className="text-blue-500" />}
+                                {isVideoCall ? (
+                                  <Video size={14} className="text-blue-500" />
+                                ) : (
+                                  <Phone size={14} className="text-blue-500" />
+                                )}
                               </div>
                               <p className="text-sm font-medium">
-                                Cuộc gọi nhóm kết thúc ({formatCallDuration(callSummary?.durationSeconds ?? 0)})
+                                Cuộc gọi nhóm kết thúc (
+                                {formatCallDuration(
+                                  callSummary?.durationSeconds ?? 0,
+                                )}
+                                )
                               </p>
                             </div>
                           </div>
@@ -3146,30 +3702,56 @@ export function ChatPage() {
                       );
                     }
 
-                    const summaryIsOutgoing = callSummary ? callSummary.direction === "outgoing" : isMe;
-                    const summaryAlignClass = summaryIsOutgoing ? "self-end" : "self-start";
+                    const summaryIsOutgoing = callSummary
+                      ? callSummary.direction === "outgoing"
+                      : isMe;
+                    const summaryAlignClass = summaryIsOutgoing
+                      ? "self-end"
+                      : "self-start";
                     const summaryBubbleClass = summaryIsOutgoing
                       ? "border-blue-500/30 bg-blue-600 text-white"
                       : "border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
                     const summaryIconClass = summaryIsOutgoing
                       ? "bg-white/10 text-white"
                       : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200";
-                    const summaryMetaClass = summaryIsOutgoing ? "text-white/80" : "text-slate-500 dark:text-slate-400";
-                    const isVideoCall = callSummary?.isVideo ?? isVideoCallByMessage;
+                    const summaryMetaClass = summaryIsOutgoing
+                      ? "text-white/80"
+                      : "text-slate-500 dark:text-slate-400";
+                    const isVideoCall =
+                      callSummary?.isVideo ?? isVideoCallByMessage;
                     const callDirectionLabel = summaryIsOutgoing ? "đi" : "đến";
                     const titleText = `Cuộc gọi ${isVideoCall ? "video" : "thoại"} ${callDirectionLabel}`;
-                    const durationText = formatCallDuration(callSummary?.durationSeconds ?? 0);
+                    const durationText = formatCallDuration(
+                      callSummary?.durationSeconds ?? 0,
+                    );
 
                     return (
-                      <div key={msg.id} className={`group relative flex max-w-[70%] ${summaryAlignClass} flex-col py-1`}>
-                        <div className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${summaryBubbleClass}`}>
+                      <div
+                        key={msg.id}
+                        className={`group relative flex max-w-[70%] ${summaryAlignClass} flex-col py-1`}
+                      >
+                        <div
+                          className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${summaryBubbleClass}`}
+                        >
                           <div className="flex items-start gap-3">
-                            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${summaryIconClass}`}>
-                              {isVideoCall ? <Video size={18} /> : <Phone size={18} />}
+                            <div
+                              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${summaryIconClass}`}
+                            >
+                              {isVideoCall ? (
+                                <Video size={18} />
+                              ) : (
+                                <Phone size={18} />
+                              )}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-semibold">{titleText}</p>
-                              <p className={`mt-0.5 text-xs ${summaryMetaClass}`}>{durationText}</p>
+                              <p className="text-sm font-semibold">
+                                {titleText}
+                              </p>
+                              <p
+                                className={`mt-0.5 text-xs ${summaryMetaClass}`}
+                              >
+                                {durationText}
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -3179,7 +3761,10 @@ export function ChatPage() {
 
                   if (isSystemNotificationMessage) {
                     return (
-                      <div key={msg.id} className="flex w-full justify-center py-2">
+                      <div
+                        key={msg.id}
+                        className="flex w-full justify-center py-2"
+                      >
                         <div className="rounded-full bg-slate-100 px-4 py-2 dark:bg-slate-800">
                           <p className="text-center text-sm text-slate-600 dark:text-slate-300">
                             {renderMessageTextWithMentions(msg.content, false)}
@@ -3200,7 +3785,9 @@ export function ChatPage() {
                       {!isEditing ? (
                         <div
                           className={`absolute ${isMe ? "-left-24" : "-right-24"} bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${
-                            activeMessageMenuId === msg.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                            activeMessageMenuId === msg.id
+                              ? "opacity-100"
+                              : "opacity-0 group-hover:opacity-100"
                           }`}
                         >
                           <button
@@ -3233,21 +3820,28 @@ export function ChatPage() {
                               title="Bày tỏ cảm xúc"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                setReactionPickerMessageId((prev) => (prev === msg.id ? null : msg.id));
+                                setReactionPickerMessageId((prev) =>
+                                  prev === msg.id ? null : msg.id,
+                                );
                               }}
                             >
                               <SmilePlus size={14} />
                             </button>
 
                             {reactionPickerMessageId === msg.id ? (
-                              <div className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}>
+                              <div
+                                className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}
+                              >
                                 {QUICK_REACTION_EMOJIS.map((emoji) => (
                                   <button
                                     key={`${msg.id}-${emoji}`}
                                     type="button"
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      handleToggleMessageReaction(msg.id, emoji);
+                                      handleToggleMessageReaction(
+                                        msg.id,
+                                        emoji,
+                                      );
                                       setReactionPickerMessageId(null);
                                     }}
                                     className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -3264,16 +3858,22 @@ export function ChatPage() {
                               type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                const triggerRect = event.currentTarget.getBoundingClientRect();
+                                const triggerRect =
+                                  event.currentTarget.getBoundingClientRect();
                                 const estimatedMenuHeight = 220;
-                                const spaceBelow = window.innerHeight - triggerRect.bottom;
+                                const spaceBelow =
+                                  window.innerHeight - triggerRect.bottom;
                                 const spaceAbove = triggerRect.top;
                                 const shouldOpenUp =
                                   spaceBelow < estimatedMenuHeight &&
                                   spaceAbove > spaceBelow;
 
-                                setMessageMenuPlacement(shouldOpenUp ? "up" : "down");
-                                setActiveMessageMenuId((prev) => (prev === msg.id ? null : msg.id));
+                                setMessageMenuPlacement(
+                                  shouldOpenUp ? "up" : "down",
+                                );
+                                setActiveMessageMenuId((prev) =>
+                                  prev === msg.id ? null : msg.id,
+                                );
                               }}
                               className="rounded-full p-1.5 text-white/90 transition hover:bg-white/20 hover:text-white"
                               title="Tùy chọn tin nhắn"
@@ -3282,12 +3882,19 @@ export function ChatPage() {
                             </button>
 
                             {activeMessageMenuId === msg.id ? (
-                              <div className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}>
+                              <div
+                                className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}
+                              >
                                 {isMe && canEditMessage ? (
                                   <button
                                     type="button"
                                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                    onClick={() => handleStartEditMessage(msg.id, msg.content)}
+                                    onClick={() =>
+                                      handleStartEditMessage(
+                                        msg.id,
+                                        msg.content,
+                                      )
+                                    }
                                   >
                                     <Pencil size={14} />
                                     Sửa tin nhắn
@@ -3296,7 +3903,9 @@ export function ChatPage() {
                                 <button
                                   type="button"
                                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                  onClick={() => handleOpenForwardDialog(msg.id)}
+                                  onClick={() =>
+                                    handleOpenForwardDialog(msg.id)
+                                  }
                                 >
                                   <Share2 size={14} />
                                   Chuyển tiếp
@@ -3305,7 +3914,12 @@ export function ChatPage() {
                                   <button
                                     type="button"
                                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                    onClick={() => void handleDeleteMessage(msg.id, "EVERYONE")}
+                                    onClick={() =>
+                                      void handleDeleteMessage(
+                                        msg.id,
+                                        "EVERYONE",
+                                      )
+                                    }
                                   >
                                     <Trash2 size={14} />
                                     Thu hồi với mọi người
@@ -3314,12 +3928,16 @@ export function ChatPage() {
                                 <button
                                   type="button"
                                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                  onClick={() => void handleDeleteMessage(msg.id, "SELF")}
+                                  onClick={() =>
+                                    void handleDeleteMessage(msg.id, "SELF")
+                                  }
                                 >
                                   <Trash2 size={14} />
                                   Ẩn với tôi
                                 </button>
-                                <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">Sẽ thêm tính năng khác sau</div>
+                                <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                                  Sẽ thêm tính năng khác sau
+                                </div>
                               </div>
                             ) : null}
                           </div>
@@ -3332,11 +3950,18 @@ export function ChatPage() {
                         </p>
                       ) : null}
 
-                      <div className={`flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}
+                      >
                         {isGroupIncoming ? (
                           shouldShowSenderMeta ? (
                             <Avatar className="h-8 w-8 shrink-0 border border-slate-200 dark:border-slate-700">
-                              {senderAvatarUrl ? <AvatarImage src={senderAvatarUrl} alt={senderDisplayName} /> : null}
+                              {senderAvatarUrl ? (
+                                <AvatarImage
+                                  src={senderAvatarUrl}
+                                  alt={senderDisplayName}
+                                />
+                              ) : null}
                               <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
                                 {senderDisplayName.charAt(0).toUpperCase()}
                               </AvatarFallback>
@@ -3349,138 +3974,171 @@ export function ChatPage() {
                         <div
                           onClick={(event) => event.stopPropagation()}
                           className={`px-4 py-2 rounded-2xl shadow-sm ${
-                            isMe 
-                              ? "bg-blue-600 text-white rounded-br-sm" 
+                            isMe
+                              ? "bg-blue-600 text-white rounded-br-sm"
                               : "bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 rounded-bl-sm"
                           }`}
                         >
-                        <div className="relative">
-                          {isForwardedMessage ? (
-                            <div className={`mb-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isMe ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
-                              {forwardedLabel}
-                            </div>
-                          ) : null}
-                          {replyPreview ? (
-                            <button
-                              type="button"
-                              onClick={() => handleFocusMessageById(replyPreview.id)}
-                              className={`mb-2 w-full rounded-lg border-l-2 px-3 py-2 text-left text-xs transition ${isMe ? "border-white/50 bg-white/10 text-white/90 hover:bg-white/15" : "border-blue-500 bg-blue-50 text-slate-600 hover:bg-blue-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"}`}
-                            >
-                              <p className="font-medium">Trả lời {replyPreview.senderName}</p>
-                              <p className="mt-0.5 line-clamp-2 break-words opacity-90">
-                                {getReplyPreviewText(replyPreview)}
-                              </p>
-                            </button>
-                          ) : null}
-                          {isEditing ? (
-                            <div className="space-y-2">
-                              <Input
-                                value={editingText}
-                                onChange={(event) => setEditingText(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    handleCancelEditMessage();
-                                    return;
-                                  }
-
-                                  if (event.key === "Enter" && !event.shiftKey) {
-                                    event.preventDefault();
-                                    void handleSaveEditMessage(msg.id);
-                                  }
-                                }}
-                                className="h-9 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-800 dark:text-slate-100"
-                                autoFocus
-                              />
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => void handleSaveEditMessage(msg.id)}
-                                  disabled={isUpdatingMessage}
-                                  className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                                >
-                                  {isUpdatingMessage ? "Đang lưu..." : "Lưu"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleCancelEditMessage}
-                                  className="rounded-md bg-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-300"
-                                >
-                                  Huỷ
-                                </button>
+                          <div className="relative">
+                            {isForwardedMessage ? (
+                              <div
+                                className={`mb-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isMe ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}
+                              >
+                                {forwardedLabel}
                               </div>
-                            </div>
-                          ) : (
-                            <p className="text-[15px] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{renderMessageTextWithMentions(msg.content, isMe)}</p>
-                          )}
-                        </div>
-                        {msg.attachmentUrl ? (
-                          isImageUrl(msg.attachmentUrl, msg.type) ? (
-                            <a href={msg.attachmentUrl} target="_blank" rel="noreferrer" className="mt-2 block">
-                              <img
+                            ) : null}
+                            {replyPreview ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleFocusMessageById(replyPreview.id)
+                                }
+                                className={`mb-2 w-full rounded-lg border-l-2 px-3 py-2 text-left text-xs transition ${isMe ? "border-white/50 bg-white/10 text-white/90 hover:bg-white/15" : "border-blue-500 bg-blue-50 text-slate-600 hover:bg-blue-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+                              >
+                                <p className="font-medium">
+                                  Trả lời {replyPreview.senderName}
+                                </p>
+                                <p className="mt-0.5 line-clamp-2 break-words opacity-90">
+                                  {getReplyPreviewText(replyPreview)}
+                                </p>
+                              </button>
+                            ) : null}
+                            {isEditing ? (
+                              <div className="space-y-2">
+                                <Input
+                                  value={editingText}
+                                  onChange={(event) =>
+                                    setEditingText(event.target.value)
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      handleCancelEditMessage();
+                                      return;
+                                    }
+
+                                    if (
+                                      event.key === "Enter" &&
+                                      !event.shiftKey
+                                    ) {
+                                      event.preventDefault();
+                                      void handleSaveEditMessage(msg.id);
+                                    }
+                                  }}
+                                  className="h-9 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-800 dark:text-slate-100"
+                                  autoFocus
+                                />
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleSaveEditMessage(msg.id)
+                                    }
+                                    disabled={isUpdatingMessage}
+                                    className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                                  >
+                                    {isUpdatingMessage ? "Đang lưu..." : "Lưu"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelEditMessage}
+                                    className="rounded-md bg-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-300"
+                                  >
+                                    Hu?
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-[15px] whitespace-pre-wrap [overflow-wrap:anywhere]">
+                                {renderMessageTextWithMentions(
+                                  msg.content,
+                                  isMe,
+                                )}
+                              </p>
+                            )}
+                          </div>
+                          {msg.attachmentUrl ? (
+                            isImageUrl(msg.attachmentUrl, msg.type) ? (
+                              <a
+                                href={msg.attachmentUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-2 block"
+                              >
+                                <img
+                                  src={msg.attachmentUrl}
+                                  alt="Tin nhan dinh kem"
+                                  className="max-h-56 max-w-full rounded-lg border border-black/10 object-cover"
+                                />
+                              </a>
+                            ) : isVideoUrl(msg.attachmentUrl, msg.type) ? (
+                              <video
+                                controls
+                                preload="metadata"
                                 src={msg.attachmentUrl}
-                                alt="Tin nhan dinh kem"
-                                className="max-h-56 max-w-full rounded-lg border border-black/10 object-cover"
+                                className="mt-2 max-h-72 w-full max-w-[320px] rounded-lg border border-black/10 bg-black"
                               />
-                            </a>
-                          ) : isVideoUrl(msg.attachmentUrl, msg.type) ? (
-                            <video
-                              controls
-                              preload="metadata"
-                              src={msg.attachmentUrl}
-                              className="mt-2 max-h-72 w-full max-w-[320px] rounded-lg border border-black/10 bg-black"
-                            />
-                          ) : (
+                            ) : (
+                              <a
+                                href={msg.attachmentUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`mt-2 inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
+                                  isMe
+                                    ? "bg-white/20 text-white"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200"
+                                }`}
+                              >
+                                <FileText className="h-4 w-4" />
+                                Tệp đính kèm
+                              </a>
+                            )
+                          ) : null}
+                          {linkPreview ? (
                             <a
-                              href={msg.attachmentUrl}
+                              href={linkPreview.href}
                               target="_blank"
                               rel="noreferrer"
-                              className={`mt-2 inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
-                                isMe ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200"
+                              className={`mt-2 block rounded-xl border px-3 py-2 text-left transition ${
+                                isMe
+                                  ? "border-white/25 bg-white/10 hover:bg-white/15"
+                                  : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
                               }`}
                             >
-                              <FileText className="h-4 w-4" />
-                              Tệp đính kèm
-                            </a>
-                          )
-                        ) : null}
-                        {linkPreview ? (
-                          <a
-                            href={linkPreview.href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className={`mt-2 block rounded-xl border px-3 py-2 text-left transition ${
-                              isMe
-                                ? "border-white/25 bg-white/10 hover:bg-white/15"
-                                : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
-                            }`}
-                          >
-                            <div className="flex items-start gap-2">
-                              <img
-                                src={linkPreview.faviconUrl}
-                                alt="favicon"
-                                className="mt-0.5 h-4 w-4 rounded-sm"
-                              />
-                              <div className="min-w-0">
-                                <p className={`truncate text-xs font-semibold ${isMe ? "text-white" : "text-slate-800 dark:text-slate-100"}`}>
-                                  {linkPreview.host}
-                                </p>
-                                <p className={`truncate text-[11px] ${isMe ? "text-white/85" : "text-slate-500 dark:text-slate-400"}`}>
-                                  {linkPreview.path}
-                                </p>
+                              <div className="flex items-start gap-2">
+                                <img
+                                  src={linkPreview.faviconUrl}
+                                  alt="favicon"
+                                  className="mt-0.5 h-4 w-4 rounded-sm"
+                                />
+                                <div className="min-w-0">
+                                  <p
+                                    className={`truncate text-xs font-semibold ${isMe ? "text-white" : "text-slate-800 dark:text-slate-100"}`}
+                                  >
+                                    {linkPreview.host}
+                                  </p>
+                                  <p
+                                    className={`truncate text-[11px] ${isMe ? "text-white/85" : "text-slate-500 dark:text-slate-400"}`}
+                                  >
+                                    {linkPreview.path}
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                          </a>
-                        ) : null}
+                            </a>
+                          ) : null}
                         </div>
                       </div>
                       {reactionSummary.length > 0 ? (
-                        <div className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end" : "justify-start"} ${isGroupIncoming ? "pl-10" : ""}`}>
+                        <div
+                          className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end" : "justify-start"} ${isGroupIncoming ? "pl-10" : ""}`}
+                        >
                           {reactionSummary.map(([emoji, count]) => (
                             <button
                               key={`${msg.id}-reaction-${emoji}`}
                               type="button"
-                              onClick={() => handleToggleMessageReaction(msg.id, emoji)}
+                              onClick={() =>
+                                handleToggleMessageReaction(msg.id, emoji)
+                              }
                               className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                               title="Bỏ cảm xúc"
                             >
@@ -3491,26 +4149,43 @@ export function ChatPage() {
                         </div>
                       ) : null}
                       {endsSenderBlock ? (
-                        <span className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"} ${isGroupIncoming ? "pl-10" : ""}`}>
+                        <span
+                          className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"} ${isGroupIncoming ? "pl-10" : ""}`}
+                        >
                           {format(new Date(msg.sentAt), "HH:mm")}
                         </span>
                       ) : null}
-                      {messageActionError && (editingMessageId === msg.id || activeMessageMenuId === msg.id) ? (
-                        <span className="mt-1 text-[11px] text-red-500">{messageActionError}</span>
+                      {messageActionError &&
+                      (editingMessageId === msg.id ||
+                        activeMessageMenuId === msg.id) ? (
+                        <span className="mt-1 text-[11px] text-red-500">
+                          {messageActionError}
+                        </span>
                       ) : null}
                       {isDeletingMessage && activeMessageMenuId === msg.id ? (
-                        <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Đang xoá...</span>
+                        <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          Đang xóa...
+                        </span>
                       ) : null}
                     </div>
                   );
                 })}
 
-                {activeContact?.isGroup && activeChat && (rtc.activeGroupCalls.has(activeChat) || (rtc.callState !== "IDLE" && rtc.activeConfig?.conversationId === activeChat)) ? (
+                {activeContact?.isGroup &&
+                activeChat &&
+                (rtc.activeGroupCalls.has(activeChat) ||
+                  (rtc.callState !== "IDLE" &&
+                    rtc.activeConfig?.conversationId === activeChat)) ? (
                   <div className="flex w-full justify-center py-3">
                     <div className="flex flex-col items-center gap-2 rounded-xl bg-blue-50/80 border border-blue-200 px-5 py-3 shadow-sm dark:bg-blue-900/20 dark:border-blue-800">
                       <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-blue-950 shadow-sm relative">
-                          {(rtc.activeConfig?.conversationId === activeChat && rtc.activeConfig.isVideo) ? <Video size={14} className="text-blue-500" /> : <Phone size={14} className="text-blue-500" />}
+                          {rtc.activeConfig?.conversationId === activeChat &&
+                          rtc.activeConfig.isVideo ? (
+                            <Video size={14} className="text-blue-500" />
+                          ) : (
+                            <Phone size={14} className="text-blue-500" />
+                          )}
                           <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
@@ -3522,14 +4197,14 @@ export function ChatPage() {
                       </div>
                       {rtc.callState !== "CONNECTED" && (
                         <div className="mt-1 flex w-full gap-2">
-                          <button 
+                          <button
                             type="button"
                             onClick={() => handleStartCall(false, true)}
                             className="flex-1 rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-slate-300 transition dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
                           >
                             Tham gia thoại
                           </button>
-                          <button 
+                          <button
                             type="button"
                             onClick={() => handleStartCall(true, true)}
                             className="flex-1 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700 transition"
@@ -3556,7 +4231,9 @@ export function ChatPage() {
                   onClick={(event) => event.stopPropagation()}
                 >
                   <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 px-4 py-3">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Chuyển tiếp tin nhắn</h3>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      Chuyển tiếp tin nhắn
+                    </h3>
                     <button
                       type="button"
                       onClick={handleCloseForwardDialog}
@@ -3577,38 +4254,52 @@ export function ChatPage() {
 
                     <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 hide-scrollbar">
                       {forwardDestinationConversations.length === 0 ? (
-                        <div className="p-3 text-sm text-slate-500 dark:text-slate-400">Không có cuộc trò chuyện phù hợp.</div>
+                        <div className="p-3 text-sm text-slate-500 dark:text-slate-400">
+                          Không có cuộc trò chuyện phù hợp.
+                        </div>
                       ) : (
                         <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-                          {forwardDestinationConversations.map((conversation) => {
-                            const checked = selectedForwardConversationIds.includes(conversation.conversationId);
-                            return (
-                              <li key={conversation.conversationId}>
-                                <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => handleToggleForwardTarget(conversation.conversationId)}
-                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                  />
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                                      {conversation.groupName || "Không rõ tên"}
-                                    </p>
-                                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                                      {conversation.conversationId}
-                                    </p>
-                                  </div>
-                                </label>
-                              </li>
-                            );
-                          })}
+                          {forwardDestinationConversations.map(
+                            (conversation) => {
+                              const checked =
+                                selectedForwardConversationIds.includes(
+                                  conversation.conversationId,
+                                );
+                              return (
+                                <li key={conversation.conversationId}>
+                                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() =>
+                                        handleToggleForwardTarget(
+                                          conversation.conversationId,
+                                        )
+                                      }
+                                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                                        {conversation.groupName ||
+                                          "Không rõ tên"}
+                                      </p>
+                                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                                        {conversation.conversationId}
+                                      </p>
+                                    </div>
+                                  </label>
+                                </li>
+                              );
+                            },
+                          )}
                         </ul>
                       )}
                     </div>
 
                     {forwardActionError ? (
-                      <p className="text-xs text-red-500">{forwardActionError}</p>
+                      <p className="text-xs text-red-500">
+                        {forwardActionError}
+                      </p>
                     ) : null}
                   </div>
 
@@ -3627,7 +4318,9 @@ export function ChatPage() {
                       className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                       disabled={isForwardingMessage}
                     >
-                      {isForwardingMessage ? "Đang chuyển tiếp..." : "Chuyển tiếp"}
+                      {isForwardingMessage
+                        ? "Đang chuyển tiếp..."
+                        : "Chuyển tiếp"}
                     </button>
                   </div>
                 </div>
@@ -3648,7 +4341,9 @@ export function ChatPage() {
                   onClick={(event) => event.stopPropagation()}
                 >
                   <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Mời bạn bè vào nhóm</h3>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      Mời bạn bè vào nhóm
+                    </h3>
                     <button
                       type="button"
                       onClick={() => setIsInviteDialogOpen(false)}
@@ -3662,25 +4357,33 @@ export function ChatPage() {
                   <div className="space-y-3 p-4">
                     <Input
                       value={inviteSearchText}
-                      onChange={(event) => setInviteSearchText(event.target.value)}
+                      onChange={(event) =>
+                        setInviteSearchText(event.target.value)
+                      }
                       placeholder="Tìm bạn bè theo tên hoặc userId"
                       className="bg-slate-50 dark:bg-slate-800 dark:border-slate-700"
                     />
 
                     <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 hide-scrollbar">
                       {inviteCandidateFriends.length === 0 ? (
-                        <div className="p-3 text-sm text-slate-500 dark:text-slate-400">Không còn bạn bè phù hợp để mời.</div>
+                        <div className="p-3 text-sm text-slate-500 dark:text-slate-400">
+                          Không còn bạn bè phù hợp để mời.
+                        </div>
                       ) : (
                         <ul className="divide-y divide-slate-200 dark:divide-slate-700">
                           {inviteCandidateFriends.map((friend) => {
-                            const checked = selectedInviteUserIds.includes(friend.userId);
+                            const checked = selectedInviteUserIds.includes(
+                              friend.userId,
+                            );
                             return (
                               <li key={friend.userId}>
                                 <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800">
                                   <input
                                     type="checkbox"
                                     checked={checked}
-                                    onChange={() => toggleInviteSelection(friend.userId)}
+                                    onChange={() =>
+                                      toggleInviteSelection(friend.userId)
+                                    }
                                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                   />
                                   <div className="min-w-0">
@@ -3688,7 +4391,9 @@ export function ChatPage() {
                                       {friend.fullName || "Không rõ tên"}
                                     </p>
                                     {canViewSensitiveUserIds ? (
-                                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">{friend.userId}</p>
+                                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                                        {friend.userId}
+                                      </p>
                                     ) : null}
                                   </div>
                                 </label>
@@ -3719,7 +4424,9 @@ export function ChatPage() {
                       disabled={manageGroupMemberMutation.isPending}
                       className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                     >
-                      {manageGroupMemberMutation.isPending ? "Đang mời..." : "Gửi lời mời"}
+                      {manageGroupMemberMutation.isPending
+                        ? "Đang mời..."
+                        : "Gửi lời mời"}
                     </button>
                   </div>
                 </div>
@@ -3740,16 +4447,20 @@ export function ChatPage() {
                   onClick={(event) => event.stopPropagation()}
                 >
                   <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Xác nhận rời nhóm</h3>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      Xác nhận rời nhóm
+                    </h3>
                   </div>
                   <div className="space-y-2 px-4 py-3">
                     <p className="text-sm text-slate-600 dark:text-slate-300">
-                      Bạn sẽ không còn nhận tin nhắn mới từ nhóm này. Bạn có chắc muốn tiếp tục?
+                      Bạn sẽ không còn nhận tin nhắn mới từ nhóm này. Bạn có
+                      chắc muốn tiếp tục?
                     </p>
                     {isCurrentUserOwner ? (
                       <div className="space-y-1">
                         <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                          Bạn là chủ nhóm, cần chọn người kế nhiệm trước khi rời nhóm.
+                          Bạn là chủ nhóm, cần chọn người kế nhiệm trước khi rời
+                          nhóm.
                         </p>
                         <select
                           value={leaveSuccessorUserId}
@@ -3761,17 +4472,26 @@ export function ChatPage() {
                         >
                           <option value="">Chọn thành viên kế nhiệm</option>
                           {activeGroupMembers
-                            .filter((member) => member.userId !== user?.sub && !member.deletedAt)
+                            .filter(
+                              (member) =>
+                                member.userId !== user?.sub &&
+                                !member.deletedAt,
+                            )
                             .map((member, index) => {
                               const profile = memberProfilesById[member.userId];
                               const displayName =
                                 profile?.fullName ||
-                                myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
+                                myFriends.find(
+                                  (friend) => friend.userId === member.userId,
+                                )?.fullName ||
                                 messageSenderNameByUserId.get(member.userId) ||
                                 `Thành viên ${index + 1}`;
 
                               return (
-                                <option key={`successor-${member.userId}`} value={member.userId}>
+                                <option
+                                  key={`successor-${member.userId}`}
+                                  value={member.userId}
+                                >
                                   {displayName} ({member.roleInGroup})
                                 </option>
                               );
@@ -3798,7 +4518,9 @@ export function ChatPage() {
                       disabled={leaveGroupMutation.isPending}
                       className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
                     >
-                      {leaveGroupMutation.isPending ? "Đang rời nhóm..." : "Xác nhận rời nhóm"}
+                      {leaveGroupMutation.isPending
+                        ? "Đang rời nhóm..."
+                        : "Xác nhận rời nhóm"}
                     </button>
                   </div>
                 </div>
@@ -3806,12 +4528,19 @@ export function ChatPage() {
             ) : null}
 
             {/* Vùng nhập liệu */}
-            <form onSubmit={handleSend} className="p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2">
+            <form
+              onSubmit={handleSend}
+              className="p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2"
+            >
               {replyingMessage ? (
                 <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">Đang trả lời</p>
-                    <p className="mt-1 font-medium">{replyingMessage.senderName}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                      Đang trả lời
+                    </p>
+                    <p className="mt-1 font-medium">
+                      {replyingMessage.senderName}
+                    </p>
                     <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                       {getReplyPreviewText(replyingMessage)}
                     </p>
@@ -3834,10 +4563,15 @@ export function ChatPage() {
               {queuedAttachments.length > 0 ? (
                 <div className="space-y-2 max-h-36 overflow-y-auto pr-1 hide-scrollbar">
                   {queuedAttachments.map((item) => (
-                    <div key={item.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2">
+                    <div
+                      key={item.id}
+                      className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2"
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{item.file.name}</p>
+                          <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+                            {item.file.name}
+                          </p>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
                             {Math.max(1, Math.round(item.file.size / 1024))} KB
                             {item.status === "failed" ? " • Loi upload" : ""}
@@ -3856,9 +4590,13 @@ export function ChatPage() {
                       <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
                         <div
                           className={`h-1.5 rounded-full transition-all ${
-                            item.status === "failed" ? "bg-red-500" : "bg-blue-500"
+                            item.status === "failed"
+                              ? "bg-red-500"
+                              : "bg-blue-500"
                           }`}
-                          style={{ width: `${item.status === "failed" ? 100 : item.progress}%` }}
+                          style={{
+                            width: `${item.status === "failed" ? 100 : item.progress}%`,
+                          }}
                         />
                       </div>
                     </div>
@@ -3867,101 +4605,127 @@ export function ChatPage() {
               ) : null}
 
               <div className="flex gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => enqueueAttachments(e.target.files)}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="h-11 w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
-                title="Dinh kem anh hoac file"
-              >
-                <Paperclip size={18} />
-              </button>
-              <div className="relative" ref={emojiPickerRef}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => enqueueAttachments(e.target.files)}
+                />
                 <button
                   type="button"
-                  onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
+                  onClick={() => fileInputRef.current?.click()}
                   className="h-11 w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
-                  title="Chọn emoji"
+                  title="Dinh kem anh hoac file"
                 >
-                  <Smile size={18} />
+                  <Paperclip size={18} />
                 </button>
-                {isEmojiPickerOpen ? (
-                  <div className="absolute bottom-12 left-0 z-50 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                    <EmojiPicker
-                      onEmojiClick={handleEmojiSelect}
-                      theme={document.documentElement.classList.contains("dark") ? Theme.DARK : Theme.LIGHT}
-                      autoFocusSearch={false}
-                      lazyLoadEmojis
-                    />
-                  </div>
-                ) : null}
-              </div>
-              <div className="relative flex-1">
-                <Input 
-                  type="text" 
-                  placeholder={activeGroupId ? "Nhập tin nhắn... gõ @ để tag thành viên" : "Nhập tin nhắn..."}
-                  className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
-                  ref={composerInputRef}
-                  value={inputText}
-                  onChange={(e) => {
-                    const nextValue = e.target.value;
-                    handleComposerInputChange(nextValue, e.target.selectionStart);
-
-                    if (!activeChat) {
-                      return;
+                <div className="relative" ref={emojiPickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
+                    className="h-11 w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
+                    title="Chọn emoji"
+                  >
+                    <Smile size={18} />
+                  </button>
+                  {isEmojiPickerOpen ? (
+                    <div className="absolute bottom-12 left-0 z-50 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                      <EmojiPicker
+                        onEmojiClick={handleEmojiSelect}
+                        theme={
+                          document.documentElement.classList.contains("dark")
+                            ? Theme.DARK
+                            : Theme.LIGHT
+                        }
+                        autoFocusSearch={false}
+                        lazyLoadEmojis
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                <div className="relative flex-1">
+                  <Input
+                    type="text"
+                    placeholder={
+                      activeGroupId
+                        ? "Nhập tin nhắn... gõ @ để tag thành viên"
+                        : "Nhập tin nhắn..."
                     }
+                    className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
+                    ref={composerInputRef}
+                    value={inputText}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      handleComposerInputChange(
+                        nextValue,
+                        e.target.selectionStart,
+                      );
 
-                    if (!nextValue.trim()) {
-                      stopTyping();
-                      return;
+                      if (!activeChat) {
+                        return;
+                      }
+
+                      if (!nextValue.trim()) {
+                        stopTyping();
+                        return;
+                      }
+
+                      if (!isTypingRef.current) {
+                        isTypingRef.current = true;
+                        void sendTyping(true);
+                      }
+
+                      scheduleTypingStop();
+                    }}
+                    onClick={(event) =>
+                      syncMentionContext(
+                        inputText,
+                        event.currentTarget.selectionStart,
+                      )
                     }
-
-                    if (!isTypingRef.current) {
-                      isTypingRef.current = true;
-                      void sendTyping(true);
+                    onKeyUp={(event) =>
+                      syncMentionContext(
+                        inputText,
+                        event.currentTarget.selectionStart,
+                      )
                     }
-
-                    scheduleTypingStop();
-                  }}
-                  onClick={(event) =>
-                    syncMentionContext(inputText, event.currentTarget.selectionStart)
+                    onKeyDown={handleComposerKeyDown}
+                    disabled={isUploading}
+                    onPaste={handleComposerPaste}
+                  />
+                  {isMentionMenuOpen ? (
+                    <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
+                      {mentionCandidates.map((candidate) => (
+                        <button
+                          key={candidate.userId}
+                          type="button"
+                          onClick={() => handleInsertMention(candidate)}
+                          className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          <span className="truncate font-medium">
+                            {candidate.displayName}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="submit"
+                  disabled={
+                    isUploading ||
+                    (!inputText.trim() && queuedAttachments.length === 0)
                   }
-                  onKeyUp={(event) =>
-                    syncMentionContext(inputText, event.currentTarget.selectionStart)
-                  }
-                  onKeyDown={handleComposerKeyDown}
-                  disabled={isUploading}
-                  onPaste={handleComposerPaste}
-                />
-                {isMentionMenuOpen ? (
-                  <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
-                    {mentionCandidates.map((candidate) => (
-                      <button
-                        key={candidate.userId}
-                        type="button"
-                        onClick={() => handleInsertMention(candidate)}
-                        className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                      >
-                        <span className="truncate font-medium">{candidate.displayName}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <button 
-                type="submit" 
-                disabled={isUploading || (!inputText.trim() && queuedAttachments.length === 0)}
-                className="h-11 w-11 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
-                title="Gửi"
-              >
-                {isUploading ? <span className="text-xs">...</span> : <Send size={18} />}
-              </button>
+                  className="h-11 w-11 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
+                  title="Gửi"
+                >
+                  {isUploading ? (
+                    <span className="text-xs">...</span>
+                  ) : (
+                    <Send size={18} />
+                  )}
+                </button>
               </div>
             </form>
 
@@ -3979,7 +4743,9 @@ export function ChatPage() {
                   onClick={(event) => event.stopPropagation()}
                 >
                   <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Xác nhận xóa thành viên</h3>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      Xác nhận xóa thành viên
+                    </h3>
                     <button
                       type="button"
                       onClick={() => setPendingRemoveMemberUserId(null)}
@@ -3992,9 +4758,13 @@ export function ChatPage() {
 
                   <div className="space-y-2 p-4 text-sm text-slate-700 dark:text-slate-300">
                     <p>Bạn có chắc muốn xóa thành viên này khỏi nhóm?</p>
-                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{pendingRemoveMemberDisplayName}</p>
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                      {pendingRemoveMemberDisplayName}
+                    </p>
                     {canViewSensitiveUserIds ? (
-                      <p className="break-all text-xs text-slate-500 dark:text-slate-400">{pendingRemoveMemberUserId}</p>
+                      <p className="break-all text-xs text-slate-500 dark:text-slate-400">
+                        {pendingRemoveMemberUserId}
+                      </p>
                     ) : null}
                   </div>
 
@@ -4013,7 +4783,9 @@ export function ChatPage() {
                       disabled={manageGroupMemberMutation.isPending}
                       className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
                     >
-                      {manageGroupMemberMutation.isPending ? "Đang xóa..." : "Xác nhận xóa"}
+                      {manageGroupMemberMutation.isPending
+                        ? "Đang xóa..."
+                        : "Xác nhận xóa"}
                     </button>
                   </div>
                 </div>

@@ -10,7 +10,10 @@ import { loadEnvFiles } from '../../../infrastructure/config/load-env';
 loadEnvFiles();
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BatchWriteCommand, DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import {
+  BatchWriteCommand,
+  DynamoDBDocumentClient,
+} from '@aws-sdk/lib-dynamodb';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -32,6 +35,20 @@ interface SeedDocument {
   metadata?: Record<string, string>;
 }
 
+interface EmbeddingExtractorOutput {
+  data: Float32Array;
+}
+
+type EmbeddingExtractor = (
+  text: string,
+  options: { pooling: 'mean'; normalize: true },
+) => Promise<EmbeddingExtractorOutput>;
+
+type TransformersPipeline = (
+  task: 'feature-extraction',
+  model: 'Xenova/all-MiniLM-L6-v2',
+) => Promise<EmbeddingExtractor>;
+
 async function main(): Promise<void> {
   console.log('\n=== Knowledge Base — Seed Embeddings Only ===');
   console.log(`Table : ${TABLE_NAME}`);
@@ -41,36 +58,25 @@ async function main(): Promise<void> {
   let generateEmbedding: ((text: string) => Promise<number[]>) | null = null;
   try {
     console.log('[INFO] Loading embedding model (all-MiniLM-L6-v2)...');
-    let pipelineFn: ((...args: unknown[]) => Promise<any>) | null = null;
-
-    try {
-      // Use runtime dynamic import to support ESM-only package in CommonJS ts-node runs.
-      const dynamicImport = new Function(
-        'modulePath',
-        'return import(modulePath);',
-      ) as (modulePath: string) => Promise<{ pipeline: (...args: unknown[]) => Promise<any> }>;
-
-      const transformers = await dynamicImport('@xenova/transformers');
-      pipelineFn = transformers.pipeline;
-    } catch {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const transformers = require('@xenova/transformers') as { pipeline: (...args: unknown[]) => Promise<any> };
-      pipelineFn = transformers.pipeline;
-    }
-
-    if (!pipelineFn) {
-      throw new Error('Embedding pipeline is unavailable');
-    }
-
-    const pipeline = pipelineFn;
-    const extractor = await pipeline('feature-extraction' as any, 'Xenova/all-MiniLM-L6-v2' as any);
+    const { pipeline } = (await import('@xenova/transformers')) as {
+      pipeline: TransformersPipeline;
+    };
+    const extractor = await pipeline(
+      'feature-extraction',
+      'Xenova/all-MiniLM-L6-v2',
+    );
     generateEmbedding = async (text: string) => {
-      const output = await extractor(text, { pooling: 'mean', normalize: true });
-      return Array.from(output.data as Float32Array);
+      const output = await extractor(text, {
+        pooling: 'mean',
+        normalize: true,
+      });
+      return Array.from(output.data);
     };
     console.log('[OK] Embedding model loaded.\n');
-  } catch (error) {
-    console.warn('[WARN] Could not load embedding model — seeding without embeddings.');
+  } catch {
+    console.warn(
+      '[WARN] Could not load embedding model — seeding without embeddings.',
+    );
   }
 
   // 2. Read seed data
@@ -115,7 +121,9 @@ async function main(): Promise<void> {
     await docClient.send(
       new BatchWriteCommand({ RequestItems: { [TABLE_NAME]: items } }),
     );
-    console.log(`[OK] Batch ${Math.floor(i / BATCH_SIZE) + 1}: wrote ${batch.length} items.\n`);
+    console.log(
+      `[OK] Batch ${Math.floor(i / BATCH_SIZE) + 1}: wrote ${batch.length} items.\n`,
+    );
   }
 
   console.log(`[DONE] All ${raw.length} documents seeded with embeddings.`);

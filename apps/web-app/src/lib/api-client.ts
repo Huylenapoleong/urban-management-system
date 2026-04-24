@@ -1,6 +1,6 @@
-import axios from "axios";
+import axios, { type AxiosError } from "axios";
 
-export interface Envelope<T = any> {
+export interface Envelope<T = unknown> {
   success: boolean;
   data: T;
   error?: {
@@ -23,13 +23,23 @@ export const REFRESH_TOKEN_KEY = "refresh_token";
 const WEB_APP_VARIANT = "citizen-web";
 let refreshAccessTokenPromise: Promise<string | null> | null = null;
 
+type ApiErrorEnvelope = {
+  error?: {
+    message?: string;
+    statusCode?: number;
+  };
+};
+
 function detectWebSessionScope(): "WEB_DESKTOP" | "WEB_MOBILE" {
   if (typeof navigator === "undefined") {
     return "WEB_DESKTOP";
   }
 
   const userAgent = navigator.userAgent?.toLowerCase() ?? "";
-  const isMobile = /android|iphone|ipad|ipod|mobile|ios|blackberry|iemobile|opera mini/.test(userAgent);
+  const isMobile =
+    /android|iphone|ipad|ipod|mobile|ios|blackberry|iemobile|opera mini/.test(
+      userAgent,
+    );
   return isMobile ? "WEB_MOBILE" : "WEB_DESKTOP";
 }
 
@@ -41,7 +51,10 @@ export function buildSessionMetadataHeaders(): Record<string, string> {
 }
 
 export function readAccessToken(): string | null {
-  return sessionStorage.getItem(AUTH_TOKEN_KEY) ?? localStorage.getItem(AUTH_TOKEN_KEY);
+  return (
+    sessionStorage.getItem(AUTH_TOKEN_KEY) ??
+    localStorage.getItem(AUTH_TOKEN_KEY)
+  );
 }
 
 export function writeAccessToken(token: string): void {
@@ -55,7 +68,10 @@ export function clearAccessToken(): void {
 }
 
 export function readRefreshToken(): string | null {
-  return sessionStorage.getItem(REFRESH_TOKEN_KEY) ?? localStorage.getItem(REFRESH_TOKEN_KEY);
+  return (
+    sessionStorage.getItem(REFRESH_TOKEN_KEY) ??
+    localStorage.getItem(REFRESH_TOKEN_KEY)
+  );
 }
 
 export function writeRefreshToken(token: string): void {
@@ -87,14 +103,18 @@ export async function refreshAccessToken(): Promise<string | null> {
 
     try {
       const sessionHeaders = buildSessionMetadataHeaders();
-      const response = await refreshClient.post("/auth/refresh", {
-        refreshToken,
-      }, {
-        headers: {
-          "x-app-variant": sessionHeaders["x-app-variant"],
-          "x-session-scope": sessionHeaders["x-session-scope"],
+      const response = await refreshClient.post(
+        "/auth/refresh",
+        {
+          refreshToken,
         },
-      });
+        {
+          headers: {
+            "x-app-variant": sessionHeaders["x-app-variant"],
+            "x-session-scope": sessionHeaders["x-session-scope"],
+          },
+        },
+      );
 
       const payload = response?.data;
       const accessToken = payload?.data?.tokens?.accessToken;
@@ -177,13 +197,22 @@ client.interceptors.response.use(
       status: res.error?.statusCode,
     });
   },
-  async (error) => {
-    const originalRequest = error?.config as (typeof error.config & { _retry?: boolean }) | undefined;
+  async (error: AxiosError<ApiErrorEnvelope>) => {
+    const originalRequest = error?.config as
+      | (typeof error.config & { _retry?: boolean })
+      | undefined;
     const status = error?.response?.status;
     const requestUrl = String(originalRequest?.url || "");
-    const isAuthEndpoint = /\/auth\/(login|register|refresh|logout)/i.test(requestUrl);
+    const isAuthEndpoint = /\/auth\/(login|register|refresh|logout)/i.test(
+      requestUrl,
+    );
 
-    if (status === 401 && originalRequest && !originalRequest._retry && !isAuthEndpoint) {
+    if (
+      status === 401 &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !isAuthEndpoint
+    ) {
       originalRequest._retry = true;
       const nextAccessToken = await refreshAccessToken();
       if (nextAccessToken) {
@@ -194,15 +223,18 @@ client.interceptors.response.use(
     }
 
     return Promise.reject({
-      message: error.response?.data?.error?.message || error.message || "Network error",
+      message:
+        error.response?.data?.error?.message ||
+        error.message ||
+        "Network error",
       status: error.response?.status,
-      originalError: error
+      originalError: error,
     });
-  }
+  },
 );
 
-export async function request<T>(promise: Promise<any>): Promise<T> {
-  return promise;
+export async function request<T>(promise: Promise<T>): Promise<T> {
+  return await promise;
 }
 
 export default client;

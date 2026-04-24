@@ -1,6 +1,5 @@
 # compiled output
 /dist
-/node_modules
 /build
 
 # Logs
@@ -12,21 +11,9 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
-# OS
-.DS_Store
-
 # Tests
 /coverage
 /.nyc_output
-
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
 
 # IDE - VSCode
 .vscode/*
@@ -45,6 +32,12 @@ lerna-debug.log*
 # temp directory
 .temp
 .tmp
+
+# TypeScript build metadata
+*.tsbuildinfo
+
+# Local script outputs
+seed-output.txt
 
 # Runtime data
 pids
