@@ -1,4 +1,9 @@
-import client, { request, writeAccessToken, writeRefreshToken, clearStoredTokens } from "@/lib/api-client";
+import client, {
+  clearStoredTokens,
+  request,
+  writeAccessToken,
+  writeRefreshToken,
+} from "@/lib/api-client";
 import type { UserProfile } from "@urban/shared-types";
 
 export type LoginRequest = {
@@ -63,7 +68,9 @@ export async function requestForgotPasswordOtp(params: ForgotPasswordRequest) {
   );
 }
 
-export async function confirmForgotPassword(params: ForgotPasswordConfirmRequest) {
+export async function confirmForgotPassword(
+  params: ForgotPasswordConfirmRequest,
+) {
   return await request<{
     passwordResetAt: string;
     revokedSessionCount?: number;
@@ -80,7 +87,9 @@ export async function requestChangePasswordOtp() {
   }>(client.post("/auth/password/change/request-otp"));
 }
 
-export async function changePasswordWithOtp(params: ChangePasswordWithOtpRequest) {
+export async function changePasswordWithOtp(
+  params: ChangePasswordWithOtpRequest,
+) {
   return await request<{
     passwordChangedAt: string;
     revokedSessionCount: number;

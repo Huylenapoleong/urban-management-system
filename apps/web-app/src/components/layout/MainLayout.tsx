@@ -1,28 +1,34 @@
-import { useEffect, useMemo, useState } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import {
-  MessageCircle,
-  ClipboardList,
-  Settings2,
-  Home,
-  Users,
-  UserPlus2,
-  LayoutDashboard,
-  Bot,
-  LogOut,
-  Moon,
-  Sun,
-  type LucideIcon,
-} from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ChatbotModal } from "@/components/ChatbotModal";
-import { WebRTCProvider } from "@/providers/WebRTCProvider";
-import { getProfile } from "@/services/user.api";
-import { useAuth } from "@/providers/AuthProvider";
 import { useConversations } from "@/hooks/shared/useChatData";
 import { useIncomingFriendRequests } from "@/hooks/useFriendsData";
 import { readAccessToken } from "@/lib/api-client";
+import { preloadChatPage } from "@/lib/route-preload";
+import { useAuth } from "@/providers/auth-context";
+import { WebRTCProvider } from "@/providers/WebRTCProvider";
+import { getProfile } from "@/services/user.api";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Bot,
+  ClipboardList,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  MessageCircle,
+  Moon,
+  Settings2,
+  Sun,
+  UserPlus2,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+
+const ChatbotModal = lazy(() =>
+  import("@/components/ChatbotModal").then((module) => ({
+    default: module.ChatbotModal,
+  })),
+);
 
 type NavItem = {
   to: string;
@@ -35,6 +41,7 @@ function formatBadgeCount(value: number): string {
   if (value > 99) {
     return "99+";
   }
+
   return String(value);
 }
 
@@ -61,8 +68,8 @@ export function Sidebar({
     refetchOnMount: "always",
     refetchOnReconnect: true,
   });
-  
-  const isOfficial = user?.role === 'OFFICIAL' || user?.role === 'ADMIN';
+
+  const isOfficial = user?.role === "OFFICIAL" || user?.role === "ADMIN";
   const unreadMessageCount = useMemo(
     () => conversations.reduce((sum, item) => sum + (item.unreadCount ?? 0), 0),
     [conversations],
@@ -71,25 +78,72 @@ export function Sidebar({
     () => incomingRequestsData?.pages.flatMap((page) => page.items).length ?? 0,
     [incomingRequestsData],
   );
-  const avatarSrc =
-    profile?.avatarAsset?.resolvedUrl ||
-    profile?.avatarUrl;
+  const avatarSrc = profile?.avatarAsset?.resolvedUrl || profile?.avatarUrl;
   const displayName = profile?.fullName || user?.sub || "User";
-  const initials = displayName
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("") || "U";
+  const initials =
+    displayName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("") || "U";
 
   const navItems = [
     { to: "/", icon: Home, label: "Trang chủ" },
-    isOfficial ? { to: "/official-dashboard", icon: LayoutDashboard, label: "Dashboard Quản Lý" } : null,
-    { to: "/chat", icon: MessageCircle, label: "Tin nhắn", badgeCount: unreadMessageCount },
-    { to: "/friends", icon: UserPlus2, label: "Bạn bè", badgeCount: incomingFriendRequestCount },
+    isOfficial
+      ? {
+          to: "/official-dashboard",
+          icon: LayoutDashboard,
+          label: "Dashboard quản lý",
+        }
+      : null,
+    {
+      to: "/chat",
+      icon: MessageCircle,
+      label: "Tin nhắn",
+      badgeCount: unreadMessageCount,
+    },
+    {
+      to: "/friends",
+      icon: UserPlus2,
+      label: "Bạn bè",
+      badgeCount: incomingFriendRequestCount,
+    },
     { to: "/groups", icon: Users, label: "Nhóm" },
     { to: "/reports", icon: ClipboardList, label: "Báo cáo duyệt" },
   ].filter(Boolean) as NavItem[];
+
+  useEffect(() => {
+    if (!hasToken || loadingAuth) {
+      return undefined;
+    }
+
+    const preload = () => {
+      void preloadChatPage();
+    };
+
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+
+    if (
+      typeof idleWindow.requestIdleCallback === "function" &&
+      typeof idleWindow.cancelIdleCallback === "function"
+    ) {
+      const idleHandle = idleWindow.requestIdleCallback(preload, {
+        timeout: 1200,
+      });
+      return () => idleWindow.cancelIdleCallback?.(idleHandle);
+    }
+
+    const timeoutId = globalThis.setTimeout(preload, 400);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [hasToken, loadingAuth]);
 
   const handleLogout = () => {
     logout();
@@ -97,11 +151,21 @@ export function Sidebar({
   };
 
   return (
-    <div className={`w-16 h-screen flex flex-col items-center py-4 border-r flex-shrink-0 ${isDarkMode ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
-      <div className="mb-8 cursor-pointer" onClick={() => navigate("/settings")} title="Hồ sơ">
-        <Avatar className={`h-9 w-9 border ${isDarkMode ? "border-slate-700" : "border-slate-300"}`}>
+    <div
+      className={`w-16 h-screen flex flex-col items-center py-4 border-r flex-shrink-0 ${isDarkMode ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}
+    >
+      <div
+        className="mb-8 cursor-pointer"
+        onClick={() => navigate("/settings")}
+        title="Hồ sơ"
+      >
+        <Avatar
+          className={`h-9 w-9 border ${isDarkMode ? "border-slate-700" : "border-slate-300"}`}
+        >
           {avatarSrc ? <AvatarImage src={avatarSrc} alt={displayName} /> : null}
-          <AvatarFallback className={`${isDarkMode ? "bg-slate-700 text-slate-100" : "bg-white text-slate-700"} text-xs font-semibold`}>
+          <AvatarFallback
+            className={`${isDarkMode ? "bg-slate-700 text-slate-100" : "bg-white text-slate-700"} text-xs font-semibold`}
+          >
             {initials}
           </AvatarFallback>
         </Avatar>
@@ -111,6 +175,15 @@ export function Sidebar({
           <NavLink
             key={item.to}
             to={item.to}
+            onMouseEnter={
+              item.to === "/chat" ? () => void preloadChatPage() : undefined
+            }
+            onFocus={
+              item.to === "/chat" ? () => void preloadChatPage() : undefined
+            }
+            onTouchStart={
+              item.to === "/chat" ? () => void preloadChatPage() : undefined
+            }
             className={({ isActive }) =>
               `p-3 rounded-xl transition-all duration-200 block ${
                 isActive
@@ -146,7 +219,11 @@ export function Sidebar({
 
       <button
         onClick={onToggleTheme}
-        title={isDarkMode ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối"}
+        title={
+          isDarkMode
+            ? "Chuyển sang giao diện sáng"
+            : "Chuyển sang giao diện tối"
+        }
         className={`mb-2 p-3 rounded-xl transition-all duration-200 ${isDarkMode ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100" : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"}`}
       >
         {isDarkMode ? <Sun size={22} /> : <Moon size={22} />}
@@ -165,7 +242,9 @@ export function Sidebar({
           }`
         }
       >
-        {({ isActive }) => <Settings2 size={22} strokeWidth={isActive ? 2.5 : 2} />}
+        {({ isActive }) => (
+          <Settings2 size={22} strokeWidth={isActive ? 2.5 : 2} />
+        )}
       </NavLink>
 
       <button
@@ -209,10 +288,22 @@ export function MainLayout() {
           isDarkMode={isDarkMode}
           onToggleTheme={handleToggleTheme}
         />
-        <main className="flex-1 flex overflow-hidden">
-          <Outlet />
+        <main className="flex-1 flex min-h-0 overflow-y-auto overflow-x-hidden">
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                Đang tải trang...
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
-        {isChatbotOpen ? <ChatbotModal onClose={() => setIsChatbotOpen(false)} /> : null}
+        {isChatbotOpen ? (
+          <Suspense fallback={null}>
+            <ChatbotModal onClose={() => setIsChatbotOpen(false)} />
+          </Suspense>
+        ) : null}
       </div>
     </WebRTCProvider>
   );

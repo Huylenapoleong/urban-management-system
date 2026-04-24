@@ -1,24 +1,14 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { jwtDecode } from 'jwt-decode';
-import type { JwtClaims } from '@urban/shared-types';
-import { socketClient } from '../lib/socket-client';
+import type { JwtClaims } from "@urban/shared-types";
+import { jwtDecode } from "jwt-decode";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  clearStoredTokens,
   readAccessToken,
   refreshAccessToken,
-  clearStoredTokens,
   writeAccessToken,
-} from '../lib/api-client';
-
-export const AUTH_TOKEN_KEY = 'auth_token';
-
-interface AuthContextType {
-  user: JwtClaims | null;
-  isLoading: boolean;
-  login: (token: string) => void;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextType | null>(null);
+} from "../lib/api-client";
+import { socketClient } from "../lib/socket-client";
+import { AuthContext } from "./auth-context";
 
 function readStoredToken(): string | null {
   return readAccessToken();
@@ -60,7 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const refreshedClaims = jwtDecode<JwtClaims>(refreshedToken);
           setUser(refreshedClaims);
         } catch (e) {
-          console.error('Failed to load token', e);
+          console.error("Failed to load token", e);
           clearStoredToken();
           setUser(null);
         } finally {
@@ -100,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (socketClient.socket?.connected) {
         socketClient.disconnect();
       }
-      
+
       persistToken(token);
       const decoded = jwtDecode<JwtClaims>(token);
       setUser(decoded);
@@ -125,12 +115,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 }

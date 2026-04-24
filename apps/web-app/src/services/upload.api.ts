@@ -1,6 +1,6 @@
 import ApiClient from "@/lib/api-client";
-import type { AxiosProgressEvent } from "axios";
 import type { UploadedAsset } from "@urban/shared-types";
+import type { AxiosProgressEvent } from "axios";
 
 type UploadMediaParams = {
   file: File;

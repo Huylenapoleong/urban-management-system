@@ -1,20 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
+import { socketClient } from "@/lib/socket-client";
 import {
-  listConversations,
   deleteMessage,
   forwardMessage,
+  listConversations,
   listMessagesPage,
-  type CursorPage,
   markConversationAsRead,
   sendMessage,
   updateMessage,
+  type CursorPage,
   type RecallScope,
   type SendMessageInput,
 } from "@/services/conversation.api";
-import { socketClient } from "@/lib/socket-client";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
-import type { ChatTypingStateEvent, MessageItem } from "@urban/shared-types";
+import type {
+  ChatConversationRemovedEvent,
+  ChatMessageCreatedEvent,
+  ChatTypingStateEvent,
+  ConversationSummary,
+  MessageItem,
+} from "@urban/shared-types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type ConversationRemovedPayload =
+  | ChatConversationRemovedEvent
+  | {
+      conversationId?: string;
+      data?: {
+        conversationId?: string;
+      };
+    };
+
+function extractConversationId(
+  payload?: ConversationRemovedPayload | null,
+): string | undefined {
+  if (!payload) {
+    return undefined;
+  }
+
+  if (typeof payload.conversationId === "string" && payload.conversationId) {
+    return payload.conversationId;
+  }
+
+  if ("data" in payload && payload.data?.conversationId) {
+    return payload.data.conversationId;
+  }
+
+  return undefined;
+}
 
 export function useConversations(searchTerm?: string) {
   const queryClient = useQueryClient();
@@ -51,11 +90,13 @@ export function useConversations(searchTerm?: string) {
       scheduleConversationsRefresh();
     };
 
-    const handleConversationRemoved = (payload: any) => {
-      const removedConversationId = payload?.conversationId || payload?.data?.conversationId;
+    const handleConversationRemoved = (payload: ConversationRemovedPayload) => {
+      const removedConversationId = extractConversationId(payload);
       if (removedConversationId) {
         joinedConversationIdsRef.current.delete(removedConversationId);
-        queryClient.removeQueries({ queryKey: ["messages", removedConversationId] });
+        queryClient.removeQueries({
+          queryKey: ["messages", removedConversationId],
+        });
       }
       scheduleConversationsRefresh();
     };
@@ -65,8 +106,14 @@ export function useConversations(searchTerm?: string) {
       scheduleConversationsRefresh();
     };
 
-    socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
-    socketClient.socket?.on(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
+      handleNewMessage,
+    );
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
+      handleConversationRemoved,
+    );
     socketClient.socket?.on("connect", handleSocketConnect);
 
     return () => {
@@ -74,8 +121,14 @@ export function useConversations(searchTerm?: string) {
         window.clearTimeout(scheduledConversationRefreshRef.current);
         scheduledConversationRefreshRef.current = null;
       }
-      socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
-      socketClient.socket?.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
+        handleNewMessage,
+      );
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
+        handleConversationRemoved,
+      );
       socketClient.socket?.off("connect", handleSocketConnect);
     };
   }, [queryClient, scheduleConversationsRefresh]);
@@ -110,9 +163,12 @@ export function useConversations(searchTerm?: string) {
         }
 
         try {
-          await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN, {
-            conversationId,
-          });
+          await socketClient.safeEmitValidated(
+            CHAT_SOCKET_EVENTS.CONVERSATION_JOIN,
+            {
+              conversationId,
+            },
+          );
           joinedConversationIdsRef.current.add(conversationId);
         } catch {
           // Keep silent here; room join will be retried on reconnect or next refresh.
@@ -128,31 +184,52 @@ export function useConversations(searchTerm?: string) {
 
 export function useMessages(conversationId?: string) {
   const queryClient = useQueryClient();
-  const [typingUsers, setTypingUsers] = useState<Record<string, ChatTypingStateEvent>>({});
-  const messageQueryKey = useMemo(() => ["messages", conversationId] as const, [conversationId]);
+  const [typingUsersByConversation, setTypingUsersByConversation] = useState<
+    Record<string, Record<string, ChatTypingStateEvent>>
+  >({});
+  const messageQueryKey = useMemo(
+    () => ["messages", conversationId] as const,
+    [conversationId],
+  );
   const messageRefreshTimerRef = useRef<number | null>(null);
   const conversationRefreshTimerRef = useRef<number | null>(null);
+  const typingUsers = conversationId
+    ? (typingUsersByConversation[conversationId] ?? {})
+    : {};
 
-  const upsertMessageInCache = useCallback((message: MessageItem) => {
-    queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(messageQueryKey, (oldData) => {
-      if (!oldData || oldData.pages.length === 0) {
-        return {
-          pages: [{ items: [message], nextCursor: undefined }],
-          pageParams: [undefined],
-        };
-      }
+  const upsertMessageInCache = useCallback(
+    (message: MessageItem) => {
+      queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(
+        messageQueryKey,
+        (oldData) => {
+          if (!oldData || oldData.pages.length === 0) {
+            return {
+              pages: [{ items: [message], nextCursor: undefined }],
+              pageParams: [undefined],
+            };
+          }
 
-      if (oldData.pages.some((page) => page.items.some((msg) => msg.id === message.id))) {
-        return oldData;
-      }
+          if (
+            oldData.pages.some((page) =>
+              page.items.some((msg) => msg.id === message.id),
+            )
+          ) {
+            return oldData;
+          }
 
-      const [firstPage, ...restPages] = oldData.pages;
-      return {
-        ...oldData,
-        pages: [{ ...firstPage, items: [message, ...firstPage.items] }, ...restPages],
-      };
-    });
-  }, [messageQueryKey, queryClient]);
+          const [firstPage, ...restPages] = oldData.pages;
+          return {
+            ...oldData,
+            pages: [
+              { ...firstPage, items: [message, ...firstPage.items] },
+              ...restPages,
+            ],
+          };
+        },
+      );
+    },
+    [messageQueryKey, queryClient],
+  );
 
   const scheduleMessageRefresh = useCallback(() => {
     if (messageRefreshTimerRef.current !== null) {
@@ -196,13 +273,13 @@ export function useMessages(conversationId?: string) {
   useEffect(() => {
     if (!conversationId) return;
 
-    setTypingUsers({});
-    
     const joinRoom = async () => {
       try {
         await socketClient.connect();
         // Fire & forget join event
-        socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN, { conversationId });
+        socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN, {
+          conversationId,
+        });
       } catch (err) {
         console.error("Failed to join chat room", err);
       }
@@ -214,60 +291,105 @@ export function useMessages(conversationId?: string) {
         return;
       }
 
-      setTypingUsers((prev) => {
+      setTypingUsersByConversation((prev) => {
+        const currentTypingUsers = prev[conversationId] ?? {};
         if (!payload.isTyping) {
-          const next = { ...prev };
-          delete next[payload.userId];
-          return next;
+          if (!currentTypingUsers[payload.userId]) {
+            return prev;
+          }
+
+          const nextTypingUsers = { ...currentTypingUsers };
+          delete nextTypingUsers[payload.userId];
+
+          return {
+            ...prev,
+            [conversationId]: nextTypingUsers,
+          };
         }
 
         return {
           ...prev,
-          [payload.userId]: payload,
+          [conversationId]: {
+            ...currentTypingUsers,
+            [payload.userId]: payload,
+          },
         };
       });
     };
 
-    const handleMessageCreated = (payload: any) => {
-      // payload could be a ChatMessageCreatedEvent
-      const newMsg = payload.message || payload;
+    const handleMessageCreated = (
+      payload: ChatMessageCreatedEvent | MessageItem,
+    ) => {
+      const newMsg = "message" in payload ? payload.message : payload;
       if (newMsg?.conversationId === conversationId) {
-        upsertMessageInCache(newMsg as MessageItem);
+        upsertMessageInCache(newMsg);
       }
     };
 
-    const handleConversationRemoved = (payload: any) => {
-      const removedConversationId = payload?.conversationId || payload?.data?.conversationId;
+    const handleConversationRemoved = (payload: ConversationRemovedPayload) => {
+      const removedConversationId = extractConversationId(payload);
       if (!removedConversationId || removedConversationId !== conversationId) {
         return;
       }
 
-      setTypingUsers({});
+      setTypingUsersByConversation((prev) => {
+        if (!prev[conversationId]) {
+          return prev;
+        }
+
+        const next = { ...prev };
+        delete next[conversationId];
+        return next;
+      });
       queryClient.removeQueries({ queryKey: messageQueryKey });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
-    socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
+      handleMessageCreated,
+    );
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
-    socketClient.socket?.on(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
+      handleConversationRemoved,
+    );
 
     return () => {
-      socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE, { conversationId }).catch(() => {});
-      socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
-      socketClient.socket?.off(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
-      socketClient.socket?.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
+      socketClient
+        .safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE, {
+          conversationId,
+        })
+        .catch(() => {});
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
+        handleMessageCreated,
+      );
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.TYPING_STATE,
+        handleTypingState,
+      );
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
+        handleConversationRemoved,
+      );
     };
-  }, [conversationId, queryClient, upsertMessageInCache]);
+  }, [conversationId, messageQueryKey, queryClient, upsertMessageInCache]);
 
   const sendTyping = useCallback(
     async (isTyping: boolean) => {
       if (!conversationId) return;
 
       try {
-        await socketClient.safeEmitValidated(isTyping ? CHAT_SOCKET_EVENTS.TYPING_START : CHAT_SOCKET_EVENTS.TYPING_STOP, {
-          conversationId,
-          clientTimestamp: new Date().toISOString(),
-        });
+        await socketClient.safeEmitValidated(
+          isTyping
+            ? CHAT_SOCKET_EVENTS.TYPING_START
+            : CHAT_SOCKET_EVENTS.TYPING_STOP,
+          {
+            conversationId,
+            clientTimestamp: new Date().toISOString(),
+          },
+        );
       } catch (error) {
         console.error("Failed to send typing state", {
           conversationId,
@@ -280,7 +402,8 @@ export function useMessages(conversationId?: string) {
   );
 
   const sendMutation = useMutation({
-    mutationFn: (payload: SendMessageInput) => sendMessage(conversationId!, payload),
+    mutationFn: (payload: SendMessageInput) =>
+      sendMessage(conversationId!, payload),
     onSuccess: (createdMessage) => {
       if (createdMessage) {
         upsertMessageInCache(createdMessage);
@@ -298,22 +421,25 @@ export function useMessages(conversationId?: string) {
   const readMutation = useMutation({
     mutationFn: () => markConversationAsRead(conversationId!),
     onSuccess: () => {
-      queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: unknown) => {
-        if (!Array.isArray(oldData)) {
-          return oldData;
-        }
-
-        return oldData.map((item: any) => {
-          if (!item || item.conversationId !== conversationId) {
-            return item;
+      queryClient.setQueriesData(
+        { queryKey: ["conversations"] },
+        (oldData: unknown) => {
+          if (!Array.isArray(oldData)) {
+            return oldData;
           }
 
-          return {
-            ...item,
-            unreadCount: 0,
-          };
-        });
-      });
+          return (oldData as ConversationSummary[]).map((item) => {
+            if (!item || item.conversationId !== conversationId) {
+              return item;
+            }
+
+            return {
+              ...item,
+              unreadCount: 0,
+            };
+          });
+        },
+      );
     },
   });
 
@@ -327,8 +453,13 @@ export function useMessages(conversationId?: string) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: ({ messageId, scope }: { messageId: string; scope?: RecallScope }) =>
-      deleteMessage(conversationId!, messageId, scope),
+    mutationFn: ({
+      messageId,
+      scope,
+    }: {
+      messageId: string;
+      scope?: RecallScope;
+    }) => deleteMessage(conversationId!, messageId, scope),
     onSuccess: () => {
       scheduleMessageRefresh();
       scheduleConversationsRefresh();
@@ -336,8 +467,13 @@ export function useMessages(conversationId?: string) {
   });
 
   const forwardMutation = useMutation({
-    mutationFn: ({ messageId, conversationIds }: { messageId: string; conversationIds: string[] }) =>
-      forwardMessage(conversationId!, messageId, conversationIds),
+    mutationFn: ({
+      messageId,
+      conversationIds,
+    }: {
+      messageId: string;
+      conversationIds: string[];
+    }) => forwardMessage(conversationId!, messageId, conversationIds),
     onSuccess: () => {
       scheduleMessageRefresh();
       scheduleConversationsRefresh();
