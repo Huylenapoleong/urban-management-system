@@ -118,4 +118,25 @@ describe('ChatCallSessionService', () => {
       'Only accepted participants can exchange media for this call.',
     );
   });
+
+  it('keeps a group call active while the caller is the only remaining participant', async () => {
+    await service.initiateCall(groupAccess, 'user-1', true);
+    await service.acceptCall(groupAccess, 'user-2');
+
+    const participantLeft = await service.endCall(groupAccess, 'user-2');
+
+    expect(participantLeft.shouldEmit).toBe(true);
+    await expect(
+      service.touchSignalingSession(groupAccess, 'user-1'),
+    ).resolves.toMatchObject({
+      status: 'ACTIVE',
+    });
+
+    const callerLeft = await service.endCall(groupAccess, 'user-1');
+
+    expect(callerLeft.shouldEmit).toBe(true);
+    await expect(
+      service.touchSignalingSession(groupAccess, 'user-1'),
+    ).rejects.toThrow('There is no active call for this conversation.');
+  });
 });

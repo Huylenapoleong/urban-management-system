@@ -10,8 +10,8 @@ import {
 } from '@nestjs/common';
 import {
   CHAT_SOCKET_EVENTS,
-  GROUP_MESSAGE_POLICIES,
   GROUP_MEMBER_ROLES,
+  GROUP_MESSAGE_POLICIES,
   GROUP_TYPES,
   type GroupMemberRole,
   type GroupMessagePolicy,
@@ -20,8 +20,8 @@ import {
 import type {
   ApiResponseMeta,
   ApiSuccessResponse,
-  AuthenticatedUser,
   AuditEventItem,
+  AuthenticatedUser,
   ChatConversationUpdatedEvent,
   GroupBan,
   GroupInviteLink,
@@ -45,15 +45,10 @@ import {
   nowIso,
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
-import { AuditTrailService } from '../../infrastructure/audit/audit-trail.service';
 import {
   GROUP_MEMBER_ROLE_INPUTS,
   normalizeGroupMemberRole,
 } from '../../common/group-member-roles';
-import {
-  buildPaginatedResponse,
-  paginateSortedItems,
-} from '../../common/pagination';
 import {
   toConversationSummary,
   toGroupBan,
@@ -61,34 +56,38 @@ import {
   toGroupMetadata,
   toMembership,
 } from '../../common/mappers';
+import {
+  buildPaginatedResponse,
+  paginateSortedItems,
+} from '../../common/pagination';
 import type {
   StoredConversation,
+  StoredGroup,
   StoredGroupAuditEvent,
   StoredGroupBan,
   StoredGroupInviteCodeLookup,
   StoredGroupInviteLink,
-  StoredGroup,
   StoredMembership,
 } from '../../common/storage-records';
 import {
-  ensureLocationCode,
   ensureObject,
   optionalBoolean,
   optionalEnum,
   optionalQueryString,
-  parseLocationCodeQuery,
   optionalString,
   parseBooleanQuery,
   parseLimit,
   requiredEnum,
   requiredString,
 } from '../../common/validation';
+import { AuditTrailService } from '../../infrastructure/audit/audit-trail.service';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { ChatRealtimeService } from '../conversations/chat-realtime.service';
 import { ConversationsService } from '../conversations/conversations.service';
-import { GroupCleanupService } from './group-cleanup.service';
+import { LocationsService } from '../locations/locations.service';
 import { UsersService } from '../users/users.service';
+import { GroupCleanupService } from './group-cleanup.service';
 
 @Injectable()
 export class GroupsService {
@@ -97,6 +96,7 @@ export class GroupsService {
   constructor(
     private readonly repository: UrbanTableRepository,
     private readonly authorizationService: AuthorizationService,
+    private readonly locationsService: LocationsService,
     private readonly usersService: UsersService,
     private readonly groupCleanupService: GroupCleanupService,
     private readonly auditTrailService: AuditTrailService,
@@ -116,7 +116,7 @@ export class GroupsService {
       maxLength: 100,
     });
     const groupType = requiredEnum(body, 'groupType', GROUP_TYPES);
-    const locationCode = ensureLocationCode(
+    const locationCode = this.locationsService.ensureKnownLocationCode(
       requiredString(body, 'locationCode'),
     );
     const description = optionalString(body, 'description', { maxLength: 500 });
@@ -212,13 +212,19 @@ export class GroupsService {
   ): Promise<ApiSuccessResponse<GroupMetadata[], ApiResponseMeta>> {
     const mine = parseBooleanQuery(query.mine, 'mine') ?? false;
     const groupType = optionalQueryString(query.groupType, 'groupType');
-    const locationCode = parseLocationCodeQuery(
+    const locationCodeInput = optionalQueryString(
       query.locationCode,
       'locationCode',
     );
+    const locationCode = locationCodeInput
+      ? this.locationsService.ensureKnownLocationCode(
+          locationCodeInput,
+          'locationCode',
+        )
+      : undefined;
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const limit = parseLimit(query.limit);
-    const actorMemberships = await this.getMembershipsForUser(actor.id);
+    const actorMemberships = await this.listMembershipsForUser(actor.id);
     const actorMembershipIds = new Set(
       actorMemberships.map((membership) => membership.groupId),
     );
@@ -419,7 +425,7 @@ export class GroupsService {
       GROUP_MESSAGE_POLICIES,
     );
     const nextLocationCode = locationCodeInput
-      ? ensureLocationCode(locationCodeInput)
+      ? this.locationsService.ensureKnownLocationCode(locationCodeInput)
       : group.locationCode;
     const nextGroupType: GroupType = groupType ?? group.groupType;
     const nextIsOfficial = isOfficial ?? group.isOfficial;
@@ -2104,9 +2110,7 @@ export class GroupsService {
     return group;
   }
 
-  private async getMembershipsForUser(
-    userId: string,
-  ): Promise<StoredMembership[]> {
+  async listMembershipsForUser(userId: string): Promise<StoredMembership[]> {
     const items = await this.repository.queryByGsi1<{ PK: string; SK: string }>(
       this.config.dynamodbMembershipsTableName,
       this.config.dynamodbMembershipsUserGroupsIndexName,

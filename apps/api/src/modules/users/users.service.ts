@@ -13,8 +13,8 @@ import type {
   ChatConversationUpdatedEvent,
   MediaAsset,
   PushDevice,
-  UserContactAlias,
   UserBlockedItem,
+  UserContactAlias,
   UserDirectoryItem,
   UserFriendItem,
   UserFriendRequestItem,
@@ -33,31 +33,29 @@ import {
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
 import {
+  toConversationSummary,
+  toUserBlockedItem,
+  toUserFriendItem,
+  toUserFriendRequestItem,
+  toUserProfile,
+} from '../../common/mappers';
+import {
   buildPaginatedResponse,
   paginateSortedItems,
 } from '../../common/pagination';
-import {
-  toConversationSummary,
-  toUserFriendItem,
-  toUserFriendRequestItem,
-  toUserBlockedItem,
-  toUserProfile,
-} from '../../common/mappers';
 import type {
   StoredConversation,
+  StoredDirectMessageRequest,
+  StoredUser,
   StoredUserBlockEdge,
   StoredUserContactAlias,
   StoredUserFriendEdge,
   StoredUserFriendRequest,
-  StoredDirectMessageRequest,
-  StoredUser,
   StoredUserIdentityClaim,
 } from '../../common/storage-records';
 import {
-  ensureLocationCode,
   ensureObject,
   optionalQueryString,
-  parseLocationCodeQuery,
   optionalString,
   parseLimit,
   requirePhoneOrEmail,
@@ -66,17 +64,18 @@ import {
 } from '../../common/validation';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
+import { ObservabilityService } from '../../infrastructure/observability/observability.service';
 import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
-import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
-import { ChatRealtimeService } from '../../modules/conversations/chat-realtime.service';
 import {
   PasswordPolicyService,
   type PasswordPolicyProfile,
 } from '../../infrastructure/security/password-policy.service';
 import { PasswordService } from '../../infrastructure/security/password.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
-import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
-import { ObservabilityService } from '../../infrastructure/observability/observability.service';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
+import { ChatRealtimeService } from '../../modules/conversations/chat-realtime.service';
+import { LocationsService } from '../locations/locations.service';
 
 interface PreparedCitizenRegistrationInput {
   phone?: string;
@@ -99,6 +98,7 @@ export class UsersService {
     private readonly passwordService: PasswordService,
     private readonly passwordPolicyService: PasswordPolicyService,
     private readonly authorizationService: AuthorizationService,
+    private readonly locationsService: LocationsService,
     private readonly chatPresenceService: ChatPresenceService,
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly refreshSessionService: RefreshSessionService,
@@ -189,7 +189,7 @@ export class UsersService {
       minLength: 2,
       maxLength: 100,
     });
-    const locationCode = ensureLocationCode(
+    const locationCode = this.locationsService.ensureKnownLocationCode(
       requiredString(body, 'locationCode'),
     );
     const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
@@ -217,7 +217,9 @@ export class UsersService {
   async registerCitizenWithPreparedInput(
     input: PreparedCitizenRegistrationInput,
   ): Promise<UserProfile> {
-    const locationCode = ensureLocationCode(input.locationCode);
+    const locationCode = this.locationsService.ensureKnownLocationCode(
+      input.locationCode,
+    );
 
     const now = nowIso();
     const userId = createUlid();
@@ -412,9 +414,7 @@ export class UsersService {
       }
 
       if (current.status !== 'LOCKED') {
-        throw new BadRequestException(
-          'Only locked accounts can be unlocked.',
-        );
+        throw new BadRequestException('Only locked accounts can be unlocked.');
       }
 
       const nextUser: StoredUser = {
@@ -522,7 +522,7 @@ export class UsersService {
       maxLength: 100,
     });
     const role = requiredEnum(body, 'role', USER_ROLES);
-    const locationCode = ensureLocationCode(
+    const locationCode = this.locationsService.ensureKnownLocationCode(
       requiredString(body, 'locationCode'),
     );
     const unit = optionalString(body, 'unit', { maxLength: 200 });
@@ -587,10 +587,16 @@ export class UsersService {
       .filter((user) => this.authorizationService.canReadUser(actor, user));
     const role = optionalQueryString(query.role, 'role');
     const status = optionalQueryString(query.status, 'status');
-    const locationCode = parseLocationCodeQuery(
+    const locationCodeInput = optionalQueryString(
       query.locationCode,
       'locationCode',
     );
+    const locationCode = locationCodeInput
+      ? this.locationsService.ensureKnownLocationCode(
+          locationCodeInput,
+          'locationCode',
+        )
+      : undefined;
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const limit = parseLimit(query.limit);
 
@@ -690,7 +696,7 @@ export class UsersService {
     });
 
     const nextLocationCode = locationCodeInput
-      ? ensureLocationCode(locationCodeInput)
+      ? this.locationsService.ensureKnownLocationCode(locationCodeInput)
       : current.locationCode;
 
     if (locationCodeInput && actor.role === 'CITIZEN') {

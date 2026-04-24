@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   CanActivate,
   ExecutionContext,
   INestApplication,
@@ -8,31 +9,31 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { Request, Response, NextFunction } from 'express';
+import type { UserRole } from '@urban/shared-constants';
+import type { NextFunction, Request, Response } from 'express';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import type { UserRole } from '@urban/shared-constants';
 import { IS_PUBLIC_KEY } from '../src/common/decorators/public.decorator';
 import { ApiExceptionFilter } from '../src/common/filters/api-exception.filter';
 import { RolesGuard } from '../src/common/guards/roles.guard';
 import { ResponseEnvelopeInterceptor } from '../src/common/interceptors/response-envelope.interceptor';
-import { SystemController } from '../src/infrastructure/health/system.controller';
-import { MaintenanceController } from '../src/infrastructure/maintenance/maintenance.controller';
-import { AuthController } from '../src/modules/auth/auth.controller';
-import { ConversationsController } from '../src/modules/conversations/conversations.controller';
-import { GroupsController } from '../src/modules/groups/groups.controller';
-import { ReportsController } from '../src/modules/reports/reports.controller';
-import { UploadsController } from '../src/modules/uploads/uploads.controller';
-import { UsersController } from '../src/modules/users/users.controller';
 import { SystemHealthService } from '../src/infrastructure/health/system-health.service';
-import { ObservabilityService } from '../src/infrastructure/observability/observability.service';
-import { RetentionMaintenanceService } from '../src/infrastructure/maintenance/retention-maintenance.service';
+import { SystemController } from '../src/infrastructure/health/system.controller';
 import { ChatReconciliationService } from '../src/infrastructure/maintenance/chat-reconciliation.service';
+import { MaintenanceController } from '../src/infrastructure/maintenance/maintenance.controller';
+import { RetentionMaintenanceService } from '../src/infrastructure/maintenance/retention-maintenance.service';
+import { ObservabilityService } from '../src/infrastructure/observability/observability.service';
+import { AuthController } from '../src/modules/auth/auth.controller';
 import { AuthService } from '../src/modules/auth/auth.service';
+import { ConversationsController } from '../src/modules/conversations/conversations.controller';
 import { ConversationsService } from '../src/modules/conversations/conversations.service';
+import { GroupsController } from '../src/modules/groups/groups.controller';
 import { GroupsService } from '../src/modules/groups/groups.service';
+import { ReportsController } from '../src/modules/reports/reports.controller';
 import { ReportsService } from '../src/modules/reports/reports.service';
+import { UploadsController } from '../src/modules/uploads/uploads.controller';
 import { UploadsService } from '../src/modules/uploads/uploads.service';
+import { UsersController } from '../src/modules/users/users.controller';
 import { UsersService } from '../src/modules/users/users.service';
 
 type TestRole = 'ANON' | UserRole;
@@ -275,7 +276,7 @@ describe('Endpoint Role Matrix (e2e)', () => {
         email: 'ward.a@smartcity.local',
         password: 'Ums@2026Secure1',
         role: 'WARD_OFFICER',
-        locationCode: 'VN-HCM-BQ1-P01',
+        locationCode: 'VN-79-25747',
       },
       expected: {
         ANON: 401,
@@ -416,7 +417,7 @@ describe('Endpoint Role Matrix (e2e)', () => {
         id: 'user-1',
         fullName: 'Citizen One',
         role: 'CITIZEN',
-        locationCode: 'VN-HCM-BQ1-P01',
+        locationCode: 'VN-79-25747',
         status: 'ACTIVE',
         deletedAt: null,
         createdAt: new Date().toISOString(),
@@ -435,7 +436,7 @@ describe('Endpoint Role Matrix (e2e)', () => {
         id: 'user-1',
         fullName: 'Citizen One',
         role: 'CITIZEN',
-        locationCode: 'VN-HCM-BQ1-P01',
+        locationCode: 'VN-79-25747',
         status: 'ACTIVE',
         deletedAt: null,
         createdAt: new Date().toISOString(),
@@ -453,7 +454,7 @@ describe('Endpoint Role Matrix (e2e)', () => {
       id: 'user-created',
       fullName: 'Created User',
       role: 'WARD_OFFICER',
-      locationCode: 'VN-HCM-BQ1-P01',
+      locationCode: 'VN-79-25747',
       status: 'ACTIVE',
       deletedAt: null,
       createdAt: new Date().toISOString(),
@@ -463,7 +464,7 @@ describe('Endpoint Role Matrix (e2e)', () => {
       id: 'user-updated',
       fullName: 'Updated User',
       role: 'CITIZEN',
-      locationCode: 'VN-HCM-BQ1-P01',
+      locationCode: 'VN-79-25747',
       status: 'ACTIVE',
       deletedAt: null,
       createdAt: new Date().toISOString(),
@@ -484,18 +485,34 @@ describe('Endpoint Role Matrix (e2e)', () => {
       data: [],
       meta: { count: 0 },
     });
-    uploadsService.uploadMedia.mockResolvedValue({
-      key: 'uploads/general/user-1/file.jpg',
-      url: 'https://cdn.example.com/file.jpg',
-      bucket: 'test-bucket',
-      target: 'GENERAL',
-      fileName: 'file.jpg',
-      originalFileName: 'file.jpg',
-      contentType: 'image/jpeg',
-      size: 128,
-      uploadedBy: 'user-1',
-      uploadedAt: new Date().toISOString(),
-    });
+    uploadsService.uploadMedia.mockImplementation(
+      (
+        _user: unknown,
+        _body: unknown,
+        file?: {
+          originalname: string;
+          mimetype: string;
+          size: number;
+        },
+      ) => {
+        if (!file) {
+          throw new BadRequestException('file is required.');
+        }
+
+        return Promise.resolve({
+          key: 'uploads/general/user-1/file.jpg',
+          url: 'https://cdn.example.com/file.jpg',
+          bucket: 'test-bucket',
+          target: 'GENERAL',
+          fileName: 'file.jpg',
+          originalFileName: 'file.jpg',
+          contentType: 'image/jpeg',
+          size: 128,
+          uploadedBy: 'user-1',
+          uploadedAt: new Date().toISOString(),
+        });
+      },
+    );
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [
@@ -564,10 +581,12 @@ describe('Endpoint Role Matrix (e2e)', () => {
       const role = roleHeader?.trim() as UserRole | undefined;
 
       if (role) {
+        const locationCode =
+          role === 'PROVINCE_OFFICER' ? 'VN-79' : 'VN-79-25747';
         req.user = {
           id: `${role.toLowerCase()}-user`,
           role,
-          locationCode: 'VN-HCM-BQ1-P01',
+          locationCode,
           fullName: `${role} User`,
           status: 'ACTIVE',
           createdAt: new Date().toISOString(),

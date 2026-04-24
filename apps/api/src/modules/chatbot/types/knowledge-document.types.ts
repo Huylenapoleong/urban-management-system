@@ -2,11 +2,11 @@
  * Domain object — phiên bản sạch dùng trong services và controller.
  */
 export interface KnowledgeDocument {
-  id: string;        // = docId
+  id: string; // = docId
   title: string;
-  content: string;   // ≤ ~1000 ký tự (1 Điều luật = 1 Item)
-  category: string;  // "land" | "construction" | "environment" | ...
-  source: string;    // số hiệu văn bản
+  content: string; // ≤ ~1000 ký tự (1 Điều luật = 1 Item)
+  category: string; // "land" | "construction" | "environment" | ...
+  source: string; // số hiệu văn bản
 }
 
 /**
@@ -22,9 +22,9 @@ export interface KnowledgeDocument {
  */
 export interface StoredKnowledgeDocument {
   PK: 'KNOWLEDGE_DOCUMENT';
-  SK: string;          // = docId
-  category: string;    // GSI partition key — field thật, dễ đọc
-  docId: string;       // GSI sort key — field thật
+  SK: string; // = docId
+  category: string; // GSI partition key — field thật, dễ đọc
+  docId: string; // GSI sort key — field thật
   title: string;
   content: string;
   source: string;

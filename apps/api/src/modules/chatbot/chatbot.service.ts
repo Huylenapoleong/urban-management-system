@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { UserRole } from '@urban/shared-constants';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
+import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import type { ChatbotAnswerDto } from './dto/chatbot-answer.dto';
 import { KnowledgeRepository } from './repositories/knowledge.repository';
 import { GroqClientService } from './services/groq-client.service';
-import { AppConfigService } from '../../infrastructure/config/app-config.service';
-import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import type { KnowledgeDocument } from './types/knowledge-document.types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,25 +26,56 @@ interface EmbeddingService {
  */
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   land: [
-    'đất', 'đất đai', 'thửa đất', 'quyền sử dụng đất',
-    'giấy chứng nhận', 'sổ đỏ', 'sổ hồng', 'địa chính',
-    'chuyển nhượng đất', 'thuê đất',
+    'đất',
+    'đất đai',
+    'thửa đất',
+    'quyền sử dụng đất',
+    'giấy chứng nhận',
+    'sổ đỏ',
+    'sổ hồng',
+    'địa chính',
+    'chuyển nhượng đất',
+    'thuê đất',
   ],
   construction: [
-    'xây dựng', 'giấy phép xây dựng', 'công trình', 'nhà ở',
-    'cải tạo', 'sửa chữa nhà', 'phá dỡ', 'thiết kế',
+    'xây dựng',
+    'giấy phép xây dựng',
+    'công trình',
+    'nhà ở',
+    'cải tạo',
+    'sửa chữa nhà',
+    'phá dỡ',
+    'thiết kế',
   ],
   environment: [
-    'môi trường', 'ô nhiễm', 'rác thải', 'nước thải',
-    'khí thải', 'tiếng ồn', 'đánh giá tác động môi trường', 'EIA',
+    'môi trường',
+    'ô nhiễm',
+    'rác thải',
+    'nước thải',
+    'khí thải',
+    'tiếng ồn',
+    'đánh giá tác động môi trường',
+    'EIA',
   ],
   urban: [
-    'đô thị', 'quy hoạch', 'hạ tầng', 'khu đô thị', 'vỉa hè',
-    'lòng đường', 'chiếu sáng', 'cây xanh đô thị',
+    'đô thị',
+    'quy hoạch',
+    'hạ tầng',
+    'khu đô thị',
+    'vỉa hè',
+    'lòng đường',
+    'chiếu sáng',
+    'cây xanh đô thị',
   ],
   administrative: [
-    'hành chính', 'thủ tục', 'hộ khẩu', 'khai sinh', 'đăng ký',
-    'chứng thực', 'công chứng', 'ủy quyền',
+    'hành chính',
+    'thủ tục',
+    'hộ khẩu',
+    'khai sinh',
+    'đăng ký',
+    'chứng thực',
+    'công chứng',
+    'ủy quyền',
   ],
 };
 
@@ -125,13 +156,8 @@ export class ChatbotService {
    *
    * @param question - Câu hỏi user
    * @param userRole - Role (nếu đã đăng nhập): CITIZEN | WARD_OFFICER | PROVINCE_OFFICER | ADMIN
-   * @param userId - User ID (nếu đã đăng nhập)
    */
-  async ask(
-    question: string,
-    userRole?: UserRole,
-    userId?: string,
-  ): Promise<ChatbotAnswerDto> {
+  async ask(question: string, userRole?: UserRole): Promise<ChatbotAnswerDto> {
     const intent = this.classifyIntent(question);
     this.logger.debug(
       `Question: "${question}" → intent: ${intent}, role: ${userRole ?? 'anonymous'}`,
@@ -148,7 +174,6 @@ export class ChatbotService {
   async *askStream(
     question: string,
     userRole?: UserRole,
-    userId?: string,
   ): AsyncGenerator<string, void, unknown> {
     const intent = this.classifyIntent(question);
     this.logger.debug(
@@ -251,7 +276,9 @@ export class ChatbotService {
   /**
    * Retrieve documents ưu tiên Vector Search, fallback về Keyword Match.
    */
-  private async retrieveDocuments(question: string): Promise<KnowledgeDocument[]> {
+  private async retrieveDocuments(
+    question: string,
+  ): Promise<KnowledgeDocument[]> {
     // Lazy init embedding service (chỉ lần đầu)
     await this.ensureEmbeddingService();
 
@@ -403,8 +430,13 @@ export class ChatbotService {
 
     // Detect summarize intent
     const summarizeKeywords = [
-      'tóm tắt', 'tổng kết', 'summary', 'tóm lược',
-      'tin nhắn nhóm', 'cuộc trò chuyện', 'chat nhóm',
+      'tóm tắt',
+      'tổng kết',
+      'summary',
+      'tóm lược',
+      'tin nhắn nhóm',
+      'cuộc trò chuyện',
+      'chat nhóm',
     ];
     if (summarizeKeywords.some((kw) => lower.includes(kw))) {
       return 'SUMMARIZE';
@@ -412,8 +444,12 @@ export class ChatbotService {
 
     // Detect report intent
     const reportKeywords = [
-      'báo cáo', 'thống kê', 'phản ánh', 'report',
-      'phân tích báo cáo', 'tổng hợp phản ánh',
+      'báo cáo',
+      'thống kê',
+      'phản ánh',
+      'report',
+      'phân tích báo cáo',
+      'tổng hợp phản ánh',
     ];
     if (reportKeywords.some((kw) => lower.includes(kw))) {
       return 'REPORT';

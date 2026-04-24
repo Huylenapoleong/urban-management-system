@@ -2416,9 +2416,7 @@ export class ConversationsService {
     const nextMessage: StoredMessage = {
       ...message,
       deletedForSenderAt:
-        actor.id === message.senderId
-          ? recalledAt
-          : message.deletedForSenderAt,
+        actor.id === message.senderId ? recalledAt : message.deletedForSenderAt,
       deletedForUserAt: nextDeletedForUserAt,
       updatedAt: recalledAt,
     };
@@ -3451,7 +3449,46 @@ export class ConversationsService {
     }
 
     const directRequest = await this.getDirectMessageRequest(conversationId);
-    return directRequest?.status === 'ACCEPTED';
+    if (directRequest?.status === 'ACCEPTED') {
+      return true;
+    }
+
+    // Two citizens who share at least one active group membership may access
+    // a DM conversation (e.g. to initiate a 1-1 call from inside a group).
+    if (await this.haveSharedGroupMembership(actor.id, targetUser.userId)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Returns true if both users are active members of at least one common group.
+   * We iterate the actor's group memberships and check if the target is also a
+   * member — short-circuits on the first match to avoid scanning all groups.
+   */
+  private async haveSharedGroupMembership(
+    actorId: string,
+    targetUserId: string,
+  ): Promise<boolean> {
+    try {
+      const actorMemberships =
+        await this.groupsService.listMembershipsForUser(actorId);
+
+      for (const membership of actorMemberships) {
+        if (membership.deletedAt) continue;
+        const targetMembership = await this.groupsService.getMembership(
+          membership.groupId,
+          targetUserId,
+        );
+        if (targetMembership && !targetMembership.deletedAt) {
+          return true;
+        }
+      }
+    } catch {
+      // Non-critical: fail open to avoid blocking valid calls.
+    }
+    return false;
   }
 
   private async hasExistingDirectConversationSummary(

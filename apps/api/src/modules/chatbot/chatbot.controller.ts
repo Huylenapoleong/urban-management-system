@@ -9,17 +9,17 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import type { UserRole } from '@urban/shared-constants';
+import type { AuthenticatedUser } from '@urban/shared-types';
 import type { Response } from 'express';
-import type { AuthenticatedUser, JwtClaims } from '@urban/shared-types';
-import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CurrentAuthClaims } from '../../common/decorators/current-auth-claims.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-response-envelope.decorator';
 import { ChatbotService } from './chatbot.service';
 import type { ChatbotAnswerDto } from './dto/chatbot-answer.dto';
 import { ChatbotAskDto } from './dto/chatbot-ask.dto';
-import { OfficerSummarizeDto } from './dto/officer-summarize.dto';
 import { OfficerGenerateReportDto } from './dto/officer-report.dto';
+import { OfficerSummarizeDto } from './dto/officer-summarize.dto';
 import { GroupChatSummaryService } from './services/group-chat-summary.service';
 import { ReportGeneratorService } from './services/report-generator.service';
 
@@ -38,11 +38,31 @@ import { ReportGeneratorService } from './services/report-generator.service';
 @Controller('chatbot')
 @UseGuards(ThrottlerGuard)
 export class ChatbotController {
+  private static readonly OFFICER_ROLES: UserRole[] = [
+    'WARD_OFFICER',
+    'PROVINCE_OFFICER',
+    'ADMIN',
+  ];
+
   constructor(
     private readonly chatbotService: ChatbotService,
     private readonly groupChatSummaryService: GroupChatSummaryService,
     private readonly reportGeneratorService: ReportGeneratorService,
   ) {}
+
+  private getSafeUserId(user: AuthenticatedUser): string {
+    return String(user.id);
+  }
+
+  private getSafeOfficerRole(user: AuthenticatedUser): UserRole {
+    const role = user.role;
+
+    if (ChatbotController.OFFICER_ROLES.includes(role as UserRole)) {
+      return role as UserRole;
+    }
+
+    return 'WARD_OFFICER';
+  }
 
   // ─── Public Endpoints (Citizen) ─────────────────────────────────────────────
 
@@ -121,9 +141,12 @@ export class ChatbotController {
     @Body() dto: OfficerSummarizeDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<{ summary: string; messagesFetched: number }> {
+    const userId = this.getSafeUserId(user);
+    const userRole = this.getSafeOfficerRole(user);
+
     return this.groupChatSummaryService.summarize(
-      user.id,
-      user.role,
+      userId,
+      userRole,
       dto.groupId,
       dto.messageCount,
     );
@@ -141,7 +164,10 @@ export class ChatbotController {
     @Body() dto: OfficerGenerateReportDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<{ analysis: string; reportsAnalyzed: number }> {
-    return this.reportGeneratorService.generateReport(user.id, user.role, {
+    const userId = this.getSafeUserId(user);
+    const userRole = this.getSafeOfficerRole(user);
+
+    return this.reportGeneratorService.generateReport(userId, userRole, {
       status: dto.status,
       locationCode: dto.locationCode,
       category: dto.category,
