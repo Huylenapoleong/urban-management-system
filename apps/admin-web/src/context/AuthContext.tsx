@@ -1,18 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { authService, type CurrentUser } from "../services/auth.service";
+import React, { useEffect, useState, type ReactNode } from 'react';
+import { authService, type CurrentUser } from '../services/auth.service';
+import { AuthContext } from './auth-context';
 
-interface AuthContextType {
-  isAuthenticated: boolean;
-  currentUser: CurrentUser | null;
-  loading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  logout: () => Promise<void>;
-  setCurrentUser: (user: CurrentUser) => void;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,7 +21,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLoading(false);
   }, []);
 
-  const handleLogin = async (email: string, password: string): Promise<boolean> => {
+  const handleLogin = async (
+    email: string,
+    password: string,
+  ): Promise<boolean> => {
     try {
       const response = await authService.login(email, password);
       if (response.success) {
@@ -39,11 +34,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         return true;
       } else {
-        console.error("Login failed:", response.error);
+        console.error('Login failed:', response.error);
         return false;
       }
     } catch (error) {
-      console.error("Login error:", error);
+      console.error('Login error:', error);
       return false;
     }
   };
@@ -73,12 +68,4 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
 };

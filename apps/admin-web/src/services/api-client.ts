@@ -1,6 +1,8 @@
-import { BrandingConfig } from "../config/branding";
+import { BrandingConfig } from '../config/branding';
 
-export interface ApiResponse<T = any> {
+type QueryParamValue = string | number | boolean | null | undefined;
+
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   message?: string;
@@ -34,12 +36,12 @@ class ApiClient {
   }
 
   getToken() {
-    const raw = this.token || localStorage.getItem("authToken");
+    const raw = this.token || localStorage.getItem('authToken');
     if (!raw) return null;
     // Strip extra quotes if token was JSON.stringify'd when saved
     try {
       const parsed = JSON.parse(raw);
-      return typeof parsed === "string" ? parsed : raw;
+      return typeof parsed === 'string' ? parsed : raw;
     } catch {
       return raw;
     }
@@ -47,25 +49,25 @@ class ApiClient {
 
   private getHeaders(headers?: Record<string, string>) {
     const defaultHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     };
 
-    const token = localStorage.getItem("authToken");
+    const token = localStorage.getItem('authToken');
     if (token) {
-      defaultHeaders["Authorization"] = `Bearer ${token}`;
+      defaultHeaders['Authorization'] = `Bearer ${token}`;
     }
 
     return { ...defaultHeaders, ...headers };
   }
 
-  async request<T = any>(
-    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+  async request<T = unknown, TBody = unknown>(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     endpoint: string,
     options?: {
-      body?: any;
+      body?: TBody;
       headers?: Record<string, string>;
-      params?: Record<string, any>;
-    }
+      params?: Record<string, QueryParamValue>;
+    },
   ): Promise<ApiResponse<T>> {
     try {
       let url = `${this.baseUrl}${endpoint}`;
@@ -87,7 +89,11 @@ class ApiClient {
         body: options?.body ? JSON.stringify(options.body) : undefined,
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as {
+        data?: T;
+        message?: string;
+        meta?: ApiResponse<T>['meta'];
+      };
 
       if (!response.ok) {
         return {
@@ -106,47 +112,51 @@ class ApiClient {
       console.error(`API Error [${method} ${endpoint}]:`, error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error occurred",
+        error:
+          error instanceof Error ? error.message : 'Unknown error occurred',
       };
     }
   }
 
-  get<T = any>(
+  get<T = unknown>(
     endpoint: string,
-    options?: { headers?: Record<string, string>; params?: Record<string, any> }
+    options?: {
+      headers?: Record<string, string>;
+      params?: Record<string, QueryParamValue>;
+    },
   ) {
-    return this.request<T>("GET", endpoint, options);
+    return this.request<T>('GET', endpoint, options);
   }
 
-  post<T = any>(
+  post<T = unknown, TBody = unknown>(
     endpoint: string,
-    body?: any,
-    options?: { headers?: Record<string, string> }
+    body?: TBody,
+    options?: { headers?: Record<string, string> },
   ) {
-    return this.request<T>("POST", endpoint, { body, ...options });
+    return this.request<T, TBody>('POST', endpoint, { body, ...options });
   }
 
-  put<T = any>(
+  put<T = unknown, TBody = unknown>(
     endpoint: string,
-    body?: any,
-    options?: { headers?: Record<string, string> }
+    body?: TBody,
+    options?: { headers?: Record<string, string> },
   ) {
-    return this.request<T>("PUT", endpoint, { body, ...options });
+    return this.request<T, TBody>('PUT', endpoint, { body, ...options });
   }
 
-  patch<T = any>(
+  patch<T = unknown, TBody = unknown>(
     endpoint: string,
-    body?: any,
-    options?: { headers?: Record<string, string> }
+    body?: TBody,
+    options?: { headers?: Record<string, string> },
   ) {
-    return this.request<T>("PATCH", endpoint, { body, ...options });
+    return this.request<T, TBody>('PATCH', endpoint, { body, ...options });
   }
 
-  delete<T = any>(
+  delete<T = unknown>(
     endpoint: string,
-    options?: { headers?: Record<string, string> }
+    options?: { headers?: Record<string, string> },
   ) {
-    return this.request<T>("DELETE", endpoint, options);
+    return this.request<T>('DELETE', endpoint, options);
   }
 }
 
