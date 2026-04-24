@@ -1,28 +1,59 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, TouchableOpacity, ScrollView, Alert, Share } from 'react-native';
-import { Image } from 'expo-image';
-import { LinearGradient } from '@/components/shared/SafeLinearGradient';
-import { Text, TextInput, IconButton, Avatar, Portal, Modal, Button } from 'react-native-paper';
-import { useLocalSearchParams, useRouter, useSegments } from 'expo-router';
-import { useChatConversation } from '../../../hooks/shared/useChatConversation';
-import { useAuth } from '../../../providers/AuthProvider';
-import { useWebRTCContext } from '../../../providers/WebRTCContext';
-import { ApiClient } from '../../../lib/api-client';
-import { ENV_CONFIG } from '../../../constants/env';
-import { convertToS3Url } from '../../../constants/s3';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { CallEndedSummary } from '../../../hooks/shared/useWebRTC';
-import ConfirmDialog from '@/components/shared/ConfirmDialog';
-import { ChatDetailHeader } from './_components/ChatDetailHeader';
-import { ChatMediaPanels } from './_components/ChatMediaPanels';
-import { GroupInfoModal } from './_components/GroupInfoModal';
-import { InviteFriendsModal } from './_components/InviteFriendsModal';
-import { uploadMedia } from '../../../services/api/upload.api';
-import { MessageListSkeleton, SkeletonInline, SkeletonMessageBubble } from '@/components/skeleton/Skeleton';
-import designColors from '@/constants/colors';
+import ConfirmDialog from "@/components/shared/ConfirmDialog";
+import { LinearGradient } from "@/components/shared/SafeLinearGradient";
+import {
+  MessageListSkeleton,
+  SkeletonInline,
+  SkeletonMessageBubble,
+} from "@/components/skeleton/Skeleton";
+import designColors from "@/constants/colors";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { Audio, Video } from "expo-av";
+import { Image } from "expo-image";
+import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Alert,
+  Animated,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import {
+  Avatar,
+  Button,
+  IconButton,
+  Modal,
+  Portal,
+  Text,
+  TextInput,
+} from "react-native-paper";
+import { ENV_CONFIG } from "../../../constants/env";
+import { convertToS3Url } from "../../../constants/s3";
+import { useChatConversation } from "../../../hooks/shared/useChatConversation";
+import { CallEndedSummary } from "../../../hooks/shared/useWebRTC";
+import { ApiClient } from "../../../lib/api-client";
+import { useAuth } from "../../../providers/AuthProvider";
+import { useWebRTCContext } from "../../../providers/WebRTCContext";
+import { uploadMedia } from "../../../services/api/upload.api";
+import { ChatDetailHeader } from "./_components/ChatDetailHeader";
+import { ChatMediaPanels } from "./_components/ChatMediaPanels";
+import { GroupInfoModal } from "./_components/GroupInfoModal";
+import { InviteFriendsModal } from "./_components/InviteFriendsModal";
 
 const OFFICIAL_CHAT_PRIMARY = designColors.primary;
-const OFFICIAL_CHAT_TEXT = '#ffffff';
+const OFFICIAL_CHAT_TEXT = "#ffffff";
 
 const OFFICIAL_CHAT_COLORS = {
   primary: OFFICIAL_CHAT_PRIMARY,
@@ -30,7 +61,7 @@ const OFFICIAL_CHAT_COLORS = {
   gradient: designColors.gradient,
   header: designColors.secondary,
   headerText: OFFICIAL_CHAT_TEXT,
-  mutedHeaderText: 'rgba(255,255,255,0.72)',
+  mutedHeaderText: "rgba(255,255,255,0.72)",
   headerIcon: OFFICIAL_CHAT_TEXT,
   messageBackground: designColors.secondary,
   incomingMessageBackground: designColors.surface,
@@ -42,37 +73,40 @@ const OFFICIAL_CHAT_COLORS = {
   messageText: OFFICIAL_CHAT_TEXT,
   mutedTextOnPrimary: `${OFFICIAL_CHAT_TEXT}b8`,
   mutedOnSurface: designColors.textSecondary,
-  divider: '#cbd5e1',
-  placeholderSurface: '#e0f7ff',
+  divider: "#cbd5e1",
+  placeholderSurface: "#e0f7ff",
   shadow: designColors.shadow,
-  fullscreenBackdrop: '#000000',
-  primarySoft: 'rgba(10,207,254,0.12)',
-  primarySoftStrong: 'rgba(73,90,255,0.16)',
-  border: '#dbeafe',
-  overlay: 'rgba(15,23,42,0.58)',
+  fullscreenBackdrop: "#000000",
+  primarySoft: "rgba(10,207,254,0.12)",
+  primarySoftStrong: "rgba(73,90,255,0.16)",
+  border: "#dbeafe",
+  overlay: "rgba(15,23,42,0.58)",
   callAction: OFFICIAL_CHAT_TEXT,
 };
 
 const CHAT_DETAIL_CONVERSATIONS_CACHE_STALE_MS = 60000;
 let chatDetailConversationsCache: any[] = [];
 let chatDetailConversationsCacheLoadedAt = 0;
-const chatDetailGroupMembersCache = new Map<string, { items: any[]; loadedAt: number }>();
+const chatDetailGroupMembersCache = new Map<
+  string,
+  { items: any[]; loadedAt: number }
+>();
 
 const getPeerIdFromConversationId = (conversationId?: string) => {
-  if (!conversationId) return '';
+  if (!conversationId) return "";
   const normalized = String(conversationId).trim();
 
   if (/^dm:/i.test(normalized)) {
-    return normalized.replace(/^dm:/i, '').trim();
+    return normalized.replace(/^dm:/i, "").trim();
   }
 
   if (/^dm#/i.test(normalized)) {
     const participantIds = normalized
-      .replace(/^dm#/i, '')
-      .split('#')
+      .replace(/^dm#/i, "")
+      .split("#")
       .map((value) => value.trim())
       .filter(Boolean);
-    return participantIds[participantIds.length - 1] || '';
+    return participantIds[participantIds.length - 1] || "";
   }
 
   return normalized;
@@ -83,7 +117,11 @@ const getCachedConversationInfo = (conversationId: string) => {
     return null;
   }
 
-  return chatDetailConversationsCache.find((item: any) => item?.conversationId === conversationId) ?? null;
+  return (
+    chatDetailConversationsCache.find(
+      (item: any) => item?.conversationId === conversationId,
+    ) ?? null
+  );
 };
 
 const resolveConversationAvatarUrl = (conversation?: any): string | null => {
@@ -98,7 +136,7 @@ const resolveConversationAvatarUrl = (conversation?: any): string | null => {
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
+    if (typeof candidate === "string" && candidate.trim()) {
       return convertToS3Url(candidate.trim());
     }
   }
@@ -107,14 +145,14 @@ const resolveConversationAvatarUrl = (conversation?: any): string | null => {
 };
 
 const formatLastSeenSubtitle = (lastSeenAt?: string | null) => {
-  const ts = Date.parse(String(lastSeenAt || ''));
+  const ts = Date.parse(String(lastSeenAt || ""));
   if (Number.isNaN(ts)) {
-    return 'Ngoại tuyến';
+    return "Ngoại tuyến";
   }
 
   const diffMinutes = Math.max(0, Math.floor((Date.now() - ts) / 60000));
   if (diffMinutes < 1) {
-    return 'Vừa hoạt động';
+    return "Vừa hoạt động";
   }
 
   if (diffMinutes < 60) {
@@ -129,10 +167,7 @@ const formatLastSeenSubtitle = (lastSeenAt?: string | null) => {
   return `Hoạt động ${Math.floor(diffHours / 24)} ngày trước`;
 };
 
-const LazyVideo = React.lazy(async () => {
-  const module = await import('expo-av');
-  return { default: module.Video as React.ComponentType<any> };
-});
+const LazyVideo = Video as React.ComponentType<any>;
 
 type MessageWithLegacyMedia = {
   attachmentUrl?: string | null;
@@ -155,12 +190,12 @@ type MessageWithLegacyMedia = {
 };
 
 const parseMessageContent = (raw: string): string => {
-  if (!raw) return '';
-  if (raw.trim().startsWith('{') || raw.trim().startsWith('[')) {
+  if (!raw) return "";
+  if (raw.trim().startsWith("{") || raw.trim().startsWith("[")) {
     try {
       const parsed = JSON.parse(raw);
-      if (typeof parsed?.text === 'string') return parsed.text;
-      if (typeof parsed?.content === 'string') return parsed.content;
+      if (typeof parsed?.text === "string") return parsed.text;
+      if (typeof parsed?.content === "string") return parsed.content;
     } catch {}
   }
   return raw;
@@ -175,15 +210,15 @@ const resolveMediaUrl = (value?: string | null): string | null => {
   const converted = convertToS3Url(trimmed);
   if (/^https?:\/\//i.test(converted)) return converted;
 
-  const normalized = converted.replace(/^\/+/, '');
-  if (normalized.startsWith('uploads/')) {
-    return `${ENV_CONFIG.S3.NEW_BASE_URL}${normalized.replace(/^uploads\/+/, '')}`;
+  const normalized = converted.replace(/^\/+/, "");
+  if (normalized.startsWith("uploads/")) {
+    return `${ENV_CONFIG.S3.NEW_BASE_URL}${normalized.replace(/^uploads\/+/, "")}`;
   }
 
-  return `${ENV_CONFIG.API_BASE_URL.replace(/\/+$/, '')}/${normalized}`;
+  return `${ENV_CONFIG.API_BASE_URL.replace(/\/+$/, "")}/${normalized}`;
 };
 
-const getMessageAttachmentUrl = (item: MessageWithLegacyMedia): string | null => (
+const getMessageAttachmentUrl = (item: MessageWithLegacyMedia): string | null =>
   resolveMediaUrl(item.attachmentAsset?.resolvedUrl) ||
   resolveMediaUrl(item.attachmentUrl) ||
   resolveMediaUrl(item.attachmentKey) ||
@@ -194,51 +229,57 @@ const getMessageAttachmentUrl = (item: MessageWithLegacyMedia): string | null =>
   resolveMediaUrl(item.file_url) ||
   resolveMediaUrl(item.mediaUrl) ||
   resolveMediaUrl(item.media_url) ||
-  resolveMediaUrl(item.attachmentAsset?.key)
-);
+  resolveMediaUrl(item.attachmentAsset?.key);
 
-const getMessageAttachmentLabel = (item: any): string => (
+const getMessageAttachmentLabel = (item: any): string =>
   item.attachmentAsset?.fileName ||
   item.attachmentAsset?.originalFileName ||
   parseMessageContent(item.content) ||
-  'Tá»‡p Ä‘Ã­nh kÃ¨m'
-);
+  "Tệp đính kèm";
 
-const getReplyTargetId = (item: MessageWithLegacyMedia): string | null => (
-  item.replyTo || item.replyToMessageId || null
-);
+const getReplyTargetId = (item: MessageWithLegacyMedia): string | null =>
+  item.replyTo || item.replyToMessageId || null;
 
 const getReplySnippet = (item?: any): string => {
-  if (!item) return 'Báº¥m Ä‘á»ƒ tÃ¬m tin nháº¯n gá»‘c';
+  if (!item) return "Bấm để tìm tin nhắn gốc";
   const text = parseMessageContent(item.content);
   if (text.trim()) return text.trim();
-  if (item.type === 'IMAGE') return 'áº¢nh';
-  if (item.type === 'VIDEO') return 'Video';
-  if (item.type === 'AUDIO') return 'Tin nháº¯n thoáº¡i';
-  if (item.type === 'DOC') return getMessageAttachmentLabel(item);
-  return 'Tin nháº¯n Ä‘Ã­nh kÃ¨m';
+  if (item.type === "IMAGE") return "Ảnh";
+  if (item.type === "VIDEO") return "Video";
+  if (item.type === "AUDIO") return "Tin nhắn thoại";
+  if (item.type === "DOC") return getMessageAttachmentLabel(item);
+  return "Tin nhắn đính kèm";
 };
 
 const resolveAttachmentType = (
   fileName: string,
   mimeType?: string,
-): 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOC' => {
-  const normalizedMime = mimeType?.split(';')[0]?.trim().toLowerCase() ?? '';
+): "IMAGE" | "VIDEO" | "AUDIO" | "DOC" => {
+  const normalizedMime = mimeType?.split(";")[0]?.trim().toLowerCase() ?? "";
   const lowerName = fileName.toLowerCase();
 
-  if (normalizedMime.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/.test(lowerName)) {
-    return 'IMAGE';
+  if (
+    normalizedMime.startsWith("image/") ||
+    /\.(jpg|jpeg|png|webp|gif)$/.test(lowerName)
+  ) {
+    return "IMAGE";
   }
 
-  if (normalizedMime.startsWith('video/') || /\.(mp4|m4v|mov|qt)$/.test(lowerName)) {
-    return 'VIDEO';
+  if (
+    normalizedMime.startsWith("video/") ||
+    /\.(mp4|m4v|mov|qt)$/.test(lowerName)
+  ) {
+    return "VIDEO";
   }
 
-  if (normalizedMime.startsWith('audio/') || /\.(mp3|m4a|aac)$/.test(lowerName)) {
-    return 'AUDIO';
+  if (
+    normalizedMime.startsWith("audio/") ||
+    /\.(mp3|m4a|aac)$/.test(lowerName)
+  ) {
+    return "AUDIO";
   }
 
-  return 'DOC';
+  return "DOC";
 };
 
 const MemoMessageWrapper = React.memo(
@@ -255,42 +296,57 @@ const MemoMessageWrapper = React.memo(
       prev.knownUsersLength === next.knownUsersLength &&
       prev.isMe === next.isMe
     );
-  }
+  },
 );
-MemoMessageWrapper.displayName = 'MemoMessageWrapper';
+MemoMessageWrapper.displayName = "MemoMessageWrapper";
 
 export default function OfficialChatScreen() {
   const { id: conversationId } = useLocalSearchParams<{ id: string }>();
   const segments = useSegments();
   const decodedId = useMemo(() => {
-    if (!conversationId) return '';
+    if (!conversationId) return "";
     const dec = decodeURIComponent(conversationId);
-    return dec.startsWith('dm-') ? `dm:${dec.slice(3)}` : dec;
+    return dec.startsWith("dm-") ? `dm:${dec.slice(3)}` : dec;
   }, [conversationId]);
 
-  const isGroup = useMemo(() => decodedId?.startsWith('GRP#') || decodedId?.startsWith('group:'), [decodedId]);
+  const isGroup = useMemo(
+    () => decodedId?.startsWith("GRP#") || decodedId?.startsWith("group:"),
+    [decodedId],
+  );
   const groupId = useMemo(() => {
-    if (decodedId?.startsWith('GRP#')) return decodedId.slice(4);
-    if (decodedId?.startsWith('group:')) return decodedId.slice('group:'.length);
-    return '';
+    if (decodedId?.startsWith("GRP#")) return decodedId.slice(4);
+    if (decodedId?.startsWith("group:"))
+      return decodedId.slice("group:".length);
+    return "";
   }, [decodedId]);
 
   const router = useRouter();
-  const chatListPath = segments[0] === '(citizen)' ? '/(citizen)/chat' : '/(official)/chat';
+  const chatListPath =
+    segments[0] === "(citizen)" ? "/(citizen)/chat" : "/(official)/chat";
   const { user: currentUser } = useAuth();
-  const { startCall } = useWebRTCContext();
-  
-  const [text, setText] = useState('');
+  const {
+    startCall,
+    activeGroupCalls,
+    callState,
+    activeConfig,
+    lastEndedCall,
+  } = useWebRTCContext();
+
+  const [text, setText] = useState("");
   const [showMediaMenu, setShowMediaMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [replyToMessage, setReplyToMessage] = useState<any>(null);
-  const [fullscreenMedia, setFullscreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
+  const [fullscreenMedia, setFullscreenMedia] = useState<{
+    uri: string;
+    type: "image" | "video";
+  } | null>(null);
   const [downloadingMedia, setDownloadingMedia] = useState(false);
-  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
-  const [typingDots, setTypingDots] = useState('.');
-  
+  const [highlightedMessageId, setHighlightedMessageId] = useState<
+    string | null
+  >(null);
+  const [typingDots, setTypingDots] = useState(".");
+
   const [callSummaries, setCallSummaries] = useState<CallEndedSummary[]>([]);
-  const { lastEndedCall } = useWebRTCContext();
 
   useEffect(() => {
     if (!lastEndedCall) return;
@@ -300,20 +356,20 @@ export default function OfficialChatScreen() {
       const nextKey = [
         lastEndedCall.conversationId,
         lastEndedCall.endedAt,
-        lastEndedCall.peerUserId || '',
+        lastEndedCall.peerUserId || "",
         lastEndedCall.direction,
         String(lastEndedCall.durationSeconds),
-      ].join('|');
+      ].join("|");
 
       const hasDuplicate = next.some(
         (item) =>
           [
             item.conversationId,
             item.endedAt,
-            item.peerUserId || '',
+            item.peerUserId || "",
             item.direction,
             String(item.durationSeconds),
-          ].join('|') === nextKey,
+          ].join("|") === nextKey,
       );
 
       if (!hasDuplicate) {
@@ -324,15 +380,30 @@ export default function OfficialChatScreen() {
   }, [lastEndedCall]);
 
   const resolveCallSummary = useCallback(
-    (msg: any, expectedDirection: 'INCOMING' | 'OUTGOING', expectedIsVideo: boolean) => {
-      const candidates = callSummaries.filter((item) => item.conversationId === decodedId);
+    (
+      msg: any,
+      expectedDirection: "INCOMING" | "OUTGOING",
+      expectedIsVideo: boolean,
+    ) => {
+      const candidates = callSummaries.filter(
+        (item) => item.conversationId === decodedId,
+      );
       if (candidates.length === 0) return null;
 
       const byDirectionAndType = candidates.filter(
-        (item) => item.direction.toUpperCase() === expectedDirection && item.isVideo === expectedIsVideo,
+        (item) =>
+          item.direction.toUpperCase() === expectedDirection &&
+          item.isVideo === expectedIsVideo,
       );
-      const byDirection = candidates.filter((item) => item.direction.toUpperCase() === expectedDirection);
-      const scopedCandidates = byDirectionAndType.length > 0 ? byDirectionAndType : (byDirection.length > 0 ? byDirection : candidates);
+      const byDirection = candidates.filter(
+        (item) => item.direction.toUpperCase() === expectedDirection,
+      );
+      const scopedCandidates =
+        byDirectionAndType.length > 0
+          ? byDirectionAndType
+          : byDirection.length > 0
+            ? byDirection
+            : candidates;
 
       const messageTime = new Date(msg.sentAt).getTime();
       const nearest = scopedCandidates
@@ -352,23 +423,29 @@ export default function OfficialChatScreen() {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
     const minutes = Math.floor(safeSeconds / 60);
     const seconds = safeSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   };
 
   const flatListRef = useRef<FlatList>(null);
   const recordingRef = useRef<any>(null);
-  
+
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [editingMessage, setEditingMessage] = useState<any>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [forwardDialogVisible, setForwardDialogVisible] = useState(false);
-  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwardSearch, setForwardSearch] = useState("");
   const [forwardTargetIds, setForwardTargetIds] = useState<string[]>([]);
   const [isForwarding, setIsForwarding] = useState(false);
-  const [convInfo, setConvInfo] = useState<any>(() => getCachedConversationInfo(decodedId));
-  const [allConversations, setAllConversations] = useState<any[]>(() => chatDetailConversationsCache);
-  const [accessDeniedDialogVisible, setAccessDeniedDialogVisible] = useState(false);
-  const [isDeletingDeniedConversation, setIsDeletingDeniedConversation] = useState(false);
+  const [convInfo, setConvInfo] = useState<any>(() =>
+    getCachedConversationInfo(decodedId),
+  );
+  const [allConversations, setAllConversations] = useState<any[]>(
+    () => chatDetailConversationsCache,
+  );
+  const [accessDeniedDialogVisible, setAccessDeniedDialogVisible] =
+    useState(false);
+  const [isDeletingDeniedConversation, setIsDeletingDeniedConversation] =
+    useState(false);
 
   // States for @mention functionality
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -401,9 +478,14 @@ export default function OfficialChatScreen() {
     setIsDeletingDeniedConversation(true);
     void (async () => {
       try {
-        await ApiClient.delete(`/conversations/${encodeURIComponent(decodedId)}`);
+        await ApiClient.delete(
+          `/conversations/${encodeURIComponent(decodedId)}`,
+        );
       } catch (error: any) {
-        Alert.alert('Lá»—i', error?.message || 'KhÃ´ng thá»ƒ xÃ³a cuá»™c trÃ² chuyá»‡n lÃºc nÃ y.');
+        Alert.alert(
+          "Lỗi",
+          error?.message || "Không thể xóa cuộc trò chuyện lúc này.",
+        );
       } finally {
         setIsDeletingDeniedConversation(false);
         setAccessDeniedDialogVisible(false);
@@ -412,9 +494,12 @@ export default function OfficialChatScreen() {
     })();
   }, [chatListPath, decodedId, isDeletingDeniedConversation, router]);
 
-  const chatOptions = useMemo(() => ({
-    onConversationAccessDenied: handleConversationAccessDenied,
-  }), [handleConversationAccessDenied]);
+  const chatOptions = useMemo(
+    () => ({
+      onConversationAccessDenied: handleConversationAccessDenied,
+    }),
+    [handleConversationAccessDenied],
+  );
 
   const {
     messages,
@@ -437,68 +522,94 @@ export default function OfficialChatScreen() {
   const groupMemberCount = groupMembers.length;
 
   const getPresenceSubtitle = useCallback(() => {
-    if (decodedId?.startsWith('GRP#') || decodedId?.startsWith('group:')) {
-      if (groupMemberCount === 0) return 'Đang cập nhật...';
+    if (decodedId?.startsWith("GRP#") || decodedId?.startsWith("group:")) {
+      if (groupMemberCount === 0) return "Đang cập nhật...";
       return `${groupMemberCount} thành viên`;
     }
 
-    if (!isReady) return 'Đang kết nối...';
+    if (!isReady) return "Đang kết nối...";
 
     const peerId = getPeerIdFromConversationId(decodedId);
     const presence = presenceByUser[String(peerId)];
 
-    if (!presence) return 'Ngoại tuyến';
-    if (presence.isActive) return 'Đang hoạt động';
+    if (!presence) return "Ngoại tuyến";
+    if (presence.isActive) return "Đang hoạt động";
 
     return formatLastSeenSubtitle(presence.lastSeenAt);
   }, [groupMemberCount, isReady, decodedId, presenceByUser]);
 
-  const handleLeaveGroup = useCallback(async (currentGroupId: string) => {
-    if (!currentGroupId) return;
-    try {
-      await ApiClient.post(`/groups/${currentGroupId}/leave`);
-      setGroupInfoDialogVisible(false);
-      router.replace(chatListPath as any);
-    } catch (e: any) {
-      Alert.alert('Lá»—i', e?.message || 'KhÃ´ng thá»ƒ rá»i nhÃ³m. (Chá»§ nhÃ³m khÃ´ng thá»ƒ tá»± rá»i)');
-    }
-  }, [router, chatListPath]);
+  const handleLeaveGroup = useCallback(
+    async (currentGroupId: string) => {
+      if (!currentGroupId) return;
+      try {
+        await ApiClient.post(`/groups/${currentGroupId}/leave`);
+        setGroupInfoDialogVisible(false);
+        router.replace(chatListPath as any);
+      } catch (e: any) {
+        Alert.alert(
+          "Lỗi",
+          e?.message || "Không thể rời nhóm. Chủ nhóm không thể tự rời.",
+        );
+      }
+    },
+    [router, chatListPath],
+  );
 
-  const handleRemoveMember = useCallback(async (currentGroupId: string, userId: string) => {
-    if (!currentGroupId) return;
-    try {
-      await ApiClient.patch(`/groups/${currentGroupId}/members/${userId}`, { action: 'remove' });
-      setGroupMembers(prev => prev.filter(m => m.userId !== userId));
-      Alert.alert('ThÃ nh cÃ´ng', 'ÄÃ£ xÃ³a thÃ nh viÃªn khá»i nhÃ³m.');
-    } catch (e: any) {
-      Alert.alert('Lá»—i', e?.message || 'KhÃ´ng thá»ƒ xÃ³a thÃ nh viÃªn.');
-    }
-  }, []);
+  const handleRemoveMember = useCallback(
+    async (currentGroupId: string, userId: string) => {
+      if (!currentGroupId) return;
+      try {
+        await ApiClient.patch(`/groups/${currentGroupId}/members/${userId}`, {
+          action: "remove",
+        });
+        setGroupMembers((prev) => prev.filter((m) => m.userId !== userId));
+        Alert.alert("Thành công", "Đã xóa thành viên khỏi nhóm.");
+      } catch (e: any) {
+        Alert.alert("Lỗi", e?.message || "Không thể xóa thành viên.");
+      }
+    },
+    [],
+  );
 
-  const handleUpdateMemberRole = useCallback(async (currentGroupId: string, targetUserId: string, currentRole: string) => {
-    const newRole = currentRole === 'OFFICER' ? 'MEMBER' : 'OFFICER';
-    try {
-      const res = await ApiClient.patch(`/groups/${currentGroupId}/members/${targetUserId}`, { action: 'update', roleInGroup: newRole });
-      setGroupMembers(prev => prev.map(m => m.userId === targetUserId ? res : m));
-      Alert.alert('ThÃ nh cÃ´ng', `ÄÃ£ Ä‘á»•i quyá»n thÃ nh ${newRole === 'OFFICER' ? 'PhÃ³ nhÃ³m' : 'ThÃ nh viÃªn'}.`);
-    } catch (e: any) {
-      Alert.alert('Lá»—i', e?.message || 'KhÃ´ng thá»ƒ Ä‘á»•i quyá»n.');
-    }
-  }, []);
+  const handleUpdateMemberRole = useCallback(
+    async (
+      currentGroupId: string,
+      targetUserId: string,
+      currentRole: string,
+    ) => {
+      const newRole = currentRole === "OFFICER" ? "MEMBER" : "OFFICER";
+      try {
+        const res = await ApiClient.patch(
+          `/groups/${currentGroupId}/members/${targetUserId}`,
+          { action: "update", roleInGroup: newRole },
+        );
+        setGroupMembers((prev) =>
+          prev.map((m) => (m.userId === targetUserId ? res : m)),
+        );
+        Alert.alert(
+          "Thành công",
+          `Đã đổi quyền thành ${newRole === "OFFICER" ? "Phó nhóm" : "Thành viên"}.`,
+        );
+      } catch (e: any) {
+        Alert.alert("Lỗi", e?.message || "Không thể đổi quyền.");
+      }
+    },
+    [],
+  );
 
   const handleUpdateGroupAvatar = useCallback(async () => {
     if (!groupId) return;
-    
+
     // Check permission
     const isOwner = convInfo?.ownerId === currentUser?.sub;
     if (!isOwner) {
-      Alert.alert('Chá»‰ Quáº£n trá»‹ viÃªn má»›i Ä‘Æ°á»£c Ä‘á»•i áº£nh nhÃ³m.');
+      Alert.alert("Chỉ Quản trị viên mới được đổi ảnh nhóm.");
       return;
     }
 
-    const ImagePicker = await import('expo-image-picker');
+    const ImagePicker = await import("expo-image-picker");
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
@@ -510,41 +621,56 @@ export default function OfficialChatScreen() {
         const uploaded = await uploadMedia({
           uri: result.assets[0].uri,
           fileName: `group-${groupId}-avatar.jpg`,
-          mimeType: 'image/jpeg',
-          target: 'AVATAR',
+          mimeType: "image/jpeg",
+          target: "AVATAR",
         });
-        
-        await ApiClient.patch(`/groups/${groupId}`, { avatarUrl: uploaded.url });
-        
+
+        await ApiClient.patch(`/groups/${groupId}`, {
+          avatarUrl: uploaded.url,
+        });
+
         setConvInfo((prev: any) => ({ ...prev, avatarUrl: uploaded.url }));
-        Alert.alert('ThÃ nh cÃ´ng', 'ÄÃ£ cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n nhÃ³m.');
+        Alert.alert("Thành công", "Đã cập nhật ảnh đại diện nhóm.");
       } catch (error: any) {
-        Alert.alert('Lá»—i', error?.message || 'KhÃ´ng thá»ƒ cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n.');
+        Alert.alert(
+          "Lỗi",
+          error?.message || "Không thể cập nhật ảnh đại diện.",
+        );
       } finally {
         setIsUpdatingAvatar(false);
       }
     }
   }, [groupId, convInfo?.ownerId, currentUser?.sub]);
 
-  const handleAddMemberSubmit = useCallback(async (currentGroupId: string, targetUserId: string) => {
-    if (!currentGroupId || !targetUserId.trim()) return;
-    try {
-      setIsAddingMember(true);
-      const res = await ApiClient.patch(`/groups/${currentGroupId}/members/${targetUserId.trim()}`, { action: 'add' });
-      setGroupMembers(prev => [...prev, res]);
-      setAddMemberDialogVisible(false);
-      Alert.alert('ThÃ nh cÃ´ng', 'ÄÃ£ thÃªm thÃ nh viÃªn.');
-    } catch (e: any) {
-      Alert.alert('Lá»—i', e?.message || 'KhÃ´ng thá»ƒ thÃªm thÃ nh viÃªn. (Báº¡n khÃ´ng cÃ³ quyá»n hoáº·c ngÆ°á»i dÃ¹ng Ä‘Ã£ cÃ³ trong nhÃ³m)');
-    } finally {
-      setIsAddingMember(false);
-    }
-  }, []);
+  const handleAddMemberSubmit = useCallback(
+    async (currentGroupId: string, targetUserId: string) => {
+      if (!currentGroupId || !targetUserId.trim()) return;
+      try {
+        setIsAddingMember(true);
+        const res = await ApiClient.patch(
+          `/groups/${currentGroupId}/members/${targetUserId.trim()}`,
+          { action: "add" },
+        );
+        setGroupMembers((prev) => [...prev, res]);
+        setAddMemberDialogVisible(false);
+        Alert.alert("Thành công", "Đã thêm thành viên.");
+      } catch (e: any) {
+        Alert.alert(
+          "Lỗi",
+          e?.message ||
+            "Không thể thêm thành viên. Bạn không có quyền hoặc người dùng đã có trong nhóm.",
+        );
+      } finally {
+        setIsAddingMember(false);
+      }
+    },
+    [],
+  );
 
-
-
-
-  const messagesById = useMemo(() => new Map(messages.map((item: any) => [item.id, item])), [messages]);
+  const messagesById = useMemo(
+    () => new Map(messages.map((item: any) => [item.id, item])),
+    [messages],
+  );
   const dedupedMessages = useMemo(() => {
     const map = new Map<string, any>();
     for (const item of messages) {
@@ -553,7 +679,9 @@ export default function OfficialChatScreen() {
     }
     return Array.from(map.values()).reverse();
   }, [messages]);
-  const latestMessageKey = dedupedMessages[0]?.id ? String(dedupedMessages[0].id) : '';
+  const latestMessageKey = dedupedMessages[0]?.id
+    ? String(dedupedMessages[0].id)
+    : "";
 
   const scrollToLatestMessage = useCallback((animated = false) => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated });
@@ -563,7 +691,11 @@ export default function OfficialChatScreen() {
     const normalized = forwardSearch.trim().toLowerCase();
 
     return allConversations
-      .filter((conversation) => conversation?.conversationId && conversation.conversationId !== decodedId)
+      .filter(
+        (conversation) =>
+          conversation?.conversationId &&
+          conversation.conversationId !== decodedId,
+      )
       .filter((conversation) => {
         if (!normalized) return true;
 
@@ -574,7 +706,7 @@ export default function OfficialChatScreen() {
           conversation.conversationId,
         ]
           .filter(Boolean)
-          .join(' ')
+          .join(" ")
           .toLowerCase();
 
         return haystack.includes(normalized);
@@ -584,7 +716,7 @@ export default function OfficialChatScreen() {
   // Build a dictionary of known names from messages and active typers
   const knownUsers = useMemo(() => {
     const map: Record<string, string> = {};
-    messages.forEach(m => {
+    messages.forEach((m) => {
       if (m.senderId && m.senderName) map[m.senderId] = m.senderName;
     });
     Object.entries(typingUsers).forEach(([userId, u]) => {
@@ -604,32 +736,38 @@ export default function OfficialChatScreen() {
 
     const hasFreshConversationCache =
       chatDetailConversationsCache.length > 0 &&
-      Date.now() - chatDetailConversationsCacheLoadedAt < CHAT_DETAIL_CONVERSATIONS_CACHE_STALE_MS;
+      Date.now() - chatDetailConversationsCacheLoadedAt <
+        CHAT_DETAIL_CONVERSATIONS_CACHE_STALE_MS;
 
     if (hasFreshConversationCache) {
       setAllConversations(chatDetailConversationsCache);
-      const found = chatDetailConversationsCache.find((c: any) => c.conversationId === decodedId);
+      const found = chatDetailConversationsCache.find(
+        (c: any) => c.conversationId === decodedId,
+      );
       if (found) setConvInfo(found);
     }
-    
+
     if (!hasFreshConversationCache) {
-      ApiClient.get('/conversations')
-      .then((convs) => {
-        const nextConversations = Array.isArray(convs) ? convs : [];
-        chatDetailConversationsCache = nextConversations;
-        chatDetailConversationsCacheLoadedAt = Date.now();
-        setAllConversations(nextConversations);
-        const found = nextConversations.find((c: any) => c.conversationId === decodedId);
-        if (found) setConvInfo(found);
-      })
-      .catch(console.error);
+      ApiClient.get("/conversations")
+        .then((convs) => {
+          const nextConversations = Array.isArray(convs) ? convs : [];
+          chatDetailConversationsCache = nextConversations;
+          chatDetailConversationsCacheLoadedAt = Date.now();
+          setAllConversations(nextConversations);
+          const found = nextConversations.find(
+            (c: any) => c.conversationId === decodedId,
+          );
+          if (found) setConvInfo(found);
+        })
+        .catch(console.error);
     }
 
     if (isGroup && groupId) {
       const cachedMembers = chatDetailGroupMembersCache.get(groupId);
       const hasFreshMemberCache =
         cachedMembers &&
-        Date.now() - cachedMembers.loadedAt < CHAT_DETAIL_CONVERSATIONS_CACHE_STALE_MS;
+        Date.now() - cachedMembers.loadedAt <
+          CHAT_DETAIL_CONVERSATIONS_CACHE_STALE_MS;
 
       if (hasFreshMemberCache) {
         setGroupMembers(cachedMembers.items);
@@ -680,18 +818,19 @@ export default function OfficialChatScreen() {
 
   useEffect(() => {
     if (!Object.values(typingUsers).some((item) => item.isTyping)) {
-      setTypingDots('.');
+      setTypingDots(".");
       return;
     }
 
     const interval = setInterval(() => {
-      setTypingDots((current) => (current.length >= 3 ? '.' : `${current}.`));
+      setTypingDots((current) => (current.length >= 3 ? "." : `${current}.`));
     }, 420);
 
     return () => clearInterval(interval);
   }, [typingUsers]);
 
-  const createClientMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const createClientMessageId = () =>
+    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const handleSend = () => {
     const trimmedText = text.trim();
@@ -701,7 +840,7 @@ export default function OfficialChatScreen() {
       let nextContent = trimmedText;
       try {
         const parsed = JSON.parse(editingMessage.content);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           nextContent = JSON.stringify({
             ...parsed,
             text: trimmedText,
@@ -714,26 +853,40 @@ export default function OfficialChatScreen() {
 
       updateMessage(editingMessage.id, nextContent);
       setEditingMessage(null);
-      setText('');
+      setText("");
       sendTyping(false);
       return;
     }
 
-    sendMessage(trimmedText, createClientMessageId(), 'TEXT', undefined, replyToMessage?.id);
-    setText('');
+    sendMessage(
+      trimmedText,
+      createClientMessageId(),
+      "TEXT",
+      undefined,
+      replyToMessage?.id,
+    );
+    setText("");
     setReplyToMessage(null);
     sendTyping(false);
   };
 
   const handleQuickLike = () => {
-    sendMessage('ðŸ‘', createClientMessageId(), 'TEXT', undefined, replyToMessage?.id);
+    sendMessage(
+      "👍",
+      createClientMessageId(),
+      "TEXT",
+      undefined,
+      replyToMessage?.id,
+    );
     setReplyToMessage(null);
     sendTyping(false);
   };
 
   const handleToggleForwardTarget = (conversationId: string) => {
     setForwardTargetIds((prev) =>
-      prev.includes(conversationId) ? prev.filter((id) => id !== conversationId) : [...prev, conversationId],
+      prev.includes(conversationId)
+        ? prev.filter((id) => id !== conversationId)
+        : [...prev, conversationId],
     );
   };
 
@@ -744,13 +897,13 @@ export default function OfficialChatScreen() {
 
     setMenuVisible(false);
     setForwardTargetIds([]);
-    setForwardSearch('');
+    setForwardSearch("");
     setForwardDialogVisible(true);
   };
 
   const submitForward = async () => {
     if (!selectedMessage?.id || !forwardTargetIds.length) {
-      Alert.alert('ThÃ´ng bÃ¡o', 'Vui lÃ²ng chá»n Ã­t nháº¥t má»™t cuá»™c trÃ² chuyá»‡n.');
+      Alert.alert("Thông báo", "Vui lòng chọn ít nhất một cuộc trò chuyện.");
       return;
     }
 
@@ -759,10 +912,13 @@ export default function OfficialChatScreen() {
       await forwardMessage(selectedMessage.id, forwardTargetIds);
       setForwardDialogVisible(false);
       setForwardTargetIds([]);
-      setForwardSearch('');
-      Alert.alert('ThÃ nh cÃ´ng', 'ÄÃ£ chuyá»ƒn tiáº¿p tin nháº¯n.');
+      setForwardSearch("");
+      Alert.alert("Thành công", "Đã chuyển tiếp tin nhắn.");
     } catch (error: any) {
-      Alert.alert('Lá»—i', error?.message || 'KhÃ´ng thá»ƒ chuyá»ƒn tiáº¿p tin nháº¯n lÃºc nÃ y.');
+      Alert.alert(
+        "Lỗi",
+        error?.message || "Không thể chuyển tiếp tin nhắn lúc này.",
+      );
     } finally {
       setIsForwarding(false);
     }
@@ -776,11 +932,52 @@ export default function OfficialChatScreen() {
     startCall(true, decodedId, getPeerIdFromConversationId(decodedId));
   };
 
+  const isActiveGroupCallBannerVisible =
+    isGroup &&
+    (activeGroupCalls.has(decodedId) ||
+      (callState !== "IDLE" && activeConfig?.conversationId === decodedId));
+  const isConnectedInCurrentConversation =
+    callState === "CONNECTED" && activeConfig?.conversationId === decodedId;
+  const groupCallPulseAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!isActiveGroupCallBannerVisible) {
+      groupCallPulseAnim.stopAnimation();
+      groupCallPulseAnim.setValue(0);
+      return;
+    }
+
+    const pulseLoop = Animated.loop(
+      Animated.timing(groupCallPulseAnim, {
+        toValue: 1,
+        duration: 1400,
+        useNativeDriver: true,
+      }),
+    );
+
+    pulseLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+      groupCallPulseAnim.stopAnimation();
+      groupCallPulseAnim.setValue(0);
+    };
+  }, [groupCallPulseAnim, isActiveGroupCallBannerVisible]);
+
+  const groupCallPulseScale = groupCallPulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.45],
+  });
+  const groupCallPulseOpacity = groupCallPulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.35, 0],
+  });
+
   // â”€â”€ Media Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const pickImage = async () => {
-    const ImagePicker = await import('expo-image-picker');
+    const ImagePicker = await import("expo-image-picker");
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ["images"],
       allowsEditing: false,
       allowsMultipleSelection: true,
       quality: 0.8,
@@ -792,32 +989,32 @@ export default function OfficialChatScreen() {
           await sendMedia(
             asset.uri,
             asset.fileName || `image-${Date.now()}-${index + 1}.jpg`,
-            asset.mimeType || 'image/jpeg',
-            'IMAGE',
+            asset.mimeType || "image/jpeg",
+            "IMAGE",
             index === 0 ? replyToMessage?.id : undefined,
           );
         }
         setReplyToMessage(null);
       } catch {
-        Alert.alert('Lá»—i', 'KhÃ´ng thá»ƒ gá»­i tá»‡p. Vui lÃ²ng thá»­ láº¡i.');
+        Alert.alert("Lỗi", "Không thể gửi tệp. Vui lòng thử lại.");
       }
     }
     setShowMediaMenu(false);
   };
 
   const takePhoto = async () => {
-    const ImagePicker = await import('expo-image-picker');
+    const ImagePicker = await import("expo-image-picker");
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ["images"],
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
       await sendMedia(
         asset.uri,
-        'camera-photo.jpg',
-        'image/jpeg',
-        'IMAGE',
+        "camera-photo.jpg",
+        "image/jpeg",
+        "IMAGE",
         replyToMessage?.id,
       );
       setReplyToMessage(null);
@@ -825,9 +1022,9 @@ export default function OfficialChatScreen() {
   };
 
   const pickVideo = async () => {
-    const ImagePicker = await import('expo-image-picker');
+    const ImagePicker = await import("expo-image-picker");
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['videos'],
+      mediaTypes: ["videos"],
       allowsEditing: false,
       allowsMultipleSelection: true,
       quality: 0.8,
@@ -839,23 +1036,23 @@ export default function OfficialChatScreen() {
           await sendMedia(
             asset.uri,
             asset.fileName || `video-${Date.now()}-${index + 1}.mp4`,
-            asset.mimeType || 'video/mp4',
-            'VIDEO',
+            asset.mimeType || "video/mp4",
+            "VIDEO",
             index === 0 ? replyToMessage?.id : undefined,
           );
         }
         setReplyToMessage(null);
       } catch {
-        Alert.alert('Lá»—i', 'KhÃ´ng thá»ƒ gá»­i video. Vui lÃ²ng thá»­ láº¡i.');
+        Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
       }
     }
     setShowMediaMenu(false);
   };
 
   const takeVideo = async () => {
-    const ImagePicker = await import('expo-image-picker');
+    const ImagePicker = await import("expo-image-picker");
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['videos'],
+      mediaTypes: ["videos"],
       quality: 0.8,
       videoMaxDuration: 60,
     });
@@ -865,14 +1062,14 @@ export default function OfficialChatScreen() {
       try {
         await sendMedia(
           asset.uri,
-          asset.fileName || 'camera-video.mp4',
-          asset.mimeType || 'video/mp4',
-          'VIDEO',
+          asset.fileName || "camera-video.mp4",
+          asset.mimeType || "video/mp4",
+          "VIDEO",
           replyToMessage?.id,
         );
         setReplyToMessage(null);
       } catch {
-        Alert.alert('Lá»—i', 'KhÃ´ng thá»ƒ quay/gá»­i video. Vui lÃ²ng thá»­ láº¡i.');
+        Alert.alert("Lỗi", "Không thể quay/gửi video. Vui lòng thử lại.");
       }
     }
     setShowMediaMenu(false);
@@ -880,9 +1077,9 @@ export default function OfficialChatScreen() {
 
   const pickDocument = async () => {
     try {
-      const DocumentPicker = await import('expo-document-picker');
+      const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
+        type: "*/*",
         multiple: true,
       });
       if (!result.canceled && result.assets?.length) {
@@ -890,16 +1087,19 @@ export default function OfficialChatScreen() {
           await sendMedia(
             asset.uri,
             asset.name || `file-${Date.now()}-${index + 1}`,
-            asset.mimeType || 'application/octet-stream',
-            resolveAttachmentType(asset.name || '', asset.mimeType),
+            asset.mimeType || "application/octet-stream",
+            resolveAttachmentType(asset.name || "", asset.mimeType),
             index === 0 ? replyToMessage?.id : undefined,
           );
         }
         setReplyToMessage(null);
       }
     } catch (e) {
-      console.warn('DocumentPicker not supported or failed', e);
-      Alert.alert('ThÃ´ng bÃ¡o', 'TÃ­nh nÄƒng chá»n tá»‡p khÃ´ng kháº£ dá»¥ng trÃªn mÃ´i trÆ°á»ng nÃ y.');
+      console.warn("DocumentPicker not supported or failed", e);
+      Alert.alert(
+        "Thông báo",
+        "Tính năng chọn tệp không khả dụng trên môi trường này.",
+      );
     }
     setShowMediaMenu(false);
   };
@@ -911,9 +1111,9 @@ export default function OfficialChatScreen() {
         let longitude: number | undefined;
 
         try {
-          const Location = await import('expo-location');
+          const Location = await import("expo-location");
           const permission = await Location.requestForegroundPermissionsAsync();
-          if (permission.status === 'granted') {
+          if (permission.status === "granted") {
             const location = await Location.getCurrentPositionAsync({
               accuracy: Location.Accuracy.Balanced,
             });
@@ -927,7 +1127,7 @@ export default function OfficialChatScreen() {
         if (latitude === undefined || longitude === undefined) {
           const geolocation = (globalThis as any)?.navigator?.geolocation;
           if (!geolocation) {
-            throw new Error('Thiáº¿t bá»‹ hiá»‡n táº¡i chÆ°a há»— trá»£ vá»‹ trÃ­.');
+            throw new Error("Thiết bị hiện tại chưa hỗ trợ vị trí.");
           }
 
           const fallback = await new Promise<any>((resolve, reject) => {
@@ -944,30 +1144,37 @@ export default function OfficialChatScreen() {
 
         const mapUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
         sendMessage(
-          `Vá»‹ trÃ­ hiá»‡n táº¡i: ${mapUrl}`,
+          `Vị trí hiện tại: ${mapUrl}`,
           createClientMessageId(),
-          'TEXT',
+          "TEXT",
           undefined,
           replyToMessage?.id,
         );
         setReplyToMessage(null);
         setShowMediaMenu(false);
       } catch (error: any) {
-        Alert.alert('Lá»—i vá»‹ trÃ­', error?.message || 'KhÃ´ng thá»ƒ láº¥y vá»‹ trÃ­ hiá»‡n táº¡i.');
+        Alert.alert(
+          "Lỗi vị trí",
+          error?.message || "Không thể lấy vị trí hiện tại.",
+        );
       }
     })();
   };
 
   const startRecording = async () => {
     try {
-      const { Audio } = await import('expo-av');
       await Audio.requestPermissionsAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+      );
       recordingRef.current = recording;
       setIsRecording(true);
     } catch (err) {
-      console.error('Failed to start recording', err);
+      console.error("Failed to start recording", err);
     }
   };
 
@@ -978,11 +1185,17 @@ export default function OfficialChatScreen() {
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
       if (uri) {
-        await sendMedia(uri, 'voice-message.m4a', 'audio/mp4', 'AUDIO', replyToMessage?.id);
+        await sendMedia(
+          uri,
+          "voice-message.m4a",
+          "audio/mp4",
+          "AUDIO",
+          replyToMessage?.id,
+        );
         setReplyToMessage(null);
       }
     } catch (err) {
-      console.error('Failed to stop recording', err);
+      console.error("Failed to stop recording", err);
     }
     recordingRef.current = null;
   };
@@ -992,12 +1205,12 @@ export default function OfficialChatScreen() {
     const label = getMessageAttachmentLabel(item);
 
     if (!url) {
-      Alert.alert('ThÃ´ng bÃ¡o', 'KhÃ´ng tÃ¬m tháº¥y Ä‘Æ°á»ng dáº«n tá»‡p Ä‘Ã­nh kÃ¨m.');
+      Alert.alert("Thông báo", "Không tìm thấy đường dẫn tệp đính kèm.");
       return;
     }
 
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.open(url, '_blank', 'noopener,noreferrer');
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.open(url, "_blank", "noopener,noreferrer");
       return;
     }
 
@@ -1009,10 +1222,10 @@ export default function OfficialChatScreen() {
     setDownloadingMedia(true);
 
     try {
-      const extension = fullscreenMedia.type === 'video' ? 'mp4' : 'jpg';
+      const extension = fullscreenMedia.type === "video" ? "mp4" : "jpg";
       const fileName = `official-chat-${Date.now()}.${extension}`;
 
-      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      if (Platform.OS === "web" && typeof document !== "undefined") {
         let downloadHref = fullscreenMedia.uri;
         let objectUrl: string | null = null;
 
@@ -1026,10 +1239,10 @@ export default function OfficialChatScreen() {
           downloadHref = fullscreenMedia.uri;
         }
 
-        const anchor = document.createElement('a');
+        const anchor = document.createElement("a");
         anchor.href = downloadHref;
         anchor.download = fileName;
-        anchor.rel = 'noopener';
+        anchor.rel = "noopener";
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
@@ -1044,90 +1257,127 @@ export default function OfficialChatScreen() {
         message: fileName,
       });
     } catch (error: any) {
-      Alert.alert('KhÃ´ng thá»ƒ lÆ°u', error?.message || 'KhÃ´ng thá»ƒ lÆ°u media lÃºc nÃ y.');
+      Alert.alert(
+        "Không thể lưu",
+        error?.message || "Không thể lưu media lúc này.",
+      );
     } finally {
       setDownloadingMedia(false);
     }
   }, [fullscreenMedia]);
 
-  const handleJumpToMessage = useCallback((messageId: string) => {
-    const index = dedupedMessages.findIndex((item: any) => item.id === messageId);
+  const handleJumpToMessage = useCallback(
+    (messageId: string) => {
+      const index = dedupedMessages.findIndex(
+        (item: any) => item.id === messageId,
+      );
 
-    if (index < 0) {
-      Alert.alert('ThÃ´ng bÃ¡o', 'KhÃ´ng tÃ¬m tháº¥y tin nháº¯n gá»‘c trong há»™i thoáº¡i hiá»‡n táº¡i.');
-      return;
-    }
-
-    flatListRef.current?.scrollToIndex({
-      index,
-      animated: true,
-      viewPosition: 0.5,
-    });
-    setHighlightedMessageId(messageId);
-  }, [dedupedMessages]);
-
-  const renderReplyQuote = useCallback((item: any, isMe: boolean) => {
-    const replyTargetId = getReplyTargetId(item);
-    if (!replyTargetId) return null;
-
-    const originalMessage = messagesById.get(replyTargetId);
-    const quoteTextColor = isMe ? OFFICIAL_CHAT_COLORS.textOnPrimary : OFFICIAL_CHAT_COLORS.primary;
-    const quoteMutedColor = isMe ? OFFICIAL_CHAT_COLORS.mutedTextOnPrimary : OFFICIAL_CHAT_COLORS.mutedOnSurface;
-    const senderName = originalMessage?.senderName || 'Tin nháº¯n gá»‘c';
-
-    return (
-      <TouchableOpacity
-        activeOpacity={0.85}
-        style={[
-          styles.replyQuote,
-          { backgroundColor: isMe ? 'rgba(255,255,255,0.16)' : OFFICIAL_CHAT_COLORS.primarySoft },
-        ]}
-        onPress={() => handleJumpToMessage(replyTargetId)}
-      >
-        <View style={[styles.replyQuoteBar, { backgroundColor: isMe ? OFFICIAL_CHAT_COLORS.textOnPrimary : OFFICIAL_CHAT_COLORS.primary }]} />
-        <View style={styles.replyQuoteContent}>
-          <Text
-            variant="labelSmall"
-            numberOfLines={1}
-            style={{ color: quoteTextColor, fontWeight: '700' }}
-          >
-            {senderName}
-          </Text>
-          <Text
-            variant="bodySmall"
-            numberOfLines={1}
-            style={{ color: quoteMutedColor }}
-          >
-            {getReplySnippet(originalMessage)}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
-  }, [handleJumpToMessage, messagesById]);
-
-  const sendDroppedFiles = useCallback(async (files: File[]) => {
-    if (!files.length || !isReady) return;
-
-    try {
-      for (const [index, file] of files.entries()) {
-        const uri = URL.createObjectURL(file);
-        await sendMedia(
-          uri,
-          file.name || `drop-${Date.now()}-${index + 1}`,
-          file.type || 'application/octet-stream',
-          resolveAttachmentType(file.name || '', file.type),
-          index === 0 ? replyToMessage?.id : undefined,
+      if (index < 0) {
+        Alert.alert(
+          "Thông báo",
+          "Không tìm thấy tin nhắn gốc trong hội thoại hiện tại.",
         );
-        URL.revokeObjectURL(uri);
+        return;
       }
-      setReplyToMessage(null);
-    } catch (error: any) {
-      Alert.alert('KhÃ´ng thá»ƒ gá»­i tá»‡p', error?.message || 'KÃ©o tháº£ tá»‡p tháº¥t báº¡i.');
-    }
-  }, [isReady, replyToMessage?.id, sendMedia]);
+
+      flatListRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+      setHighlightedMessageId(messageId);
+    },
+    [dedupedMessages],
+  );
+
+  const renderReplyQuote = useCallback(
+    (item: any, isMe: boolean) => {
+      const replyTargetId = getReplyTargetId(item);
+      if (!replyTargetId) return null;
+
+      const originalMessage = messagesById.get(replyTargetId);
+      const quoteTextColor = isMe
+        ? OFFICIAL_CHAT_COLORS.textOnPrimary
+        : OFFICIAL_CHAT_COLORS.primary;
+      const quoteMutedColor = isMe
+        ? OFFICIAL_CHAT_COLORS.mutedTextOnPrimary
+        : OFFICIAL_CHAT_COLORS.mutedOnSurface;
+      const senderName = originalMessage?.senderName || "Tin nhắn gốc";
+
+      return (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={[
+            styles.replyQuote,
+            {
+              backgroundColor: isMe
+                ? "rgba(255,255,255,0.16)"
+                : OFFICIAL_CHAT_COLORS.primarySoft,
+            },
+          ]}
+          onPress={() => handleJumpToMessage(replyTargetId)}
+        >
+          <View
+            style={[
+              styles.replyQuoteBar,
+              {
+                backgroundColor: isMe
+                  ? OFFICIAL_CHAT_COLORS.textOnPrimary
+                  : OFFICIAL_CHAT_COLORS.primary,
+              },
+            ]}
+          />
+          <View style={styles.replyQuoteContent}>
+            <Text
+              variant="labelSmall"
+              numberOfLines={1}
+              style={{ color: quoteTextColor, fontWeight: "700" }}
+            >
+              {senderName}
+            </Text>
+            <Text
+              variant="bodySmall"
+              numberOfLines={1}
+              style={{ color: quoteMutedColor }}
+            >
+              {getReplySnippet(originalMessage)}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [handleJumpToMessage, messagesById],
+  );
+
+  const sendDroppedFiles = useCallback(
+    async (files: File[]) => {
+      if (!files.length || !isReady) return;
+
+      try {
+        for (const [index, file] of files.entries()) {
+          const uri = URL.createObjectURL(file);
+          await sendMedia(
+            uri,
+            file.name || `drop-${Date.now()}-${index + 1}`,
+            file.type || "application/octet-stream",
+            resolveAttachmentType(file.name || "", file.type),
+            index === 0 ? replyToMessage?.id : undefined,
+          );
+          URL.revokeObjectURL(uri);
+        }
+        setReplyToMessage(null);
+      } catch (error: any) {
+        Alert.alert(
+          "Không thể gửi tệp",
+          error?.message || "Kéo thả tệp thất bại.",
+        );
+      }
+    },
+    [isReady, replyToMessage?.id, sendMedia],
+  );
 
   const dropZoneProps = useMemo(() => {
-    if (Platform.OS !== 'web') return {};
+    if (Platform.OS !== "web") return {};
 
     return {
       onDragOver: (event: any) => {
@@ -1141,61 +1391,84 @@ export default function OfficialChatScreen() {
     };
   }, [sendDroppedFiles]);
 
-  const activeTypers = Object.values(typingUsers).filter(u => u.isTyping).map(u => u.fullName).join(', ');
-  const keyboardBehavior: 'padding' | 'height' | undefined = Platform.OS === 'ios' ? 'padding' : 'height';
-  const keyboardVerticalOffset = Platform.select({ ios: 8, android: 20, default: 0 });
+  const activeTypers = Object.values(typingUsers)
+    .filter((u) => u.isTyping)
+    .map((u) => u.fullName)
+    .join(", ");
+  const keyboardBehavior: "padding" | "height" | undefined =
+    Platform.OS === "ios" ? "padding" : "height";
+  const keyboardVerticalOffset = Platform.select({
+    ios: 8,
+    android: 20,
+    default: 0,
+  });
 
   const renderMessageContent = (item: any) => {
     const isMe = currentUser?.sub === item.senderId;
     const attachmentUrl = getMessageAttachmentUrl(item);
     const attachmentLabel = getMessageAttachmentLabel(item);
-    const contentColor = isMe ? OFFICIAL_CHAT_COLORS.textOnPrimary : OFFICIAL_CHAT_COLORS.incomingText;
-    const mutedContentColor = isMe ? OFFICIAL_CHAT_COLORS.mutedTextOnPrimary : OFFICIAL_CHAT_COLORS.mutedOnSurface;
-    
+    const contentColor = isMe
+      ? OFFICIAL_CHAT_COLORS.textOnPrimary
+      : OFFICIAL_CHAT_COLORS.incomingText;
+    const mutedContentColor = isMe
+      ? OFFICIAL_CHAT_COLORS.mutedTextOnPrimary
+      : OFFICIAL_CHAT_COLORS.mutedOnSurface;
+
     if (item.deletedAt) {
       return (
-        <Text style={{ color: mutedContentColor, fontStyle: 'italic' }}>
-          Tin nháº¯n Ä‘Ã£ bá»‹ thu há»“i
+        <Text style={{ color: mutedContentColor, fontStyle: "italic" }}>
+          Tin nhắn đã bị thu hồi
         </Text>
       );
     }
 
-    if (item.type === 'IMAGE') {
+    if (item.type === "IMAGE") {
       if (!attachmentUrl) {
         return (
           <View style={styles.mediaFallback}>
             <IconButton icon="image-off" iconColor={contentColor} size={24} />
-            <Text style={{ color: contentColor }}>KhÃ´ng tÃ¬m tháº¥y áº£nh</Text>
+            <Text style={{ color: contentColor }}>Không tìm thấy ảnh</Text>
           </View>
         );
       }
 
       return (
-        <TouchableOpacity activeOpacity={0.9} onPress={() => setFullscreenMedia({ uri: attachmentUrl, type: 'image' })}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() =>
+            setFullscreenMedia({ uri: attachmentUrl, type: "image" })
+          }
+        >
           <Image
             source={{ uri: attachmentUrl }}
             style={styles.mediaImage}
             contentFit="cover"
             cachePolicy="memory-disk"
-            placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+            placeholder={{ blurhash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj" }}
             transition={160}
           />
         </TouchableOpacity>
       );
     }
 
-    if (item.type === 'VIDEO') {
+    if (item.type === "VIDEO") {
       if (!attachmentUrl) {
         return (
           <View style={styles.mediaFallback}>
             <IconButton icon="video-off" iconColor={contentColor} size={24} />
-            <Text style={{ color: contentColor }}>KhÃ´ng tÃ¬m tháº¥y video</Text>
+            <Text style={{ color: contentColor }}>Không tìm thấy video</Text>
           </View>
         );
       }
 
       return (
-        <TouchableOpacity style={styles.mediaVideo} activeOpacity={0.85} onPress={() => setFullscreenMedia({ uri: attachmentUrl, type: 'video' })}>
+        <TouchableOpacity
+          style={styles.mediaVideo}
+          activeOpacity={0.85}
+          onPress={() =>
+            setFullscreenMedia({ uri: attachmentUrl, type: "video" })
+          }
+        >
           <React.Suspense fallback={<View style={styles.mediaVideoPlayer} />}>
             <LazyVideo
               source={{ uri: attachmentUrl }}
@@ -1207,24 +1480,34 @@ export default function OfficialChatScreen() {
             />
           </React.Suspense>
           <View pointerEvents="none" style={styles.mediaVideoOverlay}>
-            <IconButton icon="arrow-expand" iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} size={24} />
+            <IconButton
+              icon="arrow-expand"
+              iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary}
+              size={24}
+            />
           </View>
         </TouchableOpacity>
       );
     }
 
-    if (item.type === 'AUDIO') {
+    if (item.type === "AUDIO") {
       return (
-        <TouchableOpacity style={styles.audioMessage} onPress={() => handleOpenAttachment(item)}>
+        <TouchableOpacity
+          style={styles.audioMessage}
+          onPress={() => handleOpenAttachment(item)}
+        >
           <IconButton icon="play" iconColor={contentColor} size={24} />
-          <Text style={{ color: contentColor }}>Tin nháº¯n thoáº¡i</Text>
+          <Text style={{ color: contentColor }}>Tin nhắn thoại</Text>
         </TouchableOpacity>
       );
     }
 
-    if (item.type === 'DOC') {
+    if (item.type === "DOC") {
       return (
-        <TouchableOpacity style={styles.docMessage} onPress={() => handleOpenAttachment(item)}>
+        <TouchableOpacity
+          style={styles.docMessage}
+          onPress={() => handleOpenAttachment(item)}
+        >
           <IconButton icon="file-document" iconColor={contentColor} size={24} />
           <Text style={{ color: contentColor }} numberOfLines={1}>
             {attachmentLabel}
@@ -1233,33 +1516,81 @@ export default function OfficialChatScreen() {
       );
     }
 
-    if (item.type === 'SYSTEM') {
-      const content = typeof item.content === 'string' ? item.content : String(item.content || '');
-      if (content.startsWith('CALL_ENDED|')) {
-        const parts = content.split('|');
-        const direction = parts[1] as 'INCOMING' | 'OUTGOING';
-        const isVideo = parts[2] === 'true';
+    if (item.type === "SYSTEM") {
+      const content =
+        typeof item.content === "string"
+          ? item.content
+          : String(item.content || "");
+      if (content.startsWith("CALL_ENDED|")) {
+        const parts = content.split("|");
+        const direction = parts[1] as "INCOMING" | "OUTGOING";
+        const isVideo = parts[2] === "true";
         const summary = resolveCallSummary(item, direction, isVideo);
         const isMissed = summary ? summary.durationSeconds === 0 : true;
 
         return (
-          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isMe ? OFFICIAL_CHAT_COLORS.primarySoftStrong : OFFICIAL_CHAT_COLORS.incomingMessageBackground, padding: 8, borderRadius: 8, marginVertical: 4 }}>
-             <MaterialCommunityIcons name={isVideo ? 'video' : 'phone'} size={20} color={isMissed ? designColors.danger : designColors.success} style={{ marginRight: 8 }} />
-             <View>
-               <Text style={{ fontWeight: '700', color: isMissed ? designColors.danger : (isMe ? OFFICIAL_CHAT_COLORS.textOnPrimary : designColors.text) }}>
-                 {direction === 'INCOMING' 
-                    ? (isMissed ? 'Cuá»™c gá»i nhá»¡' : 'Cuá»™c gá»i Ä‘áº¿n') 
-                    : (isMissed ? 'Cuá»™c gá»i Ä‘i chÆ°a Ä‘Æ°á»£c tráº£ lá»i' : 'Cuá»™c gá»i Ä‘i')}
-               </Text>
-               {!isMissed && summary && (
-                 <Text style={{ fontSize: 12, color: isMe ? OFFICIAL_CHAT_COLORS.mutedTextOnPrimary : '#666' }}>{formatCallDuration(summary.durationSeconds)}</Text>
-               )}
-             </View>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              backgroundColor: isMe
+                ? OFFICIAL_CHAT_COLORS.primarySoftStrong
+                : OFFICIAL_CHAT_COLORS.incomingMessageBackground,
+              padding: 8,
+              borderRadius: 8,
+              marginVertical: 4,
+            }}
+          >
+            <MaterialCommunityIcons
+              name={isVideo ? "video" : "phone"}
+              size={20}
+              color={isMissed ? designColors.danger : designColors.success}
+              style={{ marginRight: 8 }}
+            />
+            <View>
+              <Text
+                style={{
+                  fontWeight: "700",
+                  color: isMissed
+                    ? designColors.danger
+                    : isMe
+                      ? OFFICIAL_CHAT_COLORS.textOnPrimary
+                      : designColors.text,
+                }}
+              >
+                {direction === "INCOMING"
+                  ? isMissed
+                    ? "Cuộc gọi nhỡ"
+                    : "Cuộc gọi đến"
+                  : isMissed
+                    ? "Cuộc gọi đi chưa được trả lời"
+                    : "Cuộc gọi đi"}
+              </Text>
+              {!isMissed && summary && (
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isMe
+                      ? OFFICIAL_CHAT_COLORS.mutedTextOnPrimary
+                      : "#666",
+                  }}
+                >
+                  {formatCallDuration(summary.durationSeconds)}
+                </Text>
+              )}
+            </View>
           </View>
         );
       }
       return (
-        <Text style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface, fontStyle: 'italic', textAlign: 'center', marginVertical: 4 }}>
+        <Text
+          style={{
+            color: OFFICIAL_CHAT_COLORS.mutedOnSurface,
+            fontStyle: "italic",
+            textAlign: "center",
+            marginVertical: 4,
+          }}
+        >
           {parseMessageContent(item.content)}
         </Text>
       );
@@ -1274,7 +1605,7 @@ export default function OfficialChatScreen() {
 
   const renderMessageBubble = (item: any) => {
     const isMe = currentUser?.sub === item.senderId;
-    const isVisualMedia = item.type === 'IMAGE' || item.type === 'VIDEO';
+    const isVisualMedia = item.type === "IMAGE" || item.type === "VIDEO";
 
     let reactions = {};
     try {
@@ -1285,25 +1616,37 @@ export default function OfficialChatScreen() {
     }
 
     return (
-      <View style={[styles.messageWrapper, isMe ? styles.messageWrapperRight : styles.messageWrapperLeft]}>
+      <View
+        style={[
+          styles.messageWrapper,
+          isMe ? styles.messageWrapperRight : styles.messageWrapperLeft,
+        ]}
+      >
         {!isMe && (
           <Avatar.Text
             size={32}
-            label={item.senderName?.substring(0, 2).toUpperCase() || 'U'}
+            label={item.senderName?.substring(0, 2).toUpperCase() || "U"}
             style={styles.avatar}
           />
         )}
-        <View style={{ flex: 1, alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-          <TouchableOpacity 
+        <View style={{ flex: 1, alignItems: isMe ? "flex-end" : "flex-start" }}>
+          <TouchableOpacity
             activeOpacity={0.8}
             onLongPress={() => handleLongPress(item)}
             style={[
               styles.messageBubble,
-              isVisualMedia ? styles.messageBubbleMedia : isMe ? styles.messageBubbleOwn : styles.messageBubbleOther,
+              isVisualMedia
+                ? styles.messageBubbleMedia
+                : isMe
+                  ? styles.messageBubbleOwn
+                  : styles.messageBubbleOther,
               isMe ? styles.bubbleRight : styles.bubbleLeft,
-              !isVisualMedia && item.id === highlightedMessageId && styles.messageBubbleHighlighted,
-              item.isOptimistic && { opacity: 0.6 }
-            ]}>
+              !isVisualMedia &&
+                item.id === highlightedMessageId &&
+                styles.messageBubbleHighlighted,
+              item.isOptimistic && { opacity: 0.6 },
+            ]}
+          >
             {isMe && !isVisualMedia ? (
               <LinearGradient
                 colors={designColors.gradient.primary}
@@ -1313,15 +1656,27 @@ export default function OfficialChatScreen() {
               />
             ) : null}
             {!isMe && item.isGroup && (
-              <Text variant="labelSmall" style={{ color: OFFICIAL_CHAT_COLORS.primary, marginBottom: 2, fontWeight: '700' }}>
+              <Text
+                variant="labelSmall"
+                style={{
+                  color: OFFICIAL_CHAT_COLORS.primary,
+                  marginBottom: 2,
+                  fontWeight: "700",
+                }}
+              >
                 {item.senderName}
               </Text>
             )}
-            
+
             {renderReplyQuote(item, isMe)}
             {renderMessageContent(item)}
-            
-            <View style={[styles.bubbleFooter, isVisualMedia ? styles.mediaBubbleFooter : null]}>
+
+            <View
+              style={[
+                styles.bubbleFooter,
+                isVisualMedia ? styles.mediaBubbleFooter : null,
+              ]}
+            >
               <Text
                 variant="labelSmall"
                 style={[
@@ -1335,28 +1690,45 @@ export default function OfficialChatScreen() {
                   },
                 ]}
               >
-                {item.isOptimistic ? 'Äang gá»­i...' : new Date(item.sentAt || Date.now()).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                {item.isOptimistic
+                  ? "Đang gửi..."
+                  : new Date(item.sentAt || Date.now()).toLocaleTimeString(
+                      "vi-VN",
+                      { hour: "2-digit", minute: "2-digit" },
+                    )}
               </Text>
               {isMe && !item.isOptimistic ? (
                 <MaterialCommunityIcons
                   name="check-all"
                   size={13}
-                  color={isVisualMedia ? OFFICIAL_CHAT_COLORS.textOnPrimary : OFFICIAL_CHAT_COLORS.mutedTextOnPrimary}
+                  color={
+                    isVisualMedia
+                      ? OFFICIAL_CHAT_COLORS.textOnPrimary
+                      : OFFICIAL_CHAT_COLORS.mutedTextOnPrimary
+                  }
                   style={styles.sentCheckIcon}
                 />
               ) : null}
             </View>
           </TouchableOpacity>
-          
+
           {Object.keys(reactions).length > 0 && (
-            <View style={[styles.reactionContainer, { alignSelf: isMe ? 'flex-end' : 'flex-start' }]}>
-              {Object.entries(reactions).map(([emoji, users]: [string, any]) => (
-                users.length > 0 && (
-                  <View key={emoji} style={styles.reactionPill}>
-                    <Text style={styles.reactionText}>{emoji} {users.length}</Text>
-                  </View>
-                )
-              ))}
+            <View
+              style={[
+                styles.reactionContainer,
+                { alignSelf: isMe ? "flex-end" : "flex-start" },
+              ]}
+            >
+              {Object.entries(reactions).map(
+                ([emoji, users]: [string, any]) =>
+                  users.length > 0 && (
+                    <View key={emoji} style={styles.reactionPill}>
+                      <Text style={styles.reactionText}>
+                        {emoji} {users.length}
+                      </Text>
+                    </View>
+                  ),
+              )}
             </View>
           )}
         </View>
@@ -1365,15 +1737,17 @@ export default function OfficialChatScreen() {
   };
 
   const pinnedMessages = useMemo(() => {
-    return messages.filter(m => {
-      if (m.deletedAt) return false;
-      try {
-        const parsed = JSON.parse(m.content);
-        return parsed.isPinned === true;
-      } catch {
-        return false;
-      }
-    }).slice(0, 5);
+    return messages
+      .filter((m) => {
+        if (m.deletedAt) return false;
+        try {
+          const parsed = JSON.parse(m.content);
+          return parsed.isPinned === true;
+        } catch {
+          return false;
+        }
+      })
+      .slice(0, 5);
   }, [messages]);
 
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -1397,8 +1771,8 @@ export default function OfficialChatScreen() {
   const handleCopy = async () => {
     if (selectedMessage) {
       const textToCopy = parseMessageContent(selectedMessage.content);
-      // Táº¡m thá»i hiá»ƒn thá»‹ Alert thay vÃ¬ Clipboard Ä‘á»ƒ trÃ¡nh lá»—i Native Module
-      Alert.alert('ÄÃ£ sao chÃ©p (Táº¡m thá»i)', textToCopy);
+      // Tạm thời hiển thị Alert thay vì Clipboard để tránh lỗi Native Module
+      Alert.alert("Đã sao chép (tạm thời)", textToCopy);
       setMenuVisible(false);
     }
   };
@@ -1429,19 +1803,22 @@ export default function OfficialChatScreen() {
   const handlePin = () => {
     if (selectedMessage) {
       if (pinnedMessages.length >= 5) {
-        Alert.alert('ThÃ´ng bÃ¡o', 'Báº¡n chá»‰ cÃ³ thá»ƒ ghim tá»‘i Ä‘a 5 tin nháº¯n.');
+        Alert.alert("Thông báo", "Bạn chỉ có thể ghim tối đa 5 tin nhắn.");
         setMenuVisible(false);
         return;
       }
-      
+
       let newContent = selectedMessage.content;
       try {
         const parsed = JSON.parse(selectedMessage.content);
         newContent = JSON.stringify({ ...parsed, isPinned: true });
       } catch {
-        newContent = JSON.stringify({ text: selectedMessage.content, isPinned: true });
+        newContent = JSON.stringify({
+          text: selectedMessage.content,
+          isPinned: true,
+        });
       }
-      
+
       updateMessage(selectedMessage.id, newContent);
       setMenuVisible(false);
     }
@@ -1453,7 +1830,7 @@ export default function OfficialChatScreen() {
       const attachmentUrl = getMessageAttachmentUrl(item);
       await Share.share({
         message: textToShare || getMessageAttachmentLabel(item),
-        url: attachmentUrl || undefined
+        url: attachmentUrl || undefined,
       });
     } catch (error: any) {
       Alert.alert(error.message);
@@ -1466,38 +1843,40 @@ export default function OfficialChatScreen() {
       const parsed = JSON.parse(item.content);
       const reactions = parsed.reactions || {};
       const users = reactions[emoji] || [];
-      
+
       if (users.includes(currentUser?.sub)) {
-        reactions[emoji] = users.filter((id: string) => id !== currentUser?.sub);
+        reactions[emoji] = users.filter(
+          (id: string) => id !== currentUser?.sub,
+        );
       } else {
         reactions[emoji] = [...users, currentUser?.sub];
       }
-      
+
       newContent = JSON.stringify({ ...parsed, reactions });
     } catch {
-      newContent = JSON.stringify({ 
-        text: item.content, 
-        reactions: { [emoji]: [currentUser?.sub] } 
+      newContent = JSON.stringify({
+        text: item.content,
+        reactions: { [emoji]: [currentUser?.sub] },
       });
     }
     updateMessage(item.id, newContent);
   };
 
-    const knownUsersLength = Object.keys(knownUsers).length;
-    const isMeFunc = (item: any) => currentUser?.sub === item?.senderId;
-    const peerId = getPeerIdFromConversationId(decodedId);
-    const peerPresence = !isGroup ? presenceByUser[String(peerId)] : null;
-    const headerAvatarUrl = resolveConversationAvatarUrl(convInfo);
-  
-    const renderMessage = ({ item }: { item: any }) => (
-      <MemoMessageWrapper
-        item={item}
-        renderMessageBubble={renderMessageBubble}
-        highlightedMessageId={highlightedMessageId}
-        knownUsersLength={knownUsersLength}
-        isMe={isMeFunc(item)}
-      />
-    );
+  const knownUsersLength = Object.keys(knownUsers).length;
+  const isMeFunc = (item: any) => currentUser?.sub === item?.senderId;
+  const peerId = getPeerIdFromConversationId(decodedId);
+  const peerPresence = !isGroup ? presenceByUser[String(peerId)] : null;
+  const headerAvatarUrl = resolveConversationAvatarUrl(convInfo);
+
+  const renderMessage = ({ item }: { item: any }) => (
+    <MemoMessageWrapper
+      item={item}
+      renderMessageBubble={renderMessageBubble}
+      highlightedMessageId={highlightedMessageId}
+      knownUsersLength={knownUsersLength}
+      isMe={isMeFunc(item)}
+    />
+  );
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -1506,27 +1885,55 @@ export default function OfficialChatScreen() {
         colors={OFFICIAL_CHAT_COLORS}
         isGroup={isGroup}
         headerAvatarUrl={headerAvatarUrl}
-        conversationDisplayName={convInfo?.groupName || (isGroup ? 'Nhóm trò chuyện' : (knownUsers[peerId] || 'Tin nhắn'))}
+        conversationDisplayName={
+          convInfo?.groupName ||
+          (isGroup ? "Nhóm trò chuyện" : knownUsers[peerId] || "Tin nhắn")
+        }
         subtitleText={getPresenceSubtitle()}
         isPeerOnline={Boolean(peerPresence?.isActive)}
         onBack={() => router.replace(chatListPath as any)}
         onStartAudioCall={handleStartAudioCall}
         onStartVideoCall={handleStartVideoCall}
         onOpenInfo={() => setGroupInfoDialogVisible(true)}
-        onUpdateAvatar={isGroup && convInfo?.ownerId === currentUser?.sub ? handleUpdateGroupAvatar : undefined}
+        onUpdateAvatar={
+          isGroup && convInfo?.ownerId === currentUser?.sub
+            ? handleUpdateGroupAvatar
+            : undefined
+        }
         isUpdatingAvatar={isUpdatingAvatar}
       />
 
       {pinnedMessages.length > 0 && (
         <View style={styles.pinnedBanner}>
-          <IconButton icon="pin" size={16} iconColor={OFFICIAL_CHAT_COLORS.primary} />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+          <IconButton
+            icon="pin"
+            size={16}
+            iconColor={OFFICIAL_CHAT_COLORS.primary}
+          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ flex: 1 }}
+          >
             {pinnedMessages.map((m, idx) => (
               <TouchableOpacity key={m.id} style={styles.pinnedItem}>
-                <Text variant="labelSmall" numberOfLines={1} style={{ maxWidth: 150 }}>
+                <Text
+                  variant="labelSmall"
+                  numberOfLines={1}
+                  style={{ maxWidth: 150 }}
+                >
                   {parseMessageContent(m.content)}
                 </Text>
-                {idx < pinnedMessages.length - 1 && <Text style={{ marginHorizontal: 8, color: OFFICIAL_CHAT_COLORS.divider }}>|</Text>}
+                {idx < pinnedMessages.length - 1 && (
+                  <Text
+                    style={{
+                      marginHorizontal: 8,
+                      color: OFFICIAL_CHAT_COLORS.divider,
+                    }}
+                  >
+                    |
+                  </Text>
+                )}
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -1539,10 +1946,79 @@ export default function OfficialChatScreen() {
         behavior={keyboardBehavior}
         keyboardVerticalOffset={keyboardVerticalOffset}
       >
+        {isActiveGroupCallBannerVisible && (
+          <View style={styles.groupCallBannerWrap}>
+            <View style={styles.groupCallBanner}>
+              <View style={styles.groupCallBannerHeader}>
+                <View style={styles.groupCallBannerIcon}>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.groupCallBannerPulseRing,
+                      {
+                        opacity: groupCallPulseOpacity,
+                        transform: [{ scale: groupCallPulseScale }],
+                      },
+                    ]}
+                  />
+                  <View style={styles.groupCallBannerPulseDot} />
+                  {activeConfig?.conversationId === decodedId &&
+                  activeConfig.isVideo ? (
+                    <MaterialCommunityIcons
+                      name="video-outline"
+                      size={16}
+                      color="#2563eb"
+                    />
+                  ) : (
+                    <MaterialCommunityIcons
+                      name="phone"
+                      size={16}
+                      color="#2563eb"
+                    />
+                  )}
+                </View>
+                <Text style={styles.groupCallBannerText}>
+                  Cuộc gọi nhóm đang diễn ra
+                </Text>
+              </View>
+
+              {!isConnectedInCurrentConversation && (
+                <View style={styles.groupCallBannerActions}>
+                  <Button
+                    mode="contained-tonal"
+                    onPress={handleStartAudioCall}
+                    compact
+                    style={styles.groupCallBannerActionButton}
+                    labelStyle={styles.groupCallBannerActionLabel}
+                  >
+                    Tham gia thoại
+                  </Button>
+                  <Button
+                    mode="contained"
+                    onPress={handleStartVideoCall}
+                    compact
+                    style={styles.groupCallBannerActionButton}
+                    labelStyle={styles.groupCallBannerActionLabel}
+                  >
+                    Tham gia video
+                  </Button>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
         {isLoadingHistory ? (
           <View style={styles.center}>
             <MessageListSkeleton count={8} />
-            <Text style={{ marginTop: 8, color: OFFICIAL_CHAT_COLORS.mutedOnSurface }}>Đang tải tin nhắn...</Text>
+            <Text
+              style={{
+                marginTop: 8,
+                color: OFFICIAL_CHAT_COLORS.mutedOnSurface,
+              }}
+            >
+              Đang tải tin nhắn...
+            </Text>
           </View>
         ) : (
           <FlatList
@@ -1554,7 +2030,7 @@ export default function OfficialChatScreen() {
             maxToRenderPerBatch={10}
             windowSize={5}
             updateCellsBatchingPeriod={40}
-            removeClippedSubviews={Platform.OS !== 'web'}
+            removeClippedSubviews={Platform.OS !== "web"}
             keyExtractor={(item) => String(item.id)}
             renderItem={renderMessage}
             onEndReachedThreshold={0.35}
@@ -1564,7 +2040,9 @@ export default function OfficialChatScreen() {
               }
             }}
             keyboardShouldPersistTaps="handled"
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            keyboardDismissMode={
+              Platform.OS === "ios" ? "interactive" : "on-drag"
+            }
             contentContainerStyle={styles.listContent}
             onLayout={() => scrollToLatestMessage(false)}
             ListFooterComponent={
@@ -1575,9 +2053,17 @@ export default function OfficialChatScreen() {
               ) : null
             }
             ListEmptyComponent={
-              <View style={[styles.emptyContainer, { transform: [{ scaleY: -1 }] }]}>
-                <Text variant="bodyMedium" style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface, textAlign: 'center' }}>
-                  Chưa có tin nhắn nào.{'\n'}Hãy bắt đầu cuộc trò chuyện!
+              <View
+                style={[styles.emptyContainer, { transform: [{ scaleY: -1 }] }]}
+              >
+                <Text
+                  variant="bodyMedium"
+                  style={{
+                    color: OFFICIAL_CHAT_COLORS.mutedOnSurface,
+                    textAlign: "center",
+                  }}
+                >
+                  Chưa có tin nhắn nào.{"\n"}Hãy bắt đầu cuộc trò chuyện!
                 </Text>
               </View>
             }
@@ -1592,33 +2078,45 @@ export default function OfficialChatScreen() {
 
         {mentionQuery !== null && isGroup && (
           <View style={styles.mentionListContainer}>
-            <ScrollView keyboardShouldPersistTaps="always" horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView
+              keyboardShouldPersistTaps="always"
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
               {groupMembers
-                .filter(m => {
+                .filter((m) => {
                   const name = knownUsers[m.userId] || m.userId;
-                  return name.toLowerCase().includes(mentionQuery) || m.userId === currentUser?.sub; // exclude current user? Keep it simple
-                })
-                .map(m => {
-                  const name = knownUsers[m.userId] || `User ${m.userId.substring(0, 4)}`;
-                  if (m.userId === currentUser?.sub) return null; // Don't allow mentioning yourself
-                  
                   return (
-                    <TouchableOpacity 
-                      key={m.userId} 
+                    name.toLowerCase().includes(mentionQuery) ||
+                    m.userId === currentUser?.sub
+                  ); // exclude current user? Keep it simple
+                })
+                .map((m) => {
+                  const name =
+                    knownUsers[m.userId] || `User ${m.userId.substring(0, 4)}`;
+                  if (m.userId === currentUser?.sub) return null; // Don't allow mentioning yourself
+
+                  return (
+                    <TouchableOpacity
+                      key={m.userId}
                       style={styles.mentionItem}
                       onPress={() => {
-                        const words = text.split(' ');
+                        const words = text.split(" ");
                         words.pop(); // Remove the typed @query
-                        const newText = [...words, `@${name} `].join(' ');
+                        const newText = [...words, `@${name} `].join(" ");
                         setText(newText.trimStart());
                         setMentionQuery(null);
                       }}
                     >
-                      <Avatar.Text size={24} label={name.substring(0,2).toUpperCase()} style={{ marginRight: 6 }} />
+                      <Avatar.Text
+                        size={24}
+                        label={name.substring(0, 2).toUpperCase()}
+                        style={{ marginRight: 6 }}
+                      />
                       <Text style={{ fontSize: 13 }}>{name}</Text>
                     </TouchableOpacity>
                   );
-              })}
+                })}
             </ScrollView>
           </View>
         )}
@@ -1626,28 +2124,61 @@ export default function OfficialChatScreen() {
         {replyToMessage && (
           <View style={styles.replyPreviewBox}>
             <View style={{ flex: 1 }}>
-              <Text variant="labelSmall" style={{ color: OFFICIAL_CHAT_COLORS.primary, fontWeight: '700' }}>
-                Đang trả lời {replyToMessage.senderName || 'tin nhắn'}
+              <Text
+                variant="labelSmall"
+                style={{
+                  color: OFFICIAL_CHAT_COLORS.primary,
+                  fontWeight: "700",
+                }}
+              >
+                Đang trả lời {replyToMessage.senderName || "tin nhắn"}
               </Text>
-              <Text variant="bodySmall" numberOfLines={1} style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface }}>
-                {parseMessageContent(replyToMessage.content) || 'Tin nhắn đính kèm'}
+              <Text
+                variant="bodySmall"
+                numberOfLines={1}
+                style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface }}
+              >
+                {parseMessageContent(replyToMessage.content) ||
+                  "Tin nhắn đính kèm"}
               </Text>
             </View>
-            <IconButton icon="close" size={18} onPress={() => setReplyToMessage(null)} />
+            <IconButton
+              icon="close"
+              size={18}
+              onPress={() => setReplyToMessage(null)}
+            />
           </View>
         )}
 
         {editingMessage && (
           <View style={styles.replyPreviewBox}>
             <View style={{ flex: 1 }}>
-              <Text variant="labelSmall" style={{ color: OFFICIAL_CHAT_COLORS.primary, fontWeight: '700' }}>
+              <Text
+                variant="labelSmall"
+                style={{
+                  color: OFFICIAL_CHAT_COLORS.primary,
+                  fontWeight: "700",
+                }}
+              >
                 Đang sửa tin nhắn
               </Text>
-              <Text variant="bodySmall" numberOfLines={1} style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface }}>
-                {parseMessageContent(editingMessage.content) || 'Tin nhắn đính kèm'}
+              <Text
+                variant="bodySmall"
+                numberOfLines={1}
+                style={{ color: OFFICIAL_CHAT_COLORS.mutedOnSurface }}
+              >
+                {parseMessageContent(editingMessage.content) ||
+                  "Tin nhắn đính kèm"}
               </Text>
             </View>
-            <IconButton icon="close" size={18} onPress={() => { setEditingMessage(null); setText(''); }} />
+            <IconButton
+              icon="close"
+              size={18}
+              onPress={() => {
+                setEditingMessage(null);
+                setText("");
+              }}
+            />
           </View>
         )}
 
@@ -1668,11 +2199,11 @@ export default function OfficialChatScreen() {
             onChangeText={(val) => {
               setText(val);
               sendTyping(val.length > 0);
-              
+
               if (isGroup) {
-                const words = val.split(' ');
+                const words = val.split(" ");
                 const lastWord = words[words.length - 1];
-                if (lastWord.startsWith('@')) {
+                if (lastWord.startsWith("@")) {
                   setMentionQuery(lastWord.slice(1).toLowerCase());
                 } else {
                   setMentionQuery(null);
@@ -1685,7 +2216,7 @@ export default function OfficialChatScreen() {
             activeUnderlineColor="transparent"
             mode="flat"
             contentStyle={{
-              backgroundColor: '#f1f5f8',
+              backgroundColor: "#f1f5f8",
               borderRadius: 20,
               paddingHorizontal: 12,
               color: OFFICIAL_CHAT_COLORS.incomingText,
@@ -1721,31 +2252,88 @@ export default function OfficialChatScreen() {
         </View>
 
         {showMediaMenu && (
-          <View style={[styles.mediaMenu, { backgroundColor: OFFICIAL_CHAT_COLORS.surface }]}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaMenuContent}>
+          <View
+            style={[
+              styles.mediaMenu,
+              { backgroundColor: OFFICIAL_CHAT_COLORS.surface },
+            ]}
+          >
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.mediaMenuContent}
+            >
               <View style={styles.menuItem}>
-                <IconButton icon="camera" mode="contained" containerColor={OFFICIAL_CHAT_COLORS.primary} iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} onPress={takePhoto} />
-                <Text variant="labelSmall" style={styles.mediaMenuLabel}>Chup anh</Text>
+                <IconButton
+                  icon="camera"
+                  mode="contained"
+                  containerColor={OFFICIAL_CHAT_COLORS.primary}
+                  iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary}
+                  onPress={takePhoto}
+                />
+                <Text variant="labelSmall" style={styles.mediaMenuLabel}>
+                  Chụp ảnh
+                </Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="image" mode="contained" containerColor={OFFICIAL_CHAT_COLORS.primary} iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} onPress={pickImage} />
-                <Text variant="labelSmall" style={styles.mediaMenuLabel}>Anh</Text>
+                <IconButton
+                  icon="image"
+                  mode="contained"
+                  containerColor={OFFICIAL_CHAT_COLORS.primary}
+                  iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary}
+                  onPress={pickImage}
+                />
+                <Text variant="labelSmall" style={styles.mediaMenuLabel}>
+                  Ảnh
+                </Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="file-document" mode="contained" containerColor={OFFICIAL_CHAT_COLORS.primary} iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} onPress={pickDocument} />
-                <Text variant="labelSmall" style={styles.mediaMenuLabel}>TÃ i liá»‡u</Text>
+                <IconButton
+                  icon="file-document"
+                  mode="contained"
+                  containerColor={OFFICIAL_CHAT_COLORS.primary}
+                  iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary}
+                  onPress={pickDocument}
+                />
+                <Text variant="labelSmall" style={styles.mediaMenuLabel}>
+                  Tài liệu
+                </Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="map-marker" mode="contained" containerColor={OFFICIAL_CHAT_COLORS.primary} iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} onPress={sendLocation} />
-                <Text variant="labelSmall" style={styles.mediaMenuLabel}>Vá»‹ trÃ­</Text>
+                <IconButton
+                  icon="map-marker"
+                  mode="contained"
+                  containerColor={OFFICIAL_CHAT_COLORS.primary}
+                  iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary}
+                  onPress={sendLocation}
+                />
+                <Text variant="labelSmall" style={styles.mediaMenuLabel}>
+                  Vị trí
+                </Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="video-outline" mode="contained" containerColor={OFFICIAL_CHAT_COLORS.primary} iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} onPress={takeVideo} />
-                <Text variant="labelSmall" style={styles.mediaMenuLabel}>Quay video</Text>
+                <IconButton
+                  icon="video-outline"
+                  mode="contained"
+                  containerColor={OFFICIAL_CHAT_COLORS.primary}
+                  iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary}
+                  onPress={takeVideo}
+                />
+                <Text variant="labelSmall" style={styles.mediaMenuLabel}>
+                  Quay video
+                </Text>
               </View>
               <View style={styles.menuItem}>
-                <IconButton icon="filmstrip" mode="contained" containerColor={OFFICIAL_CHAT_COLORS.primary} iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary} onPress={pickVideo} />
-                <Text variant="labelSmall" style={styles.mediaMenuLabel}>Video thÆ° viá»‡n</Text>
+                <IconButton
+                  icon="filmstrip"
+                  mode="contained"
+                  containerColor={OFFICIAL_CHAT_COLORS.primary}
+                  iconColor={OFFICIAL_CHAT_COLORS.textOnPrimary}
+                  onPress={pickVideo}
+                />
+                <Text variant="labelSmall" style={styles.mediaMenuLabel}>
+                  Video thư viện
+                </Text>
               </View>
             </ScrollView>
           </View>
@@ -1757,85 +2345,181 @@ export default function OfficialChatScreen() {
           visible={menuVisible}
           onDismiss={() => setMenuVisible(false)}
           contentContainerStyle={styles.bottomSheetContainer}
-          style={{ justifyContent: 'flex-end', margin: 0 }}
+          style={{ justifyContent: "flex-end", margin: 0 }}
         >
           <View style={styles.menuSheet}>
             <View style={styles.emojiList}>
-              {['ðŸ‘', 'â¤ï¸', 'ðŸ˜‚', 'ðŸ˜®', 'ðŸ˜¢', 'ðŸ˜¡'].map(emoji => (
-                <TouchableOpacity key={emoji} onPress={() => { handleReaction(selectedMessage, emoji); setMenuVisible(false); }} style={styles.emojiCircle}>
+              {["👍", "❤️", "😂", "😮", "😢", "😡"].map((emoji) => (
+                <TouchableOpacity
+                  key={emoji}
+                  onPress={() => {
+                    handleReaction(selectedMessage, emoji);
+                    setMenuVisible(false);
+                  }}
+                  style={styles.emojiCircle}
+                >
                   <Text style={{ fontSize: 28 }}>{emoji}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            
+
             <View style={styles.actionGrid}>
-              <TouchableOpacity style={styles.actionGridItem} onPress={handleReply}>
-                <View style={styles.actionGridIcon}><IconButton icon="reply" size={24} iconColor={OFFICIAL_CHAT_COLORS.primary} /></View>
-                <Text variant="labelSmall" style={styles.actionGridText}>Tráº£ lá»i</Text>
+              <TouchableOpacity
+                style={styles.actionGridItem}
+                onPress={handleReply}
+              >
+                <View style={styles.actionGridIcon}>
+                  <IconButton
+                    icon="reply"
+                    size={24}
+                    iconColor={OFFICIAL_CHAT_COLORS.primary}
+                  />
+                </View>
+                <Text variant="labelSmall" style={styles.actionGridText}>
+                  Trả lời
+                </Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.actionGridItem} onPress={handleCopy}>
-                <View style={styles.actionGridIcon}><IconButton icon="content-copy" size={24} iconColor={OFFICIAL_CHAT_COLORS.primary} /></View>
-                <Text variant="labelSmall" style={styles.actionGridText}>Sao chÃ©p</Text>
+
+              <TouchableOpacity
+                style={styles.actionGridItem}
+                onPress={handleCopy}
+              >
+                <View style={styles.actionGridIcon}>
+                  <IconButton
+                    icon="content-copy"
+                    size={24}
+                    iconColor={OFFICIAL_CHAT_COLORS.primary}
+                  />
+                </View>
+                <Text variant="labelSmall" style={styles.actionGridText}>
+                  Sao chép
+                </Text>
               </TouchableOpacity>
 
               {currentUser?.sub === selectedMessage?.senderId && (
-                <TouchableOpacity style={styles.actionGridItem} onPress={handleEdit}>
-                  <View style={styles.actionGridIcon}><IconButton icon="pencil" size={24} iconColor={OFFICIAL_CHAT_COLORS.primary} /></View>
-                  <Text variant="labelSmall" style={styles.actionGridText}>Sá»­a</Text>
-                </TouchableOpacity>
-              )}
-              
-              {currentUser?.sub === selectedMessage?.senderId ? (
-                <TouchableOpacity style={styles.actionGridItem} onPress={handleRecall}>
-                  <View style={styles.actionGridIcon}><IconButton icon="delete-sweep" size={24} iconColor={OFFICIAL_CHAT_COLORS.primary} /></View>
-                  <Text variant="labelSmall" style={styles.actionGridText}>Thu há»“i</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.actionGridItem} onPress={() => { setMenuVisible(false); Alert.alert('ThÃ´ng bÃ¡o', 'TÃ­nh nÄƒng xÃ³a Ä‘ang Ä‘Æ°á»£c cáº­p nháº­t.'); }}>
-                  <View style={styles.actionGridIcon}><IconButton icon="delete" size={24} iconColor={OFFICIAL_CHAT_COLORS.primary} /></View>
-                  <Text variant="labelSmall" style={styles.actionGridText}>XÃ³a</Text>
+                <TouchableOpacity
+                  style={styles.actionGridItem}
+                  onPress={handleEdit}
+                >
+                  <View style={styles.actionGridIcon}>
+                    <IconButton
+                      icon="pencil"
+                      size={24}
+                      iconColor={OFFICIAL_CHAT_COLORS.primary}
+                    />
+                  </View>
+                  <Text variant="labelSmall" style={styles.actionGridText}>
+                    Sửa
+                  </Text>
                 </TouchableOpacity>
               )}
 
-              <TouchableOpacity style={styles.actionGridItem} onPress={() => setShowMoreMenu(!showMoreMenu)}>
-                <View style={[styles.actionGridIcon, showMoreMenu && styles.actionGridIconActive]}>
-                  <IconButton icon="dots-horizontal" size={24} iconColor={showMoreMenu ? OFFICIAL_CHAT_COLORS.textOnPrimary : OFFICIAL_CHAT_COLORS.primary} />
+              {currentUser?.sub === selectedMessage?.senderId ? (
+                <TouchableOpacity
+                  style={styles.actionGridItem}
+                  onPress={handleRecall}
+                >
+                  <View style={styles.actionGridIcon}>
+                    <IconButton
+                      icon="delete-sweep"
+                      size={24}
+                      iconColor={OFFICIAL_CHAT_COLORS.primary}
+                    />
+                  </View>
+                  <Text variant="labelSmall" style={styles.actionGridText}>
+                    Thu hồi
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.actionGridItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    Alert.alert(
+                      "Thông báo",
+                      "Tính năng xóa đang được cập nhật.",
+                    );
+                  }}
+                >
+                  <View style={styles.actionGridIcon}>
+                    <IconButton
+                      icon="delete"
+                      size={24}
+                      iconColor={OFFICIAL_CHAT_COLORS.primary}
+                    />
+                  </View>
+                  <Text variant="labelSmall" style={styles.actionGridText}>
+                    Xóa
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={styles.actionGridItem}
+                onPress={() => setShowMoreMenu(!showMoreMenu)}
+              >
+                <View
+                  style={[
+                    styles.actionGridIcon,
+                    showMoreMenu && styles.actionGridIconActive,
+                  ]}
+                >
+                  <IconButton
+                    icon="dots-horizontal"
+                    size={24}
+                    iconColor={
+                      showMoreMenu
+                        ? OFFICIAL_CHAT_COLORS.textOnPrimary
+                        : OFFICIAL_CHAT_COLORS.primary
+                    }
+                  />
                 </View>
-                <Text variant="labelSmall" style={showMoreMenu ? styles.actionGridTextActive : styles.actionGridText}>KhÃ¡c...</Text>
+                <Text
+                  variant="labelSmall"
+                  style={
+                    showMoreMenu
+                      ? styles.actionGridTextActive
+                      : styles.actionGridText
+                  }
+                >
+                  Khác...
+                </Text>
               </TouchableOpacity>
             </View>
 
             {showMoreMenu && (
               <View style={styles.moreMenuContainer}>
-                <Button 
-                  icon="pin" 
-                  mode="text" 
+                <Button
+                  icon="pin"
+                  mode="text"
                   onPress={handlePin}
                   style={styles.modalButton}
                   contentStyle={styles.modalButtonContent}
                 >
-                  Ghim tin nháº¯n
+                  Ghim tin nhắn
                 </Button>
 
-                <Button 
-                  icon="share-outline" 
-                  mode="text" 
+                <Button
+                  icon="share-outline"
+                  mode="text"
                   onPress={openForwardDialog}
                   style={styles.modalButton}
                   contentStyle={styles.modalButtonContent}
                 >
-                  Chuyá»ƒn tiáº¿p
+                  Chuyển tiếp
                 </Button>
 
-                <Button 
-                  icon="export-variant" 
-                  mode="text" 
-                  onPress={() => { handleShare(selectedMessage); setMenuVisible(false); }}
+                <Button
+                  icon="export-variant"
+                  mode="text"
+                  onPress={() => {
+                    handleShare(selectedMessage);
+                    setMenuVisible(false);
+                  }}
                   style={styles.modalButton}
                   contentStyle={styles.modalButtonContent}
                 >
-                  Chia sáº» ngoÃ i
+                  Chia sẻ ngoài
                 </Button>
               </View>
             )}
@@ -1847,15 +2531,20 @@ export default function OfficialChatScreen() {
           onDismiss={() => setForwardDialogVisible(false)}
           contentContainerStyle={styles.forwardModalContainer}
         >
-          <Text variant="titleMedium" style={styles.forwardTitle}>Chuyá»ƒn tiáº¿p tin nháº¯n</Text>
+          <Text variant="titleMedium" style={styles.forwardTitle}>
+            Chuyển tiếp tin nhắn
+          </Text>
           <TextInput
             mode="outlined"
             value={forwardSearch}
             onChangeText={setForwardSearch}
-            placeholder="TÃ¬m cuá»™c trÃ² chuyá»‡n"
+            placeholder="Tìm cuộc trò chuyện"
             style={styles.forwardSearchInput}
           />
-          <ScrollView style={styles.forwardList} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            style={styles.forwardList}
+            keyboardShouldPersistTaps="handled"
+          >
             {filteredForwardConversations.map((conversation) => {
               const conversationId = String(conversation.conversationId);
               const selected = forwardTargetIds.includes(conversationId);
@@ -1863,14 +2552,27 @@ export default function OfficialChatScreen() {
               return (
                 <TouchableOpacity
                   key={conversationId}
-                  style={[styles.forwardItem, selected && styles.forwardItemSelected]}
+                  style={[
+                    styles.forwardItem,
+                    selected && styles.forwardItemSelected,
+                  ]}
                   onPress={() => handleToggleForwardTarget(conversationId)}
                   activeOpacity={0.8}
                 >
-                  <Text variant="bodyMedium" style={styles.forwardItemTitle} numberOfLines={1}>
-                    {conversation.groupName || conversation.lastSenderName || conversationId}
+                  <Text
+                    variant="bodyMedium"
+                    style={styles.forwardItemTitle}
+                    numberOfLines={1}
+                  >
+                    {conversation.groupName ||
+                      conversation.lastSenderName ||
+                      conversationId}
                   </Text>
-                  <Text variant="labelSmall" style={styles.forwardItemMeta} numberOfLines={1}>
+                  <Text
+                    variant="labelSmall"
+                    style={styles.forwardItemMeta}
+                    numberOfLines={1}
+                  >
                     {conversation.lastMessagePreview || conversationId}
                   </Text>
                 </TouchableOpacity>
@@ -1878,10 +2580,20 @@ export default function OfficialChatScreen() {
             })}
           </ScrollView>
           <View style={styles.forwardActions}>
-            <Button mode="text" onPress={() => setForwardDialogVisible(false)} disabled={isForwarding}>Há»§y</Button>
+            <Button
+              mode="text"
+              onPress={() => setForwardDialogVisible(false)}
+              disabled={isForwarding}
+            >
+              H?y
+            </Button>
             {isForwarding ? <SkeletonInline width={56} height={12} /> : null}
-            <Button mode="contained" onPress={submitForward} disabled={isForwarding || !forwardTargetIds.length}>
-              Gá»­i
+            <Button
+              mode="contained"
+              onPress={submitForward}
+              disabled={isForwarding || !forwardTargetIds.length}
+            >
+              Gửi
             </Button>
           </View>
         </Modal>
@@ -1889,9 +2601,9 @@ export default function OfficialChatScreen() {
 
       <ConfirmDialog
         visible={accessDeniedDialogVisible}
-        title="KhÃ´ng thá»ƒ nháº¯n tin"
-        message={`${convInfo?.groupName || 'NgÆ°á»i dÃ¹ng nÃ y'} Ä‘Ã£ há»§y káº¿t báº¡n vá»›i báº¡n. Báº¡n cÃ³ muá»‘n xÃ³a cuá»™c trÃ² chuyá»‡n nÃ y khá»i danh sÃ¡ch?`}
-        confirmText="CÃ³, xÃ³a"
+        title="Không thể nhắn tin"
+        message={`${convInfo?.groupName || "Người dùng này"} đã hủy kết bạn với bạn. Bạn có muốn xóa cuộc trò chuyện này khỏi danh sách?`}
+        confirmText="Có, xóa"
         confirmLoading={isDeletingDeniedConversation}
         disableClose={isDeletingDeniedConversation}
         onCancel={handleDeniedKeepConversation}
@@ -1944,19 +2656,88 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   screen: { flex: 1, backgroundColor: OFFICIAL_CHAT_COLORS.header },
   chatArea: { flex: 1, backgroundColor: OFFICIAL_CHAT_COLORS.chatBackground },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: OFFICIAL_CHAT_COLORS.chatBackground },
+  groupCallBannerWrap: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  groupCallBanner: {
+    borderRadius: 16,
+    backgroundColor: "rgba(239, 246, 255, 0.96)",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  groupCallBannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  groupCallBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  groupCallBannerPulseRing: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#93c5fd",
+  },
+  groupCallBannerPulseDot: {
+    position: "absolute",
+    right: -1,
+    top: -1,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#3b82f6",
+    borderWidth: 1,
+    borderColor: "#ffffff",
+  },
+  groupCallBannerText: {
+    flex: 1,
+    color: "#1d4ed8",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  groupCallBannerActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  groupCallBannerActionButton: {
+    flex: 1,
+    borderRadius: 999,
+  },
+  groupCallBannerActionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: OFFICIAL_CHAT_COLORS.chatBackground,
+  },
   headerAvatarWrap: {
     width: 44,
     height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: 8,
   },
   headerGradient: {
     ...StyleSheet.absoluteFillObject,
   },
   headerBackButton: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: "rgba(255,255,255,0.16)",
     zIndex: 2,
     elevation: 2,
   },
@@ -1965,16 +2746,16 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.85)',
+    borderColor: "rgba(255,255,255,0.85)",
   },
   onlineDotSmall: {
-    position: 'absolute',
+    position: "absolute",
     right: 2,
     bottom: 2,
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#22c55e',
+    backgroundColor: "#22c55e",
     borderWidth: 2,
     borderColor: OFFICIAL_CHAT_COLORS.header,
   },
@@ -1983,48 +2764,68 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     marginHorizontal: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
-  messageList: { flex: 1, backgroundColor: OFFICIAL_CHAT_COLORS.chatBackground },
+  messageList: {
+    flex: 1,
+    backgroundColor: OFFICIAL_CHAT_COLORS.chatBackground,
+  },
   listContent: { paddingHorizontal: 14, paddingTop: 18, paddingBottom: 28 },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 300 },
+  emptyContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 300,
+  },
   loadOlderSkeleton: { paddingVertical: 8, transform: [{ scaleY: -1 }] },
-  messageWrapper: { flexDirection: 'row', marginBottom: 10, maxWidth: '88%' },
-  messageWrapperLeft: { alignSelf: 'flex-start' },
-  messageWrapperRight: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
-  avatar: { marginRight: 8, marginTop: 2, backgroundColor: OFFICIAL_CHAT_COLORS.primary },
+  messageWrapper: { flexDirection: "row", marginBottom: 10, maxWidth: "88%" },
+  messageWrapperLeft: { alignSelf: "flex-start" },
+  messageWrapperRight: { alignSelf: "flex-end", flexDirection: "row-reverse" },
+  avatar: {
+    marginRight: 8,
+    marginTop: 2,
+    backgroundColor: OFFICIAL_CHAT_COLORS.primary,
+  },
   messageBubble: {
-    overflow: 'hidden',
+    overflow: "hidden",
     minWidth: 54,
     borderRadius: 14,
     paddingHorizontal: 11,
     paddingVertical: 8,
-    shadowColor: '#12324f',
+    shadowColor: "#12324f",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.08,
     shadowRadius: 7,
     elevation: 1,
   },
   messageBubbleOwn: { backgroundColor: OFFICIAL_CHAT_COLORS.messageBackground },
-  messageBubbleOther: { backgroundColor: OFFICIAL_CHAT_COLORS.incomingMessageBackground },
+  messageBubbleOther: {
+    backgroundColor: OFFICIAL_CHAT_COLORS.incomingMessageBackground,
+  },
   messageBubbleMedia: {
     paddingHorizontal: 0,
     paddingVertical: 0,
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
     shadowOpacity: 0,
     elevation: 0,
   },
   messageBubbleHighlighted: {
     borderWidth: 2,
-    borderColor: 'rgba(73,90,255,0.35)',
+    borderColor: "rgba(73,90,255,0.35)",
   },
   bubbleLeft: { borderTopLeftRadius: 5 },
   bubbleRight: { borderTopRightRadius: 5 },
-  timeText: { alignSelf: 'flex-end', fontSize: 10, fontWeight: '600' },
+  timeText: { alignSelf: "flex-end", fontSize: 10, fontWeight: "600" },
   sentCheckIcon: { marginLeft: 4, marginTop: 1 },
-  typingIndicator: { paddingHorizontal: 20, fontStyle: 'italic', color: OFFICIAL_CHAT_COLORS.primary, marginBottom: 4, height: 20 },
+  typingIndicator: {
+    paddingHorizontal: 20,
+    fontStyle: "italic",
+    color: OFFICIAL_CHAT_COLORS.primary,
+    marginBottom: 4,
+    height: 20,
+  },
   mentionListContainer: {
     paddingHorizontal: 8,
     paddingVertical: 8,
@@ -2034,8 +2835,8 @@ const styles = StyleSheet.create({
     maxHeight: 60,
   },
   mentionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -2050,8 +2851,8 @@ const styles = StyleSheet.create({
     shadowRadius: 1,
   },
   replyPreviewBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: OFFICIAL_CHAT_COLORS.primarySoft,
     borderTopWidth: 1,
     borderColor: OFFICIAL_CHAT_COLORS.border,
@@ -2059,11 +2860,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   replyQuote: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
+    flexDirection: "row",
+    alignItems: "stretch",
     borderRadius: 10,
     marginBottom: 8,
-    overflow: 'hidden',
+    overflow: "hidden",
     maxWidth: 240,
   },
   replyQuoteBar: {
@@ -2076,70 +2877,102 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   inputArea: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingHorizontal: 8,
     paddingTop: 8,
-    paddingBottom: Platform.OS === 'ios' ? 10 : 8,
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingBottom: Platform.OS === "ios" ? 10 : 8,
+    alignItems: "center",
+    justifyContent: "space-between",
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(10,63,104,0.12)',
+    borderTopColor: "rgba(10,63,104,0.12)",
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
   },
-  input: { flex: 1, minWidth: 0, marginHorizontal: 2, maxHeight: 120, backgroundColor: 'transparent' },
+  input: {
+    flex: 1,
+    minWidth: 0,
+    marginHorizontal: 2,
+    maxHeight: 120,
+    backgroundColor: "transparent",
+  },
   mediaImage: {
     width: 220,
     height: 200,
     borderRadius: 14,
-    backgroundColor: '#d8e2ea',
-    shadowColor: '#12324f',
+    backgroundColor: "#d8e2ea",
+    shadowColor: "#12324f",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 10,
     elevation: 2,
   },
-  mediaFallback: { width: 190, minHeight: 90, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  mediaFallback: {
+    width: 190,
+    minHeight: 90,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   mediaVideo: {
     width: 220,
     height: 180,
     borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: '#082f49',
-    shadowColor: '#12324f',
+    overflow: "hidden",
+    backgroundColor: "#082f49",
+    shadowColor: "#12324f",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 10,
     elevation: 2,
   },
-  mediaVideoPlayer: { width: '100%', height: '100%' },
+  mediaVideoPlayer: { width: "100%", height: "100%" },
   mediaVideoOverlay: {
-    position: 'absolute',
+    position: "absolute",
     right: 6,
     bottom: 6,
     width: 40,
     height: 40,
     borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: OFFICIAL_CHAT_COLORS.overlay,
   },
-  mediaPlaceholder: { width: 180, height: 100, backgroundColor: OFFICIAL_CHAT_COLORS.placeholderSurface, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  audioMessage: { flexDirection: 'row', alignItems: 'center', paddingRight: 8 },
-  docMessage: { flexDirection: 'row', alignItems: 'center', maxWidth: 180 },
-  mediaMenu: { position: 'absolute', bottom: 65, left: 0, right: 0, height: 110, borderTopWidth: 0.5, borderColor: OFFICIAL_CHAT_COLORS.border, overflow: 'hidden' },
-  mediaMenuContent: { paddingHorizontal: 20, alignItems: 'center', gap: 20 },
-  menuItem: { alignItems: 'center' },
-  mediaMenuLabel: { color: OFFICIAL_CHAT_COLORS.primary, fontWeight: '600' },
+  mediaPlaceholder: {
+    width: 180,
+    height: 100,
+    backgroundColor: OFFICIAL_CHAT_COLORS.placeholderSurface,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  audioMessage: { flexDirection: "row", alignItems: "center", paddingRight: 8 },
+  docMessage: { flexDirection: "row", alignItems: "center", maxWidth: 180 },
+  mediaMenu: {
+    position: "absolute",
+    bottom: 65,
+    left: 0,
+    right: 0,
+    height: 110,
+    borderTopWidth: 0.5,
+    borderColor: OFFICIAL_CHAT_COLORS.border,
+    overflow: "hidden",
+  },
+  mediaMenuContent: { paddingHorizontal: 20, alignItems: "center", gap: 20 },
+  menuItem: { alignItems: "center" },
+  mediaMenuLabel: { color: OFFICIAL_CHAT_COLORS.primary, fontWeight: "600" },
   pinnedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
     paddingVertical: 4,
     paddingHorizontal: 8,
     borderBottomWidth: 0.5,
     borderColor: OFFICIAL_CHAT_COLORS.border,
   },
-  pinnedItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
+  pinnedItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 4,
+  },
   modalContainer: {
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
     padding: 20,
@@ -2147,43 +2980,43 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   modalButton: {
-    width: '100%',
-    alignItems: 'flex-start',
+    width: "100%",
+    alignItems: "flex-start",
   },
   modalButtonContent: {
     height: 48,
-    justifyContent: 'flex-start',
+    justifyContent: "flex-start",
   },
   bubbleFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
     marginTop: 4,
   },
   mediaBubbleFooter: {
-    alignSelf: 'flex-end',
+    alignSelf: "flex-end",
     borderRadius: 999,
     marginTop: -30,
     marginRight: 8,
     marginBottom: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: 'rgba(5, 28, 48, 0.52)',
+    backgroundColor: "rgba(5, 28, 48, 0.52)",
   },
   emptyComposerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     flexShrink: 0,
     marginLeft: 2,
   },
   rightComposerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     flexShrink: 0,
   },
   reactionContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     marginTop: -8,
     zIndex: 10,
   },
@@ -2204,10 +3037,10 @@ const styles = StyleSheet.create({
   reactionText: {
     color: OFFICIAL_CHAT_COLORS.textOnPrimary,
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   bottomSheetContainer: {
-    justifyContent: 'flex-end',
+    justifyContent: "flex-end",
     margin: 0,
   },
   menuSheet: {
@@ -2215,11 +3048,11 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    paddingBottom: Platform.OS === "ios" ? 32 : 16,
   },
   emojiList: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
     borderRadius: 30,
     paddingHorizontal: 16,
@@ -2235,14 +3068,14 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   actionGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
     backgroundColor: OFFICIAL_CHAT_COLORS.surface,
     borderRadius: 16,
     paddingVertical: 12,
   },
   actionGridItem: {
-    alignItems: 'center',
+    alignItems: "center",
     flex: 1,
   },
   actionGridIcon: {
@@ -2250,8 +3083,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     width: 48,
     height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 4,
   },
   actionGridIconActive: {
@@ -2259,11 +3092,11 @@ const styles = StyleSheet.create({
   },
   actionGridText: {
     color: OFFICIAL_CHAT_COLORS.primary,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   actionGridTextActive: {
     color: OFFICIAL_CHAT_COLORS.primary,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   moreMenuContainer: {
     marginTop: 12,
@@ -2276,11 +3109,11 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 16,
     padding: 16,
-    maxHeight: '78%',
+    maxHeight: "78%",
   },
   forwardTitle: {
     color: OFFICIAL_CHAT_COLORS.primary,
-    fontWeight: '700',
+    fontWeight: "700",
     marginBottom: 10,
   },
   forwardSearchInput: {
@@ -2306,38 +3139,38 @@ const styles = StyleSheet.create({
   },
   forwardItemTitle: {
     color: OFFICIAL_CHAT_COLORS.primary,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   forwardItemMeta: {
     color: OFFICIAL_CHAT_COLORS.mutedOnSurface,
     marginTop: 2,
   },
   forwardActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
     gap: 8,
   },
   fullscreenOverlay: {
     flex: 1,
     backgroundColor: OFFICIAL_CHAT_COLORS.fullscreenBackdrop,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   fullscreenMedia: {
-    width: '100%',
-    height: '75%',
+    width: "100%",
+    height: "75%",
   },
   fullscreenCloseButton: {
-    position: 'absolute',
+    position: "absolute",
     top: 40,
     right: 12,
     zIndex: 2,
   },
   fullscreenShareButton: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 36,
-    alignSelf: 'center',
+    alignSelf: "center",
     backgroundColor: OFFICIAL_CHAT_COLORS.primary,
     borderRadius: 999,
     paddingHorizontal: 18,

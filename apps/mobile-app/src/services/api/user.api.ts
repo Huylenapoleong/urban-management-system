@@ -1,5 +1,5 @@
 import client from "./client";
-import type { UserProfile } from "@urban/shared-types";
+import type { UserBlockedItem, UserProfile } from "@urban/shared-types";
 
 export type UpdateProfilePayload = Partial<UserProfile> & {
   avatarKey?: string;
@@ -108,3 +108,40 @@ export async function deletePushDevice(deviceId: string): Promise<void> {
   await client.delete(`/users/me/push-devices/${encodeURIComponent(deviceId)}`);
 }
 
+// ─── Avatar ───────────────────────────────────────────────────────────────────
+
+export async function deleteAvatar(): Promise<void> {
+  await client.delete("/users/me/avatar");
+}
+
+// ─── Blocks ───────────────────────────────────────────────────────────────────
+
+export async function listBlocks(): Promise<UserBlockedItem[]> {
+  return await client.get("/users/me/blocks");
+}
+
+export async function blockUser(userId: string): Promise<UserBlockedItem> {
+  return await client.post(`/users/me/blocks/${encodeURIComponent(userId)}`);
+}
+
+export async function unblockUser(userId: string): Promise<UserBlockedItem> {
+  return await client.delete(`/users/me/blocks/${encodeURIComponent(userId)}`);
+}
+
+// ─── Contact alias ────────────────────────────────────────────────────────────
+
+export async function setContactAlias(
+  userId: string,
+  alias: string,
+): Promise<void> {
+  await client.put(
+    `/users/me/contacts/${encodeURIComponent(userId)}/alias`,
+    { alias },
+  );
+}
+
+export async function deleteContactAlias(userId: string): Promise<void> {
+  await client.delete(
+    `/users/me/contacts/${encodeURIComponent(userId)}/alias`,
+  );
+}
