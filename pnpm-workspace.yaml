@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  '@nestjs/core': false
+  '@scarf/scarf': false
+  protobufjs: true
+  sharp: true
+  unrs-resolver: false

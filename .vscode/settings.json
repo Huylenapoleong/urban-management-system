@@ -1,0 +1,11 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "/^pnpm --filter api build$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  },
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit"
+  }
+}

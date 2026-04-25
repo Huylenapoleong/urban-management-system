@@ -1,0 +1,3776 @@
+{
+  "info": {
+    "name": "Urban Management API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Smoke and integration test collection for the SmartCity Urban Management API. Updated to match the current apps/api contract. This collection covers HTTP APIs only; Socket.IO chat/call payloads such as call.end and call.heartbeat are documented in apps/api/docs/FE_INTEGRATION.md and apps/api/docs/CHAT_REALTIME_OPERATIONS.md."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001/api"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "currentUserId",
+      "value": ""
+    },
+    {
+      "key": "sessionId",
+      "value": ""
+    },
+    {
+      "key": "historySessionId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "officerUserId",
+      "value": ""
+    },
+    {
+      "key": "groupId",
+      "value": ""
+    },
+    {
+      "key": "reportId",
+      "value": ""
+    },
+    {
+      "key": "conversationId",
+      "value": ""
+    },
+    {
+      "key": "messageId",
+      "value": ""
+    },
+    {
+      "key": "recallScope",
+      "value": "EVERYONE"
+    },
+    {
+      "key": "forwardConversationIdsJson",
+      "value": "[\"{{conversationId}}\"]"
+    },
+    {
+      "key": "deviceId",
+      "value": "device-postman-local-01"
+    },
+    {
+      "key": "loginIdentity",
+      "value": "nvhiep.aws@gmail.com"
+    },
+    {
+      "key": "loginPassword",
+      "value": "Ums@2026Secure1"
+    },
+    {
+      "key": "newPassword",
+      "value": "Ums@2026Secure2"
+    },
+    {
+      "key": "otpCode",
+      "value": "123456"
+    },
+    {
+      "key": "locationCode",
+      "value": "VN-79-25747"
+    },
+    {
+      "key": "uploadTarget",
+      "value": "GENERAL"
+    },
+    {
+      "key": "uploadKey",
+      "value": ""
+    },
+    {
+      "key": "appVariant",
+      "value": "postman"
+    },
+    {
+      "key": "registerEmail",
+      "value": "nvhiep.aws@gmail.com"
+    },
+    {
+      "key": "registerPhone",
+      "value": "0901234567"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Live",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/live",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/ready",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Metrics JSON (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/metrics"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Metrics Prometheus (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/metrics/prometheus"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register Citizen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Postman Citizen Demo\",\n  \"email\": \"{{registerEmail}}\",\n  \"phone\": \"{{registerPhone}}\",\n  \"password\": \"Ums@2026Secure1\",\n  \"locationCode\": \"{{locationCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Uses registerEmail/registerPhone from environment (defaults to nvhiep.aws@gmail.com/0901234567), then stores accessToken, refreshToken, currentUserId, and loginIdentity into the active Postman environment."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.tokens) {",
+                  "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                  "}",
+                  "if (json?.success && json?.data?.user?.id) {",
+                  "  pm.environment.set('currentUserId', json.data.user.id);",
+                  "}",
+                  "if (pm.environment.get('registerEmail')) { pm.environment.set('loginIdentity', pm.environment.get('registerEmail')); }",
+                  "pm.environment.set('loginPassword', 'Ums@2026Secure1');"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const stamp = Date.now();",
+                  "if (!pm.environment.get('registerEmail')) { pm.environment.set('registerEmail', 'nvhiep.aws@gmail.com'); }",
+                  "if (!pm.environment.get('registerPhone')) { pm.environment.set('registerPhone', `0${String(stamp).slice(-9)}`); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register OTP - Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/register/request-otp",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Postman Citizen OTP Demo\",\n  \"email\": \"{{registerEmail}}\",\n  \"phone\": \"{{registerPhone}}\",\n  \"password\": \"{{loginPassword}}\",\n  \"locationCode\": \"{{locationCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Requests OTP for citizen registration. Copy OTP from API log/webhook and set it to {{otpCode}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const stamp = Date.now();",
+                  "if (!pm.environment.get('registerEmail')) { pm.environment.set('registerEmail', 'nvhiep.aws@gmail.com'); }",
+                  "if (!pm.environment.get('registerPhone')) { pm.environment.set('registerPhone', `0${String(stamp).slice(-9)}`); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register OTP - Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/register/verify-otp",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registerEmail}}\",\n  \"otpCode\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.tokens) {",
+                  "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                  "}",
+                  "if (json?.success && json?.data?.user?.id) {",
+                  "  pm.environment.set('currentUserId', json.data.user.id);",
+                  "}",
+                  "if (pm.environment.get('registerEmail')) { pm.environment.set('loginIdentity', pm.environment.get('registerEmail')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"password\": \"{{loginPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Logs in with {{loginIdentity}}/{{loginPassword}} and stores accessToken, refreshToken, and currentUserId into the active Postman environment."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.tokens) {",
+                  "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                  "}",
+                  "if (json?.success && json?.data?.user?.id) {",
+                  "  pm.environment.set('currentUserId', json.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login OTP - Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login/request-otp",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"password\": \"{{loginPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Requests OTP for password-verified login."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login OTP - Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login/verify-otp",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"otpCode\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.tokens) {",
+                  "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                  "}",
+                  "if (json?.success && json?.data?.user?.id) {",
+                  "  pm.environment.set('currentUserId', json.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/refresh",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Refreshes the current token pair and overwrites accessToken/refreshToken in the active Postman environment."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.tokens) {",
+                  "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                  "}",
+                  "if (json?.success && json?.data?.user?.id) {",
+                  "  pm.environment.set('currentUserId', json.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.tokens) {",
+                  "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                  "}",
+                  "if (json?.success && json?.data?.user?.id) {",
+                  "  pm.environment.set('currentUserId', json.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/sessions"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "const current = json?.success ? (json.data.find((session) => session.isCurrent) || json.data.find((session) => session.sessionId)) : null;",
+                  "const history = json?.success ? (json.data.find((session) => Boolean(session.revokedAt) || Boolean(session.expiredAt)) || null) : null;",
+                  "if (current?.sessionId) { pm.environment.set('sessionId', current.sessionId); }",
+                  "if (history?.sessionId) { pm.environment.set('historySessionId', history.sessionId); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Revoke Session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/auth/sessions/{{sessionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.currentSessionRevoked) {",
+                  "  pm.environment.set('accessToken', '');",
+                  "  pm.environment.set('refreshToken', '');",
+                  "  pm.environment.set('sessionId', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dismiss Session History",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/auth/sessions/{{historySessionId}}/history",
+            "description": "Dismisses a revoked or expired session from history. Run List Sessions first to auto-populate historySessionId."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success) {",
+                  "  pm.environment.set('historySessionId', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/logout",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.loggedOut) {",
+                  "  pm.environment.set('accessToken', '');",
+                  "  pm.environment.set('refreshToken', '');",
+                  "  pm.environment.set('sessionId', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout All",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/logout-all"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.currentSessionRevoked) {",
+                  "  pm.environment.set('accessToken', '');",
+                  "  pm.environment.set('refreshToken', '');",
+                  "  pm.environment.set('sessionId', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forgot Password OTP - Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/password/forgot/request",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{loginIdentity}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forgot Password OTP - Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/password/forgot/confirm",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"otpCode\": \"{{otpCode}}\",\n  \"newPassword\": \"{{newPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Confirms forgot-password OTP and rotates account password."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success) {",
+                  "  pm.environment.set('loginPassword', pm.environment.get('newPassword'));",
+                  "  pm.environment.set('accessToken', '');",
+                  "  pm.environment.set('refreshToken', '');",
+                  "  pm.environment.set('sessionId', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change Password OTP - Request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/password/change/request-otp"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/password/change",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{loginPassword}}\",\n  \"newPassword\": \"{{newPassword}}\",\n  \"otpCode\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success) {",
+                  "  pm.environment.set('loginPassword', pm.environment.get('newPassword'));",
+                  "  if (json?.data?.currentSessionRevoked) {",
+                  "    pm.environment.set('accessToken', '');",
+                  "    pm.environment.set('refreshToken', '');",
+                  "    pm.environment.set('sessionId', '');",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Account Deactivate OTP - Request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/account/deactivate/request-otp",
+            "description": "Requests OTP to deactivate the currently authenticated account."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Account Deactivate - Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/account/deactivate/confirm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"otpCode\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Confirms OTP and deactivates current account. Current access/refresh tokens are cleared."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success) {",
+                  "  pm.environment.set('accessToken', '');",
+                  "  pm.environment.set('refreshToken', '');",
+                  "  pm.environment.set('sessionId', '');",
+                  "  pm.environment.set('historySessionId', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Account Reactivate OTP - Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/account/reactivate/request-otp",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"password\": \"{{loginPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Requests OTP to reactivate a deactivated account."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Account Reactivate - Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Device-Id",
+                "value": "{{deviceId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-App-Variant",
+                "value": "{{appVariant}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/account/reactivate/confirm",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"password\": \"{{loginPassword}}\",\n  \"otpCode\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Confirms OTP, reactivates account, and stores new accessToken/refreshToken."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.tokens) {",
+                  "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                  "}",
+                  "if (json?.success && json?.data?.user?.id) {",
+                  "  pm.environment.set('currentUserId', json.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Account Delete OTP - Request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/account/delete/request-otp",
+            "description": "Requests OTP to permanently delete current account (requires active session)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Account Delete - Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/account/delete/confirm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{loginPassword}}\",\n  \"otpCode\": \"{{otpCode}}\",\n  \"acceptTerms\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Permanently deletes account after password + OTP check. Clears current tokens."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success) {",
+                  "  pm.environment.set('accessToken', '');",
+                  "  pm.environment.set('refreshToken', '');",
+                  "  pm.environment.set('sessionId', '');",
+                  "  pm.environment.set('historySessionId', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Auth Lifecycle - Guided Run",
+          "description": "Run this folder in order to validate full lifecycle: ACTIVE -> DEACTIVATED -> ACTIVE -> DELETED. Prerequisites: loginIdentity/loginPassword point to an existing ACTIVE user, and otpCode is updated before each confirm step.",
+          "item": [
+            {
+              "name": "00. Login Baseline (ACTIVE)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "X-Device-Id",
+                    "value": "{{deviceId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "X-App-Variant",
+                    "value": "{{appVariant}}",
+                    "type": "text"
+                  }
+                ],
+                "url": "{{baseUrl}}/auth/login",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"password\": \"{{loginPassword}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success && json?.data?.tokens) {",
+                      "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                      "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                      "}",
+                      "if (json?.success && json?.data?.user?.id) {",
+                      "  pm.environment.set('currentUserId', json.data.user.id);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "01. Deactivate OTP - Request",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{baseUrl}}/auth/account/deactivate/request-otp"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "02. Deactivate - Confirm",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": "{{baseUrl}}/auth/account/deactivate/confirm",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"otpCode\": \"{{otpCode}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success) {",
+                      "  pm.environment.set('accessToken', '');",
+                      "  pm.environment.set('refreshToken', '');",
+                      "  pm.environment.set('sessionId', '');",
+                      "  pm.environment.set('historySessionId', '');",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "03. Reactivate OTP - Request",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "X-Device-Id",
+                    "value": "{{deviceId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "X-App-Variant",
+                    "value": "{{appVariant}}",
+                    "type": "text"
+                  }
+                ],
+                "url": "{{baseUrl}}/auth/account/reactivate/request-otp",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"password\": \"{{loginPassword}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "04. Reactivate - Confirm",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "X-Device-Id",
+                    "value": "{{deviceId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "X-App-Variant",
+                    "value": "{{appVariant}}",
+                    "type": "text"
+                  }
+                ],
+                "url": "{{baseUrl}}/auth/account/reactivate/confirm",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"login\": \"{{loginIdentity}}\",\n  \"password\": \"{{loginPassword}}\",\n  \"otpCode\": \"{{otpCode}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success && json?.data?.tokens) {",
+                      "  pm.environment.set('accessToken', json.data.tokens.accessToken);",
+                      "  pm.environment.set('refreshToken', json.data.tokens.refreshToken);",
+                      "}",
+                      "if (json?.success && json?.data?.user?.id) {",
+                      "  pm.environment.set('currentUserId', json.data.user.id);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "05. Delete OTP - Request",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{baseUrl}}/auth/account/delete/request-otp"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "06. Delete - Confirm",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": "{{baseUrl}}/auth/account/delete/confirm",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"currentPassword\": \"{{loginPassword}}\",\n  \"otpCode\": \"{{otpCode}}\",\n  \"acceptTerms\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success) {",
+                      "  pm.environment.set('accessToken', '');",
+                      "  pm.environment.set('refreshToken', '');",
+                      "  pm.environment.set('sessionId', '');",
+                      "  pm.environment.set('historySessionId', '');",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Flow - Friends & Discovery (Recommended Order)",
+          "description": "Run requests in numeric order. Optional steps (03/06/09) depend on current relationship state and may return 4xx when not applicable.",
+          "item": [
+            {
+              "name": "Flow 01 - Get Me (bootstrap)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/users/me"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 02 - Discover Users (Friend Mode)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/users/discover?mode=friend&limit=20&q={{discoverKeyword}}"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success && Array.isArray(json.data)) {",
+                      "  const requestTarget = json.data.find((item) => item?.canSendFriendRequest === true);",
+                      "  const incoming = json.data.find((item) => item?.relationState === 'INCOMING_REQUEST');",
+                      "  if (requestTarget?.userId) { pm.environment.set('friendUserId', requestTarget.userId); }",
+                      "  if (incoming?.userId) { pm.environment.set('friendRequestUserId', incoming.userId); }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 03 - Send Friend Request (optional)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{baseUrl}}/users/me/friends/{{friendUserId}}/request"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('request handled', function () { pm.expect([200,201,400,403,404,409]).to.include(pm.response.code); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 04 - List Outgoing Friend Requests",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/users/me/friend-requests?direction=OUTGOING&limit=20"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success && Array.isArray(json.data) && json.data[0]?.userId) { pm.environment.set('friendUserId', json.data[0].userId); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 05 - List Incoming Friend Requests",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/users/me/friend-requests?direction=INCOMING&limit=20"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success && Array.isArray(json.data) && json.data[0]?.userId) { pm.environment.set('friendRequestUserId', json.data[0].userId); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 06 - Accept Incoming Friend Request (optional)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{baseUrl}}/users/me/friend-requests/{{friendRequestUserId}}/accept"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request handled', function () { pm.expect([200,404]).to.include(pm.response.code); });",
+                      "if (pm.response.code < 400 && json?.success && json?.data?.userId) { pm.environment.set('friendUserId', json.data.userId); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 07 - List My Friends",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/users/me/friends?limit=20"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                      "if (json?.success && Array.isArray(json.data) && json.data[0]?.userId) { pm.environment.set('friendUserId', json.data[0].userId); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 08 - Discover Users (Chat Mode)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/users/discover?mode=chat&limit=20&q={{discoverKeyword}}"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 09 - Remove Friend (optional cleanup)",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{baseUrl}}/users/me/friends/{{friendUserId}}"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('request handled', function () { pm.expect([200,404]).to.include(pm.response.code); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Flow 10 - Discover Users (Chat Mode, After Cleanup)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/users/discover?mode=chat&limit=20&q={{discoverKeyword}}"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Me",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/users/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Admin Postman Updated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Me Avatar",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/users/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avatarKey\": \"{{avatarKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload avatar first with `uploadTarget=AVATAR`.\nIf `uploadEntityId` is blank, Postman will auto-use `currentUserId` when available.\nUpload responses automatically save the returned key into `avatarKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Current Avatar From Library",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/users/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avatarKey\": \"{{avatarLibraryKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use an older uploaded avatar from the avatar library as the current profile avatar.\nRun `Uploads > List Avatar Uploads` first so Postman can populate `avatarLibraryKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);",
+                  "if (currentAvatarKey) { pm.environment.set('avatarKey', currentAvatarKey); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove My Avatar",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/avatar",
+            "description": "Removes only the current avatar reference from the user profile. Uploaded avatar files remain in the avatar library and can be reused later."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('currentUserId', json.data.id); }",
+                  "const currentAvatarKey = json?.success && json?.data?.avatarAsset?.key ? json.data.avatarAsset.key : '';",
+                  "pm.environment.set('currentAvatarKey', currentAvatarKey);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Presence",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/presence"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Push Devices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/push-devices"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register My Push Device",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/push-devices",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"provider\": \"WEB\",\n  \"platform\": \"chrome\",\n  \"pushToken\": \"web-token-demo-{{deviceId}}\",\n  \"appVariant\": \"{{appVariant}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete My Push Device",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/push-devices/{{deviceId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Discover Users (All)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/discover?mode=all&limit=20&q={{discoverKeyword}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data)) {",
+                  "  const friendCandidate = json.data.find((item) => item?.canSendFriendRequest === true);",
+                  "  if (friendCandidate?.userId) { pm.environment.set('friendUserId', friendCandidate.userId); }",
+                  "  const incomingRequester = json.data.find((item) => item?.relationState === 'INCOMING_REQUEST');",
+                  "  if (incomingRequester?.userId) { pm.environment.set('friendRequestUserId', incomingRequester.userId); }",
+                  "  const anyUser = json.data[0];",
+                  "  if (anyUser?.userId) { pm.environment.set('userId', anyUser.userId); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Discover Users (Chat Mode)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/discover?mode=chat&limit=20&q={{discoverKeyword}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.userId) {",
+                  "  pm.environment.set('userId', json.data[0].userId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Discover Users (Friend Mode)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/discover?mode=friend&limit=20&q={{discoverKeyword}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data)) {",
+                  "  const preferred = json.data.find((item) => item?.canSendFriendRequest === true) ?? json.data[0];",
+                  "  if (preferred?.userId) { pm.environment.set('friendUserId', preferred.userId); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Friend Request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friends/{{friendUserId}}/request"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.userId) { pm.environment.set('friendUserId', json.data.userId); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Incoming Friend Requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friend-requests?direction=INCOMING&limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.userId) {",
+                  "  pm.environment.set('friendRequestUserId', json.data[0].userId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Accept Incoming Friend Request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friend-requests/{{friendRequestUserId}}/accept"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.userId) { pm.environment.set('friendUserId', json.data.userId); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject Incoming Friend Request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friend-requests/{{friendRequestUserId}}/reject"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Outgoing Friend Requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friend-requests?direction=OUTGOING&limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.userId) {",
+                  "  pm.environment.set('friendUserId', json.data[0].userId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel Outgoing Friend Request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friend-requests/{{friendUserId}}/cancel"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Friends",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friends?limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.userId) {",
+                  "  pm.environment.set('friendUserId', json.data[0].userId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Contact Alias",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/contacts/{{friendUserId}}/alias",
+            "description": "Stores a private alias for a friend or existing DM counterpart. FE should render `displayName` from API payloads instead of recomputing it locally.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alias\": \"Postman Alias {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clear Contact Alias",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/contacts/{{friendUserId}}/alias",
+            "description": "Removes the private alias so API payloads fall back to the target full name in `displayName`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove Friend",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/me/friends/{{friendUserId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users?limit=20&locationCode={{locationCode}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "const nextUser = json?.success ? json.data.find((user) => user.id !== pm.environment.get('currentUserId')) : null;",
+                  "if (nextUser?.id) { pm.environment.set('userId', nextUser.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create User (Admin/Province Officer)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Ward Officer Postman {{$timestamp}}\",\n  \"email\": \"ward.officer+{{$timestamp}}@smartcity.local\",\n  \"password\": \"Ums@2026Secure1\",\n  \"role\": \"WARD_OFFICER\",\n  \"locationCode\": \"{{locationCode}}\",\n  \"unit\": \"Ward Office\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) {",
+                  "  pm.environment.set('officerUserId', json.data.id);",
+                  "  pm.environment.set('userId', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get User By Id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{userId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get User Presence By Id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{userId}}/presence"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update User Status",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{userId}}/status",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Groups",
+      "item": [
+        {
+          "name": "Create Group",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupName\": \"Postman Group {{$timestamp}}\",\n  \"groupType\": \"TOPIC\",\n  \"locationCode\": \"{{locationCode}}\",\n  \"description\": \"Group created from Postman collection\",\n  \"isOfficial\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('groupId', json?.success && json?.data?.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Groups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups?limit=20&locationCode={{locationCode}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Group",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Group",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}",
+            "description": "Only the current OWNER can rename a group by changing `groupName`. Other editable metadata still follows the standard group-management rules.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupName\": \"Postman Group Updated\",\n  \"description\": \"Updated from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Join Group",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/join"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Group Members",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add Group Member",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"roleInGroup\": \"MEMBER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Group Member Role",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{userId}}/role",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleInGroup\": \"DEPUTY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove Group Member",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{userId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Manage Group Member (Deprecated)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/members/{{userId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"update\",\n  \"roleInGroup\": \"MEMBER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Leave Group",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}/leave"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Group",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/groups/{{groupId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "Create Report",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman report {{$timestamp}}\",\n  \"description\": \"Infrastructure issue created from Postman\",\n  \"category\": \"INFRASTRUCTURE\",\n  \"priority\": \"MEDIUM\",\n  \"locationCode\": \"{{locationCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Report With Media",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman report with media {{$timestamp}}\",\n  \"description\": \"Infrastructure issue with uploaded media\",\n  \"category\": \"INFRASTRUCTURE\",\n  \"priority\": \"MEDIUM\",\n  \"locationCode\": \"{{locationCode}}\",\n  \"mediaKeys\": {{reportMediaKeysJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload report media first with `uploadTarget=REPORT`.\nUse `Upload Media` or `Presign Upload`; the response stores the key into `reportMediaKey` and `reportMediaKeysJson`.\nThis request sends `mediaKeys` directly from `reportMediaKeysJson`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports?limit=20&locationCode={{locationCode}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Report",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman report updated\",\n  \"description\": \"Updated by Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Report Media",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mediaKeys\": {{reportMediaKeysJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use this after uploading new report media with `uploadTarget=REPORT`.\nIf `uploadEntityId` is blank, Postman auto-resolves it from `reportId`.\nThe request body is driven by `reportMediaKeysJson`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('reportId', json.data.id); }",
+                  "if (json?.success && Array.isArray(json?.data?.mediaAssets)) {",
+                  "  const keys = json.data.mediaAssets.map((asset) => asset?.key).filter(Boolean);",
+                  "  pm.environment.set('reportMediaKeysJson', JSON.stringify(keys));",
+                  "  pm.environment.set('reportMediaKey', keys[0] || '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assign Report",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}/assign",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"officerId\": \"{{officerUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Report Status",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}/status",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IN_PROGRESS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Report Audit",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}/audit?limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Linked Report Conversations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}/conversations?limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Link Group Conversation To Report",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}/conversations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groupId\": \"{{groupId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Report",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/reports/{{reportId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Conversations",
+      "item": [
+        {
+          "name": "List Conversations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/conversations?limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Direct Message",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/direct",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUserId\": \"{{userId}}\",\n  \"clientMessageId\": \"postman-dm-{{$timestamp}}\",\n  \"type\": \"TEXT\",\n  \"content\": \"{\\\"text\\\":\\\"Xin chao tu Postman\\\",\\\"mention\\\":[]}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Direct Message With Attachment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/direct",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUserId\": \"{{userId}}\",\n  \"clientMessageId\": \"postman-dm-asset-{{$timestamp}}\",\n  \"type\": \"TEXT\",\n  \"content\": \"{\\\"text\\\":\\\"Xin chao kem attachment tu Postman\\\",\\\"mention\\\":[]}\",\n  \"attachmentKey\": \"{{messageAttachmentKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload attachment first with `uploadTarget=MESSAGE`.\nThe upload response stores the returned key into `messageAttachmentKey`.\nThis request uses `attachmentKey={{messageAttachmentKey}}`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages?limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.id) { pm.environment.set('messageId', json.data[0].id); }",
+                  "if (json?.success && Array.isArray(json.data)) {",
+                  "  const attached = json.data.find((item) => item?.attachmentAsset?.key);",
+                  "  if (attached?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', attached.attachmentAsset.key); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientMessageId\": \"postman-msg-{{$timestamp}}\",\n  \"type\": \"TEXT\",\n  \"content\": \"{\\\"text\\\":\\\"Hello from Postman group message\\\",\\\"mention\\\":[]}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Message With Attachment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientMessageId\": \"postman-msg-asset-{{$timestamp}}\",\n  \"type\": \"TEXT\",\n  \"content\": \"{\\\"text\\\":\\\"Hello from Postman with attachment\\\",\\\"mention\\\":[]}\",\n  \"attachmentKey\": \"{{messageAttachmentKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Upload attachment first with `uploadTarget=MESSAGE`.\nIf `uploadEntityId` is blank, Postman auto-resolves it from `conversationId`.\nThe upload response stores the returned key into `messageAttachmentKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Message",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"{\\\"text\\\":\\\"Updated from Postman\\\",\\\"mention\\\":[]}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Message Attachment",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attachmentKey\": \"{{messageAttachmentKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Use after uploading a replacement attachment with `uploadTarget=MESSAGE`.\nThis request updates only the attachment field via `attachmentKey`.\nThe latest message attachment key is stored in `messageAttachmentKey`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.conversationId) { pm.environment.set('conversationId', json.data.conversationId); }",
+                  "if (json?.success && json?.data?.id) { pm.environment.set('messageId', json.data.id); }",
+                  "if (json?.success && json?.data?.attachmentAsset?.key) { pm.environment.set('messageAttachmentKey', json.data.attachmentAsset.key); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recall Message",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}/recall",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"{{recallScope}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Primary end-user chat action for removing a message.\nUse `EVERYONE` to keep a recalled placeholder in the thread for all participants.\nUse `SELF` to hide the message only from the current actor view."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forward Message",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}/forward",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationIds\": {{forwardConversationIdsJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Forward the selected message into one or more target conversations.\nSet `forwardConversationIdsJson` to a JSON array of route-safe ids such as `[\"group:{{groupId}}\"]` or `[\"dm:{{userId}}\"]`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.conversationId) { pm.environment.set('conversationId', json.data[0].conversationId); }",
+                  "if (json?.success && Array.isArray(json.data) && json.data[0]?.id) { pm.environment.set('messageId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Message (Admin Only)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/messages/{{messageId}}",
+            "description": "Permanent delete for moderation/admin tooling only.\nNormal chat UX should use `Recall Message` instead.\nA non-admin token should receive `403` here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('admin delete succeeded or non-admin was correctly rejected', function () {",
+                  "  pm.expect(pm.response.code < 400 || pm.response.code === 403).to.equal(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mark Conversation As Read",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/read"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Conversation Preferences",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/preferences",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"archived\": false,\n  \"isPinned\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Conversation Audit",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}/audit?limit=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Conversation For Me",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/conversations/{{conversationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Maintenance",
+      "item": [
+        {
+          "name": "Retention Preview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/maintenance/retention/preview"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retention Purge",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/maintenance/retention/purge"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chat Reconciliation Preview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/maintenance/chat-reconciliation/preview"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chat Reconciliation Repair",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/maintenance/chat-reconciliation/repair"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Uploads",
+      "item": [
+        {
+          "name": "Get Upload Limits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/limits"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Avatar Uploads",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/media?target=AVATAR&limit=20&cursor={{uploadListCursor}}",
+            "description": "Lists avatar files uploaded by the current user.\nThe test script stores `currentAvatarKey` from the `isInUse` item and stores a reusable `avatarLibraryKey` from the first non-in-use item when available."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "const items = json?.success && Array.isArray(json.data) ? json.data : [];",
+                  "const currentItem = items.find((item) => item?.isInUse && item?.key);",
+                  "const reusableItem = items.find((item) => !item?.isInUse && item?.key) || currentItem;",
+                  "pm.environment.set('currentAvatarKey', currentItem?.key || '');",
+                  "pm.environment.set('avatarLibraryKey', reusableItem?.key || '');",
+                  "pm.environment.set('uploadListCursor', json?.success && json?.meta?.nextCursor ? json.meta.nextCursor : '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Avatar Upload From Library",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/media",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"AVATAR\",\n  \"key\": \"{{avatarLibraryKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Deletes an avatar file from the upload library.\nThis succeeds only when the selected file is not the current avatar in use."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && pm.environment.get('avatarLibraryKey') === pm.environment.get('avatarKey')) { pm.environment.set('avatarKey', ''); }",
+                  "pm.environment.set('avatarLibraryKey', '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Presign Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/presign/upload",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{resolvedUploadTarget}}\",\n  \"entityId\": \"{{resolvedUploadEntityId}}\",\n  \"fileName\": \"{{uploadFileName}}\",\n  \"contentType\": \"{{uploadContentType}}\",\n  \"size\": {{uploadFileSize}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Controls: `uploadTarget`, `uploadEntityId`, `uploadFileName`, `uploadContentType`, `uploadFileSize`.\nAuto-resolves `entityId` from `currentUserId` / `conversationId` / `reportId` when `uploadEntityId` is blank.\nOn success, Postman stores `uploadKey` and the target-specific key variable (`avatarKey`, `messageAttachmentKey`, or `reportMediaKey`)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.key) {",
+                  "  const key = json.data.key;",
+                  "  const target = String(json.data.target || pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
+                  "  pm.environment.set('uploadKey', key);",
+                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); pm.environment.set('avatarLibraryKey', key); }",
+                  "  if (target === 'MESSAGE') { pm.environment.set('messageAttachmentKey', key); }",
+                  "  if (target === 'REPORT') {",
+                  "    pm.environment.set('reportMediaKey', key);",
+                  "    pm.environment.set('reportMediaKeysJson', JSON.stringify([key]));",
+                  "  }",
+                  "}",
+                  "if (json?.success && json?.data?.url) { pm.environment.set('presignedUploadUrl', json.data.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Presign Download",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/presign/download",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{resolvedUploadTarget}}\",\n  \"entityId\": \"{{resolvedUploadEntityId}}\",\n  \"key\": \"{{resolvedUploadKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reads `resolvedUploadKey` from `uploadKey` by default.\nIf `uploadKey` is blank, Postman falls back to `avatarKey`, `messageAttachmentKey`, or `reportMediaKey` based on `uploadTarget`.\nThe signed URL is saved into `presignedDownloadUrl`."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.url) { pm.environment.set('presignedDownloadUrl', json.data.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload Media",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/media",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "target",
+                  "value": "{{resolvedUploadTarget}}",
+                  "type": "text"
+                },
+                {
+                  "key": "entityId",
+                  "value": "{{resolvedUploadEntityId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "description": "Multipart upload helper for quick manual testing.\nAuto-resolves `entityId` from `currentUserId` / `conversationId` / `reportId` when `uploadEntityId` is blank.\nOn success, Postman stores `uploadKey`, the target-specific key variable, and `uploadedAssetUrl`."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success && json?.data?.key) {",
+                  "  const key = json.data.key;",
+                  "  const target = String(json.data.target || pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
+                  "  pm.environment.set('uploadKey', key);",
+                  "  if (target === 'AVATAR') { pm.environment.set('avatarKey', key); pm.environment.set('avatarLibraryKey', key); }",
+                  "  if (target === 'MESSAGE') { pm.environment.set('messageAttachmentKey', key); }",
+                  "  if (target === 'REPORT') {",
+                  "    pm.environment.set('reportMediaKey', key);",
+                  "    pm.environment.set('reportMediaKeysJson', JSON.stringify([key]));",
+                  "  }",
+                  "}",
+                  "if (json?.success && json?.data?.url) { pm.environment.set('uploadedAssetUrl', json.data.url); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Upload",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/uploads/media",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"{{resolvedUploadTarget}}\",\n  \"entityId\": \"{{resolvedUploadEntityId}}\",\n  \"key\": \"{{resolvedUploadKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Deletes the currently selected upload key for the chosen target.\nWhen `uploadKey` is blank, Postman falls back to the target-specific key variable.\nSuccessful deletion clears the matching stored key from the environment."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = String(pm.environment.get('uploadTarget') || 'GENERAL').toUpperCase();",
+                  "let entityId = String(pm.environment.get('uploadEntityId') || '').trim();",
+                  "if (!entityId) {",
+                  "  if (target === 'AVATAR') { entityId = String(pm.environment.get('currentUserId') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { entityId = String(pm.environment.get('conversationId') || '').trim(); }",
+                  "  if (target === 'REPORT') { entityId = String(pm.environment.get('reportId') || '').trim(); }",
+                  "}",
+                  "let key = String(pm.environment.get('uploadKey') || '').trim();",
+                  "if (!key) {",
+                  "  if (target === 'AVATAR') { key = String(pm.environment.get('avatarKey') || pm.environment.get('avatarLibraryKey') || '').trim(); }",
+                  "  if (target === 'MESSAGE') { key = String(pm.environment.get('messageAttachmentKey') || '').trim(); }",
+                  "  if (target === 'REPORT') { key = String(pm.environment.get('reportMediaKey') || '').trim(); }",
+                  "}",
+                  "pm.variables.set('resolvedUploadTarget', target);",
+                  "pm.variables.set('resolvedUploadEntityId', entityId);",
+                  "pm.variables.set('resolvedUploadKey', key);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.headers.get('content-type')?.includes('application/json') ? pm.response.json() : null;",
+                  "pm.test('request succeeded', function () { pm.expect(pm.response.code).to.be.below(400); });",
+                  "if (json?.success) {",
+                  "  const target = String(pm.variables.get('resolvedUploadTarget') || pm.environment.get('uploadTarget') || '').toUpperCase();",
+                  "  const key = String(pm.variables.get('resolvedUploadKey') || '').trim();",
+                  "  if (pm.environment.get('uploadKey') === key) { pm.environment.set('uploadKey', ''); }",
+                  "  if (target === 'AVATAR' && pm.environment.get('avatarKey') === key) { pm.environment.set('avatarKey', ''); }",
+                  "  if (target === 'AVATAR' && pm.environment.get('avatarLibraryKey') === key) { pm.environment.set('avatarLibraryKey', ''); }",
+                  "  if (target === 'MESSAGE' && pm.environment.get('messageAttachmentKey') === key) { pm.environment.set('messageAttachmentKey', ''); }",
+                  "  if (target === 'REPORT' && pm.environment.get('reportMediaKey') === key) {",
+                  "    pm.environment.set('reportMediaKey', '');",
+                  "    pm.environment.set('reportMediaKeysJson', '[]');",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

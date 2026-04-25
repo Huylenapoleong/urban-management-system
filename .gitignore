@@ -1,0 +1,27 @@
+node_modules/
+.pnpm-store/
+
+# Workspace caches
+.cache/
+.turbo/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local root artifacts
+/api-log.txt
+/chatbot-response.txt
+
+# OS and IDE
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+
+# Local AI/assistant workspace files
+/.claude/
+/.gitnexus/
+AGENTS.md
+CLAUDE.md

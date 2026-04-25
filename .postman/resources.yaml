@@ -1,0 +1,9 @@
+# Use this workspace to collaborate
+workspace:
+  id: d3693ff5-08e2-408a-80a9-989452f23075
+
+localResources:
+  collections:
+    - ..\apps\api\docs\postman\urban-management-api.postman_collection.json
+  environments:
+    - ..\apps\api\docs\postman\urban-management-api.postman_environment.json
