@@ -1,3 +1,4 @@
+import type { OtpPurpose, SessionScope } from '@urban/shared-constants';
 import type {
   AuditEventItem,
   ConversationSummary,
@@ -12,8 +13,6 @@ import type {
   ReportItem,
   UserProfile,
 } from '@urban/shared-types';
-import type { SessionScope } from '@urban/shared-constants';
-import type { OtpPurpose } from '@urban/shared-constants';
 
 export type StorageEntityType =
   | 'USER_PROFILE'
