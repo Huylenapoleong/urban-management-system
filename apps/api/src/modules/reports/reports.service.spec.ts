@@ -23,6 +23,9 @@ describe('ReportsService', () => {
     canTransitionReport: jest.fn(),
     canUpdateOwnReport: jest.fn(),
   };
+  const locationsService = {
+    ensureKnownLocationCode: jest.fn((value: string) => value),
+  };
   const usersService = {
     getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
@@ -105,6 +108,7 @@ describe('ReportsService', () => {
     service = new ReportsService(
       repository as never,
       authorizationService as never,
+      locationsService as never,
       usersService as never,
       groupsService as never,
       auditTrailService as never,

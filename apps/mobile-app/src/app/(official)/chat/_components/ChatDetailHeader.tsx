@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, TouchableOpacity } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { LinearGradient } from '@/components/shared/SafeLinearGradient';
 import { Appbar, Avatar } from 'react-native-paper';
 import { Skeleton } from '@/components/skeleton/Skeleton';
 
@@ -37,17 +39,34 @@ export function ChatDetailHeader({
   return (
     <Appbar.Header
       style={{
-        backgroundColor: colors.surface,
-        borderBottomWidth: 0.5,
-        borderColor: colors.border,
+        backgroundColor: colors.header || colors.secondary || colors.primary,
+        borderBottomWidth: 0,
         elevation: 0,
+        shadowOpacity: 0,
       }}
     >
-      <Appbar.BackAction onPress={onBack} color={colors.primary} />
+      <LinearGradient
+        pointerEvents="none"
+        colors={colors.gradient?.primary || [colors.primary, colors.secondary || colors.primary]}
+        start={colors.gradient?.start || { x: 0, y: 0 }}
+        end={colors.gradient?.end || { x: 1, y: 1 }}
+        style={styles.headerGradient}
+      />
+      <Appbar.BackAction
+        onPress={onBack}
+        color={colors.headerIcon || colors.textOnPrimary}
+        style={styles.headerBackButton}
+      />
       <View style={styles.headerAvatarWrap}>
         <TouchableOpacity onPress={onUpdateAvatar} disabled={!onUpdateAvatar || isUpdatingAvatar}>
           {headerAvatarUrl ? (
-            <Avatar.Image size={40} source={{ uri: headerAvatarUrl }} style={styles.headerAvatarImage} />
+            <ExpoImage
+              source={{ uri: headerAvatarUrl }}
+              style={styles.headerAvatarImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={0}
+            />
           ) : (
             <Avatar.Icon
               size={40}
@@ -65,9 +84,21 @@ export function ChatDetailHeader({
       </View>
       <Appbar.Content
         title={conversationDisplayName}
-        titleStyle={{ fontSize: 18, fontWeight: '800', color: colors.primary }}
+        titleStyle={{
+          fontSize: 16,
+          fontWeight: '700',
+          lineHeight: 20,
+          letterSpacing: 0,
+          color: colors.headerText || colors.textOnPrimary,
+        }}
         subtitle={subtitleText}
-        subtitleStyle={{ fontSize: 12, color: colors.mutedOnSurface, fontWeight: '600' }}
+        subtitleStyle={{
+          fontSize: 12,
+          fontWeight: '500',
+          lineHeight: 16,
+          letterSpacing: 0,
+          color: colors.mutedHeaderText || colors.mutedTextOnPrimary,
+        }}
       />
       <Appbar.Action
         icon="phone"
@@ -81,7 +112,9 @@ export function ChatDetailHeader({
         iconColor={colors.callAction}
         style={styles.callActionButton}
       />
-      <Appbar.Action icon="information" onPress={onOpenInfo} color={colors.primary} />
+      <Appbar.Action icon="information" onPress={onOpenInfo} color={colors.headerIcon || colors.textOnPrimary} />
     </Appbar.Header>
   );
 }
+
+export default ChatDetailHeader;

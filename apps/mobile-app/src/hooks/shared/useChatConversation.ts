@@ -1,31 +1,30 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { socketClient } from '../../lib/socket-client';
-import { ApiClient } from '../../lib/api-client';
-import { uploadMedia } from '../../services/api/upload.api';
-import { CHAT_SOCKET_EVENTS } from '@urban/shared-constants';
-import { queryKeys } from '@/services/query-keys';
-import { useSkeletonQuery } from '@/components/skeleton/Skeleton';
+import { useSkeletonQuery } from "@/components/skeleton/Skeleton";
+import { queryKeys } from "@/services/query-keys";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type {
-  MessageItem,
-  ChatMessageCreatedEvent,
-  ChatTypingStateEvent,
-  ChatPresenceSnapshotEvent,
-  ChatPresenceUpdatedEvent,
-  ChatPresenceState,
   ChatMessageAccepted,
-  ChatMessageUpdatedEvent,
+  ChatMessageCreatedEvent,
   ChatMessageDeletedEvent,
-  ChatMessageDeletedAccepted,
   ChatMessageUpdatedAccepted,
+  ChatMessageUpdatedEvent,
+  ChatPresenceSnapshotEvent,
+  ChatPresenceState,
+  ChatPresenceUpdatedEvent,
+  ChatTypingStateEvent,
+  MessageItem,
   RecallMessageResult,
-} from '@urban/shared-types';
+} from "@urban/shared-types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiClient } from "../../lib/api-client";
+import { socketClient } from "../../lib/socket-client";
+import { uploadMedia } from "../../services/api/upload.api";
 
 const PRESENCE_OFFLINE_GRACE_MS = 120000;
 const INITIAL_MESSAGES_LIMIT = 7;
 const OLDER_MESSAGES_BATCH_LIMIT = 7;
-const RECALL_FALLBACK_TEXT = 'Tin nhắn đã bị thu hồi';
-const QUICK_REACTION_EMOJIS = new Set(['👍', '❤️', '😂', '😮', '😢', '😡']);
+const RECALL_FALLBACK_TEXT = "Tin nhắn đã bị thu hồi";
+const QUICK_REACTION_EMOJIS = new Set(["👍", "❤️", "😂", "😮", "😢", "😡"]);
 
 type UseChatConversationOptions = {
   onConversationAccessDenied?: (payload: {
@@ -48,20 +47,20 @@ export type ChatMessageViewModel = {
 } & Record<string, any>;
 
 const parseMessageContent = (raw: unknown): string => {
-  if (typeof raw !== 'string' || !raw.trim()) {
-    return '';
+  if (typeof raw !== "string" || !raw.trim()) {
+    return "";
   }
 
   const normalizedRaw = raw.trim();
-  if (normalizedRaw.startsWith('{') || normalizedRaw.startsWith('[')) {
+  if (normalizedRaw.startsWith("{") || normalizedRaw.startsWith("[")) {
     try {
       const parsed = JSON.parse(normalizedRaw);
       const candidate =
-        typeof parsed?.text === 'string'
+        typeof parsed?.text === "string"
           ? parsed.text
-          : typeof parsed?.content === 'string'
+          : typeof parsed?.content === "string"
             ? parsed.content
-            : '';
+            : "";
 
       if (candidate) {
         if (/^message was recalled\.?$/i.test(candidate.trim())) {
@@ -81,19 +80,24 @@ const parseMessageContent = (raw: unknown): string => {
   return raw;
 };
 
-const parseReactionPayload = (item: any): { emoji: string; targetMessageId: string } | null => {
-  if (!item || item.type !== 'TEXT' || item.deletedAt || item.recalledAt) {
+const parseReactionPayload = (
+  item: any,
+): { emoji: string; targetMessageId: string } | null => {
+  if (!item || item.type !== "TEXT" || item.deletedAt || item.recalledAt) {
     return null;
   }
 
-  const rawContent = typeof item.content === 'string' ? item.content.trim() : '';
-  const replyTarget = typeof item.replyTo === 'string' ? item.replyTo : undefined;
+  const rawContent =
+    typeof item.content === "string" ? item.content.trim() : "";
+  const replyTarget =
+    typeof item.replyTo === "string" ? item.replyTo : undefined;
 
   try {
     const parsed = JSON.parse(rawContent);
-    if (parsed?.kind === 'REACTION' && typeof parsed?.emoji === 'string') {
+    if (parsed?.kind === "REACTION" && typeof parsed?.emoji === "string") {
       const targetMessageId =
-        typeof parsed?.targetMessageId === 'string' && parsed.targetMessageId.trim()
+        typeof parsed?.targetMessageId === "string" &&
+        parsed.targetMessageId.trim()
           ? parsed.targetMessageId.trim()
           : replyTarget;
 
@@ -122,71 +126,117 @@ export const useChatConversation = (
   options?: UseChatConversationOptions,
 ) => {
   const queryClient = useQueryClient();
-  const messagesQueryKey = useMemo(() => queryKeys.messages(conversationId), [conversationId]);
+  const messagesQueryKey = useMemo(
+    () => queryKeys.messages(conversationId),
+    [conversationId],
+  );
+  const cachedInitialMessages =
+    queryClient.getQueryData<any[]>(messagesQueryKey);
+  const hasInitialMessagesCache = Array.isArray(cachedInitialMessages);
 
   const looksLikeRecallText = useCallback((value: unknown) => {
-    if (typeof value !== 'string') {
+    if (typeof value !== "string") {
       return false;
     }
 
     const normalized = value.trim().toLowerCase();
-    return normalized === 'message was recalled.' || normalized === 'message was recalled' || normalized === RECALL_FALLBACK_TEXT.toLowerCase();
-  }, [RECALL_FALLBACK_TEXT]);
+    return (
+      normalized === "message was recalled." ||
+      normalized === "message was recalled" ||
+      normalized === RECALL_FALLBACK_TEXT.toLowerCase()
+    );
+  }, []);
 
-  const normalizeRecalledMessage = useCallback((incoming: any, previous?: any) => {
-    if (!incoming || typeof incoming !== 'object') {
-      return incoming;
-    }
+  const normalizeRecalledMessage = useCallback(
+    (incoming: any, previous?: any) => {
+      if (!incoming || typeof incoming !== "object") {
+        return incoming;
+      }
 
-    const incomingContent = typeof incoming.content === 'string' ? incoming.content : '';
-    const previousContent = typeof previous?.content === 'string' ? previous.content : '';
-    const wasAlreadyRecalled = Boolean(previous?.deletedAt || previous?.recalledAt || looksLikeRecallText(previousContent));
-    const isIncomingRecalled = Boolean(incoming.deletedAt || incoming.recalledAt || looksLikeRecallText(incomingContent));
+      const incomingContent =
+        typeof incoming.content === "string" ? incoming.content : "";
+      const previousContent =
+        typeof previous?.content === "string" ? previous.content : "";
+      const wasAlreadyRecalled = Boolean(
+        previous?.deletedAt ||
+        previous?.recalledAt ||
+        looksLikeRecallText(previousContent),
+      );
+      const isIncomingRecalled = Boolean(
+        incoming.deletedAt ||
+        incoming.recalledAt ||
+        looksLikeRecallText(incomingContent),
+      );
 
-    const shouldForceRecall = isIncomingRecalled || wasAlreadyRecalled;
+      const shouldForceRecall = isIncomingRecalled || wasAlreadyRecalled;
 
-    if (!shouldForceRecall) {
+      if (!shouldForceRecall) {
+        return {
+          ...previous,
+          ...incoming,
+        };
+      }
+
+      const occurredAt =
+        incoming.recalledAt ||
+        incoming.deletedAt ||
+        previous?.recalledAt ||
+        previous?.deletedAt ||
+        incoming.updatedAt ||
+        new Date().toISOString();
+      const resolvedContent =
+        incomingContent.trim() ||
+        previousContent.trim() ||
+        RECALL_FALLBACK_TEXT;
+
       return {
         ...previous,
         ...incoming,
+        deletedAt: incoming.deletedAt || previous?.deletedAt || occurredAt,
+        recalledAt: incoming.recalledAt || previous?.recalledAt || occurredAt,
+        content: resolvedContent,
       };
-    }
+    },
+    [looksLikeRecallText],
+  );
 
-    const occurredAt = incoming.recalledAt || incoming.deletedAt || previous?.recalledAt || previous?.deletedAt || incoming.updatedAt || new Date().toISOString();
-    const resolvedContent = incomingContent.trim() || previousContent.trim() || RECALL_FALLBACK_TEXT;
+  const logRecallDebug = useCallback(
+    (stage: string, payload: Record<string, unknown>) => {
+      if (!__DEV__) {
+        return;
+      }
 
-    return {
-      ...previous,
-      ...incoming,
-      deletedAt: incoming.deletedAt || previous?.deletedAt || occurredAt,
-      recalledAt: incoming.recalledAt || previous?.recalledAt || occurredAt,
-      content: resolvedContent,
-    };
-  }, [looksLikeRecallText, RECALL_FALLBACK_TEXT]);
+      try {
+        console.log("[ChatRecallDebug]", {
+          stage,
+          conversationId,
+          ...payload,
+        });
+      } catch {
+        // Keep debug logging fully safe.
+      }
+    },
+    [conversationId],
+  );
 
-  const logRecallDebug = useCallback((stage: string, payload: Record<string, unknown>) => {
-    if (!__DEV__) {
-      return;
-    }
-
-    try {
-      console.log('[ChatRecallDebug]', {
-        stage,
-        conversationId,
-        ...payload,
-      });
-    } catch {
-      // Keep debug logging fully safe.
-    }
-  }, [conversationId]);
-
-  const [messages, setMessages] = useState<any[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [messages, setMessages] = useState<any[]>(() =>
+    hasInitialMessagesCache
+      ? (cachedInitialMessages ?? []).map((message) =>
+          normalizeRecalledMessage(message),
+        )
+      : [],
+  );
+  const [isLoadingHistory, setIsLoadingHistory] = useState(
+    () => Boolean(conversationId) && !hasInitialMessagesCache,
+  );
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(true);
-  const [typingUsers, setTypingUsers] = useState<Record<string, { fullName: string; isTyping: boolean }>>({});
+  const [typingUsers, setTypingUsers] = useState<
+    Record<string, { fullName: string; isTyping: boolean }>
+  >({});
   const [presenceByUser, setPresenceByUser] = useState<Record<string, any>>({});
-    const normalizePresenceState = useCallback((presence?: ChatPresenceState): ChatPresenceState | null => {
+  const normalizePresenceState = useCallback(
+    (presence?: ChatPresenceState): ChatPresenceState | null => {
       if (!presence || !presence.userId) {
         return null;
       }
@@ -202,71 +252,92 @@ export const useChatConversation = (
         ...presence,
         lastSeenAt: presence.lastSeenAt || (presence as any).occurredAt,
       };
-    }, []);
+    },
+    [],
+  );
 
-  const mergePresenceWithGrace = useCallback((previous: any, incoming: ChatPresenceState) => {
-    const normalizedIncoming = normalizePresenceState(incoming);
-    if (!normalizedIncoming) {
-      return previous || null;
-    }
+  const mergePresenceWithGrace = useCallback(
+    (previous: any, incoming: ChatPresenceState) => {
+      const normalizedIncoming = normalizePresenceState(incoming);
+      if (!normalizedIncoming) {
+        return previous || null;
+      }
 
-    if (normalizedIncoming.isActive === true) {
+      if (normalizedIncoming.isActive === true) {
+        return {
+          ...normalizedIncoming,
+          lastSeenAt: undefined,
+          _pendingOfflineSinceMs: undefined,
+          _pendingOfflinePresence: undefined,
+        };
+      }
+
+      if (
+        normalizedIncoming.isActive === false &&
+        previous?.isActive === true
+      ) {
+        return {
+          ...previous,
+          _pendingOfflineSinceMs:
+            typeof previous?._pendingOfflineSinceMs === "number"
+              ? previous._pendingOfflineSinceMs
+              : Date.now(),
+          _pendingOfflinePresence: {
+            ...normalizedIncoming,
+            lastSeenAt:
+              normalizedIncoming.lastSeenAt ||
+              (normalizedIncoming as any).occurredAt,
+          },
+        };
+      }
+
       return {
         ...normalizedIncoming,
-        lastSeenAt: undefined,
+        lastSeenAt:
+          normalizedIncoming.lastSeenAt ||
+          (normalizedIncoming as any).occurredAt,
         _pendingOfflineSinceMs: undefined,
         _pendingOfflinePresence: undefined,
       };
-    }
+    },
+    [normalizePresenceState],
+  );
 
-    if (normalizedIncoming.isActive === false && previous?.isActive === true) {
-      return {
-        ...previous,
-        _pendingOfflineSinceMs:
-          typeof previous?._pendingOfflineSinceMs === 'number'
-            ? previous._pendingOfflineSinceMs
-            : Date.now(),
-        _pendingOfflinePresence: {
-          ...normalizedIncoming,
-          lastSeenAt: normalizedIncoming.lastSeenAt || (normalizedIncoming as any).occurredAt,
-        },
-      };
-    }
-
-    return {
-      ...normalizedIncoming,
-      lastSeenAt: normalizedIncoming.lastSeenAt || (normalizedIncoming as any).occurredAt,
-      _pendingOfflineSinceMs: undefined,
-      _pendingOfflinePresence: undefined,
-    };
-  }, [normalizePresenceState]);
-
-  const resolvePresenceWithGrace = useCallback((presence: any, nowMs = Date.now()) => {
-    if (!presence) {
-      return null;
-    }
-
-    if (
-      presence.isActive === true &&
-      typeof presence._pendingOfflineSinceMs === 'number' &&
-      nowMs - presence._pendingOfflineSinceMs >= PRESENCE_OFFLINE_GRACE_MS
-    ) {
-      const pending = normalizePresenceState(presence._pendingOfflinePresence as ChatPresenceState);
-      if (pending) {
-        return {
-          ...pending,
-          isActive: false,
-          lastSeenAt: pending.lastSeenAt || (pending as any).occurredAt,
-        };
+  const resolvePresenceWithGrace = useCallback(
+    (presence: any, nowMs = Date.now()) => {
+      if (!presence) {
+        return null;
       }
-    }
 
-    return presence;
-  }, [normalizePresenceState]);
+      if (
+        presence.isActive === true &&
+        typeof presence._pendingOfflineSinceMs === "number" &&
+        nowMs - presence._pendingOfflineSinceMs >= PRESENCE_OFFLINE_GRACE_MS
+      ) {
+        const pending = normalizePresenceState(
+          presence._pendingOfflinePresence as ChatPresenceState,
+        );
+        if (pending) {
+          return {
+            ...pending,
+            isActive: false,
+            lastSeenAt: pending.lastSeenAt || (pending as any).occurredAt,
+          };
+        }
+      }
+
+      return presence;
+    },
+    [normalizePresenceState],
+  );
 
   const conversationKeyRef = useRef<string | null>(null);
-  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const typingEmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingTimeoutsRef = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
+  const typingEmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const messagesRef = useRef<any[]>([]);
   const [isReady, setIsReady] = useState(false);
   const currentUserId = currentUser?.id || currentUser?.sub;
@@ -276,7 +347,10 @@ export const useChatConversation = (
     messagesRef.current = messages;
   }, [messages]);
 
-  const isDmConversation = useCallback((value: string) => /^dm:|^DM#/i.test(value), []);
+  const isDmConversation = useCallback(
+    (value: string) => /^dm:|^DM#/i.test(value),
+    [],
+  );
 
   const shouldRetryDmForbidden = useCallback(
     (error: unknown) => {
@@ -285,14 +359,19 @@ export const useChatConversation = (
       }
 
       const payload = error as any;
-      const statusCode = payload?.statusCode ?? payload?.status ?? payload?.error?.statusCode;
-      const code = String(payload?.code ?? payload?.error?.code ?? '').toUpperCase();
-      const message = String(payload?.message ?? payload?.error?.message ?? '').toLowerCase();
+      const statusCode =
+        payload?.statusCode ?? payload?.status ?? payload?.error?.statusCode;
+      const code = String(
+        payload?.code ?? payload?.error?.code ?? "",
+      ).toUpperCase();
+      const message = String(
+        payload?.message ?? payload?.error?.message ?? "",
+      ).toLowerCase();
 
       return (
         Number(statusCode) === 403 ||
-        code.includes('CONVERSATION_JOIN_FAILED') ||
-        message.includes('cannot access this conversation')
+        code.includes("CONVERSATION_JOIN_FAILED") ||
+        message.includes("cannot access this conversation")
       );
     },
     [conversationId, isDmConversation],
@@ -307,38 +386,47 @@ export const useChatConversation = (
     accessDeniedHandledRef.current = false;
   }, [conversationId]);
 
-  const notifyAccessDenied = useCallback((error: unknown) => {
-    if (accessDeniedHandledRef.current) {
-      return;
-    }
+  const notifyAccessDenied = useCallback(
+    (error: unknown) => {
+      if (accessDeniedHandledRef.current) {
+        return;
+      }
 
-    if (!shouldRetryDmForbidden(error)) {
-      return;
-    }
+      if (!shouldRetryDmForbidden(error)) {
+        return;
+      }
 
-    accessDeniedHandledRef.current = true;
-    optionsRef.current?.onConversationAccessDenied?.({
-      conversationId,
-      error,
-    });
-  }, [conversationId, shouldRetryDmForbidden]);
+      accessDeniedHandledRef.current = true;
+      optionsRef.current?.onConversationAccessDenied?.({
+        conversationId,
+        error,
+      });
+    },
+    [conversationId, shouldRetryDmForbidden],
+  );
 
   const wait = useCallback(async (ms: number) => {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }, []);
 
-  const updateMessageCache = useCallback((updater: (previous: any[]) => any[]) => {
-    setMessages((previous) => {
-      const next = updater(previous);
-      queryClient.setQueryData(messagesQueryKey, next);
-      return next;
-    });
-  }, [messagesQueryKey, queryClient]);
+  const updateMessageCache = useCallback(
+    (updater: (previous: any[]) => any[]) => {
+      setMessages((previous) => {
+        const next = updater(previous);
+        queryClient.setQueryData(messagesQueryKey, next);
+        return next;
+      });
+    },
+    [messagesQueryKey, queryClient],
+  );
 
-  const replaceMessageCache = useCallback((next: any[]) => {
-    queryClient.setQueryData(messagesQueryKey, next);
-    setMessages(next);
-  }, [messagesQueryKey, queryClient]);
+  const replaceMessageCache = useCallback(
+    (next: any[]) => {
+      queryClient.setQueryData(messagesQueryKey, next);
+      setMessages(next);
+    },
+    [messagesQueryKey, queryClient],
+  );
 
   const historyQuery = useQuery<any[]>({
     queryKey: messagesQueryKey,
@@ -350,7 +438,9 @@ export const useChatConversation = (
       );
 
       return Array.isArray(data)
-        ? [...data].reverse().map((message) => normalizeRecalledMessage(message))
+        ? [...data]
+            .reverse()
+            .map((message) => normalizeRecalledMessage(message))
         : [];
     },
     enabled: Boolean(conversationId),
@@ -369,7 +459,10 @@ export const useChatConversation = (
 
     if (historyQuery.error) {
       notifyAccessDenied(historyQuery.error);
-      console.error('[useChatConversation] Failed to load history:', historyQuery.error);
+      console.error(
+        "[useChatConversation] Failed to load history:",
+        historyQuery.error,
+      );
       setIsLoadingHistory(false);
       return;
     }
@@ -381,14 +474,20 @@ export const useChatConversation = (
       return;
     }
 
-    if (historyQuery.isLoading || historyQuery.isFetching || !historyQuery.data) {
+    if (
+      historyQuery.isLoading ||
+      historyQuery.isFetching ||
+      !historyQuery.data
+    ) {
       setIsLoadingHistory(isFirstHistoryLoad);
       return;
     }
 
     const cachedMessages = queryClient.getQueryData<any[]>(messagesQueryKey);
     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
-      replaceMessageCache(cachedMessages.map((message) => normalizeRecalledMessage(message)));
+      replaceMessageCache(
+        cachedMessages.map((message) => normalizeRecalledMessage(message)),
+      );
       setIsLoadingHistory(false);
       setHasOlderMessages(cachedMessages.length >= INITIAL_MESSAGES_LIMIT);
       return;
@@ -416,7 +515,9 @@ export const useChatConversation = (
 
           // Backend returns newest-first, we keep local state oldest-first so newest stays at the bottom.
           const normalizedMessages = Array.isArray(data)
-            ? [...data].reverse().map((message) => normalizeRecalledMessage(message))
+            ? [...data]
+                .reverse()
+                .map((message) => normalizeRecalledMessage(message))
             : [];
           replaceMessageCache(normalizedMessages);
 
@@ -431,7 +532,7 @@ export const useChatConversation = (
 
           if (!canRetry) {
             notifyAccessDenied(err);
-            console.error('[useChatConversation] Failed to load history:', err);
+            console.error("[useChatConversation] Failed to load history:", err);
             return;
           }
 
@@ -467,7 +568,12 @@ export const useChatConversation = (
   ]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!conversationId || isLoadingHistory || isLoadingOlderMessages || !hasOlderMessages) {
+    if (
+      !conversationId ||
+      isLoadingHistory ||
+      isLoadingOlderMessages ||
+      !hasOlderMessages
+    ) {
       return;
     }
 
@@ -489,7 +595,9 @@ export const useChatConversation = (
       );
 
       const incoming = Array.isArray(older)
-        ? [...older].reverse().map((message) => normalizeRecalledMessage(message))
+        ? [...older]
+            .reverse()
+            .map((message) => normalizeRecalledMessage(message))
         : [];
 
       updateMessageCache((prev) => {
@@ -497,8 +605,10 @@ export const useChatConversation = (
           return prev;
         }
 
-        const existingIds = new Set(prev.map((item) => String(item?.id || '')));
-        const prepend = incoming.filter((item) => !existingIds.has(String(item?.id || '')));
+        const existingIds = new Set(prev.map((item) => String(item?.id || "")));
+        const prepend = incoming.filter(
+          (item) => !existingIds.has(String(item?.id || "")),
+        );
         if (!prepend.length) {
           return prev;
         }
@@ -508,7 +618,7 @@ export const useChatConversation = (
       setHasOlderMessages(incoming.length >= OLDER_MESSAGES_BATCH_LIMIT);
     } catch (error) {
       if (__DEV__) {
-        console.log('[ChatPagination] load older failed', error);
+        console.log("[ChatPagination] load older failed", error);
       }
     } finally {
       setIsLoadingOlderMessages(false);
@@ -526,7 +636,7 @@ export const useChatConversation = (
   // ── 2. Socket: join room + real-time listeners ────────────────────────────
   useEffect(() => {
     if (!conversationId) {
-      console.warn('[useChatConversation] No conversationId provided');
+      console.warn("[useChatConversation] No conversationId provided");
       return;
     }
 
@@ -539,10 +649,9 @@ export const useChatConversation = (
         try {
           await socketClient.connect();
 
-          const response = await socketClient.emitWithAck<{ conversationKey: string }>(
-            CHAT_SOCKET_EVENTS.CONVERSATION_JOIN,
-            { conversationId }
-          );
+          const response = await socketClient.emitWithAck<{
+            conversationKey: string;
+          }>(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN, { conversationId });
 
           if (mounted) {
             conversationKeyRef.current = response.conversationKey;
@@ -554,7 +663,10 @@ export const useChatConversation = (
 
           if (!canRetry) {
             notifyAccessDenied(e);
-            console.error('[useChatConversation] Failed to join conversation:', e);
+            console.error(
+              "[useChatConversation] Failed to join conversation:",
+              e,
+            );
             return;
           }
 
@@ -579,8 +691,8 @@ export const useChatConversation = (
       setIsReady(false);
     };
 
-    socketClient.on('connect', onSocketConnect);
-    socketClient.on('disconnect', onSocketDisconnect);
+    socketClient.on("connect", onSocketConnect);
+    socketClient.on("disconnect", onSocketDisconnect);
 
     void fetchJoin();
 
@@ -588,7 +700,7 @@ export const useChatConversation = (
     // with payload: ChatMessageCreatedEvent { message: MessageItem, ... }
     const onMessageCreated = (event: ChatMessageCreatedEvent) => {
       if (mounted && event?.message) {
-        updateMessageCache(prev => {
+        updateMessageCache((prev) => {
           const next = prev.filter((message) => {
             if (message.id === event.message.id) {
               return false;
@@ -631,7 +743,7 @@ export const useChatConversation = (
           delete typingTimeoutsRef.current[payload.userId];
         }
 
-        setTypingUsers(prev => {
+        setTypingUsers((prev) => {
           if (!payload.isTyping) {
             const next = { ...prev };
             delete next[payload.userId];
@@ -640,13 +752,13 @@ export const useChatConversation = (
 
           return {
             ...prev,
-            [payload.userId]: { fullName: payload.fullName, isTyping: true }
+            [payload.userId]: { fullName: payload.fullName, isTyping: true },
           };
         });
 
         if (payload.isTyping) {
           typingTimeoutsRef.current[payload.userId] = setTimeout(() => {
-            setTypingUsers(prev => {
+            setTypingUsers((prev) => {
               const next = { ...prev };
               delete next[payload.userId];
               return next;
@@ -676,7 +788,10 @@ export const useChatConversation = (
       setPresenceByUser((prev) => {
         const merged: Record<string, any> = {};
         for (const [userId, rawPresence] of Object.entries(nextPresenceRaw)) {
-          merged[userId] = mergePresenceWithGrace(prev[userId], rawPresence as ChatPresenceState);
+          merged[userId] = mergePresenceWithGrace(
+            prev[userId],
+            rawPresence as ChatPresenceState,
+          );
         }
         return merged;
       });
@@ -687,7 +802,10 @@ export const useChatConversation = (
         return;
       }
 
-      if (event.conversationKey !== conversationKeyRef.current || !event.presence?.userId) {
+      if (
+        event.conversationKey !== conversationKeyRef.current ||
+        !event.presence?.userId
+      ) {
         return;
       }
 
@@ -716,7 +834,7 @@ export const useChatConversation = (
 
             const normalized = normalizeRecalledMessage(event.message, m);
 
-            logRecallDebug('message.updated', {
+            logRecallDebug("message.updated", {
               messageId: event.message.id,
               incomingDeletedAt: (event.message as any)?.deletedAt || null,
               incomingRecalledAt: (event.message as any)?.recalledAt || null,
@@ -724,8 +842,13 @@ export const useChatConversation = (
               previousRecalledAt: (m as any)?.recalledAt || null,
               nextDeletedAt: (normalized as any)?.deletedAt || null,
               nextRecalledAt: (normalized as any)?.recalledAt || null,
-              incomingContent: String((event.message as any)?.content || '').slice(0, 80),
-              nextContent: String((normalized as any)?.content || '').slice(0, 80),
+              incomingContent: String(
+                (event.message as any)?.content || "",
+              ).slice(0, 80),
+              nextContent: String((normalized as any)?.content || "").slice(
+                0,
+                80,
+              ),
             });
 
             return normalized;
@@ -754,7 +877,7 @@ export const useChatConversation = (
           ),
         );
 
-        logRecallDebug('message.deleted', {
+        logRecallDebug("message.deleted", {
           messageId: event.messageId,
           occurredAt,
         });
@@ -778,10 +901,13 @@ export const useChatConversation = (
       socketClient.off(CHAT_SOCKET_EVENTS.MESSAGE_UPDATED, onMessageUpdated);
       socketClient.off(CHAT_SOCKET_EVENTS.MESSAGE_DELETED, onMessageDeleted);
       socketClient.off(CHAT_SOCKET_EVENTS.TYPING_STATE, onTypingState);
-      socketClient.off(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, onPresenceSnapshot);
+      socketClient.off(
+        CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT,
+        onPresenceSnapshot,
+      );
       socketClient.off(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, onPresenceUpdated);
-      socketClient.off('connect', onSocketConnect);
-      socketClient.off('disconnect', onSocketDisconnect);
+      socketClient.off("connect", onSocketConnect);
+      socketClient.off("disconnect", onSocketDisconnect);
     };
   }, [
     conversationId,
@@ -797,119 +923,141 @@ export const useChatConversation = (
   ]);
 
   // ── 3. Send message ───────────────────────────────────────────────────────
-  const sendMessage = useCallback(async (
-    content: string,
-    clientMessageId: string,
-    type: string = 'TEXT',
-    attachmentUrl?: string,
-    replyTo?: string,
-    attachmentKey?: string,
-  ) => {
-    if (!conversationId) return;
+  const sendMessage = useCallback(
+    async (
+      content: string,
+      clientMessageId: string,
+      type: string = "TEXT",
+      attachmentUrl?: string,
+      replyTo?: string,
+      attachmentKey?: string,
+    ) => {
+      if (!conversationId) return;
 
-    // Optimistic UI Update: Hiển thị ngay lên màn hình
-    if (currentUser) {
-      const optimisticMsg = {
-        id: clientMessageId,
-        messageId: clientMessageId,
-        senderId: currentUser.id || currentUser.sub,
-        senderName: currentUser.name || currentUser.fullName || 'Tôi',
-        type: type,
-        content,
-        attachmentUrl,
-        attachmentKey,
-        replyTo,
-        sentAt: new Date().toISOString(),
-        deletedAt: null,
-        clientMessageId,
-        isOptimistic: true,
-        sendStatus: 'sending',
-      };
-      updateMessageCache(prev => [...prev, optimisticMsg]);
-    }
+      // Optimistic UI Update: Hiển thị ngay lên màn hình
+      if (currentUser) {
+        const optimisticMsg = {
+          id: clientMessageId,
+          messageId: clientMessageId,
+          senderId: currentUser.id || currentUser.sub,
+          senderName: currentUser.name || currentUser.fullName || "Tôi",
+          type: type,
+          content,
+          attachmentUrl,
+          attachmentKey,
+          replyTo,
+          sentAt: new Date().toISOString(),
+          deletedAt: null,
+          clientMessageId,
+          isOptimistic: true,
+          sendStatus: "sending",
+        };
+        updateMessageCache((prev) => [...prev, optimisticMsg]);
+      }
 
-    try {
-      const payload = {
-        content,
-        clientMessageId,
-        type,
-        ...(attachmentKey ? { attachmentKey } : attachmentUrl ? { attachmentUrl } : {}),
-        ...(replyTo ? { replyTo } : {}),
-      };
+      try {
+        const payload = {
+          content,
+          clientMessageId,
+          type,
+          ...(attachmentKey
+            ? { attachmentKey }
+            : attachmentUrl
+              ? { attachmentUrl }
+              : {}),
+          ...(replyTo ? { replyTo } : {}),
+        };
 
-      if (isReady) {
-        try {
-          await socketClient.emitWithAck<ChatMessageAccepted>(
-            CHAT_SOCKET_EVENTS.MESSAGE_SEND,
-            {
-              conversationId,
-              ...payload,
+        if (isReady) {
+          try {
+            await socketClient.emitWithAck<ChatMessageAccepted>(
+              CHAT_SOCKET_EVENTS.MESSAGE_SEND,
+              {
+                conversationId,
+                ...payload,
+              },
+            );
+            return;
+          } catch (socketError) {
+            if (__DEV__) {
+              console.log(
+                "[ChatFallback] socket send failed, fallback to REST",
+                {
+                  conversationId,
+                  clientMessageId,
+                  type,
+                  error: String(
+                    (socketError as any)?.message || socketError || "unknown",
+                  ),
+                },
+              );
             }
-          );
-          return;
-        } catch (socketError) {
-          if (__DEV__) {
-            console.log('[ChatFallback] socket send failed, fallback to REST', {
-              conversationId,
-              clientMessageId,
-              type,
-              error: String((socketError as any)?.message || socketError || 'unknown'),
-            });
           }
         }
-      }
 
-      // Fallback for mobile when realtime socket is not ready: send via REST.
-      const created = await ApiClient.post<any>(
-        `/conversations/${encodeURIComponent(conversationId)}/messages`,
-        payload,
-      );
+        // Fallback for mobile when realtime socket is not ready: send via REST.
+        const created = await ApiClient.post<any>(
+          `/conversations/${encodeURIComponent(conversationId)}/messages`,
+          payload,
+        );
 
-      if (created?.id || created?.messageId) {
-        updateMessageCache((prev) => {
-          const withoutOptimistic = prev.filter((m) => m.id !== clientMessageId && m.clientMessageId !== clientMessageId);
-          return [...withoutOptimistic, normalizeRecalledMessage(created)];
-        });
+        if (created?.id || created?.messageId) {
+          updateMessageCache((prev) => {
+            const withoutOptimistic = prev.filter(
+              (m) =>
+                m.id !== clientMessageId &&
+                m.clientMessageId !== clientMessageId,
+            );
+            return [...withoutOptimistic, normalizeRecalledMessage(created)];
+          });
+        }
+      } catch (e) {
+        console.error("[useChatConversation] Send message failed:", e);
+        updateMessageCache((prev) =>
+          prev.map((message) =>
+            message.id === clientMessageId ||
+            message.clientMessageId === clientMessageId
+              ? {
+                  ...message,
+                  isOptimistic: false,
+                  sendStatus: "failed",
+                  errorMessage: (e as Error)?.message || "Send failed",
+                }
+              : message,
+          ),
+        );
       }
-    } catch (e) {
-      console.error('[useChatConversation] Send message failed:', e);
-      updateMessageCache(prev =>
-        prev.map((message) =>
-          message.id === clientMessageId || message.clientMessageId === clientMessageId
-            ? {
-                ...message,
-                isOptimistic: false,
-                sendStatus: 'failed',
-                errorMessage: (e as Error)?.message || 'Send failed',
-              }
-            : message,
-        ),
-      );
-    }
-  }, [
-    conversationId,
-    currentUser,
-    isReady,
-    normalizeRecalledMessage,
-    updateMessageCache,
-  ]);
+    },
+    [
+      conversationId,
+      currentUser,
+      isReady,
+      normalizeRecalledMessage,
+      updateMessageCache,
+    ],
+  );
 
   const createClientMessageId = useCallback(
     () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     [],
   );
 
-  // Fetch only once when opening conversation if realtime socket is not ready.
+  // Fetch only once when opening conversation if realtime socket is not ready and no cache is visible yet.
   useEffect(() => {
     if (!conversationId || isReady) {
       return;
     }
 
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     const fetchOnce = async () => {
       try {
         const latestMessages = messagesRef.current;
+        if (latestMessages.length > 0) {
+          return;
+        }
+
         const latest = latestMessages[latestMessages.length - 1];
         const after = latest?.sentAt || latest?.createdAt;
         const data = await ApiClient.get<MessageItem[]>(
@@ -929,9 +1077,11 @@ export const useChatConversation = (
         }
 
         updateMessageCache((prev) => {
-          const map = new Map<string, any>(prev.map((item) => [String(item?.id || ''), item]));
+          const map = new Map<string, any>(
+            prev.map((item) => [String(item?.id || ""), item]),
+          );
           for (const message of data) {
-            const key = String(message?.id || '');
+            const key = String(message?.id || "");
             const normalized = normalizeRecalledMessage(message, map.get(key));
             map.set(key, normalized);
           }
@@ -949,75 +1099,94 @@ export const useChatConversation = (
       }
     };
 
-    void fetchOnce();
+    timer = setTimeout(() => {
+      void fetchOnce();
+    }, 900);
 
     return () => {
       cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, [conversationId, isReady, normalizeRecalledMessage, updateMessageCache]);
 
   // ── 3.1 Upload and Send Media ─────────────────────────────────────────────
-  const sendMedia = useCallback(async (
-    fileUri: string,
-    fileName: string,
-    mimeType: string,
-    type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOC',
-    replyTo?: string,
-  ) => {
-    if (!conversationId) return;
-    
-    try {
-      // Use uploadMedia with proper /api prefix routing
-      const uploadResponse = await uploadMedia({
-        uri: fileUri,
-        fileName,
-        mimeType,
-        target: 'MESSAGE',
-        entityId: conversationId,
-      });
+  const sendMedia = useCallback(
+    async (
+      fileUri: string,
+      fileName: string,
+      mimeType: string,
+      type: "IMAGE" | "VIDEO" | "AUDIO" | "DOC",
+      replyTo?: string,
+    ) => {
+      if (!conversationId) return;
 
-      if (!uploadResponse?.url && !uploadResponse?.key) {
-        throw new Error('Upload failed: No URL or key returned');
+      try {
+        // Use uploadMedia with proper /api prefix routing
+        const uploadResponse = await uploadMedia({
+          uri: fileUri,
+          fileName,
+          mimeType,
+          target: "MESSAGE",
+          entityId: conversationId,
+        });
+
+        if (!uploadResponse?.url && !uploadResponse?.key) {
+          throw new Error("Upload failed: No URL or key returned");
+        }
+
+        const attachmentUrl = uploadResponse.url || uploadResponse.key;
+        const attachmentKey = uploadResponse.key || undefined;
+
+        await sendMessage(
+          fileName,
+          createClientMessageId(),
+          type,
+          attachmentUrl,
+          replyTo,
+          attachmentKey,
+        );
+      } catch (e) {
+        console.error("[useChatConversation] Media send failed:", e);
+        throw e;
       }
-
-      const attachmentUrl = uploadResponse.url || uploadResponse.key;
-      const attachmentKey = uploadResponse.key || undefined;
-
-      await sendMessage(fileName, createClientMessageId(), type, attachmentUrl, replyTo, attachmentKey);
-      
-    } catch (e) {
-      console.error('[useChatConversation] Media send failed:', e);
-      throw e;
-    }
-  }, [conversationId, sendMessage, createClientMessageId]);
+    },
+    [conversationId, sendMessage, createClientMessageId],
+  );
 
   // ── 4. Typing indicator ───────────────────────────────────────────────────
-  const sendTyping = useCallback((isTyping: boolean) => {
-    if (!isReady || !conversationId) return;
+  const sendTyping = useCallback(
+    (isTyping: boolean) => {
+      if (!isReady || !conversationId) return;
 
-    const socket = socketClient.socket;
-    if (!socket || !socket.connected) return;
+      const socket = socketClient.socket;
+      if (!socket || !socket.connected) return;
 
-    const event = isTyping ? CHAT_SOCKET_EVENTS.TYPING_START : CHAT_SOCKET_EVENTS.TYPING_STOP;
-    if (!isTyping) {
+      const event = isTyping
+        ? CHAT_SOCKET_EVENTS.TYPING_START
+        : CHAT_SOCKET_EVENTS.TYPING_STOP;
+      if (!isTyping) {
+        if (typingEmitTimeoutRef.current) {
+          clearTimeout(typingEmitTimeoutRef.current);
+          typingEmitTimeoutRef.current = null;
+        }
+        socket.emit(event, { conversationId });
+        return;
+      }
+
       if (typingEmitTimeoutRef.current) {
         clearTimeout(typingEmitTimeoutRef.current);
-        typingEmitTimeoutRef.current = null;
       }
-      socket.emit(event, { conversationId });
-      return;
-    }
 
-    if (typingEmitTimeoutRef.current) {
-      clearTimeout(typingEmitTimeoutRef.current);
-    }
-
-    // Throttle typing.start emissions to reduce socket pressure on mobile keyboards.
-    typingEmitTimeoutRef.current = setTimeout(() => {
-      socket.emit(event, { conversationId });
-      typingEmitTimeoutRef.current = null;
-    }, 220);
-  }, [conversationId, isReady]);
+      // Throttle typing.start emissions to reduce socket pressure on mobile keyboards.
+      typingEmitTimeoutRef.current = setTimeout(() => {
+        socket.emit(event, { conversationId });
+        typingEmitTimeoutRef.current = null;
+      }, 220);
+    },
+    [conversationId, isReady],
+  );
 
   useEffect(() => {
     return () => {
@@ -1031,120 +1200,150 @@ export const useChatConversation = (
   // ── 5. Mark read ──────────────────────────────────────────────────────────
   const markRead = useCallback(() => {
     if (!isReady) return;
-    socketClient.emitWithAck(CHAT_SOCKET_EVENTS.CONVERSATION_READ, { conversationId }).catch(() => {});
+    socketClient
+      .emitWithAck(CHAT_SOCKET_EVENTS.CONVERSATION_READ, { conversationId })
+      .catch(() => {});
   }, [conversationId, isReady]);
 
   // ── 6. Update/Delete Message ──────────────────────────────────────────────
-  const recallMessage = useCallback(async (messageId: string) => {
-    if (!isReady || !conversationId) return;
-    try {
-      const ack = await socketClient.emitWithAck<RecallMessageResult>(
-        CHAT_SOCKET_EVENTS.MESSAGE_RECALL,
-        { conversationId, messageId, scope: 'EVERYONE' }
-      );
+  const recallMessage = useCallback(
+    async (messageId: string) => {
+      if (!isReady || !conversationId) return;
+      try {
+        const ack = await socketClient.emitWithAck<RecallMessageResult>(
+          CHAT_SOCKET_EVENTS.MESSAGE_RECALL,
+          { conversationId, messageId, scope: "EVERYONE" },
+        );
 
-      logRecallDebug('message.recall.ack', {
-        messageId,
-        scope: (ack as any)?.scope || 'EVERYONE',
-        recalledAt: (ack as any)?.recalledAt || null,
-      });
-    } catch (e) {
-      logRecallDebug('message.recall.error', {
-        messageId,
-        error: String((e as any)?.message || e || 'unknown'),
-      });
-      console.error('[useChatConversation] Recall message failed:', e);
-    }
-  }, [conversationId, isReady, logRecallDebug]);
+        logRecallDebug("message.recall.ack", {
+          messageId,
+          scope: (ack as any)?.scope || "EVERYONE",
+          recalledAt: (ack as any)?.recalledAt || null,
+        });
+      } catch (e) {
+        logRecallDebug("message.recall.error", {
+          messageId,
+          error: String((e as any)?.message || e || "unknown"),
+        });
+        console.error("[useChatConversation] Recall message failed:", e);
+      }
+    },
+    [conversationId, isReady, logRecallDebug],
+  );
 
-  const hideMessage = useCallback(async (messageId: string) => {
-    if (!isReady || !conversationId) return;
-    try {
-      await socketClient.emitWithAck<RecallMessageResult>(
-        CHAT_SOCKET_EVENTS.MESSAGE_RECALL,
-        { conversationId, messageId, scope: 'SELF' }
-      );
+  const hideMessage = useCallback(
+    async (messageId: string) => {
+      if (!isReady || !conversationId) return;
+      try {
+        await socketClient.emitWithAck<RecallMessageResult>(
+          CHAT_SOCKET_EVENTS.MESSAGE_RECALL,
+          { conversationId, messageId, scope: "SELF" },
+        );
 
-      // Hide only on current client timeline.
-      updateMessageCache((prev) => prev.filter((message) => message.id !== messageId));
-    } catch (e) {
-      console.error('[useChatConversation] Hide message failed:', e);
-      throw e;
-    }
-  }, [conversationId, isReady, updateMessageCache]);
+        // Hide only on current client timeline.
+        updateMessageCache((prev) =>
+          prev.filter((message) => message.id !== messageId),
+        );
+      } catch (e) {
+        console.error("[useChatConversation] Hide message failed:", e);
+        throw e;
+      }
+    },
+    [conversationId, isReady, updateMessageCache],
+  );
 
   // Backward compatibility for existing callsites.
   const deleteMessage = recallMessage;
 
-  const updateMessage = useCallback(async (messageId: string, content?: string, attachmentUrl?: string) => {
-    if (!conversationId) return;
+  const updateMessage = useCallback(
+    async (messageId: string, content?: string, attachmentUrl?: string) => {
+      if (!conversationId) return;
 
-    const payload = { messageId, content, attachmentUrl };
+      const payload = { messageId, content, attachmentUrl };
 
-    if (isReady) {
-      try {
-        const ack = await socketClient.emitWithAck<ChatMessageUpdatedAccepted>(
-          CHAT_SOCKET_EVENTS.MESSAGE_UPDATE,
-          { conversationId, ...payload }
-        );
-        if (__DEV__) {
-          console.log('[useChatConversation] Message update ack:', ack);
-        }
-        return;
-      } catch (socketError) {
-        if (__DEV__) {
-          console.log('[ChatFallback] socket update failed, fallback to REST', {
-            conversationId,
-            messageId,
-            error: String((socketError as any)?.message || socketError || 'unknown'),
-          });
+      if (isReady) {
+        try {
+          const ack =
+            await socketClient.emitWithAck<ChatMessageUpdatedAccepted>(
+              CHAT_SOCKET_EVENTS.MESSAGE_UPDATE,
+              { conversationId, ...payload },
+            );
+          if (__DEV__) {
+            console.log("[useChatConversation] Message update ack:", ack);
+          }
+          return;
+        } catch (socketError) {
+          if (__DEV__) {
+            console.log(
+              "[ChatFallback] socket update failed, fallback to REST",
+              {
+                conversationId,
+                messageId,
+                error: String(
+                  (socketError as any)?.message || socketError || "unknown",
+                ),
+              },
+            );
+          }
         }
       }
-    }
 
-    try {
-      await ApiClient.patch(
-        `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
-        { content, attachmentUrl },
-      );
-    } catch (e) {
-      console.error('[useChatConversation] Update message failed:', e);
-      throw e;
-    }
-  }, [conversationId, isReady]);
+      try {
+        await ApiClient.patch(
+          `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+          { content, attachmentUrl },
+        );
+      } catch (e) {
+        console.error("[useChatConversation] Update message failed:", e);
+        throw e;
+      }
+    },
+    [conversationId, isReady],
+  );
 
-  const forwardMessage = useCallback(async (messageId: string, targetConversationIds: string[]) => {
-    if (!conversationId) return;
+  const forwardMessage = useCallback(
+    async (messageId: string, targetConversationIds: string[]) => {
+      if (!conversationId) return;
 
-    const conversationIds = [...new Set(targetConversationIds.map((id) => String(id).trim()).filter(Boolean))];
-    if (!conversationIds.length) {
-      throw new Error('Vui lòng chọn ít nhất một cuộc trò chuyện để chuyển tiếp.');
-    }
+      const conversationIds = [
+        ...new Set(
+          targetConversationIds.map((id) => String(id).trim()).filter(Boolean),
+        ),
+      ];
+      if (!conversationIds.length) {
+        throw new Error(
+          "Vui lòng chọn ít nhất một cuộc trò chuyện để chuyển tiếp.",
+        );
+      }
 
-    try {
-      await ApiClient.post(
-        `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/forward`,
-        { conversationIds },
-      );
-    } catch (e) {
-      console.error('[useChatConversation] Forward message failed:', e);
-      throw e;
-    }
-  }, [conversationId]);
+      try {
+        await ApiClient.post(
+          `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/forward`,
+          { conversationIds },
+        );
+      } catch (e) {
+        console.error("[useChatConversation] Forward message failed:", e);
+        throw e;
+      }
+    },
+    [conversationId],
+  );
 
   const messageViewModels = useMemo<ChatMessageViewModel[]>(() => {
     return messages.map((message) => {
       const normalizedContent = parseMessageContent(message?.content);
       const reaction = parseReactionPayload(message);
-      const sentAt = String(message?.sentAt || message?.createdAt || '');
-      const sentAtMs = Number.isNaN(Date.parse(sentAt)) ? 0 : Date.parse(sentAt);
+      const sentAt = String(message?.sentAt || message?.createdAt || "");
+      const sentAtMs = Number.isNaN(Date.parse(sentAt))
+        ? 0
+        : Date.parse(sentAt);
 
       return {
         ...message,
-        id: String(message?.id || ''),
-        senderId: String(message?.senderId || ''),
-        senderName: String(message?.senderName || ''),
-        type: String(message?.type || 'TEXT'),
+        id: String(message?.id || ""),
+        senderId: String(message?.senderId || ""),
+        senderName: String(message?.senderName || ""),
+        type: String(message?.type || "TEXT"),
         sentAt,
         sentAtMs,
         contentText: normalizedContent,
@@ -1171,7 +1370,7 @@ export const useChatConversation = (
       }
 
       const target = reaction.targetMessageId;
-      const userId = String(message.senderId || message.id || 'unknown');
+      const userId = String(message.senderId || message.id || "unknown");
       const latestKey = `${target}::${userId}`;
       const previousEmoji = latestByUserTarget.get(latestKey);
 
@@ -1222,7 +1421,10 @@ export const useChatConversation = (
     isLoadingHistory,
     typingUsers,
     presenceByUser: Object.fromEntries(
-      Object.entries(presenceByUser).map(([userId, value]) => [userId, resolvePresenceWithGrace(value)]),
+      Object.entries(presenceByUser).map(([userId, value]) => [
+        userId,
+        resolvePresenceWithGrace(value),
+      ]),
     ),
     isReady,
     sendMessage,

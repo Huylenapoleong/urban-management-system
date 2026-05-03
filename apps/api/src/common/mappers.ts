@@ -237,6 +237,7 @@ export function toMessage(message: StoredMessage): MessageItem {
     senderAvatarUrl: message.senderAvatarUrl,
     type: message.type,
     content: message.content,
+    callEvent: message.callEvent,
     attachmentAsset: message.attachmentAsset,
     attachmentUrl: message.attachmentUrl,
     replyTo: message.replyTo,

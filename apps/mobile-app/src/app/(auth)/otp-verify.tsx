@@ -1,21 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable } from 'react-native';
-import { Text, Surface, Button, TextInput, useTheme } from 'react-native-paper';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useAuth } from '../../providers/AuthProvider';
+import colors from "@/constants/colors";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
+import { Button, Surface, Text, TextInput, useTheme } from "react-native-paper";
+import { useAuth } from "../../providers/AuthProvider";
 
 export default function OtpVerifyScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { verifyRegisterOtp, verifyLoginOtp, requestRegisterOtp, requestLoginOtp } = useAuth();
-  
-  const { login, type, context } = useLocalSearchParams<{ 
-    login: string, 
-    type: 'REGISTER' | 'LOGIN',
-    context?: string 
+  const {
+    verifyRegisterOtp,
+    verifyLoginOtp,
+    requestRegisterOtp,
+    requestLoginOtp,
+  } = useAuth();
+
+  const { login, type } = useLocalSearchParams<{
+    login: string;
+    type: "REGISTER" | "LOGIN";
   }>();
 
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timer, setTimer] = useState(60);
@@ -29,23 +40,23 @@ export default function OtpVerifyScreen() {
 
   const handleVerify = async () => {
     if (otp.length !== 6) {
-      setError('Vui lòng nhập đủ 6 chữ số.');
+      setError("Vui lòng nhập đủ 6 chữ số.");
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
-      
-      if (type === 'REGISTER') {
+
+      if (type === "REGISTER") {
         await verifyRegisterOtp(login!, otp);
-      } else if (type === 'LOGIN') {
+      } else if (type === "LOGIN") {
         await verifyLoginOtp(login!, otp);
       }
-      
+
       // AuthProvider will automatically redirect to home/(citizen)/(official) upon token persist
     } catch (err: any) {
-      setError(err?.message || 'Mã xác thực không hợp lệ hoặc đã hết hạn.');
+      setError(err?.message || "Mã xác thực không hợp lệ hoặc đã hết hạn.");
     } finally {
       setLoading(false);
     }
@@ -57,14 +68,14 @@ export default function OtpVerifyScreen() {
     try {
       setLoading(true);
       setError(null);
-      if (type === 'REGISTER') {
+      if (type === "REGISTER") {
         await requestRegisterOtp(login!);
       } else {
         await requestLoginOtp(login!);
       }
       setTimer(60);
     } catch (err: any) {
-      setError(err?.message || 'Không thể gửi lại mã.');
+      setError(err?.message || "Không thể gửi lại mã.");
     } finally {
       setLoading(false);
     }
@@ -73,11 +84,13 @@ export default function OtpVerifyScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView contentContainerStyle={styles.content}>
         <Surface style={styles.card} elevation={3}>
-          <Text variant="headlineSmall" style={styles.title}>Xác thực mã OTP</Text>
+          <Text variant="headlineSmall" style={styles.title}>
+            Xác thực mã OTP
+          </Text>
           <Text style={styles.subtitle}>
             Vui lòng nhập mã 6 số chúng tôi đã gửi đến {login}.
           </Text>
@@ -86,7 +99,7 @@ export default function OtpVerifyScreen() {
             mode="outlined"
             value={otp}
             onChangeText={(text) => {
-              setOtp(text.replace(/[^0-9]/g, '').slice(0, 6));
+              setOtp(text.replace(/[^0-9]/g, "").slice(0, 6));
               if (error) setError(null);
             }}
             keyboardType="number-pad"
@@ -99,7 +112,11 @@ export default function OtpVerifyScreen() {
             contentStyle={styles.inputContent}
           />
 
-          {error && <Text style={[styles.error, { color: theme.colors.error }]}>{error}</Text>}
+          {error && (
+            <Text style={[styles.error, { color: theme.colors.error }]}>
+              {error}
+            </Text>
+          )}
 
           <Button
             mode="contained"
@@ -119,13 +136,13 @@ export default function OtpVerifyScreen() {
               compact
               labelStyle={styles.resendLabel}
             >
-              {timer > 0 ? `Gửi lại sau ${timer}s` : 'Gửi lại mã'}
+              {timer > 0 ? `Gửi lại sau ${timer}s` : "Gửi lại mã"}
             </Button>
           </View>
 
-          <Button 
-            mode="text" 
-            onPress={() => router.replace('/login')} 
+          <Button
+            mode="text"
+            onPress={() => router.replace("/login")}
             style={styles.backButton}
             labelStyle={styles.backLabel}
           >
@@ -140,7 +157,7 @@ export default function OtpVerifyScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f3f6fb',
+    backgroundColor: colors.background,
   },
   content: {
     padding: 24,
@@ -149,31 +166,31 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 24,
     padding: 24,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
   },
   title: {
-    fontWeight: '800',
+    fontWeight: "700",
     marginBottom: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   subtitle: {
-    color: '#667085',
+    color: colors.textSecondary,
     marginBottom: 32,
-    textAlign: 'center',
+    textAlign: "center",
     lineHeight: 20,
   },
   input: {
     marginBottom: 12,
   },
   inputContent: {
-    textAlign: 'center',
+    textAlign: "center",
     fontSize: 28,
     letterSpacing: 10,
-    fontWeight: '700',
+    fontWeight: "700",
     paddingVertical: 10,
   },
   error: {
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 16,
     fontSize: 13,
   },
@@ -182,18 +199,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   resendContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: 20,
   },
   resendLabel: {
-    fontWeight: '700',
+    fontWeight: "700",
   },
   backButton: {
     marginTop: 24,
   },
   backLabel: {
-    color: '#667085',
+    color: colors.textSecondary,
   },
 });

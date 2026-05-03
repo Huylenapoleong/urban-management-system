@@ -1,9 +1,21 @@
-import { apiClient, ApiResponse, ListResponse } from "./api-client";
+import { apiClient, ApiResponse, ListResponse } from './api-client';
 
 // ── enums matching backend REPORT_STATUSES / REPORT_PRIORITIES / REPORT_CATEGORIES ──
-export type ReportStatus   = "NEW" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" | "REJECTED";
-export type ReportPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-export type ReportCategory = "INFRASTRUCTURE" | "TRAFFIC" | "ENVIRONMENT" | "SECURITY" | "PUBLIC_ORDER" | "PUBLIC_SERVICES";
+export type ReportStatus =
+  | 'NEW'
+  | 'IN_REVIEW'
+  | 'IN_PROGRESS'
+  | 'RESOLVED'
+  | 'CLOSED'
+  | 'REJECTED';
+export type ReportPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+export type ReportCategory =
+  | 'INFRASTRUCTURE'
+  | 'TRAFFIC'
+  | 'ENVIRONMENT'
+  | 'SECURITY'
+  | 'PUBLIC_ORDER'
+  | 'PUBLIC_SERVICES';
 
 export interface Report {
   id: string;
@@ -42,36 +54,39 @@ export interface UpdateReportRequest {
 }
 
 export interface ListReportsQuery {
-  status?:             ReportStatus;
-  category?:           ReportCategory;
-  priority?:           ReportPriority;
-  locationCode?:       string;
-  assignedOfficerId?:  string;
-  mine?:               boolean;
-  assignedToMe?:       boolean;
-  q?:                  string;
-  createdFrom?:        string;
-  createdTo?:          string;
-  cursor?:             string;
-  limit?:              number;
+  status?: ReportStatus;
+  category?: ReportCategory;
+  priority?: ReportPriority;
+  locationCode?: string;
+  assignedOfficerId?: string;
+  mine?: boolean;
+  assignedToMe?: boolean;
+  q?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  cursor?: string;
+  limit?: number;
 }
 
 class ReportsService {
   async getReports(
     page: number = 1,
     limit: number = 20,
-    query: ListReportsQuery = {}
+    query: ListReportsQuery = {},
   ): Promise<ApiResponse<ListResponse<Report>>> {
-    const params: Record<string, any> = { limit, ...query };
+    const params: Record<string, string | number | boolean | undefined> = {
+      limit,
+      ...query,
+    };
     // Remove undefined values
-    Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
+    Object.keys(params).forEach(
+      (k) => params[k] === undefined && delete params[k],
+    );
 
-    const response = await apiClient.get<any>("/reports", { params });
+    const response = await apiClient.get<Report[]>('/reports', { params });
 
     if (response.success) {
-      // Backend returns { data: Report[], meta: { count, nextCursor } }
-      const raw = response.data;
-      const items: Report[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+      const items = Array.isArray(response.data) ? response.data : [];
       return {
         success: true,
         data: {
@@ -85,7 +100,7 @@ class ReportsService {
     }
     return {
       success: false,
-      error: response.error || "Failed to fetch reports",
+      error: response.error || 'Failed to fetch reports',
       data: { items: [], total: 0, page: 1, limit, totalPages: 0 },
     };
   }
@@ -95,18 +110,27 @@ class ReportsService {
   }
 
   async createReport(data: CreateReportRequest): Promise<ApiResponse<Report>> {
-    return apiClient.post<Report>("/reports", data);
+    return apiClient.post<Report>('/reports', data);
   }
 
-  async updateReport(id: string, data: UpdateReportRequest): Promise<ApiResponse<Report>> {
+  async updateReport(
+    id: string,
+    data: UpdateReportRequest,
+  ): Promise<ApiResponse<Report>> {
     return apiClient.patch<Report>(`/reports/${id}`, data);
   }
 
-  async updateStatus(id: string, status: ReportStatus): Promise<ApiResponse<Report>> {
+  async updateStatus(
+    id: string,
+    status: ReportStatus,
+  ): Promise<ApiResponse<Report>> {
     return apiClient.post<Report>(`/reports/${id}/status`, { status });
   }
 
-  async assignReport(id: string, officerId: string): Promise<ApiResponse<Report>> {
+  async assignReport(
+    id: string,
+    officerId: string,
+  ): Promise<ApiResponse<Report>> {
     return apiClient.post<Report>(`/reports/${id}/assign`, { officerId });
   }
 

@@ -1,4 +1,3 @@
-const { createHash } = require("crypto");
 const { monotonicFactory } = require("ulid");
 
 let createMonotonicUlid;
@@ -45,13 +44,42 @@ function normalizeEmail(value) {
 }
 
 function parseLocationCode(locationCode) {
-  const [country, province, district, ward] = locationCode.split("-");
+  const normalized = String(locationCode || "")
+    .trim()
+    .toUpperCase();
+  const parts = normalized.split("-");
+
+  if (parts.length < 2 || parts.length > 4 || parts[0] !== "VN") {
+    throw new Error("locationCode is invalid.");
+  }
+
+  const [, province = "", third = "", fourth = ""] = parts;
+
+  if (parts.length === 2) {
+    return {
+      country: "VN",
+      district: "",
+      province,
+      ward: "",
+    };
+  }
+
+  if (parts.length === 3) {
+    const isV2Ward = /^\d{2}$/.test(province) && /^\d{5}$/.test(third);
+
+    return {
+      country: "VN",
+      district: isV2Ward ? "" : third,
+      province,
+      ward: isV2Ward ? third : "",
+    };
+  }
 
   return {
-    country,
-    district,
+    country: "VN",
+    district: third,
     province,
-    ward,
+    ward: fourth,
   };
 }
 
@@ -85,15 +113,6 @@ function makeUserPushDeviceSk(deviceId) {
 
 function makeUserContactAliasSk(targetUserId) {
   return `CONTACT_ALIAS#${targetUserId}`;
-}
-
-function makePushTokenLookupPk(pushToken) {
-  const digest = createHash("sha256").update(pushToken).digest("hex");
-  return `PUSH_TOKEN#${digest}`;
-}
-
-function makePushTokenLookupSk() {
-  return "LOOKUP";
 }
 
 function makeAuthEmailOtpPk(email) {
@@ -271,8 +290,7 @@ module.exports = {
   makeMembershipSk,
   makeMessageSk,
   makePhoneLookupKey,
-  makePushTokenLookupPk,
-  makePushTokenLookupSk,
+
   makePushOutboxPk,
   makePushOutboxSk,
   makeReportAuditSk,

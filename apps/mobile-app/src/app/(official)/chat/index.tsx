@@ -1,72 +1,111 @@
-import React, { useState, useCallback } from 'react';
-import { View, FlatList, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { Text, Avatar, Badge, Searchbar, useTheme, Divider, SegmentedButtons, IconButton, Card, Portal, Modal, Button } from 'react-native-paper';
-import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
-import { useConversations, type ConversationSummaryItem } from '../../../hooks/shared/useConversations';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
-import { ApiClient } from '../../../lib/api-client';
-import { useAuth } from '../../../providers/AuthProvider';
-import { socketClient } from '../../../lib/socket-client';
-import { CHAT_SOCKET_EVENTS } from '@urban/shared-constants';
-import { convertToS3Url } from '../../../constants/s3';
-import { ListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
-import { prefetchConversationMessages } from '@/services/prefetch';
+import { ListSkeleton, useSkeletonQuery } from "@/components/skeleton/Skeleton";
+import colors from "@/constants/colors";
+import { prefetchConversationMessages } from "@/services/prefetch";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
+import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
+import { useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
+import {
+  FlatList,
+  Platform,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  Divider,
+  IconButton,
+  Modal,
+  Portal,
+  Searchbar,
+  SegmentedButtons,
+  Text,
+} from "react-native-paper";
+import { convertToS3Url } from "../../../constants/s3";
+import {
+  useConversations,
+  type ConversationSummaryItem,
+} from "../../../hooks/shared/useConversations";
+import { ApiClient } from "../../../lib/api-client";
+import { socketClient } from "../../../lib/socket-client";
+import { useAuth } from "../../../providers/AuthProvider";
 
 const PRESENCE_OFFLINE_GRACE_MS = 120000;
 const OFFICIAL_DM_PRESENCE_CACHE: Record<string, any> = {};
 
-const getDmTargetUserId = (conversationId: string | undefined): string | undefined => {
-  if (!conversationId || typeof conversationId !== 'string') return undefined;
-  if (!conversationId.startsWith('dm:')) return undefined;
+const getDmTargetUserId = (
+  conversationId: string | undefined,
+): string | undefined => {
+  if (!conversationId || typeof conversationId !== "string") return undefined;
+  if (!conversationId.startsWith("dm:")) return undefined;
   const targetId = conversationId.slice(3).trim();
   return targetId || undefined;
 };
 
 const formatPresenceLabel = (
-  presence?: { isActive?: boolean; lastSeenAt?: string; occurredAt?: string } | null,
+  presence?: {
+    isActive?: boolean;
+    lastSeenAt?: string;
+    occurredAt?: string;
+  } | null,
   nowMs = Date.now(),
 ): string => {
   if (presence?.isActive === true) {
-    return 'Đang hoạt động';
+    return "Đang hoạt động";
   }
 
   if (presence?.isActive === false) {
-    const ts = Date.parse(String(presence.lastSeenAt || presence.occurredAt || ''));
+    const ts = Date.parse(
+      String(presence.lastSeenAt || presence.occurredAt || ""),
+    );
     if (!Number.isNaN(ts)) {
       const diffMinutes = Math.max(0, Math.floor((nowMs - ts) / 60000));
       return `Hoạt động ${diffMinutes} phút trước`;
     }
   }
 
-  return '';
+  return "";
 };
 
-const normalizePresencePayload = (raw: any): { isActive?: boolean; lastSeenAt?: string; occurredAt?: string } | null => {
+const normalizePresencePayload = (
+  raw: any,
+): { isActive?: boolean; lastSeenAt?: string; occurredAt?: string } | null => {
   const candidate = raw?.presence || raw?.data?.presence || raw?.data || raw;
-  if (!candidate || typeof candidate !== 'object') {
+  if (!candidate || typeof candidate !== "object") {
     return null;
   }
 
   return {
     isActive:
-      typeof candidate.isActive === 'boolean'
+      typeof candidate.isActive === "boolean"
         ? candidate.isActive
-        : typeof candidate.active === 'boolean'
+        : typeof candidate.active === "boolean"
           ? candidate.active
           : undefined,
     lastSeenAt:
-      typeof candidate.lastSeenAt === 'string'
+      typeof candidate.lastSeenAt === "string"
         ? candidate.lastSeenAt
-        : typeof candidate.lastActiveAt === 'string'
+        : typeof candidate.lastActiveAt === "string"
           ? candidate.lastActiveAt
           : undefined,
-    occurredAt: typeof candidate.occurredAt === 'string' ? candidate.occurredAt : undefined,
+    occurredAt:
+      typeof candidate.occurredAt === "string"
+        ? candidate.occurredAt
+        : undefined,
   };
 };
 
-const applyPresenceWithGrace = (previous: any, incoming: any, nowMs = Date.now()) => {
+const applyPresenceWithGrace = (
+  previous: any,
+  incoming: any,
+  nowMs = Date.now(),
+) => {
   const normalizedIncoming = normalizePresencePayload(incoming);
   if (!normalizedIncoming) {
     return previous || null;
@@ -85,12 +124,13 @@ const applyPresenceWithGrace = (previous: any, incoming: any, nowMs = Date.now()
     return {
       ...previous,
       _pendingOfflineSinceMs:
-        typeof previous?._pendingOfflineSinceMs === 'number'
+        typeof previous?._pendingOfflineSinceMs === "number"
           ? previous._pendingOfflineSinceMs
           : nowMs,
       _pendingOfflinePresence: {
         ...normalizedIncoming,
-        lastSeenAt: normalizedIncoming.lastSeenAt || normalizedIncoming.occurredAt,
+        lastSeenAt:
+          normalizedIncoming.lastSeenAt || normalizedIncoming.occurredAt,
       },
     };
   }
@@ -110,7 +150,7 @@ const resolveDisplayPresence = (presence: any, nowMs = Date.now()) => {
 
   if (
     presence.isActive === true &&
-    typeof presence._pendingOfflineSinceMs === 'number' &&
+    typeof presence._pendingOfflineSinceMs === "number" &&
     nowMs - presence._pendingOfflineSinceMs >= PRESENCE_OFFLINE_GRACE_MS
   ) {
     const pending = normalizePresencePayload(presence._pendingOfflinePresence);
@@ -126,7 +166,9 @@ const resolveDisplayPresence = (presence: any, nowMs = Date.now()) => {
   return presence;
 };
 
-const resolveConversationAvatarUrl = (item: ConversationSummaryItem): string | undefined => {
+const resolveConversationAvatarUrl = (
+  item: ConversationSummaryItem,
+): string | undefined => {
   const candidates = [
     (item as any).groupAvatarUrl,
     (item as any).peerAvatarUrl,
@@ -137,7 +179,7 @@ const resolveConversationAvatarUrl = (item: ConversationSummaryItem): string | u
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
+    if (typeof candidate === "string" && candidate.trim()) {
       return convertToS3Url(candidate.trim());
     }
   }
@@ -145,23 +187,25 @@ const resolveConversationAvatarUrl = (item: ConversationSummaryItem): string | u
   return undefined;
 };
 
-const sanitizeConversationPreferencesPayload = (payload: Record<string, unknown>) => {
+const sanitizeConversationPreferencesPayload = (
+  payload: Record<string, unknown>,
+) => {
   const next: Record<string, unknown> = {};
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'isPinned')) {
+  if (Object.prototype.hasOwnProperty.call(payload, "isPinned")) {
     next.isPinned = Boolean(payload.isPinned);
   }
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'archived')) {
+  if (Object.prototype.hasOwnProperty.call(payload, "archived")) {
     next.archived = Boolean(payload.archived);
   }
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'mutedUntil')) {
+  if (Object.prototype.hasOwnProperty.call(payload, "mutedUntil")) {
     const rawMutedUntil = payload.mutedUntil;
 
-    if (rawMutedUntil === null || rawMutedUntil === '') {
+    if (rawMutedUntil === null || rawMutedUntil === "") {
       next.mutedUntil = null;
-    } else if (typeof rawMutedUntil === 'string') {
+    } else if (typeof rawMutedUntil === "string") {
       const normalized = rawMutedUntil.trim();
       const ts = Date.parse(normalized);
       if (!Number.isNaN(ts)) {
@@ -179,7 +223,7 @@ const buildConversationPreferenceDelta = (
 ) => {
   const delta: Record<string, unknown> = {};
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'isPinned')) {
+  if (Object.prototype.hasOwnProperty.call(payload, "isPinned")) {
     const nextValue = Boolean(payload.isPinned);
     const currentValue = Boolean(currentConversation?.isPinned);
     if (nextValue !== currentValue) {
@@ -187,7 +231,7 @@ const buildConversationPreferenceDelta = (
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'archived')) {
+  if (Object.prototype.hasOwnProperty.call(payload, "archived")) {
     const nextValue = Boolean(payload.archived);
     const currentValue = Boolean(currentConversation?.archived);
     if (nextValue !== currentValue) {
@@ -195,7 +239,7 @@ const buildConversationPreferenceDelta = (
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'mutedUntil')) {
+  if (Object.prototype.hasOwnProperty.call(payload, "mutedUntil")) {
     const nextValue = payload.mutedUntil ?? null;
     const currentValue = currentConversation?.mutedUntil ?? null;
     if (nextValue !== currentValue) {
@@ -207,53 +251,73 @@ const buildConversationPreferenceDelta = (
 };
 
 const isConversationMuted = (mutedUntil: unknown) => {
-  if (typeof mutedUntil !== 'string' || !mutedUntil.trim()) return false;
+  if (typeof mutedUntil !== "string" || !mutedUntil.trim()) return false;
   const ts = Date.parse(mutedUntil);
   return !Number.isNaN(ts) && ts > Date.now();
 };
 
 const resolveConversationPathId = (conversationId: string) => {
-  return conversationId.includes('#') ? encodeURIComponent(conversationId) : conversationId;
+  return conversationId.includes("#")
+    ? encodeURIComponent(conversationId)
+    : conversationId;
 };
 
 export default function ChatListScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const theme = useTheme();
   const { user: currentUser } = useAuth();
-  const currentUserId = String((currentUser as any)?.sub || (currentUser as any)?.id || '');
-  
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterMode, setFilterMode] = useState('ALL');
-  const [selectedConversation, setSelectedConversation] = useState<ConversationSummaryItem | null>(null);
+  const currentUserId = String(
+    (currentUser as any)?.sub || (currentUser as any)?.id || "",
+  );
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterMode, setFilterMode] = useState("ALL");
+  const [selectedConversation, setSelectedConversation] =
+    useState<ConversationSummaryItem | null>(null);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [muteOptionsVisible, setMuteOptionsVisible] = useState(false);
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
-  const [dmPresenceByConversationId, setDmPresenceByConversationId] = useState<Record<string, any>>(() => ({ ...OFFICIAL_DM_PRESENCE_CACHE }));
+  const [dmPresenceByConversationId, setDmPresenceByConversationId] = useState<
+    Record<string, any>
+  >(() => ({ ...OFFICIAL_DM_PRESENCE_CACHE }));
   const [presenceNowMs, setPresenceNowMs] = useState(() => Date.now());
-  const { data: conversations, isLoading, isFetching, isRefetching, refetch } = useConversations({ q: searchQuery || undefined });
-  const { isFirstLoad, isRefreshing } = useSkeletonQuery({ data: conversations, isLoading, isFetching, isRefetching });
+  const {
+    data: conversations,
+    isLoading,
+    isFetching,
+    isRefetching,
+    refetch,
+  } = useConversations({ q: searchQuery || undefined });
+  const { isFirstLoad, isRefreshing } = useSkeletonQuery({
+    data: conversations,
+    isLoading,
+    isFetching,
+    isRefetching,
+  });
 
-  const openConversation = useCallback((conversationId: string) => {
-    void prefetchConversationMessages(queryClient, conversationId);
+  const openConversation = useCallback(
+    (conversationId: string) => {
+      void prefetchConversationMessages(queryClient, conversationId);
 
-    router.push({
-      pathname: '/(official)/chat/[id]',
-      params: { id: conversationId },
-    } as any);
-  }, [queryClient, router]);
-  
+      router.push({
+        pathname: "/(official)/chat/[id]",
+        params: { id: conversationId },
+      } as any);
+    },
+    [queryClient, router],
+  );
+
   // Refresh list whenever screen is focused (user comes back from chat)
   useFocusEffect(
     useCallback(() => {
       const hasConversationCache = queryClient
-        .getQueriesData({ queryKey: ['conversations'] })
+        .getQueriesData({ queryKey: ["conversations"] })
         .some(([, data]) => Array.isArray(data));
 
       if (!hasConversationCache) {
         refetch();
       }
-    }, [queryClient, refetch])
+    }, [queryClient, refetch]),
   );
 
   React.useEffect(() => {
@@ -265,13 +329,15 @@ export default function ChatListScreen() {
       }
 
       queryClient.setQueriesData<ConversationSummaryItem[]>(
-        { queryKey: ['conversations'] },
+        { queryKey: ["conversations"] },
         (current) => {
           if (!Array.isArray(current)) {
             return current;
           }
 
-          const index = current.findIndex((item) => item.conversationId === event.summary.conversationId);
+          const index = current.findIndex(
+            (item) => item.conversationId === event.summary.conversationId,
+          );
           if (index === -1) {
             return [event.summary, ...current];
           }
@@ -289,27 +355,44 @@ export default function ChatListScreen() {
       }
 
       queryClient.setQueriesData<ConversationSummaryItem[]>(
-        { queryKey: ['conversations'] },
+        { queryKey: ["conversations"] },
         (current) =>
           Array.isArray(current)
-            ? current.filter((item) => item.conversationId !== event.conversationId)
+            ? current.filter(
+                (item) => item.conversationId !== event.conversationId,
+              )
             : current,
       );
     };
 
-    void socketClient.connect().then(() => {
-      if (cancelled) {
-        return;
-      }
+    void socketClient
+      .connect()
+      .then(() => {
+        if (cancelled) {
+          return;
+        }
 
-      socketClient.on(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, handleConversationUpdated);
-      socketClient.on(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
-    }).catch(() => {});
+        socketClient.on(
+          CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
+          handleConversationUpdated,
+        );
+        socketClient.on(
+          CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
+          handleConversationRemoved,
+        );
+      })
+      .catch(() => {});
 
     return () => {
       cancelled = true;
-      socketClient.off(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, handleConversationUpdated);
-      socketClient.off(CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED, handleConversationRemoved);
+      socketClient.off(
+        CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
+        handleConversationUpdated,
+      );
+      socketClient.off(
+        CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
+        handleConversationRemoved,
+      );
     };
   }, [queryClient]);
 
@@ -322,7 +405,9 @@ export default function ChatListScreen() {
   }, []);
 
   React.useEffect(() => {
-    const sourceConversations = Array.isArray(conversations) ? conversations : [];
+    const sourceConversations = Array.isArray(conversations)
+      ? conversations
+      : [];
     const dmItems = sourceConversations.filter((item) => !item.isGroup);
     if (!dmItems.length) {
       return;
@@ -350,7 +435,6 @@ export default function ChatListScreen() {
       }
       return nextMap;
     });
-
   }, [conversations]);
 
   React.useEffect(() => {
@@ -358,7 +442,9 @@ export default function ChatListScreen() {
   }, [dmPresenceByConversationId]);
 
   React.useEffect(() => {
-    const sourceConversations = Array.isArray(conversations) ? conversations : [];
+    const sourceConversations = Array.isArray(conversations)
+      ? conversations
+      : [];
     const dmItems = sourceConversations.filter((item) => !item.isGroup);
 
     if (!dmItems.length) {
@@ -381,41 +467,60 @@ export default function ChatListScreen() {
       }
     }
 
-    const normalizeSocketPresence = (presence: any) => normalizePresencePayload({
-      isActive: presence?.isActive,
-      lastSeenAt: presence?.lastSeenAt,
-      occurredAt: presence?.occurredAt,
-    });
+    const normalizeSocketPresence = (presence: any) =>
+      normalizePresencePayload({
+        isActive: presence?.isActive,
+        lastSeenAt: presence?.lastSeenAt,
+        occurredAt: presence?.occurredAt,
+      });
 
     const handlePresenceSnapshot = (event: any) => {
-      const conversationId = conversationIdByKey.get(String(event?.conversationKey || ''));
+      const conversationId = conversationIdByKey.get(
+        String(event?.conversationKey || ""),
+      );
       if (!conversationId) return;
 
       const peerUserId = peerUserIdByConversationId.get(conversationId);
       const participant =
-        (event?.participants || []).find((entry: any) => String(entry?.userId || '') === String(peerUserId || '')) ||
-        (event?.participants || []).find((entry: any) => String(entry?.userId || '') !== currentUserId);
+        (event?.participants || []).find(
+          (entry: any) =>
+            String(entry?.userId || "") === String(peerUserId || ""),
+        ) ||
+        (event?.participants || []).find(
+          (entry: any) => String(entry?.userId || "") !== currentUserId,
+        );
       const normalized = normalizeSocketPresence(participant);
 
       if (normalized) {
         setDmPresenceByConversationId((prev) => ({
           ...prev,
-          [conversationId]: applyPresenceWithGrace(prev[conversationId], normalized),
+          [conversationId]: applyPresenceWithGrace(
+            prev[conversationId],
+            normalized,
+          ),
         }));
       }
     };
 
     const handlePresenceUpdated = (event: any) => {
-      const conversationId = conversationIdByKey.get(String(event?.conversationKey || ''));
+      const conversationId = conversationIdByKey.get(
+        String(event?.conversationKey || ""),
+      );
       if (!conversationId) return;
 
       const peerUserId = peerUserIdByConversationId.get(conversationId);
 
-      if (peerUserId && String(event?.presence?.userId || '') !== String(peerUserId)) {
+      if (
+        peerUserId &&
+        String(event?.presence?.userId || "") !== String(peerUserId)
+      ) {
         return;
       }
 
-      if (!peerUserId && String(event?.presence?.userId || '') === currentUserId) {
+      if (
+        !peerUserId &&
+        String(event?.presence?.userId || "") === currentUserId
+      ) {
         return;
       }
 
@@ -424,7 +529,10 @@ export default function ChatListScreen() {
       if (normalized) {
         setDmPresenceByConversationId((prev) => ({
           ...prev,
-          [conversationId]: applyPresenceWithGrace(prev[conversationId], normalized),
+          [conversationId]: applyPresenceWithGrace(
+            prev[conversationId],
+            normalized,
+          ),
         }));
       }
     };
@@ -434,16 +542,17 @@ export default function ChatListScreen() {
 
       for (const item of dmItems) {
         try {
-          const joined = await socketClient.emitWithAck<{ conversationKey: string }>(
-            CHAT_SOCKET_EVENTS.CONVERSATION_JOIN,
-            { conversationId: item.conversationId },
-          );
+          const joined = await socketClient.emitWithAck<{
+            conversationKey: string;
+          }>(CHAT_SOCKET_EVENTS.CONVERSATION_JOIN, {
+            conversationId: item.conversationId,
+          });
 
           if (cancelled) {
             break;
           }
 
-          const conversationKey = String(joined?.conversationKey || '');
+          const conversationKey = String(joined?.conversationKey || "");
           if (conversationKey) {
             conversationIdByKey.set(conversationKey, item.conversationId);
           }
@@ -465,9 +574,15 @@ export default function ChatListScreen() {
         return;
       }
 
-      socketClient.on(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
-      socketClient.on(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
-      socketClient.on('connect', handleSocketConnect);
+      socketClient.on(
+        CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT,
+        handlePresenceSnapshot,
+      );
+      socketClient.on(
+        CHAT_SOCKET_EVENTS.PRESENCE_UPDATED,
+        handlePresenceUpdated,
+      );
+      socketClient.on("connect", handleSocketConnect);
 
       await joinAllPresenceRooms();
     };
@@ -476,34 +591,49 @@ export default function ChatListScreen() {
 
     return () => {
       cancelled = true;
-      socketClient.off(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
-      socketClient.off(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
-      socketClient.off('connect', handleSocketConnect);
+      socketClient.off(
+        CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT,
+        handlePresenceSnapshot,
+      );
+      socketClient.off(
+        CHAT_SOCKET_EVENTS.PRESENCE_UPDATED,
+        handlePresenceUpdated,
+      );
+      socketClient.off("connect", handleSocketConnect);
     };
   }, [conversations, currentUserId]);
 
-  const getConversationSortTimestamp = useCallback((item: ConversationSummaryItem) => {
-    const candidates = [
-      (item as any).lastMessageSentAt,
-      (item as any).lastMessageAt,
-      (item as any).latestMessageSentAt,
-      item.updatedAt,
-    ];
+  const getConversationSortTimestamp = useCallback(
+    (item: ConversationSummaryItem) => {
+      const candidates = [
+        (item as any).lastMessageSentAt,
+        (item as any).lastMessageAt,
+        (item as any).latestMessageSentAt,
+        item.updatedAt,
+      ];
 
-    for (const value of candidates) {
-      const time = typeof value === 'string' ? Date.parse(value) : NaN;
-      if (!Number.isNaN(time)) return time;
-    }
+      for (const value of candidates) {
+        const time = typeof value === "string" ? Date.parse(value) : NaN;
+        if (!Number.isNaN(time)) return time;
+      }
 
-    return 0;
-  }, []);
+      return 0;
+    },
+    [],
+  );
 
-  const formatConversationTime = useCallback((item: ConversationSummaryItem) => {
-    const timestamp = getConversationSortTimestamp(item);
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-  }, [getConversationSortTimestamp]);
+  const formatConversationTime = useCallback(
+    (item: ConversationSummaryItem) => {
+      const timestamp = getConversationSortTimestamp(item);
+      if (!timestamp) return "";
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    },
+    [getConversationSortTimestamp],
+  );
 
   const sortedConversations = React.useMemo(() => {
     if (!conversations) return [];
@@ -511,21 +641,25 @@ export default function ChatListScreen() {
       return [];
     }
     let filtered = [...conversations];
-    
+
     // Deduplicate by conversationId to prevent FlatList key warnings
     const uniqueMap = new Map<string, ConversationSummaryItem>();
     for (const conv of filtered) {
       const existing = uniqueMap.get(conv.conversationId);
-      if (!existing || getConversationSortTimestamp(conv) >= getConversationSortTimestamp(existing)) {
+      if (
+        !existing ||
+        getConversationSortTimestamp(conv) >=
+          getConversationSortTimestamp(existing)
+      ) {
         uniqueMap.set(conv.conversationId, conv);
       }
     }
     filtered = Array.from(uniqueMap.values());
 
-    if (filterMode === 'GROUP') {
-      filtered = filtered.filter(c => c.isGroup);
-    } else if (filterMode === 'PRIVATE') {
-      filtered = filtered.filter(c => !c.isGroup);
+    if (filterMode === "GROUP") {
+      filtered = filtered.filter((c) => c.isGroup);
+    } else if (filterMode === "PRIVATE") {
+      filtered = filtered.filter((c) => !c.isGroup);
     }
 
     const sorted = filtered.sort((a, b) => {
@@ -541,17 +675,23 @@ export default function ChatListScreen() {
     return sorted;
   }, [conversations, filterMode, getConversationSortTimestamp]);
 
-  const handlePress = useCallback((id: string) => {
-    if (!id) {
-      return;
-    }
-    openConversation(id);
-  }, [openConversation]);
+  const handlePress = useCallback(
+    (id: string) => {
+      if (!id) {
+        return;
+      }
+      openConversation(id);
+    },
+    [openConversation],
+  );
 
-  const openConversationSettings = useCallback((item: ConversationSummaryItem) => {
-    setSelectedConversation(item);
-    setSettingsVisible(true);
-  }, []);
+  const openConversationSettings = useCallback(
+    (item: ConversationSummaryItem) => {
+      setSelectedConversation(item);
+      setSettingsVisible(true);
+    },
+    [],
+  );
 
   const closeConversationSettings = useCallback(() => {
     setSettingsVisible(false);
@@ -567,63 +707,71 @@ export default function ChatListScreen() {
     setMuteOptionsVisible(false);
   }, []);
 
-  const updateConversationPreference = useCallback(async (payload: Record<string, unknown>) => {
-    if (!selectedConversation) return;
-    setIsUpdatingSettings(true);
-    try {
-      const deltaPayload = buildConversationPreferenceDelta(selectedConversation, payload);
-      const sanitizedPayload = sanitizeConversationPreferencesPayload(deltaPayload);
+  const updateConversationPreference = useCallback(
+    async (payload: Record<string, unknown>) => {
+      if (!selectedConversation) return;
+      setIsUpdatingSettings(true);
+      try {
+        const deltaPayload = buildConversationPreferenceDelta(
+          selectedConversation,
+          payload,
+        );
+        const sanitizedPayload =
+          sanitizeConversationPreferencesPayload(deltaPayload);
 
-      if (Object.keys(sanitizedPayload).length === 0) {
+        if (Object.keys(sanitizedPayload).length === 0) {
+          closeConversationSettings();
+          return;
+        }
+
+        await ApiClient.patch(
+          `/conversations/${resolveConversationPathId(selectedConversation.conversationId)}/preferences`,
+          sanitizedPayload,
+        );
         closeConversationSettings();
-        return;
+        refetch();
+      } catch (error: any) {
+        // Keep message concise to avoid noisy settings UX.
+        alert(error?.message || "Không thể cập nhật cài đặt hội thoại.");
+      } finally {
+        setIsUpdatingSettings(false);
       }
-
-      await ApiClient.patch(
-        `/conversations/${resolveConversationPathId(selectedConversation.conversationId)}/preferences`,
-        sanitizedPayload,
-      );
-      closeConversationSettings();
-      refetch();
-    } catch (error: any) {
-      // Keep message concise to avoid noisy settings UX.
-      alert(error?.message || 'Không thể cập nhật cài đặt hội thoại.');
-    } finally {
-      setIsUpdatingSettings(false);
-    }
-  }, [closeConversationSettings, refetch, selectedConversation]);
+    },
+    [closeConversationSettings, refetch, selectedConversation],
+  );
 
   const handleDeleteConversation = useCallback(async () => {
     if (!selectedConversation) return;
     setIsUpdatingSettings(true);
     try {
-      await ApiClient.delete(`/conversations/${resolveConversationPathId(selectedConversation.conversationId)}`);
+      await ApiClient.delete(
+        `/conversations/${resolveConversationPathId(selectedConversation.conversationId)}`,
+      );
       closeConversationSettings();
       refetch();
     } catch (error: any) {
-      alert(error?.message || 'Không thể xóa cuộc trò chuyện.');
+      alert(error?.message || "Không thể xóa cuộc trò chuyện.");
     } finally {
       setIsUpdatingSettings(false);
     }
   }, [closeConversationSettings, refetch, selectedConversation]);
 
-  const handleToggleMute = useCallback(async () => {
-    if (!selectedConversation) return;
-    const mutedUntil = isConversationMuted(selectedConversation.mutedUntil)
-      ? null
-      : new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    await updateConversationPreference({ mutedUntil });
-  }, [selectedConversation, updateConversationPreference]);
-
-  const handleMuteForHours = useCallback(async (hours: number) => {
-    if (!selectedConversation) return;
-    const mutedUntil = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
-    await updateConversationPreference({ mutedUntil });
-  }, [selectedConversation, updateConversationPreference]);
+  const handleMuteForHours = useCallback(
+    async (hours: number) => {
+      if (!selectedConversation) return;
+      const mutedUntil = new Date(
+        Date.now() + hours * 60 * 60 * 1000,
+      ).toISOString();
+      await updateConversationPreference({ mutedUntil });
+    },
+    [selectedConversation, updateConversationPreference],
+  );
 
   const handleMuteUntilManual = useCallback(async () => {
     if (!selectedConversation) return;
-    await updateConversationPreference({ mutedUntil: '2099-12-31T23:59:59.999Z' });
+    await updateConversationPreference({
+      mutedUntil: "2099-12-31T23:59:59.999Z",
+    });
   }, [selectedConversation, updateConversationPreference]);
 
   const handleUnmute = useCallback(async () => {
@@ -633,15 +781,26 @@ export default function ChatListScreen() {
 
   const handleTogglePin = useCallback(async () => {
     if (!selectedConversation) return;
-    await updateConversationPreference({ isPinned: !(selectedConversation.isPinned ?? false) });
+    await updateConversationPreference({
+      isPinned: !(selectedConversation.isPinned ?? false),
+    });
   }, [selectedConversation, updateConversationPreference]);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header / Search */}
       <View style={styles.header}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <Text variant="headlineSmall" style={styles.headerTitle}>Tin nhắn</Text>
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <Text variant="headlineSmall" style={styles.headerTitle}>
+            Tin nhắn
+          </Text>
         </View>
         <Searchbar
           placeholder="Tìm kiếm cuộc hội thoại..."
@@ -654,9 +813,9 @@ export default function ChatListScreen() {
             value={filterMode}
             onValueChange={setFilterMode}
             buttons={[
-              { value: 'ALL', label: 'Tất cả' },
-              { value: 'GROUP', label: 'Nhóm' },
-              { value: 'PRIVATE', label: 'Cá nhân' },
+              { value: "ALL", label: "Tất cả" },
+              { value: "GROUP", label: "Nhóm" },
+              { value: "PRIVATE", label: "Cá nhân" },
             ]}
             density="small"
           />
@@ -669,95 +828,144 @@ export default function ChatListScreen() {
       ) : (
         <FlatList
           data={sortedConversations}
-          keyExtractor={item => item.conversationId}
+          keyExtractor={(item) => item.conversationId}
           onRefresh={refetch}
           refreshing={isRefreshing}
-          removeClippedSubviews={Platform.OS !== 'web'}
+          removeClippedSubviews={Platform.OS !== "web"}
           initialNumToRender={10}
           maxToRenderPerBatch={8}
           windowSize={7}
           updateCellsBatchingPeriod={50}
           contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <Divider style={{ marginHorizontal: 16 }} />}
+          ItemSeparatorComponent={() => (
+            <Divider style={{ marginHorizontal: 16 }} />
+          )}
           renderItem={({ item }) => {
             const displayPresence = !item.isGroup
-              ? resolveDisplayPresence(dmPresenceByConversationId[item.conversationId], presenceNowMs)
+              ? resolveDisplayPresence(
+                  dmPresenceByConversationId[item.conversationId],
+                  presenceNowMs,
+                )
               : null;
             const presenceLabel = !item.isGroup
               ? formatPresenceLabel(displayPresence, presenceNowMs)
-              : '';
+              : "";
 
             return (
-            <Card style={styles.chatCard} mode="elevated" elevation={1}>
-              <Card.Content style={styles.cardContent}>
-                <TouchableOpacity style={styles.chatMainPressable} activeOpacity={0.8} onPress={() => handlePress(item.conversationId)}>
-                  <View style={styles.avatarContainer}>
-                    {resolveConversationAvatarUrl(item) ? (
-                      <Avatar.Image
-                        size={48}
-                        source={{ uri: resolveConversationAvatarUrl(item) as string }}
-                        style={{ backgroundColor: item.isGroup ? theme.colors.secondaryContainer : theme.colors.primaryContainer }}
-                      />
-                    ) : (
-                      <Avatar.Icon 
-                        icon={item.isGroup ? "account-group" : "account"} 
-                        size={48} 
-                        style={{ backgroundColor: item.isGroup ? theme.colors.secondaryContainer : theme.colors.primaryContainer }} 
-                      />
-                    )}
-                    {!item.isGroup && displayPresence?.isActive ? (
-                      <View style={styles.onlineDot} />
-                    ) : null}
-                    {item.unreadCount > 0 && <Badge style={styles.badge}>{item.unreadCount}</Badge>}
-                  </View>
-                  <View style={styles.textContainer}>
-                    <View style={styles.row}>
-                      <View style={styles.nameWithPresenceWrap}>
-                        <Text variant="titleMedium" style={[styles.groupName, item.unreadCount > 0 && { fontWeight: 'bold' }]} numberOfLines={1}>
-                          {item.groupName || 'Hội thoại'}
-                        </Text>
-                        {presenceLabel ? (
+              <Card style={styles.chatCard} mode="elevated" elevation={1}>
+                <Card.Content style={styles.cardContent}>
+                  <TouchableOpacity
+                    style={styles.chatMainPressable}
+                    activeOpacity={0.8}
+                    onPress={() => handlePress(item.conversationId)}
+                  >
+                    <View style={styles.avatarContainer}>
+                      {resolveConversationAvatarUrl(item) ? (
+                        <Avatar.Image
+                          size={48}
+                          source={{
+                            uri: resolveConversationAvatarUrl(item) as string,
+                          }}
+                          style={{ backgroundColor: colors.surface }}
+                        />
+                      ) : (
+                        <Avatar.Icon
+                          icon={item.isGroup ? "account-group" : "account"}
+                          size={48}
+                          style={{ backgroundColor: colors.surface }}
+                        />
+                      )}
+                      {!item.isGroup && displayPresence?.isActive ? (
+                        <View style={styles.onlineDot} />
+                      ) : null}
+                      {item.unreadCount > 0 && (
+                        <Badge style={styles.badge}>{item.unreadCount}</Badge>
+                      )}
+                    </View>
+                    <View style={styles.textContainer}>
+                      <View style={styles.row}>
+                        <View style={styles.nameWithPresenceWrap}>
                           <Text
-                            variant="labelSmall"
+                            variant="titleMedium"
                             style={[
-                              styles.presenceInline,
-                                displayPresence?.isActive && styles.presenceInlineActive,
+                              styles.groupName,
+                              item.unreadCount > 0 && { fontWeight: "700" },
                             ]}
                             numberOfLines={1}
                           >
-                            {presenceLabel}
+                            {item.groupName || "Hội thoại"}
                           </Text>
-                        ) : null}
+                          {presenceLabel ? (
+                            <Text
+                              variant="labelSmall"
+                              style={[
+                                styles.presenceInline,
+                                displayPresence?.isActive &&
+                                  styles.presenceInlineActive,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {presenceLabel}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View style={styles.trailingActions}>
+                          {isConversationMuted(item.mutedUntil) ? (
+                            <MaterialCommunityIcons
+                              name="bell-off-outline"
+                              size={14}
+                              color={colors.muted}
+                              style={styles.muteIcon}
+                            />
+                          ) : null}
+                          <Text variant="labelSmall" style={styles.timeText}>
+                            {formatConversationTime(item)}
+                          </Text>
+                        </View>
                       </View>
-                      <View style={styles.trailingActions}>
-                        {isConversationMuted(item.mutedUntil) ? (
-                          <MaterialCommunityIcons name="bell-off-outline" size={14} color="#9e9e9e" style={styles.muteIcon} />
-                        ) : null}
-                        <Text variant="labelSmall" style={styles.timeText}>{formatConversationTime(item)}</Text>
-                      </View>
+                      <Text
+                        variant="bodySmall"
+                        style={[
+                          styles.description,
+                          item.unreadCount > 0 && {
+                            fontWeight: "600",
+                            color: colors.text,
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {[item.lastMessagePreview || "Bắt đầu trò chuyện..."]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </Text>
                     </View>
-                    <Text variant="bodySmall" style={[styles.description, item.unreadCount > 0 && { fontWeight: '600', color: '#000' }]} numberOfLines={1}>
-                      {[
-                        item.lastMessagePreview || 'Bắt đầu trò chuyện...',
-                      ].filter(Boolean).join(' • ')}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                  </TouchableOpacity>
 
-                <IconButton
-                  icon="dots-vertical"
-                  size={20}
-                  style={styles.settingsBtn}
-                  onPress={() => openConversationSettings(item)}
-                />
-              </Card.Content>
-            </Card>
-          );
+                  <IconButton
+                    icon="dots-vertical"
+                    size={20}
+                    style={styles.settingsBtn}
+                    onPress={() => openConversationSettings(item)}
+                  />
+                </Card.Content>
+              </Card>
+            );
           }}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <MaterialCommunityIcons name="message-text-outline" size={60} color="#e0e0e0" />
-              <Text variant="bodyLarge" style={{ color: '#9e9e9e', fontWeight: 'bold', marginTop: 8 }}>
+              <MaterialCommunityIcons
+                name="message-text-outline"
+                size={60}
+                color={colors.border}
+              />
+              <Text
+                variant="bodyLarge"
+                style={{
+                  color: colors.textSecondary,
+                  fontWeight: "700",
+                  marginTop: 8,
+                }}
+              >
                 Không có cuộc hội thoại nào.
               </Text>
             </View>
@@ -772,9 +980,16 @@ export default function ChatListScreen() {
           contentContainerStyle={styles.settingsModalContainer}
           style={styles.settingsModalSheet}
         >
-          <Text variant="titleMedium" style={styles.settingsTitle}>Cài đặt hội thoại</Text>
-          <Text variant="bodySmall" style={styles.settingsSubtitle} numberOfLines={1}>
-            {selectedConversation?.groupName || selectedConversation?.conversationId}
+          <Text variant="titleMedium" style={styles.settingsTitle}>
+            Cài đặt hội thoại
+          </Text>
+          <Text
+            variant="bodySmall"
+            style={styles.settingsSubtitle}
+            numberOfLines={1}
+          >
+            {selectedConversation?.groupName ||
+              selectedConversation?.conversationId}
           </Text>
 
           <Button
@@ -785,7 +1000,9 @@ export default function ChatListScreen() {
             contentStyle={styles.settingsActionContent}
             labelStyle={styles.settingsActionLabel}
           >
-            {selectedConversation?.isPinned ? 'Bỏ ghim hội thoại' : 'Ghim hội thoại'}
+            {selectedConversation?.isPinned
+              ? "Bỏ ghim hội thoại"
+              : "Ghim hội thoại"}
           </Button>
 
           <Button
@@ -796,24 +1013,50 @@ export default function ChatListScreen() {
             contentStyle={styles.settingsActionContent}
             labelStyle={styles.settingsActionLabel}
           >
-            {isConversationMuted(selectedConversation?.mutedUntil) ? 'Tùy chỉnh tắt thông báo' : 'Tắt thông báo'}
+            {isConversationMuted(selectedConversation?.mutedUntil)
+              ? "Tùy chỉnh tắt thông báo"
+              : "Tắt thông báo"}
           </Button>
 
           {muteOptionsVisible ? (
             <View style={styles.muteOptionsBox}>
-              <Button mode="text" icon="bell-off-outline" disabled={isUpdatingSettings} onPress={() => handleMuteForHours(1)}>
+              <Button
+                mode="text"
+                icon="bell-off-outline"
+                disabled={isUpdatingSettings}
+                onPress={() => handleMuteForHours(1)}
+              >
                 Tắt 1 giờ
               </Button>
-              <Button mode="text" icon="bell-off-outline" disabled={isUpdatingSettings} onPress={() => handleMuteForHours(4)}>
+              <Button
+                mode="text"
+                icon="bell-off-outline"
+                disabled={isUpdatingSettings}
+                onPress={() => handleMuteForHours(4)}
+              >
                 Tắt 4 giờ
               </Button>
-              <Button mode="text" icon="bell-off-outline" disabled={isUpdatingSettings} onPress={handleMuteUntilManual}>
+              <Button
+                mode="text"
+                icon="bell-off-outline"
+                disabled={isUpdatingSettings}
+                onPress={handleMuteUntilManual}
+              >
                 Tắt đến khi mở lại
               </Button>
-              <Button mode="text" icon="bell-ring-outline" disabled={isUpdatingSettings} onPress={handleUnmute}>
+              <Button
+                mode="text"
+                icon="bell-ring-outline"
+                disabled={isUpdatingSettings}
+                onPress={handleUnmute}
+              >
                 Bật thông báo
               </Button>
-              <Button mode="text" disabled={isUpdatingSettings} onPress={closeMuteOptions}>
+              <Button
+                mode="text"
+                disabled={isUpdatingSettings}
+                onPress={closeMuteOptions}
+              >
                 Đóng tùy chọn
               </Button>
             </View>
@@ -830,7 +1073,12 @@ export default function ChatListScreen() {
             Xóa cuộc trò chuyện
           </Button>
 
-          <Button mode="contained" onPress={closeConversationSettings} disabled={isUpdatingSettings} style={{ marginTop: 8 }}>
+          <Button
+            mode="contained"
+            onPress={closeConversationSettings}
+            disabled={isUpdatingSettings}
+            style={{ marginTop: 8 }}
+          >
             Đóng
           </Button>
         </Modal>
@@ -840,54 +1088,63 @@ export default function ChatListScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f7fa' },
-  header: { 
-    padding: 16, 
-    backgroundColor: '#fff', 
-    borderBottomLeftRadius: 24, 
-    borderBottomRightRadius: 24, 
+  container: { flex: 1, backgroundColor: colors.background },
+  header: {
+    padding: 16,
+    backgroundColor: colors.card,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     elevation: 4,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
     shadowRadius: 10,
     zIndex: 10,
   },
-  headerTitle: { fontWeight: '900', color: '#1a1a1a' },
-  searchBar: { borderRadius: 12, backgroundColor: '#f2f3f5', elevation: 0 },
+  headerTitle: { fontWeight: "700", color: colors.text },
+  searchBar: {
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    elevation: 0,
+  },
   filterRow: { marginTop: 12 },
-  
+
   listContent: { paddingVertical: 12 },
   chatCard: {
     marginHorizontal: 16,
     marginVertical: 4,
     borderRadius: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
   },
   cardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     padding: 12,
   },
   chatMainPressable: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     flex: 1,
   },
-  avatarContainer: { position: 'relative' },
+  avatarContainer: { position: "relative" },
   onlineDot: {
-    position: 'absolute',
+    position: "absolute",
     right: 0,
     bottom: 0,
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#22c55e',
+    backgroundColor: "#22c55e",
     borderWidth: 2,
-    borderColor: '#ffffff',
+    borderColor: colors.card,
   },
-  badge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#E53935' },
-  
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: colors.secondary,
+  },
+
   textContainer: {
     flex: 1,
     marginLeft: 12,
@@ -897,22 +1154,22 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 4,
   },
   presenceInline: {
     marginTop: 1,
-    color: '#6b7280',
+    color: colors.textSecondary,
   },
   presenceInlineActive: {
-    color: '#16a34a',
-    fontWeight: '700',
+    color: "#16a34a",
+    fontWeight: "700",
   },
   trailingActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginLeft: 8,
   },
   muteIcon: {
@@ -924,50 +1181,50 @@ const styles = StyleSheet.create({
   },
   groupName: {
     flex: 1,
-    color: '#212121',
+    color: colors.text,
   },
   timeText: {
-    color: '#9e9e9e',
-    fontWeight: '500',
+    color: colors.muted,
+    fontWeight: "500",
   },
   description: {
-    color: '#757575',
+    color: colors.textSecondary,
   },
   settingsModalSheet: {
-    justifyContent: 'flex-end',
+    justifyContent: "flex-end",
     margin: 0,
   },
   settingsModalContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     padding: 16,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
   },
   settingsTitle: {
-    fontWeight: '700',
+    fontWeight: "700",
     marginBottom: 2,
   },
   settingsSubtitle: {
-    color: '#6b7280',
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   settingsActionContent: {
-    justifyContent: 'flex-start',
+    justifyContent: "flex-start",
   },
   settingsActionLabel: {
-    color: '#111827',
+    color: colors.text,
   },
   settingsDangerLabel: {
-    color: '#b91c1c',
+    color: "#b91c1c",
   },
   muteOptionsBox: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 4,
     marginBottom: 8,
   },
-  
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  empty: { padding: 48, alignItems: 'center' },
+
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  empty: { padding: 48, alignItems: "center" },
 });

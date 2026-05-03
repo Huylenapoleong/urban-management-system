@@ -6,7 +6,9 @@ import {
   Text,
   View,
 } from 'react-native';
+import { LinearGradient } from '@/components/shared/SafeLinearGradient';
 import { SkeletonInline } from '@/components/skeleton/Skeleton';
+import colors from '@/constants/colors';
 
 type ConfirmDialogProps = {
   visible: boolean;
@@ -77,6 +79,14 @@ export default function ConfirmDialog({
               onPress={onConfirm}
               disabled={disableClose}
             >
+              {!isDanger ? (
+                <LinearGradient
+                  colors={colors.gradient.primary}
+                  start={colors.gradient.start}
+                  end={colors.gradient.end}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              ) : null}
               {confirmLoading ? (
                 <SkeletonInline width={52} height={12} />
               ) : (
@@ -105,20 +115,20 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 380,
     borderRadius: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: colors.border,
     paddingHorizontal: 16,
     paddingVertical: 16,
   },
   title: {
-    color: '#1e293b',
+    color: colors.text,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   message: {
     marginTop: 10,
-    color: '#334155',
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 21,
   },
@@ -135,26 +145,27 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   buttonGhost: {
     borderWidth: 1,
-    borderColor: '#dbe5f0',
-    backgroundColor: '#f8fafc',
+    borderColor: colors.border,
+    backgroundColor: colors.background,
   },
   buttonPrimary: {
-    backgroundColor: '#1f3e68',
+    backgroundColor: colors.secondary,
   },
   buttonDanger: {
     backgroundColor: '#dc2626',
   },
   buttonGhostText: {
-    color: '#1e293b',
+    color: colors.text,
     fontSize: 13,
     fontWeight: '700',
   },
   buttonSolidText: {
     color: '#ffffff',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
   },
 });

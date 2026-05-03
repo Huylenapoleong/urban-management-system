@@ -67,6 +67,13 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    min-height: 100%;
+  }
+
   * {
     @apply border-border;
     scrollbar-width: none;
@@ -81,6 +88,8 @@
 
   body {
     @apply bg-background text-foreground;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 }
 

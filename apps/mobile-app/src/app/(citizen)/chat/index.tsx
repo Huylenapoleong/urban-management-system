@@ -1,22 +1,27 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FlatList, StyleSheet, Text, View, TouchableOpacity, Platform } from "react-native";
+import { Animated, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Avatar, Badge, Card, Divider, IconButton, Searchbar, SegmentedButtons, Portal, Modal, Button } from "react-native-paper";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Avatar, Badge, Button, Modal, Portal } from "react-native-paper";
 import colors from "@/constants/colors";
 import { useCitizenInbox } from "@/features/chat/citizen/useCitizenInbox";
 import { useAuth } from "@/providers/AuthProvider";
 import client from "@/services/api/client";
+import { deleteConversation, updateConversationPreferences } from "@/services/api/conversation.api";
+import { getUserPresence } from "@/services/api/user.api";
 import { convertToS3Url } from "@/constants/s3";
 import { socketClient } from "@/lib/socket-client";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import { ListSkeleton } from "@/components/skeleton/Skeleton";
 import { prefetchConversationMessages } from "@/services/prefetch";
+import { openAiChatbot } from "@/lib/ai-chatbot-controller";
 
 const PRESENCE_OFFLINE_GRACE_MS = 120000;
 const CITIZEN_DM_PRESENCE_CACHE: Record<string, any> = {};
+const DEFAULT_CHAT_HEADER_HEIGHT = 118;
 
 const resolveConversationAvatarUrl = (item: any): string | undefined => {
   const candidates = [
@@ -37,11 +42,35 @@ const resolveConversationAvatarUrl = (item: any): string | undefined => {
   return undefined;
 };
 
-const getDmTargetUserId = (conversationId: string | undefined): string | undefined => {
+const getDmTargetUserId = (
+  conversationId: string | undefined,
+  currentUserId?: string,
+): string | undefined => {
   if (!conversationId || typeof conversationId !== "string") return undefined;
-  if (!conversationId.startsWith("dm:")) return undefined;
-  const targetId = conversationId.slice(3).trim();
-  return targetId || undefined;
+  const normalized = conversationId.trim();
+
+  if (/^dm:/i.test(normalized)) {
+    const targetId = normalized.replace(/^dm:/i, "").trim();
+    return targetId || undefined;
+  }
+
+  if (/^dm#/i.test(normalized)) {
+    const participantIds = normalized
+      .replace(/^dm#/i, "")
+      .split("#")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (!participantIds.length) return undefined;
+
+    if (currentUserId) {
+      return participantIds.find((participantId) => participantId !== currentUserId) ?? participantIds[0];
+    }
+
+    return participantIds[participantIds.length - 1];
+  }
+
+  return undefined;
 };
 
 const formatPresenceLabel = (
@@ -49,18 +78,29 @@ const formatPresenceLabel = (
   nowMs = Date.now(),
 ): string => {
   if (presence?.isActive === true) {
-    return 'Đang hoạt động';
+    return "Đang hoạt động";
   }
 
   if (presence?.isActive === false) {
-    const ts = Date.parse(String(presence.lastSeenAt || presence.occurredAt || ''));
+    const ts = Date.parse(String(presence.lastSeenAt || presence.occurredAt || ""));
     if (!Number.isNaN(ts)) {
       const diffMinutes = Math.max(0, Math.floor((nowMs - ts) / 60000));
-      return `Hoạt động ${diffMinutes} phút trước`;
+      if (diffMinutes < 1) {
+        return "Vừa hoạt động";
+      }
+      if (diffMinutes < 60) {
+        return `Hoạt động ${diffMinutes} phút trước`;
+      }
+      const diffHours = Math.floor(diffMinutes / 60);
+      if (diffHours < 24) {
+        return `Hoạt động ${diffHours} giờ trước`;
+      }
+      const diffDays = Math.floor(diffHours / 24);
+      return `Hoạt động ${diffDays} ngày trước`;
     }
   }
 
-  return '';
+  return "";
 };
 
 const normalizePresencePayload = (raw: any): { isActive?: boolean; lastSeenAt?: string; occurredAt?: string } | null => {
@@ -69,7 +109,7 @@ const normalizePresencePayload = (raw: any): { isActive?: boolean; lastSeenAt?: 
     return null;
   }
 
-  return {
+  const normalized = {
     isActive:
       typeof candidate.isActive === 'boolean'
         ? candidate.isActive
@@ -84,6 +124,16 @@ const normalizePresencePayload = (raw: any): { isActive?: boolean; lastSeenAt?: 
           : undefined,
     occurredAt: typeof candidate.occurredAt === 'string' ? candidate.occurredAt : undefined,
   };
+
+  if (
+    normalized.isActive === undefined &&
+    !normalized.lastSeenAt &&
+    !normalized.occurredAt
+  ) {
+    return null;
+  }
+
+  return normalized;
 };
 
 const applyPresenceWithGrace = (previous: any, incoming: any, nowMs = Date.now()) => {
@@ -150,10 +200,6 @@ const isConversationMuted = (mutedUntil: unknown) => {
   if (typeof mutedUntil !== "string" || !mutedUntil.trim()) return false;
   const ts = Date.parse(mutedUntil);
   return !Number.isNaN(ts) && ts > Date.now();
-};
-
-const resolveConversationPathId = (conversationId: string) => {
-  return conversationId.includes("#") ? encodeURIComponent(conversationId) : conversationId;
 };
 
 const sanitizeConversationPreferencesPayload = (payload: Record<string, unknown>) => {
@@ -223,9 +269,8 @@ export default function ChatListPage() {
   const tabBarHeight = useBottomTabBarHeight();
   const { user: currentUser } = useAuth();
   const currentUserId = String((currentUser as any)?.sub || (currentUser as any)?.id || '');
-  const { conversations, loading, error, refresh } = useCitizenInbox();
+  const { conversations, loading, error, refresh, hideConversation } = useCitizenInbox();
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterMode, setFilterMode] = useState("ALL");
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<any>(null);
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
@@ -233,6 +278,86 @@ export default function ChatListPage() {
   const [dmAvatarByConversationId, setDmAvatarByConversationId] = useState<Record<string, string>>({});
   const [dmPresenceByConversationId, setDmPresenceByConversationId] = useState<Record<string, any>>(() => ({ ...CITIZEN_DM_PRESENCE_CACHE }));
   const [presenceNowMs, setPresenceNowMs] = useState(() => Date.now());
+  const [titleBarHeight, setTitleBarHeight] = useState(56);
+  const [searchHeaderHeight, setSearchHeaderHeight] = useState(DEFAULT_CHAT_HEADER_HEIGHT - 56);
+  const scrollY = React.useRef(new Animated.Value(0)).current;
+  const searchCollapseDistance = Math.max(searchHeaderHeight, 1);
+  const clampedScrollY = useMemo(
+    () => Animated.diffClamp(scrollY, 0, searchCollapseDistance),
+    [scrollY, searchCollapseDistance],
+  );
+  const searchRowHeight = useMemo(
+    () =>
+      clampedScrollY.interpolate({
+        inputRange: [
+          0,
+          searchCollapseDistance * 0.16,
+          searchCollapseDistance * 0.72,
+          searchCollapseDistance,
+        ],
+        outputRange: [
+          searchHeaderHeight,
+          searchHeaderHeight,
+          searchHeaderHeight * 0.54,
+          0,
+        ],
+        extrapolate: "clamp",
+      }),
+    [clampedScrollY, searchCollapseDistance, searchHeaderHeight],
+  );
+  const searchRowOpacity = useMemo(
+    () =>
+      clampedScrollY.interpolate({
+        inputRange: [
+          0,
+          searchCollapseDistance * 0.16,
+          searchCollapseDistance * 0.5,
+          searchCollapseDistance * 0.82,
+          searchCollapseDistance,
+        ],
+        outputRange: [1, 0.98, 0.86, 0.34, 0],
+        extrapolate: "clamp",
+      }),
+    [clampedScrollY, searchCollapseDistance],
+  );
+  const searchRowTranslateY = useMemo(
+    () =>
+      clampedScrollY.interpolate({
+        inputRange: [0, searchCollapseDistance * 0.68, searchCollapseDistance],
+        outputRange: [0, -2, -4],
+        extrapolate: "clamp",
+      }),
+    [clampedScrollY, searchCollapseDistance],
+  );
+  const searchRowScale = useMemo(
+    () =>
+      clampedScrollY.interpolate({
+        inputRange: [0, searchCollapseDistance * 0.7, searchCollapseDistance],
+        outputRange: [1, 0.997, 0.992],
+        extrapolate: "clamp",
+      }),
+    [clampedScrollY, searchCollapseDistance],
+  );
+  const handleTitleBarLayout = React.useCallback((event: any) => {
+    const nextHeight = Math.ceil(event?.nativeEvent?.layout?.height || 0);
+    if (nextHeight > 0 && Math.abs(nextHeight - titleBarHeight) > 1) {
+      setTitleBarHeight(nextHeight);
+    }
+  }, [titleBarHeight]);
+  const handleSearchHeaderLayout = React.useCallback((event: any) => {
+    const nextHeight = Math.ceil(event?.nativeEvent?.layout?.height || 0);
+    if (nextHeight > 0 && Math.abs(nextHeight - searchHeaderHeight) > 1) {
+      setSearchHeaderHeight(nextHeight);
+    }
+  }, [searchHeaderHeight]);
+  const animatedOnScroll = useMemo(
+    () =>
+      Animated.event(
+        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+        { useNativeDriver: false },
+      ),
+    [scrollY],
+  );
 
   const openConversation = React.useCallback((conversationId: string) => {
     void prefetchConversationMessages(queryClient, conversationId);
@@ -292,14 +417,6 @@ export default function ChatListPage() {
         .includes(keyword);
     });
 
-    if (filterMode === "GROUP") {
-      next = next.filter((item) => item.isGroup);
-    }
-
-    if (filterMode === "PRIVATE") {
-      next = next.filter((item) => !item.isGroup);
-    }
-
     return [...next].sort((left, right) => {
       const leftPinned = Boolean(left.isPinned);
       const rightPinned = Boolean(right.isPinned);
@@ -310,7 +427,7 @@ export default function ChatListPage() {
 
       return getConversationSortTimestamp(right) - getConversationSortTimestamp(left);
     });
-  }, [conversations, filterMode, searchQuery]);
+  }, [conversations, searchQuery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -320,7 +437,7 @@ export default function ChatListPage() {
       const targetUserIds = Array.from(
         new Set(
           dmItems
-            .map((item) => getDmTargetUserId(item.conversationId))
+            .map((item) => getDmTargetUserId(item.conversationId, currentUserId))
             .filter((value): value is string => Boolean(value)),
         ),
       );
@@ -352,7 +469,7 @@ export default function ChatListPage() {
 
       const nextMap: Record<string, string> = {};
       for (const item of dmItems) {
-        const userId = getDmTargetUserId(item.conversationId);
+        const userId = getDmTargetUserId(item.conversationId, currentUserId);
         if (!userId) continue;
         const avatar = avatarByUserId[userId];
         if (avatar) {
@@ -370,7 +487,7 @@ export default function ChatListPage() {
     return () => {
       cancelled = true;
     };
-  }, [conversations]);
+  }, [conversations, currentUserId]);
 
   useEffect(() => {
     const dmItems = conversations.filter((item) => !item.isGroup);
@@ -397,12 +514,68 @@ export default function ChatListPage() {
         const conversationId = item.conversationId;
         const existing = prev[conversationId];
         const fallback = summaryMap[conversationId];
-        nextMap[conversationId] = existing || fallback || null;
+        nextMap[conversationId] = fallback
+          ? applyPresenceWithGrace(existing, fallback)
+          : existing || null;
       }
       return nextMap;
     });
 
   }, [conversations]);
+
+  useEffect(() => {
+    const dmTargets = conversations
+      .filter((item) => !item.isGroup)
+      .map((item) => ({
+        conversationId: item.conversationId,
+        userId: getDmTargetUserId(item.conversationId, currentUserId),
+      }))
+      .filter((item): item is { conversationId: string; userId: string } => Boolean(item.userId));
+
+    if (!dmTargets.length) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadPresence = async () => {
+      const results = await Promise.all(
+        dmTargets.map(async (item) => {
+          try {
+            const presence = await getUserPresence(item.userId);
+            const normalized = normalizePresencePayload(presence);
+            return normalized
+              ? { conversationId: item.conversationId, presence: normalized }
+              : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setDmPresenceByConversationId((prev) => {
+        const next = { ...prev };
+        for (const result of results) {
+          if (!result) continue;
+          next[result.conversationId] = applyPresenceWithGrace(
+            prev[result.conversationId],
+            result.presence,
+          );
+        }
+        return next;
+      });
+    };
+
+    void loadPresence();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversations, currentUserId]);
 
   useEffect(() => {
     Object.assign(CITIZEN_DM_PRESENCE_CACHE, dmPresenceByConversationId);
@@ -425,7 +598,7 @@ export default function ChatListPage() {
     const joinedConversationIds = new Set<string>();
 
     for (const item of dmItems) {
-      const peerUserId = getDmTargetUserId(item.conversationId);
+      const peerUserId = getDmTargetUserId(item.conversationId, currentUserId);
       if (peerUserId) {
         peerUserIdByConversationId.set(item.conversationId, peerUserId);
       }
@@ -563,10 +736,7 @@ export default function ChatListPage() {
         return;
       }
 
-      await client.patch(
-        `/conversations/${resolveConversationPathId(selectedConversation.conversationId)}/preferences`,
-        sanitizedPayload,
-      );
+      await updateConversationPreferences(selectedConversation.conversationId, sanitizedPayload);
       closeSettings();
       await refresh();
     } catch (error: any) {
@@ -579,14 +749,6 @@ export default function ChatListPage() {
   const handleTogglePin = async () => {
     if (!selectedConversation) return;
     await patchPreferences({ isPinned: !(selectedConversation.isPinned ?? false) });
-  };
-
-  const handleToggleMute = async () => {
-    if (!selectedConversation) return;
-    const mutedUntil = isConversationMuted(selectedConversation.mutedUntil)
-      ? null
-      : new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    await patchPreferences({ mutedUntil });
   };
 
   const handleMuteForHours = async (hours: number) => {
@@ -608,9 +770,11 @@ export default function ChatListPage() {
 
   const handleDeleteConversation = async () => {
     if (!selectedConversation) return;
+    const conversationId = selectedConversation.conversationId;
     setIsUpdatingSettings(true);
     try {
-      await client.delete(`/conversations/${resolveConversationPathId(selectedConversation.conversationId)}`);
+      await deleteConversation(conversationId);
+      hideConversation(conversationId);
       closeSettings();
       await refresh();
     } catch (error: any) {
@@ -621,123 +785,180 @@ export default function ChatListPage() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>Tin nhắn</Text>
-        </View>
-        <Searchbar
-          placeholder="Tìm kiếm cuộc hội thoại..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          style={styles.searchBar}
-        />
-        <View style={styles.filterRow}>
-          <SegmentedButtons
-            value={filterMode}
-            onValueChange={setFilterMode}
-            buttons={[
-              { value: "ALL", label: "Tất cả" },
-              { value: "GROUP", label: "Nhóm" },
-              { value: "PRIVATE", label: "Cá nhân" },
-            ]}
-            density="small"
-          />
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <View style={styles.floatingHeader}>
+        <View onLayout={handleTitleBarLayout} style={styles.floatingHeaderInner}>
+          <View style={[styles.headerTop, styles.headerTopMessenger]}>
+            <Text style={styles.headerTitle}>Chat</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Tìm người để chat"
+              onPress={() => router.push("/(citizen)/chat/search" as any)}
+              style={({ pressed }) => [styles.headerAction, pressed ? styles.pressed : null]}
+            >
+              <Ionicons name="create-outline" size={22} color={colors.text} />
+            </Pressable>
+          </View>
         </View>
       </View>
+
       {loading ? (
-        <ListSkeleton count={7} />
+        <View
+          style={[
+            styles.skeletonWrap,
+            styles.stateWrap,
+            { paddingTop: titleBarHeight + 12, paddingBottom: tabBarHeight + 20 },
+          ]}
+        >
+          <ListSkeleton count={7} />
+        </View>
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <View
+          style={[
+            styles.stateWrap,
+            styles.errorWrap,
+            { paddingTop: titleBarHeight + 12, paddingBottom: tabBarHeight + 20 },
+          ]}
+        >
+          <Text style={styles.error}>{error}</Text>
+        </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
           data={filteredConversations}
           keyExtractor={(item) => item.conversationId}
-          contentContainerStyle={{ padding: 16, paddingBottom: tabBarHeight + 24 }}
+          ListHeaderComponent={
+            <Animated.View
+              style={[
+                styles.searchHeaderAnimated,
+                {
+                  height: searchRowHeight,
+                  opacity: searchRowOpacity,
+                  transform: [{ translateY: searchRowTranslateY }, { scale: searchRowScale }],
+                },
+              ]}
+            >
+              <View onLayout={handleSearchHeaderLayout} style={styles.searchSection}>
+                <View style={styles.searchField}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Mở Meta AI"
+                    onPress={openAiChatbot}
+                    style={({ pressed }) => [styles.searchAiButton, pressed ? styles.pressed : null]}
+                  >
+                    <Ionicons name="sparkles" size={20} color={colors.secondary} />
+                  </Pressable>
+                  <TextInput
+                    placeholder="Hỏi Meta AI hoặc tìm kiếm"
+                    placeholderTextColor="#6b7280"
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    returnKeyType="search"
+                    selectionColor={colors.secondary}
+                    style={styles.searchInput}
+                  />
+                </View>
+              </View>
+            </Animated.View>
+          }
+          onScroll={animatedOnScroll}
+          scrollEventThrottle={8}
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingTop: titleBarHeight, paddingBottom: tabBarHeight + 20 },
+          ]}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           initialNumToRender={10}
           maxToRenderPerBatch={8}
           windowSize={7}
           updateCellsBatchingPeriod={50}
-          ItemSeparatorComponent={() => <Divider style={{ marginHorizontal: 16 }} />}
           renderItem={({ item }) => {
             const displayPresence = !item.isGroup
               ? resolveDisplayPresence(dmPresenceByConversationId[item.conversationId], presenceNowMs)
               : null;
             const presenceLabel = !item.isGroup
               ? formatPresenceLabel(displayPresence, presenceNowMs)
-              : '';
-
+              : "";
             const avatarUrl =
               resolveConversationAvatarUrl(item) || dmAvatarByConversationId[item.conversationId];
+            const unreadCount = Number(item.unreadCount || 0);
+            const previewText = item.lastMessagePreview || presenceLabel || "Bắt đầu trò chuyện...";
 
             return (
-              <Card style={styles.chatCard} mode="elevated" elevation={1}>
-                <View style={styles.cardContent}>
-                  <TouchableOpacity
-                    style={styles.chatMainPressable}
-                    activeOpacity={0.8}
-                    onPress={() => openConversation(item.conversationId)}
-                  >
-                    <View style={styles.avatarContainer}>
-                      {avatarUrl ? (
-                        <Avatar.Image
-                          size={48}
-                          source={{ uri: avatarUrl }}
-                          style={{ backgroundColor: item.isGroup ? "#e8efff" : "#eafbf0" }}
-                        />
-                      ) : (
-                        <Avatar.Icon
-                          icon={item.isGroup ? "account-group" : "account"}
-                          size={48}
-                          style={{ backgroundColor: item.isGroup ? "#e8efff" : "#eafbf0" }}
-                        />
-                      )}
-                      {!item.isGroup && displayPresence?.isActive ? (
-                        <View style={styles.onlineDot} />
-                      ) : null}
-                      {item.unreadCount > 0 ? <Badge style={styles.badge}>{item.unreadCount}</Badge> : null}
-                    </View>
-                    <View style={styles.textWrap}>
-                      <View style={styles.titleRow}>
-                        <View style={styles.nameWithPresenceWrap}>
-                          <Text style={[styles.title, item.unreadCount > 0 ? styles.titleUnread : null]} numberOfLines={1}>
-                            {item.groupName || "Hội thoại"}
-                          </Text>
-                          {presenceLabel ? (
-                            <Text
-                              style={[
-                                styles.presenceInline,
-                                displayPresence?.isActive ? styles.presenceInlineActive : null,
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {presenceLabel}
-                            </Text>
-                          ) : null}
-                        </View>
-                        <View style={styles.timeWrap}>
-                          {isConversationMuted(item.mutedUntil) ? (
-                            <Ionicons name="notifications-off-outline" size={14} color={colors.textSecondary} style={styles.muteIcon} />
-                          ) : null}
-                          <Text style={styles.timeText}>{formatConversationTime(item)}</Text>
-                        </View>
-                      </View>
-                      <Text style={[styles.preview, item.unreadCount > 0 ? styles.previewUnread : null]} numberOfLines={1}>
-                        {[
-                          item.lastMessagePreview || "Bắt đầu trò chuyện...",
-                        ].filter(Boolean).join(' • ')}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  <IconButton icon="dots-vertical" size={20} style={styles.settingsBtn} onPress={() => openSettings(item)} />
+              <Pressable
+                onPress={() => openConversation(item.conversationId)}
+                onLongPress={() => openSettings(item)}
+                delayLongPress={260}
+                style={({ pressed }) => [styles.chatRow, pressed ? styles.chatRowPressed : null]}
+              >
+                <View style={styles.avatarContainer}>
+                  {avatarUrl ? (
+                    <Avatar.Image
+                      size={46}
+                      source={{ uri: avatarUrl }}
+                      style={{ backgroundColor: colors.surface }}
+                    />
+                  ) : (
+                    <Avatar.Icon
+                      icon={item.isGroup ? "account-group" : "account"}
+                      size={46}
+                      style={{ backgroundColor: colors.surface }}
+                    />
+                  )}
+                  {!item.isGroup && displayPresence?.isActive ? <View style={styles.onlineDot} /> : null}
                 </View>
-              </Card>
+
+                <View style={styles.chatBody}>
+                  <View style={styles.messageColumn}>
+                    <View style={styles.nameLine}>
+                      <Text
+                        style={[styles.title, unreadCount > 0 ? styles.titleUnread : null]}
+                        numberOfLines={1}
+                      >
+                        {item.groupName || "Hội thoại"}
+                      </Text>
+                      {item.isPinned ? (
+                        <Ionicons name="bookmark" size={11} color={colors.secondary} style={styles.inlineIcon} />
+                      ) : null}
+                    </View>
+                    <Text
+                      style={[styles.preview, unreadCount > 0 ? styles.previewUnread : null]}
+                      numberOfLines={1}
+                    >
+                      {previewText}
+                    </Text>
+                  </View>
+
+                  <View style={styles.metaColumn}>
+                    <Text style={styles.timeText} numberOfLines={1}>
+                      {formatConversationTime(item)}
+                    </Text>
+                    <View style={styles.statusRow}>
+                      {isConversationMuted(item.mutedUntil) ? (
+                        <Ionicons name="notifications-off-outline" size={13} color={colors.muted} />
+                      ) : null}
+                      {unreadCount > 0 ? (
+                        <Badge size={18} style={styles.unreadBadge}>
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </Badge>
+                      ) : (
+                        <Ionicons name="checkmark-done" size={15} color={colors.muted} />
+                      )}
+                    </View>
+                  </View>
+                </View>
+              </Pressable>
             );
           }}
-          ListEmptyComponent={<Text style={styles.empty}>Chưa có cuộc hội thoại nào.</Text>}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons name="chatbubble-ellipses-outline" size={42} color={colors.border} />
+              <Text style={styles.empty}>Chưa có cuộc hội thoại nào.</Text>
+            </View>
+          }
         />
       )}
 
@@ -787,121 +1008,239 @@ export default function ChatListPage() {
           </Button>
         </Modal>
       </Portal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    padding: 16,
-    backgroundColor: "#fff",
-    borderBottomLeftRadius: 22,
-    borderBottomRightRadius: 22,
-    shadowColor: "#0f172a",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 4,
+  floatingHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 30,
+    elevation: 30,
   },
-  headerRow: {
+  floatingHeaderInner: {
+    backgroundColor: colors.card,
+  },
+  searchSection: {
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 10,
+    backgroundColor: colors.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  searchHeaderAnimated: {
+    overflow: "hidden",
+    backgroundColor: colors.card,
+    marginTop: 0,
+  },
+  headerTop: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    justifyContent: "space-between",
+  },
+  headerTopMessenger: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: colors.card,
+    borderBottomWidth: 0,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: "900",
+    fontSize: 32,
+    fontWeight: "700",
     color: colors.text,
   },
-  searchBar: {
-    borderRadius: 12,
-    backgroundColor: "#f2f5f9",
-  },
-  filterRow: { marginTop: 10 },
-  loader: { marginTop: 16 },
-  chatCard: {
-    marginHorizontal: 16,
-    marginVertical: 5,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-  },
-  cardContent: {
+  headerLeft: { display: "none" },
+  headerRow: { display: "none" },
+  headerActionRow: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 12,
+    gap: 0,
   },
-  chatMainPressable: {
+  headerAction: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerActionDark: {
+    display: "none",
+  },
+  pressed: {
+    opacity: 0.58,
+  },
+  searchField: {
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#f0f0f4",
     flexDirection: "row",
     alignItems: "center",
+    paddingLeft: 10,
+    paddingRight: 14,
+  },
+  searchAiButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  searchInput: {
     flex: 1,
+    height: 40,
+    marginLeft: 6,
+    padding: 0,
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "400",
+  },
+  filterRow: {
+    display: "none",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingTop: 10,
+  },
+  filterChip: {
+    height: 30,
+    borderRadius: 15,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f1f2f4",
+  },
+  filterChipActive: {
+    backgroundColor: "rgba(10,207,254,0.14)",
+  },
+  filterChipText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  filterChipTextActive: {
+    color: colors.secondary,
+  },
+  skeletonWrap: {
+    backgroundColor: colors.card,
+  },
+  stateWrap: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  errorWrap: {
+    alignItems: "center",
+  },
+  listContent: {
+    paddingHorizontal: 0,
+    paddingBottom: 8,
+  },
+  chatRow: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  chatRowPressed: {
+    backgroundColor: "#eef2f7",
   },
   avatarContainer: { position: "relative" },
   onlineDot: {
     position: "absolute",
-    right: 0,
-    bottom: 0,
-    width: 12,
-    height: 12,
+    right: 1,
+    bottom: 1,
+    width: 11,
+    height: 11,
     borderRadius: 6,
     backgroundColor: "#22c55e",
     borderWidth: 2,
     borderColor: "#ffffff",
   },
-  textWrap: { flex: 1, marginLeft: 12 },
-  nameWithPresenceWrap: {
+  chatBody: {
     flex: 1,
-    marginRight: 8,
-  },
-  titleRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 4,
+    marginLeft: 11,
+    minWidth: 0,
   },
-  presenceInline: {
+  messageColumn: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 10,
+  },
+  nameLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  title: {
+    flexShrink: 1,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0,
+    lineHeight: 17,
+  },
+  titleUnread: { fontWeight: "700" },
+  inlineIcon: {
+    marginLeft: 5,
     marginTop: 1,
-    color: colors.textSecondary,
-    fontSize: 12,
   },
-  presenceInlineActive: {
-    color: "#16a34a",
+  preview: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "500",
+    letterSpacing: 0,
+    lineHeight: 15,
+  },
+  previewUnread: {
+    color: colors.text,
     fontWeight: "700",
   },
-  title: { flex: 1, fontSize: 16, fontWeight: "700", color: colors.text },
-  titleUnread: { fontWeight: "900" },
-  timeText: {
-    marginLeft: 8,
-    color: colors.textSecondary,
-    fontSize: 12,
+  metaColumn: {
+    width: 48,
+    alignItems: "flex-end",
+    alignSelf: "stretch",
+    justifyContent: "center",
   },
-  timeWrap: {
+  timeText: {
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0,
+    lineHeight: 12,
+  },
+  statusRow: {
+    minHeight: 18,
     flexDirection: "row",
     alignItems: "center",
-    marginLeft: 8,
+    justifyContent: "flex-end",
+    gap: 4,
+    marginTop: 7,
   },
-  muteIcon: {
-    marginRight: 2,
-  },
-  preview: { color: colors.textSecondary, fontSize: 14 },
-  previewUnread: { color: colors.text, fontWeight: "700" },
-  badge: {
-    position: "absolute",
-    top: -4,
-    right: -4,
-    backgroundColor: "#E53935",
-  },
-  settingsBtn: {
-    margin: 0,
-    marginLeft: 4,
+  unreadBadge: {
+    minWidth: 18,
+    paddingHorizontal: 4,
+    backgroundColor: colors.secondary,
+    color: "#ffffff",
+    fontSize: 9,
+    fontWeight: "700",
   },
   settingsModalSheet: {
     justifyContent: "flex-end",
     margin: 0,
   },
   settingsModalContainer: {
-    backgroundColor: "#fff",
+    backgroundColor: colors.card,
     padding: 16,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -918,11 +1257,26 @@ const styles = StyleSheet.create({
   },
   muteOptionsBox: {
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 4,
     marginBottom: 8,
   },
   error: { color: colors.danger, textAlign: "center", marginTop: 12 },
-  empty: { color: colors.textSecondary, textAlign: "center", marginTop: 12 },
+  emptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 70,
+  },
+  empty: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 10,
+    textAlign: "center",
+  },
+ 
 });
+
+
+

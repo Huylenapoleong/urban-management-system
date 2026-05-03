@@ -57,8 +57,12 @@ const FIXTURE_IDS = {
 } as const;
 
 const LOCATIONS = {
-  ward1: 'VN-HCM-BQ1-P01',
-  ward2: 'VN-HCM-BQ1-P02',
+  province: 'VN-79',
+  ward1: 'VN-79-25747',
+  ward2: 'VN-79-25750',
+  provinceName: 'TP Ho Chi Minh',
+  ward1Name: 'Phuong Thu Dau Mot',
+  ward2Name: 'Phuong Phu Loi',
 };
 
 let bcryptModulePromise: Promise<typeof import('bcryptjs')> | undefined;
@@ -367,7 +371,7 @@ async function main(): Promise<void> {
       email: 'admin@smartcity.local',
       fullName: 'System Admin',
       role: 'ADMIN',
-      locationCode: LOCATIONS.ward1,
+      locationCode: LOCATIONS.province,
       unit: 'Smart City Platform',
       createdAt: '2026-03-17T06:00:00.000Z',
       passwordHash,
@@ -378,8 +382,8 @@ async function main(): Promise<void> {
       email: 'province.officer@smartcity.local',
       fullName: 'Nguyen Thi Province',
       role: 'PROVINCE_OFFICER',
-      locationCode: LOCATIONS.ward1,
-      unit: 'So Xay dung TP.HCM',
+      locationCode: LOCATIONS.province,
+      unit: `So Xay dung ${LOCATIONS.provinceName}`,
       createdAt: '2026-03-17T06:05:00.000Z',
       passwordHash,
     }),
@@ -390,7 +394,7 @@ async function main(): Promise<void> {
       fullName: 'Tran Van Ward',
       role: 'WARD_OFFICER',
       locationCode: LOCATIONS.ward1,
-      unit: 'UBND Phuong 1 Quan 1',
+      unit: `UBND ${LOCATIONS.ward1Name}`,
       createdAt: '2026-03-17T06:10:00.000Z',
       passwordHash,
     }),
@@ -487,20 +491,20 @@ async function main(): Promise<void> {
   const groups: StoredGroup[] = [
     makeGroup({
       id: FIXTURE_IDS.areaGroup,
-      groupName: 'Phuong 1 Q1 - Ha tang',
+      groupName: `${LOCATIONS.ward1Name} - Ha tang`,
       groupType: 'AREA',
       locationCode: LOCATIONS.ward1,
       createdBy: FIXTURE_IDS.wardOfficer,
-      description: 'Nhom trao doi cac van de ha tang do thi tai Phuong 1.',
+      description: `Nhom trao doi cac van de ha tang do thi tai ${LOCATIONS.ward1Name}.`,
       memberCount: 3,
       isOfficial: true,
       createdAt: '2026-03-17T07:00:00.000Z',
     }),
     makeGroup({
       id: FIXTURE_IDS.officialGroup,
-      groupName: 'To xu ly moi truong Quan 1',
+      groupName: `To xu ly moi truong ${LOCATIONS.provinceName}`,
       groupType: 'OFFICIAL',
-      locationCode: LOCATIONS.ward1,
+      locationCode: LOCATIONS.province,
       createdBy: FIXTURE_IDS.provinceOfficer,
       description: 'Nhom dieu phoi can bo xu ly phan anh.',
       memberCount: 3,
@@ -509,7 +513,7 @@ async function main(): Promise<void> {
     }),
     makeGroup({
       id: FIXTURE_IDS.privateGroup,
-      groupName: 'Dan pho Nguyen Hue',
+      groupName: `Cu dan ${LOCATIONS.ward1Name}`,
       groupType: 'PRIVATE',
       locationCode: LOCATIONS.ward1,
       createdBy: FIXTURE_IDS.citizenA,
@@ -724,7 +728,7 @@ async function main(): Promise<void> {
     makeConversationSummary({
       userId: FIXTURE_IDS.wardOfficer,
       conversationId: areaConversationId,
-      groupName: 'Phuong 1 Q1 - Ha tang',
+      groupName: `${LOCATIONS.ward1Name} - Ha tang`,
       lastMessagePreview: 'Toi xac nhan khu vuc nay nguy hiem vao ban dem.',
       lastSenderName: 'Pham Van Citizen B',
       unreadCount: 1,
@@ -734,7 +738,7 @@ async function main(): Promise<void> {
     makeConversationSummary({
       userId: FIXTURE_IDS.citizenA,
       conversationId: areaConversationId,
-      groupName: 'Phuong 1 Q1 - Ha tang',
+      groupName: `${LOCATIONS.ward1Name} - Ha tang`,
       lastMessagePreview: 'Toi xac nhan khu vuc nay nguy hiem vao ban dem.',
       lastSenderName: 'Pham Van Citizen B',
       unreadCount: 1,
@@ -744,7 +748,7 @@ async function main(): Promise<void> {
     makeConversationSummary({
       userId: FIXTURE_IDS.citizenB,
       conversationId: areaConversationId,
-      groupName: 'Phuong 1 Q1 - Ha tang',
+      groupName: `${LOCATIONS.ward1Name} - Ha tang`,
       lastMessagePreview: 'Toi xac nhan khu vuc nay nguy hiem vao ban dem.',
       lastSenderName: 'Pham Van Citizen B',
       unreadCount: 0,

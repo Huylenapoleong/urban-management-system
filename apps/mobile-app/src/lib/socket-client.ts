@@ -2,13 +2,14 @@ import { io, Socket } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { readWebToken } from './web-token-storage';
+import { resolveSocketOrigin } from './network-url';
 // Tái sử dụng constants nếu `mobile-app` có link `@urban/shared-constants`.
 // Dùng mock nếu không tìm thấy, nhưng recommend setup dev env đúng.
 import { CHAT_SOCKET_EVENTS, CHAT_SOCKET_NAMESPACE } from '@urban/shared-constants';
 
 const getSocketOrigin = () => {
   const raw = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001').trim();
-  return raw.replace(/\/api\/?$/i, '').replace(/\/+$/, '');
+  return resolveSocketOrigin(raw);
 };
 
 let SOCKET_URL = getSocketOrigin();

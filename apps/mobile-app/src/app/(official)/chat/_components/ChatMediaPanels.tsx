@@ -1,5 +1,5 @@
-import React from 'react';
 import { Modal as NativeModal, TouchableOpacity, View } from 'react-native';
+import { ResizeMode, Video } from 'expo-av';
 import { Image } from 'expo-image';
 import { IconButton, Text } from 'react-native-paper';
 import { SkeletonInline } from '@/components/skeleton/Skeleton';
@@ -12,11 +12,6 @@ type ChatMediaPanelsProps = {
   onSaveFullscreenMedia: () => Promise<void> | void;
   downloadingMedia: boolean;
 };
-
-const LazyVideo = React.lazy(async () => {
-  const module = await import('expo-av');
-  return { default: module.Video as React.ComponentType<any> };
-});
 
 export function ChatMediaPanels({
   styles,
@@ -50,16 +45,14 @@ export function ChatMediaPanels({
         ) : null}
 
         {fullscreenMedia?.type === 'video' ? (
-          <React.Suspense fallback={<View style={styles.fullscreenMedia} />}>
-            <LazyVideo
-              source={{ uri: fullscreenMedia.uri }}
-              style={styles.fullscreenMedia}
-              useNativeControls
-              resizeMode="contain"
-              shouldPlay
-              isLooping={false}
-            />
-          </React.Suspense>
+          <Video
+            source={{ uri: fullscreenMedia.uri }}
+            style={styles.fullscreenMedia}
+            useNativeControls
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+            isLooping={false}
+          />
         ) : null}
 
         {fullscreenMedia?.uri ? (
@@ -79,3 +72,5 @@ export function ChatMediaPanels({
     </NativeModal>
   );
 }
+
+export default ChatMediaPanels;

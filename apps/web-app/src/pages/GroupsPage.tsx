@@ -1,11 +1,30 @@
+import { useAuth } from "@/providers/auth-context";
+import {
+  addGroupMember,
+  createGroup,
+  getGroups,
+  joinGroup,
+  joinGroupByInvite,
+  leaveGroup,
+} from "@/services/group.api";
+import { listMyFriends } from "@/services/friends.api";
+import { resolveLocationCode } from "@/services/location.api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { GroupType } from "@urban/shared-constants";
+import {
+  Check,
+  Loader2,
+  LogOut,
+  MessageCircle,
+  Plus,
+  ShieldCheck,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Users, Plus, ShieldCheck, MessageCircle, LogOut, X } from "lucide-react";
-import { createGroup, getGroups, joinGroup, joinGroupByInvite, leaveGroup } from "@/services/group.api";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/providers/AuthProvider";
-import type { GroupType } from "@urban/shared-constants";
 
 type GroupFormState = {
   groupName: string;
@@ -19,7 +38,8 @@ export default function GroupsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const accountLocationCode = user?.locationCode?.trim() ?? "";
-  const canCreateOfficialGroup = user?.role === "PROVINCE_OFFICER" || user?.role === "ADMIN";
+  const canCreateOfficialGroup =
+    user?.role === "PROVINCE_OFFICER" || user?.role === "ADMIN";
   const allowedCreateGroupTypes = useMemo(() => {
     if (user?.role === "CITIZEN") {
       return ["PRIVATE"] as GroupType[];
@@ -36,6 +56,8 @@ export default function GroupsPage() {
   const [isLeaving, setIsLeaving] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [inviteCodeInput, setInviteCodeInput] = useState("");
+  const [locationLabel, setLocationLabel] = useState("");
+  const [selectedFriendIds, setSelectedFriendIds] = useState<Set<string>>(new Set());
   const [formState, setFormState] = useState<GroupFormState>({
     groupName: "",
     description: "",
@@ -53,7 +75,18 @@ export default function GroupsPage() {
     queryFn: () => getGroups({ mine: true }),
   });
 
-  const joinedGroupIds = useMemo(() => new Set(joinedGroups.map((item) => item.id)), [joinedGroups]);
+  // Load friends only when create modal is open (lazy)
+  const { data: myFriends = [] } = useQuery({
+    queryKey: ["friends", "me"],
+    queryFn: () => listMyFriends({ limit: 100 }),
+    enabled: isCreateOpen,
+    staleTime: 60_000,
+  });
+
+  const joinedGroupIds = useMemo(
+    () => new Set(joinedGroups.map((item) => item.id)),
+    [joinedGroups],
+  );
 
   const joinGroupMutation = useMutation({
     mutationFn: joinGroup,
@@ -63,7 +96,7 @@ export default function GroupsPage() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Đã tham gia nhóm thành công!");
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       toast.error(error?.message || "Không thể tham gia nhóm lúc này.");
     },
     onSettled: () => setIsJoining(null),
@@ -77,7 +110,7 @@ export default function GroupsPage() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Đã rời nhóm.");
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       toast.error(error?.message || "Không thể rời nhóm lúc này.");
     },
     onSettled: () => setIsLeaving(null),
@@ -85,10 +118,26 @@ export default function GroupsPage() {
 
   const createGroupMutation = useMutation({
     mutationFn: createGroup,
-    onSuccess: (group) => {
+    onSuccess: async (group) => {
+      // Add selected friends as members (min 2 required for PRIVATE)
+      const friendIds = [...selectedFriendIds];
+      if (friendIds.length > 0) {
+        const results = await Promise.allSettled(
+          friendIds.map((uid) =>
+            addGroupMember(group.id, { userId: uid, roleInGroup: "MEMBER" }),
+          ),
+        );
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) {
+          toast.error(`Thêm ${failed} thành viên thất bại. Bạn có thể thêm lại trong trang quản lý nhóm.`);
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Tạo nhóm thành công!");
       setIsCreateOpen(false);
+      setSelectedFriendIds(new Set());
       setFormState((prev) => ({
         ...prev,
         groupName: "",
@@ -101,7 +150,7 @@ export default function GroupsPage() {
         },
       });
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       toast.error(error?.message || "Không thể tạo nhóm.");
     },
   });
@@ -114,7 +163,7 @@ export default function GroupsPage() {
       toast.success("Đã tham gia nhóm bằng link mời");
       setInviteCodeInput("");
     },
-    onError: (error: any) => {
+    onError: (error: { message?: string }) => {
       toast.error(error?.message || "Link hoặc mã mời không hợp lệ.");
     },
   });
@@ -126,25 +175,52 @@ export default function GroupsPage() {
       groupType: allowedCreateGroupTypes[0] ?? "PRIVATE",
       locationCode: user?.locationCode ?? "",
     });
+    setSelectedFriendIds(new Set());
     setIsCreateOpen(true);
   };
 
+  const toggleFriend = (friendId: string) => {
+    setSelectedFriendIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(friendId)) {
+        next.delete(friendId);
+      } else {
+        next.add(friendId);
+      }
+      return next;
+    });
+  };
+
+  // For PRIVATE groups citizens must select ≥ 2 friends (group = creator + 2 = min 3 members)
+  const isPrivateGroup = formState.groupType === "PRIVATE";
+  const friendRequirementMet = !isPrivateGroup || selectedFriendIds.size >= 2;
+
   useEffect(() => {
-    if (!isCreateOpen || !user?.locationCode) {
+    if (!accountLocationCode) {
       return;
     }
 
-    setFormState((prev) => {
-      if (prev.locationCode === user.locationCode) {
-        return prev;
-      }
+    let cancelled = false;
 
-      return {
-        ...prev,
-        locationCode: user.locationCode,
-      };
-    });
-  }, [isCreateOpen, user?.locationCode]);
+    async function loadLocationLabel() {
+      try {
+        const resolved = await resolveLocationCode(accountLocationCode);
+        if (!cancelled) {
+          setLocationLabel(resolved.displayName);
+        }
+      } catch {
+        if (!cancelled) {
+          setLocationLabel("");
+        }
+      }
+    }
+
+    void loadLocationLabel();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountLocationCode]);
 
   const handleCreateGroup = (event: React.FormEvent) => {
     event.preventDefault();
@@ -166,6 +242,12 @@ export default function GroupsPage() {
 
     if (!allowedCreateGroupTypes.includes(formState.groupType)) {
       toast.error("Loại nhóm hiện tại không phù hợp với quyền tài khoản.");
+      return;
+    }
+
+    // Enforce minimum 3 members (creator + 2 friends) for PRIVATE groups
+    if (formState.groupType === "PRIVATE" && selectedFriendIds.size < 2) {
+      toast.error("Nhóm PRIVATE cần chọn ít nhất 2 bạn bè (nhóm tối thiểu 3 người).");
       return;
     }
 
@@ -229,7 +311,9 @@ export default function GroupsPage() {
             <Users className="w-8 h-8 text-blue-600" />
             Nhóm cộng đồng
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-2">Tham gia các nhóm để nhận thông báo và trao đổi.</p>
+          <p className="text-gray-500 dark:text-gray-400 mt-2">
+            Tham gia các nhóm để nhận thông báo và trao đổi.
+          </p>
         </div>
         <button
           onClick={handleOpenCreate}
@@ -243,7 +327,9 @@ export default function GroupsPage() {
       {isCreateOpen ? (
         <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Tạo nhóm mới</h2>
+            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              Tạo nhóm mới
+            </h2>
             <button
               type="button"
               onClick={() => setIsCreateOpen(false)}
@@ -252,53 +338,128 @@ export default function GroupsPage() {
               <X className="h-4 w-4" />
             </button>
           </div>
-          <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleCreateGroup}>
+          <form
+            className="grid gap-3 sm:grid-cols-2"
+            onSubmit={handleCreateGroup}
+          >
             <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tên nhóm</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Tên nhóm
+              </label>
               <input
                 value={formState.groupName}
                 onChange={(event) =>
-                  setFormState((prev) => ({ ...prev, groupName: event.target.value }))
+                  setFormState((prev) => ({
+                    ...prev,
+                    groupName: event.target.value,
+                  }))
                 }
                 placeholder="Ví dụ: Hạ tầng phường 1"
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Loại nhóm</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Loại nhóm
+              </label>
               <select
                 value={formState.groupType}
                 onChange={(event) =>
-                  setFormState((prev) => ({ ...prev, groupType: event.target.value as GroupType }))
+                  setFormState((prev) => ({
+                    ...prev,
+                    groupType: event.target.value as GroupType,
+                  }))
                 }
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               >
                 {allowedCreateGroupTypes.map((groupType) => (
-                  <option key={groupType} value={groupType}>{groupType}</option>
+                  <option key={groupType} value={groupType}>
+                    {groupType}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Mã khu vực</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Mã khu vực
+              </label>
               <input
-                value={formState.locationCode}
-                placeholder="VN-HCM-BQ1-P01"
+                value={locationLabel}
+                placeholder="Gan theo pham vi tai khoan"
                 readOnly
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                {accountLocationCode
+                  ? locationLabel || "Dia ban cua tai khoan hien tai"
+                  : "Nhom se duoc tao theo dia ban hien tai cua tai khoan."}
+              </p>
             </div>
             <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Mô tả</label>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Mô tả
+              </label>
               <textarea
                 value={formState.description}
                 onChange={(event) =>
-                  setFormState((prev) => ({ ...prev, description: event.target.value }))
+                  setFormState((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
                 }
                 rows={3}
                 placeholder="Mô tả mục tiêu nhóm"
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               />
             </div>
+            {isPrivateGroup && (
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <span className="flex items-center gap-1">
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Thêm bạn bè vào nhóm
+                    <span className="ml-1 text-red-500">*</span>
+                    <span className="ml-auto font-normal normal-case text-slate-400">
+                      Chọn ít nhất 2 bạn ({selectedFriendIds.size}/2 tối thiểu)
+                    </span>
+                  </span>
+                </label>
+                {myFriends.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-xs text-slate-500">
+                    Bạn chưa có bạn bè nào. Hãy thêm bạn bè trước khi tạo nhóm PRIVATE.
+                  </p>
+                ) : (
+                  <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    {myFriends.map((friend) => {
+                      const id = friend.userId;
+                      const name = friend.fullName;
+                      const selected = selectedFriendIds.has(id);
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => toggleFriend(id)}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 ${
+                            selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                          }`}
+                        >
+                          <span
+                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                              selected
+                                ? "border-blue-600 bg-blue-600 text-white"
+                                : "border-slate-300 bg-white dark:bg-slate-800"
+                            }`}
+                          >
+                            {selected && <Check className="h-2.5 w-2.5" />}
+                          </span>
+                          <span className="truncate font-medium text-slate-800 dark:text-slate-100">{name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="sm:col-span-2 flex justify-end gap-2">
               <button
                 type="button"
@@ -309,8 +470,9 @@ export default function GroupsPage() {
               </button>
               <button
                 type="submit"
-                disabled={createGroupMutation.isPending}
+                disabled={createGroupMutation.isPending || !friendRequirementMet}
                 className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                title={!friendRequirementMet ? "Chọn ít nhất 2 bạn bè để tiếp tục" : undefined}
               >
                 {createGroupMutation.isPending ? "Đang tạo..." : "Tạo nhóm"}
               </button>
@@ -320,11 +482,16 @@ export default function GroupsPage() {
       ) : null}
 
       <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Tham gia bằng link mời</h2>
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+          Tham gia bằng link mời
+        </h2>
         <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
           Dán link mời hoặc nhập mã mời để tham gia nhóm nhanh.
         </p>
-        <form onSubmit={handleJoinByInvite} className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <form
+          onSubmit={handleJoinByInvite}
+          className="mt-3 flex flex-col gap-2 sm:flex-row"
+        >
           <input
             value={inviteCodeInput}
             onChange={(event) => setInviteCodeInput(event.target.value)}
@@ -349,14 +516,18 @@ export default function GroupsPage() {
           >
             <div>
               <div className="flex justify-between items-start mb-2">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{group.groupName}</h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {group.groupName}
+                </h3>
                 {group.groupType !== "PRIVATE" && (
                   <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full dark:bg-green-900 dark:text-green-200">
                     Công khai
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">{group.description}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">
+                {group.description}
+              </p>
               <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-4">
                 <Users className="w-4 h-4" />
                 <span>{group.memberCount || 0} thành viên</span>
@@ -378,7 +549,11 @@ export default function GroupsPage() {
                     disabled={isLeaving === group.id}
                     className="w-full flex justify-center items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-600 rounded-lg transition-colors disabled:opacity-50"
                   >
-                    {isLeaving === group.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+                    {isLeaving === group.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <LogOut className="w-4 h-4" />
+                    )}
                     {isLeaving === group.id ? "Đang xử lý..." : "Rời nhóm"}
                   </button>
                 </>
@@ -388,7 +563,11 @@ export default function GroupsPage() {
                   disabled={isJoining === group.id}
                   className="w-full flex justify-center items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-600 rounded-lg transition-colors disabled:opacity-50"
                 >
-                  {isJoining === group.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  {isJoining === group.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4" />
+                  )}
                   {isJoining === group.id ? "Đang xử lý..." : "Tham gia nhóm"}
                 </button>
               )}

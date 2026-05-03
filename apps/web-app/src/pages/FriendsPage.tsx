@@ -1,27 +1,31 @@
-import { useMemo, useState, type ReactNode } from "react";
-import {
-  Ban,
-  Loader2,
-  Search,
-  UserPlus2,
-  UserCheck2,
-  UserRoundX,
-  Users,
-  Clock3,
-  MessageCircle,
-} from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import {
-  useFriendActions,
   useBlockedUsers,
+  useFriendActions,
   useFriendDiscover,
   useIncomingFriendRequests,
   useMyFriends,
   useOutgoingFriendRequests,
 } from "@/hooks/useFriendsData";
-import { useAuth } from "@/providers/AuthProvider";
+import {
+  getResolvedLocationLabel,
+  useResolvedLocations,
+} from "@/hooks/useResolvedLocations";
+import { useAuth } from "@/providers/auth-context";
+import {
+  Ban,
+  Clock3,
+  Loader2,
+  MessageCircle,
+  Search,
+  UserCheck2,
+  UserPlus2,
+  UserRoundX,
+  Users,
+} from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 
 type FriendsTab = "discover" | "incoming" | "outgoing" | "friends" | "blocked";
 
@@ -57,11 +61,19 @@ function UserRow({
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0">
-          <p className="truncate font-medium text-slate-900 dark:text-slate-100">{name}</p>
-          {subtitle ? <p className="truncate text-xs text-slate-500 dark:text-slate-400">{subtitle}</p> : null}
+          <p className="truncate font-medium text-slate-900 dark:text-slate-100">
+            {name}
+          </p>
+          {subtitle ? (
+            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+              {subtitle}
+            </p>
+          ) : null}
         </div>
       </div>
-      {actions ? <div className="ml-4 flex items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="ml-4 flex items-center gap-2">{actions}</div>
+      ) : null}
     </div>
   );
 }
@@ -109,7 +121,8 @@ export default function FriendsPage() {
   const [searchText, setSearchText] = useState("");
   const pageSize = 20;
 
-  const { data: discover = [], isLoading: loadingDiscover } = useFriendDiscover(searchText);
+  const { data: discover = [], isLoading: loadingDiscover } =
+    useFriendDiscover(searchText);
   const {
     data: incomingData,
     isLoading: loadingIncoming,
@@ -156,7 +169,15 @@ export default function FriendsPage() {
     [blockedData],
   );
 
-  const { sendRequest, acceptRequest, rejectRequest, cancelRequest, unfriend, block, unblock } = useFriendActions();
+  const {
+    sendRequest,
+    acceptRequest,
+    rejectRequest,
+    cancelRequest,
+    unfriend,
+    block,
+    unblock,
+  } = useFriendActions();
 
   const listLoading =
     (tab === "discover" && loadingDiscover) ||
@@ -166,7 +187,9 @@ export default function FriendsPage() {
     (tab === "blocked" && loadingBlocked);
 
   const discoverItems = useMemo(() => {
-    const filtered = discover.filter((item) => containsFriendKeyword(item, searchText));
+    const filtered = discover.filter((item) =>
+      containsFriendKeyword(item, searchText),
+    );
     const userLocation = user?.locationCode?.trim().toUpperCase();
     if (!userLocation) {
       return filtered;
@@ -202,8 +225,29 @@ export default function FriendsPage() {
     () => blocked.filter((item) => containsFriendKeyword(item, searchText)),
     [blocked, searchText],
   );
+  const friendLocationCodes = useMemo(
+    () => [
+      ...discoverItems.map((item) => item.locationCode),
+      ...filteredIncoming.map((item) => item.locationCode),
+      ...filteredOutgoing.map((item) => item.locationCode),
+      ...filteredFriends.map((item) => item.locationCode),
+      ...filteredBlocked.map((item) => item.locationCode),
+    ],
+    [
+      discoverItems,
+      filteredBlocked,
+      filteredFriends,
+      filteredIncoming,
+      filteredOutgoing,
+    ],
+  );
+  const { data: locationMap } = useResolvedLocations(friendLocationCodes);
 
-  const navigateToChat = (userId: string, fullName: string, avatarUrl?: string) => {
+  const navigateToChat = (
+    userId: string,
+    fullName: string,
+    avatarUrl?: string,
+  ) => {
     navigate("/chat", {
       state: {
         conversationId: `dm:${userId}`,
@@ -224,13 +268,32 @@ export default function FriendsPage() {
     );
   };
 
+  const getSubtitle = (role?: string, locationCode?: string): string => {
+    const parts = [role];
+    const locationLabel = getResolvedLocationLabel(
+      locationMap,
+      locationCode,
+      "",
+    );
+
+    if (locationLabel) {
+      parts.push(locationLabel);
+    }
+
+    return parts.filter(Boolean).join(" • ");
+  };
+
   return (
     <div className="h-full w-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
       <div className="mx-auto max-w-5xl p-4 md:p-6 space-y-6">
         <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Bạn bè</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Quản lý lời mời kết bạn và danh sách bạn bè của bạn.</p>
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">
+              Bạn bè
+            </h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Quản lý lời mời kết bạn và danh sách bạn bè của bạn.
+            </p>
           </div>
           <div className="relative w-full md:w-80">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
@@ -244,11 +307,41 @@ export default function FriendsPage() {
         </header>
 
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={tabClass(tab === "discover")} onClick={() => setTab("discover")}>Đề xuất</button>
-          <button type="button" className={tabClass(tab === "incoming")} onClick={() => setTab("incoming")}>Yêu cầu kết bạn ({incoming.length})</button>
-          <button type="button" className={tabClass(tab === "outgoing")} onClick={() => setTab("outgoing")}>Đã gửi ({outgoing.length})</button>
-          <button type="button" className={tabClass(tab === "friends")} onClick={() => setTab("friends")}>Bạn bè ({friends.length})</button>
-          <button type="button" className={tabClass(tab === "blocked")} onClick={() => setTab("blocked")}>Đã chặn ({blocked.length})</button>
+          <button
+            type="button"
+            className={tabClass(tab === "discover")}
+            onClick={() => setTab("discover")}
+          >
+            Đề xuất
+          </button>
+          <button
+            type="button"
+            className={tabClass(tab === "incoming")}
+            onClick={() => setTab("incoming")}
+          >
+            Yêu cầu kết bạn ({incoming.length})
+          </button>
+          <button
+            type="button"
+            className={tabClass(tab === "outgoing")}
+            onClick={() => setTab("outgoing")}
+          >
+            Đã gửi ({outgoing.length})
+          </button>
+          <button
+            type="button"
+            className={tabClass(tab === "friends")}
+            onClick={() => setTab("friends")}
+          >
+            Bạn bè ({friends.length})
+          </button>
+          <button
+            type="button"
+            className={tabClass(tab === "blocked")}
+            onClick={() => setTab("blocked")}
+          >
+            Đã chặn ({blocked.length})
+          </button>
         </div>
 
         {listLoading ? (
@@ -261,24 +354,33 @@ export default function FriendsPage() {
           <div className="space-y-3">
             {discoverItems.map((item) => {
               const avatarUrl = item.avatarAsset?.resolvedUrl || item.avatarUrl;
-              const busy = sendRequest.isPending && sendRequest.variables === item.userId;
-              const isBlocking = block.isPending && block.variables === item.userId;
+              const busy =
+                sendRequest.isPending && sendRequest.variables === item.userId;
+              const isBlocking =
+                block.isPending && block.variables === item.userId;
               const isCitizenWard = isCitizenWardPair(item.role);
-              const canSendFriendRequest = Boolean(item.canSendFriendRequest) && !isCitizenWard;
+              const canSendFriendRequest =
+                Boolean(item.canSendFriendRequest) && !isCitizenWard;
               const canMessage = Boolean(item.canMessage) || isCitizenWard;
 
               return (
                 <UserRow
                   key={item.userId}
                   name={item.fullName}
-                  subtitle={`${item.role} • ${item.locationCode}`}
+                  subtitle={getSubtitle(item.role, item.locationCode)}
                   avatarUrl={avatarUrl}
                   actions={
                     <>
                       {canMessage ? (
                         <button
                           type="button"
-                          onClick={() => navigateToChat(item.userId, item.fullName, avatarUrl)}
+                          onClick={() =>
+                            navigateToChat(
+                              item.userId,
+                              item.fullName,
+                              avatarUrl,
+                            )
+                          }
                           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                         >
                           <MessageCircle className="h-4 w-4" />
@@ -296,17 +398,25 @@ export default function FriendsPage() {
                           }
                           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                         >
-                          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus2 className="h-4 w-4" />}
+                          {busy ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <UserPlus2 className="h-4 w-4" />
+                          )}
                           Kết bạn
                         </button>
                       ) : null}
-                      {!canMessage && !canSendFriendRequest && item.relationState === "OUTGOING_REQUEST" ? (
+                      {!canMessage &&
+                      !canSendFriendRequest &&
+                      item.relationState === "OUTGOING_REQUEST" ? (
                         <span className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">
                           <Clock3 className="h-3 w-3" />
                           Đang chờ chấp nhận
                         </span>
                       ) : null}
-                      {!canMessage && !canSendFriendRequest && item.relationState === "INCOMING_REQUEST" ? (
+                      {!canMessage &&
+                      !canSendFriendRequest &&
+                      item.relationState === "INCOMING_REQUEST" ? (
                         <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800">
                           <UserCheck2 className="h-3 w-3" />
                           Có yêu cầu đến
@@ -322,7 +432,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                       >
-                        {isBlocking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                        {isBlocking ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Ban className="h-4 w-4" />
+                        )}
                         Chặn
                       </button>
                     </>
@@ -342,15 +456,20 @@ export default function FriendsPage() {
           <div className="space-y-3">
             {filteredIncoming.map((item) => {
               const avatarUrl = item.avatarAsset?.resolvedUrl || item.avatarUrl;
-              const isAccepting = acceptRequest.isPending && acceptRequest.variables === item.userId;
-              const isRejecting = rejectRequest.isPending && rejectRequest.variables === item.userId;
-              const isBlocking = block.isPending && block.variables === item.userId;
+              const isAccepting =
+                acceptRequest.isPending &&
+                acceptRequest.variables === item.userId;
+              const isRejecting =
+                rejectRequest.isPending &&
+                rejectRequest.variables === item.userId;
+              const isBlocking =
+                block.isPending && block.variables === item.userId;
 
               return (
                 <UserRow
                   key={item.userId}
                   name={item.fullName}
-                  subtitle={`${item.role} • ${item.locationCode}`}
+                  subtitle={getSubtitle(item.role, item.locationCode)}
                   avatarUrl={avatarUrl}
                   actions={
                     <>
@@ -364,7 +483,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
                       >
-                        {isAccepting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck2 className="h-4 w-4" />}
+                        {isAccepting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <UserCheck2 className="h-4 w-4" />
+                        )}
                         Chấp nhận
                       </button>
                       <button
@@ -377,7 +500,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                       >
-                        {isRejecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRoundX className="h-4 w-4" />}
+                        {isRejecting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <UserRoundX className="h-4 w-4" />
+                        )}
                         Từ chối
                       </button>
                       <button
@@ -390,7 +517,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                       >
-                        {isBlocking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                        {isBlocking ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Ban className="h-4 w-4" />
+                        )}
                         Chặn
                       </button>
                     </>
@@ -422,14 +553,17 @@ export default function FriendsPage() {
           <div className="space-y-3">
             {filteredOutgoing.map((item) => {
               const avatarUrl = item.avatarAsset?.resolvedUrl || item.avatarUrl;
-              const isCancelling = cancelRequest.isPending && cancelRequest.variables === item.userId;
-              const isBlocking = block.isPending && block.variables === item.userId;
+              const isCancelling =
+                cancelRequest.isPending &&
+                cancelRequest.variables === item.userId;
+              const isBlocking =
+                block.isPending && block.variables === item.userId;
 
               return (
                 <UserRow
                   key={item.userId}
                   name={item.fullName}
-                  subtitle={`${item.role} • ${item.locationCode}`}
+                  subtitle={getSubtitle(item.role, item.locationCode)}
                   avatarUrl={avatarUrl}
                   actions={
                     <>
@@ -443,7 +577,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
                       >
-                        {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRoundX className="h-4 w-4" />}
+                        {isCancelling ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <UserRoundX className="h-4 w-4" />
+                        )}
                         Hủy yêu cầu
                       </button>
                       <button
@@ -456,7 +594,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                       >
-                        {isBlocking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                        {isBlocking ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Ban className="h-4 w-4" />
+                        )}
                         Chặn
                       </button>
                     </>
@@ -488,20 +630,24 @@ export default function FriendsPage() {
           <div className="space-y-3">
             {filteredFriends.map((item) => {
               const avatarUrl = item.avatarAsset?.resolvedUrl || item.avatarUrl;
-              const isRemoving = unfriend.isPending && unfriend.variables === item.userId;
-              const isBlocking = block.isPending && block.variables === item.userId;
+              const isRemoving =
+                unfriend.isPending && unfriend.variables === item.userId;
+              const isBlocking =
+                block.isPending && block.variables === item.userId;
 
               return (
                 <UserRow
                   key={item.userId}
                   name={item.fullName}
-                  subtitle={`${item.role} • ${item.locationCode}`}
+                  subtitle={getSubtitle(item.role, item.locationCode)}
                   avatarUrl={avatarUrl}
                   actions={
                     <>
                       <button
                         type="button"
-                        onClick={() => navigateToChat(item.userId, item.fullName, avatarUrl)}
+                        onClick={() =>
+                          navigateToChat(item.userId, item.fullName, avatarUrl)
+                        }
                         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                       >
                         <MessageCircle className="h-4 w-4" />
@@ -517,7 +663,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                       >
-                        {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+                        {isRemoving ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Users className="h-4 w-4" />
+                        )}
                         Hủy kết bạn
                       </button>
                       <button
@@ -530,7 +680,11 @@ export default function FriendsPage() {
                         }
                         className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                       >
-                        {isBlocking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                        {isBlocking ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Ban className="h-4 w-4" />
+                        )}
                         Chặn
                       </button>
                     </>
@@ -562,13 +716,14 @@ export default function FriendsPage() {
           <div className="space-y-3">
             {filteredBlocked.map((item) => {
               const avatarUrl = item.avatarAsset?.resolvedUrl || item.avatarUrl;
-              const isUnblocking = unblock.isPending && unblock.variables === item.userId;
+              const isUnblocking =
+                unblock.isPending && unblock.variables === item.userId;
 
               return (
                 <UserRow
                   key={item.userId}
                   name={item.fullName}
-                  subtitle={`${item.role} • ${item.locationCode}`}
+                  subtitle={getSubtitle(item.role, item.locationCode)}
                   avatarUrl={avatarUrl}
                   actions={
                     <button
@@ -581,7 +736,11 @@ export default function FriendsPage() {
                       }
                       className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
                     >
-                      {isUnblocking ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck2 className="h-4 w-4" />}
+                      {isUnblocking ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <UserCheck2 className="h-4 w-4" />
+                      )}
                       Bỏ chặn
                     </button>
                   }

@@ -14,19 +14,30 @@ export type ChatbotMessageResponse = {
   sources: ChatbotSource[];
 };
 
-export async function sendMessageToChatbot(params: ChatbotMessageRequest): Promise<ChatbotMessageResponse> {
+function getErrorStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const response = (error as { response?: { status?: number } }).response;
+  return typeof response?.status === "number" ? response.status : undefined;
+}
+
+export async function sendMessageToChatbot(
+  params: ChatbotMessageRequest,
+): Promise<ChatbotMessageResponse> {
   try {
     return await ApiClient.post("/chatbot/ask", params);
-  } catch (error: any) {
-    if (error?.response?.status === 404) {
-      // Backend is missing on this branch, return mock
+  } catch (error: unknown) {
+    if (getErrorStatus(error) === 404) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       return {
         answer:
-          "[Mock] Backend Chatbot chưa được merge vào nhánh hiện tại (tham khảo nhánh AIChatBot). Đây là câu trả lời phụ trợ: Tôi đã nhận được tin nhắn của bạn về quá trình quản lý thông tin.",
+          "[Mock] Backend Chatbot chua duoc merge vao nhanh hien tai (tham khao nhanh AIChatBot). Day la cau tra loi phu tro.",
         sources: [],
       };
     }
+
     throw error;
   }
 }

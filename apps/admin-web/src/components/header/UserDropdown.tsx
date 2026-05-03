@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { useNavigate } from "react-router";
-import { DropdownItem } from "../ui/dropdown/DropdownItem";
-import { Dropdown } from "../ui/dropdown/Dropdown";
-import { useAuth } from "../../context/AuthContext";
+import { useState } from 'react';
+import { useNavigate } from 'react-router';
+import { useAuth } from '../../context/auth-context';
+import { Dropdown } from '../ui/dropdown/Dropdown';
+import { DropdownItem } from '../ui/dropdown/DropdownItem';
 
 export default function UserDropdown() {
   const { currentUser, logout } = useAuth();
@@ -20,14 +20,19 @@ export default function UserDropdown() {
   const handleLogout = async () => {
     await logout();
     closeDropdown();
-    navigate("/signin");
+    navigate('/signin');
   };
 
-  const displayName = currentUser?.name || "User";
-  const displayEmail = currentUser?.email || "user@example.com";
+  const displayName = currentUser?.name || 'User';
+  const displayEmail = currentUser?.email || 'user@example.com';
   const initials = currentUser?.name
-    ? currentUser.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
-    : "?";
+    ? currentUser.name
+        .split(' ')
+        .map((n: string) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2)
+    : '?';
 
   return (
     <div className="relative">
@@ -35,16 +40,24 @@ export default function UserDropdown() {
         onClick={toggleDropdown}
         className="flex items-center text-gray-700 dropdown-toggle dark:text-gray-400"
       >
-        <span className="mr-3 overflow-hidden rounded-full h-11 w-11 bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-          {currentUser?.avatarUrl
-            ? <img src={currentUser.avatarUrl} alt={displayName} className="w-full h-full object-cover rounded-full" />
-            : initials}
+        <span className="mr-3 overflow-hidden rounded-full h-11 w-11 bg-linear-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
+          {currentUser?.avatarUrl ? (
+            <img
+              src={currentUser.avatarUrl}
+              alt={displayName}
+              className="w-full h-full object-cover rounded-full"
+            />
+          ) : (
+            initials
+          )}
         </span>
 
-        <span className="block mr-1 font-medium text-theme-sm">{displayName.split(" ")[0]}</span>
+        <span className="block mr-1 font-medium text-theme-sm">
+          {displayName.split(' ')[0]}
+        </span>
         <svg
           className={`stroke-gray-500 dark:stroke-gray-400 transition-transform duration-200 ${
-            isOpen ? "rotate-180" : ""
+            isOpen ? 'rotate-180' : ''
           }`}
           width="18"
           height="20"
@@ -65,7 +78,7 @@ export default function UserDropdown() {
       <Dropdown
         isOpen={isOpen}
         onClose={closeDropdown}
-        className="absolute right-0 mt-[17px] flex w-[260px] flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark"
+        className="absolute right-0 mt-4.25 flex w-65 flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark"
       >
         <div>
           <span className="block font-medium text-gray-700 text-theme-sm dark:text-gray-400">

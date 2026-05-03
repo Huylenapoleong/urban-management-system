@@ -282,9 +282,17 @@ Client rules:
 - do not assume every socket event is unique; outbox replay can redeliver safely
 - when `conversation.updated.reason === "conversation.metadata.updated"`, refresh only the visible conversation header/list label instead of treating it like a new-message event
 - do not send `callerId`, `calleeId`, or `userId` in call command payloads; backend canonicalizes actor identity from the authenticated socket
-- treat `call.end` server payload as `{ conversationId, userId, endedByUserId }` and prefer `endedByUserId` when present
+- `call.init` server payload now also includes `startedAt`
+- `call.accept` server payload now also includes `acceptedAt`
+- `call.reject` server payload now also includes `startedAt`, optional `acceptedAt`, `endedAt`, and `durationSeconds`
+- `call.end` server payload now also includes `startedAt`, optional `acceptedAt`, `endedAt`, `durationSeconds`, and `callStillActive`
+- for call timers, use the server-provided `acceptedAt` as the single source of truth across participants instead of starting local timers from different UI moments
+- treat `call.end` as:
+  - DM: whole call ended
+  - group: one participant left when `callStillActive=true`, not a room teardown
 - send `call.heartbeat` every `30-60s` while a long-running call remains active
 - for DM calls, `call.heartbeat` refreshes server state only and is not broadcast to the peer
+- persisted call-history system messages may include `message.callEvent` with `status`, `isVideo`, `startedAt`, `acceptedAt`, `endedAt`, and `durationSeconds`; FE should prefer this over deriving duration from plain text
 
 ## Upload Flow
 

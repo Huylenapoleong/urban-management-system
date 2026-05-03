@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform } from "react-native";
 
 /**
  * Thư viện react-native-webrtc chỉ chạy trên Native (iOS/Android).
@@ -11,14 +11,15 @@ let _RTCSessionDescription: any;
 let _mediaDevices: any;
 let _MediaStream: any;
 
-if (Platform.OS === 'web') {
+if (Platform.OS === "web") {
   _RTCPeerConnection = window.RTCPeerConnection;
   _RTCIceCandidate = window.RTCIceCandidate;
   _RTCSessionDescription = window.RTCSessionDescription;
   _mediaDevices = window.navigator.mediaDevices;
   _MediaStream = window.MediaStream;
 } else {
-  const WebRTC = require('react-native-webrtc');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const WebRTC = require("react-native-webrtc");
   _RTCPeerConnection = WebRTC.RTCPeerConnection;
   _RTCIceCandidate = WebRTC.RTCIceCandidate;
   _RTCSessionDescription = WebRTC.RTCSessionDescription;

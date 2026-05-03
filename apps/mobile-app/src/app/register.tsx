@@ -1,75 +1,30 @@
-import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable } from 'react-native';
-import { Text, TextInput, Button, Surface, HelperText, Chip } from 'react-native-paper';
-import { useRouter } from 'expo-router';
-import { useAuth } from '../providers/AuthProvider';
-import { OtpVerificationModal } from '../components/auth/OtpVerificationModal';
-
-type WardOption = {
-  code: string;
-  label: string;
-};
-
-type DistrictOption = {
-  code: string;
-  label: string;
-  wards: WardOption[];
-};
-
-type ProvinceOption = {
-  code: string;
-  label: string;
-  districts: DistrictOption[];
-};
-
-const LOCATION_OPTIONS: ProvinceOption[] = [
-  {
-    code: 'HCM',
-    label: 'TP Ho Chi Minh',
-    districts: [
-      {
-        code: 'BQ1',
-        label: 'Quan 1',
-        wards: [
-          { code: 'P01', label: 'Phuong 1' },
-          { code: 'P02', label: 'Phuong 2' },
-          { code: 'P03', label: 'Phuong 3' },
-        ],
-      },
-      {
-        code: 'BQ3',
-        label: 'Quan 3',
-        wards: [
-          { code: 'P01', label: 'Phuong 1' },
-          { code: 'P02', label: 'Phuong 2' },
-          { code: 'P03', label: 'Phuong 3' },
-        ],
-      },
-    ],
-  },
-  {
-    code: 'HN',
-    label: 'Ha Noi',
-    districts: [
-      {
-        code: 'BD',
-        label: 'Ba Dinh',
-        wards: [
-          { code: 'P01', label: 'Phuong 1' },
-          { code: 'P02', label: 'Phuong 2' },
-        ],
-      },
-      {
-        code: 'CG',
-        label: 'Cau Giay',
-        wards: [
-          { code: 'P01', label: 'Phuong 1' },
-          { code: 'P02', label: 'Phuong 2' },
-        ],
-      },
-    ],
-  },
-];
+import colors from "@/constants/colors";
+import {
+  listLocationProvinces,
+  listLocationWards,
+  type LocationProvince,
+  type LocationWard,
+} from "@/services/api/location.api";
+import { useRouter } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
+import {
+  Button,
+  Chip,
+  HelperText,
+  Surface,
+  Text,
+  TextInput,
+} from "react-native-paper";
+import { OtpVerificationModal } from "../components/auth/OtpVerificationModal";
+import { useAuth } from "../providers/AuthProvider";
 
 type RegisterForm = {
   fullName: string;
@@ -78,52 +33,126 @@ type RegisterForm = {
   password: string;
   confirmPassword: string;
   selectedProvince: string;
-  selectedDistrict: string;
   selectedWard: string;
 };
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register, requestRegisterOtp, verifyRegisterOtp } = useAuth();
+  const { requestRegisterOtp, verifyRegisterOtp } = useAuth();
 
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [loadingProvinces, setLoadingProvinces] = useState(true);
+  const [loadingWards, setLoadingWards] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otpLoading, setOtpLoading] = useState(false);
+  const [provinceOptions, setProvinceOptions] = useState<LocationProvince[]>(
+    [],
+  );
+  const [wardOptions, setWardOptions] = useState<LocationWard[]>([]);
   const [form, setForm] = useState<RegisterForm>({
-    fullName: '',
-    phone: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    selectedProvince: '',
-    selectedDistrict: '',
-    selectedWard: '',
+    fullName: "",
+    phone: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    selectedProvince: "",
+    selectedWard: "",
   });
 
-  const hasIdentity = useMemo(() => Boolean(form.phone.trim() || form.email.trim()), [form.phone, form.email]);
-  const selectedProvince = useMemo(
-    () => LOCATION_OPTIONS.find((item) => item.code === form.selectedProvince),
-    [form.selectedProvince],
-  );
-  const districtOptions = selectedProvince?.districts ?? [];
-  const selectedDistrict = useMemo(
-    () => districtOptions.find((item) => item.code === form.selectedDistrict),
-    [districtOptions, form.selectedDistrict],
-  );
-  const wardOptions = selectedDistrict?.wards ?? [];
+  useEffect(() => {
+    let isMounted = true;
 
-  const locationCode = useMemo(() => {
-    const province = form.selectedProvince.trim().toUpperCase();
-    const district = form.selectedDistrict.trim().toUpperCase();
-    const ward = form.selectedWard.trim().toUpperCase();
+    const loadProvinces = async () => {
+      try {
+        setLoadingProvinces(true);
+        const provinces = await listLocationProvinces();
 
-    if (!province || !district || !ward) {
-      return '';
+        if (isMounted) {
+          setProvinceOptions(provinces);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setErrorMsg(err?.message || "Khong the tai danh sach tinh/thanh.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingProvinces(false);
+        }
+      }
+    };
+
+    void loadProvinces();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!form.selectedProvince) {
+      setWardOptions([]);
+      return () => {
+        isMounted = false;
+      };
     }
 
-    return `VN-${province}-${district}-${ward}`;
-  }, [form.selectedProvince, form.selectedDistrict, form.selectedWard]);
+    const loadWards = async () => {
+      try {
+        setLoadingWards(true);
+        const wards = await listLocationWards(form.selectedProvince);
+
+        if (isMounted) {
+          setWardOptions(wards);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setErrorMsg(err?.message || "Khong the tai danh sach phuong/xa.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingWards(false);
+        }
+      }
+    };
+
+    void loadWards();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [form.selectedProvince]);
+
+  const selectedProvince = useMemo(
+    () => provinceOptions.find((item) => item.code === form.selectedProvince),
+    [form.selectedProvince, provinceOptions],
+  );
+
+  const locationCode = useMemo(() => {
+    const provinceCode = form.selectedProvince.trim();
+    const wardCode = form.selectedWard.trim();
+
+    if (!provinceCode || !wardCode) {
+      return "";
+    }
+
+    return `VN-${provinceCode}-${wardCode}`;
+  }, [form.selectedProvince, form.selectedWard]);
+  const selectedProvinceLabel = useMemo(
+    () =>
+      provinceOptions.find(
+        (province) => province.code === form.selectedProvince,
+      )?.fullName || "",
+    [form.selectedProvince, provinceOptions],
+  );
+  const selectedWardLabel = useMemo(
+    () =>
+      wardOptions.find((ward) => ward.code === form.selectedWard)?.fullName ||
+      "",
+    [form.selectedWard, wardOptions],
+  );
 
   const setField = (field: keyof RegisterForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -133,54 +162,54 @@ export default function RegisterScreen() {
     setForm((prev) => ({
       ...prev,
       selectedProvince: provinceCode,
-      selectedDistrict: '',
-      selectedWard: '',
+      selectedWard: "",
     }));
   };
 
-  const chooseDistrict = (districtCode: string) => {
-    setForm((prev) => ({
-      ...prev,
-      selectedDistrict: districtCode,
-      selectedWard: '',
-    }));
-  };
+  const buildRegisterOtpPayload = () => ({
+    fullName: form.fullName.trim(),
+    password: form.password,
+    locationCode,
+    ...(form.email.trim() ? { email: form.email.trim() } : {}),
+    ...(form.phone.trim() ? { phone: form.phone.trim() } : {}),
+  });
 
   const handleRegister = async () => {
-    setErrorMsg('');
+    setErrorMsg("");
 
     if (!form.fullName.trim() || !form.password) {
-      setErrorMsg('Vui lòng nhập họ tên và mật khẩu.');
+      setErrorMsg("Vui long nhap ho ten va mat khau.");
       return;
     }
 
     if (!locationCode) {
-      setErrorMsg('Vui lòng chọn đủ Tỉnh/TP, Quận/Huyện và Phường/Xã.');
+      setErrorMsg("Vui long chon du Tinh/TP va Phuong/Xa.");
       return;
     }
 
-    if (!hasIdentity) {
-      setErrorMsg('Vui lòng nhập ít nhất số điện thoại hoặc email.');
+    if (!form.email.trim()) {
+      setErrorMsg("Vui long nhap email de nhan OTP dang ky.");
       return;
     }
 
     if (form.password.length < 10) {
-      setErrorMsg('Mật khẩu phải có ít nhất 10 ký tự.');
+      setErrorMsg("Mat khau phai co it nhat 10 ky tu.");
       return;
     }
 
     if (form.password !== form.confirmPassword) {
-      setErrorMsg('Mật khẩu xác nhận không khớp.');
+      setErrorMsg("Mat khau xac nhan khong khop.");
       return;
     }
 
     try {
       setLoading(true);
-      // Initiate OTP flow instead of direct registration
-      await requestRegisterOtp(form.email.trim());
+      await requestRegisterOtp(buildRegisterOtpPayload());
       setShowOtpModal(true);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Không thể gửi mã xác thực. Vui lòng thử lại.');
+      setErrorMsg(
+        err?.message || "Khong the gui ma xac thuc. Vui long thu lai.",
+      );
     } finally {
       setLoading(false);
     }
@@ -190,33 +219,37 @@ export default function RegisterScreen() {
     try {
       setOtpLoading(true);
       await verifyRegisterOtp(form.email.trim(), otpCode);
-      // Auth provider will handle navigation after successful registration
-    } catch (err: any) {
-      throw err; // Modal will handle display
     } finally {
       setOtpLoading(false);
     }
   };
 
   const handleResendOtp = async () => {
-    await requestRegisterOtp(form.email.trim());
+    await requestRegisterOtp(buildRegisterOtpPayload());
   };
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <Surface style={styles.card} elevation={3}>
-          <Text variant="headlineSmall" style={styles.title}>Tạo tài khoản cư dân</Text>
-          <Text style={styles.subtitle}>Đăng ký dành cho cư dân. Tài khoản cán bộ do quản trị cấp.</Text>
+          <Text variant="headlineSmall" style={styles.title}>
+            Tạo tài khoản cư dân
+          </Text>
+          <Text style={styles.subtitle}>
+            Đăng ký dành cho cư dân. Tài khoản cán bộ do quản trị cấp.
+          </Text>
 
           <TextInput
             mode="outlined"
             label="Họ và tên"
             value={form.fullName}
-            onChangeText={(value) => setField('fullName', value)}
+            onChangeText={(value) => setField("fullName", value)}
             style={styles.input}
             disabled={loading}
           />
@@ -225,7 +258,7 @@ export default function RegisterScreen() {
             mode="outlined"
             label="Số điện thoại"
             value={form.phone}
-            onChangeText={(value) => setField('phone', value)}
+            onChangeText={(value) => setField("phone", value)}
             keyboardType="phone-pad"
             style={styles.input}
             disabled={loading}
@@ -235,7 +268,7 @@ export default function RegisterScreen() {
             mode="outlined"
             label="Email"
             value={form.email}
-            onChangeText={(value) => setField('email', value)}
+            onChangeText={(value) => setField("email", value)}
             keyboardType="email-address"
             autoCapitalize="none"
             style={styles.input}
@@ -245,68 +278,65 @@ export default function RegisterScreen() {
           <Text style={styles.sectionLabel}>Khu vực cư trú</Text>
           <Text style={styles.optionLabel}>1. Chọn Tỉnh/TP</Text>
           <View style={styles.optionWrap}>
-            {LOCATION_OPTIONS.map((province) => (
-              <Chip
-                key={province.code}
-                selected={form.selectedProvince === province.code}
-                onPress={() => chooseProvince(province.code)}
-                style={styles.optionChip}
-                mode="outlined"
-              >
-                {province.label}
-              </Chip>
-            ))}
-          </View>
-
-          <Text style={styles.optionLabel}>2. Chọn Quận/Huyện</Text>
-          <View style={styles.optionWrap}>
-            {districtOptions.length > 0 ? (
-              districtOptions.map((district) => (
+            {loadingProvinces ? (
+              <Text style={styles.optionHint}>
+                Dang tai danh sach tinh/thanh...
+              </Text>
+            ) : (
+              provinceOptions.map((province) => (
                 <Chip
-                  key={district.code}
-                  selected={form.selectedDistrict === district.code}
-                  onPress={() => chooseDistrict(district.code)}
+                  key={province.code}
+                  selected={form.selectedProvince === province.code}
+                  onPress={() => chooseProvince(province.code)}
                   style={styles.optionChip}
                   mode="outlined"
                 >
-                  {district.label}
+                  {province.fullName}
                 </Chip>
               ))
-            ) : (
-              <Text style={styles.optionHint}>Vui lòng chọn Tỉnh/TP trước.</Text>
             )}
           </View>
 
-          <Text style={styles.optionLabel}>3. Chọn Phường/Xã</Text>
+          <Text style={styles.optionLabel}>2. Chọn Phường/Xã</Text>
           <View style={styles.optionWrap}>
-            {wardOptions.length > 0 ? (
+            {!selectedProvince ? (
+              <Text style={styles.optionHint}>
+                Vui long chon Tinh/TP truoc.
+              </Text>
+            ) : loadingWards ? (
+              <Text style={styles.optionHint}>
+                Dang tai danh sach phuong/xa...
+              </Text>
+            ) : wardOptions.length > 0 ? (
               wardOptions.map((ward) => (
                 <Chip
                   key={ward.code}
                   selected={form.selectedWard === ward.code}
-                  onPress={() => setField('selectedWard', ward.code)}
+                  onPress={() => setField("selectedWard", ward.code)}
                   style={styles.optionChip}
                   mode="outlined"
                 >
-                  {ward.label}
+                  {ward.fullName}
                 </Chip>
               ))
             ) : (
-              <Text style={styles.optionHint}>Vui lòng chọn Quận/Huyện trước.</Text>
+              <Text style={styles.optionHint}>
+                Khong co phuong/xa kha dung cho tinh/thanh da chon.
+              </Text>
             )}
           </View>
 
           <HelperText type="info" visible>
-            {locationCode
-              ? `Mã khu vực tạo tự động: ${locationCode}`
-              : 'Chọn 3 cấp khu vực bên trên, hệ thống sẽ tự tạo mã VN-...'}
+            {selectedWardLabel ||
+              selectedProvinceLabel ||
+              "Chon tinh va phuong/xa ben tren, he thong se gan dia ban tu dong."}
           </HelperText>
 
           <TextInput
             mode="outlined"
             label="Mật khẩu"
             value={form.password}
-            onChangeText={(value) => setField('password', value)}
+            onChangeText={(value) => setField("password", value)}
             secureTextEntry
             style={styles.input}
             disabled={loading}
@@ -316,7 +346,7 @@ export default function RegisterScreen() {
             mode="outlined"
             label="Nhập lại mật khẩu"
             value={form.confirmPassword}
-            onChangeText={(value) => setField('confirmPassword', value)}
+            onChangeText={(value) => setField("confirmPassword", value)}
             secureTextEntry
             style={styles.input}
             disabled={loading}
@@ -328,12 +358,17 @@ export default function RegisterScreen() {
             </HelperText>
           )}
 
-          <Button mode="contained" onPress={handleRegister} disabled={loading} style={styles.button}>
+          <Button
+            mode="contained"
+            onPress={handleRegister}
+            disabled={loading || loadingProvinces}
+            style={styles.button}
+          >
             Đăng ký cư dân
           </Button>
           <View style={styles.footer}>
             <Text>Bạn đã có tài khoản? </Text>
-            <Pressable onPress={() => router.push('/login')}>
+            <Pressable onPress={() => router.push("/login")}>
               <Text style={styles.link}>Đăng nhập</Text>
             </Pressable>
           </View>
@@ -356,7 +391,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f3f6fb',
+    backgroundColor: colors.background,
   },
   content: {
     padding: 18,
@@ -364,15 +399,15 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: 18,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     padding: 18,
   },
   title: {
-    fontWeight: '800',
+    fontWeight: "700",
     marginBottom: 6,
   },
   subtitle: {
-    color: '#5f6b7a',
+    color: colors.textSecondary,
     marginBottom: 16,
   },
   input: {
@@ -381,27 +416,27 @@ const styles = StyleSheet.create({
   sectionLabel: {
     marginTop: 4,
     marginBottom: 6,
-    color: '#344054',
-    fontWeight: '700',
+    color: colors.text,
+    fontWeight: "700",
   },
   optionLabel: {
     marginTop: 6,
     marginBottom: 8,
-    color: '#475467',
-    fontWeight: '600',
+    color: colors.textSecondary,
+    fontWeight: "600",
     fontSize: 13,
   },
   optionWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     marginBottom: 6,
   },
   optionChip: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
   },
   optionHint: {
-    color: '#667085',
+    color: colors.textSecondary,
     fontSize: 12,
   },
   button: {
@@ -410,12 +445,12 @@ const styles = StyleSheet.create({
   },
   footer: {
     marginTop: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
   },
   link: {
-    color: '#1976D2',
-    fontWeight: '700',
+    color: colors.secondary,
+    fontWeight: "700",
   },
 });

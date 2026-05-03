@@ -1,6 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Modal, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform } from 'react-native';
-import { Text, Surface, Button, TextInput, useTheme, IconButton } from 'react-native-paper';
+import colors from "@/constants/colors";
+import React, { useEffect, useState } from "react";
+import {
+  Keyboard,
+  Modal,
+  StyleSheet,
+  TouchableWithoutFeedback,
+  View,
+} from "react-native";
+import {
+  Button,
+  IconButton,
+  Surface,
+  Text,
+  TextInput,
+  useTheme,
+} from "react-native-paper";
 
 interface OtpVerificationModalProps {
   visible: boolean;
@@ -18,20 +32,20 @@ export function OtpVerificationModal({
   onDismiss,
   onVerify,
   loading = false,
-  title = 'Xác thực mã OTP',
-  subtitle = 'Vui lòng nhập mã 6 số đã được gửi đến bạn.',
+  title = "Xác thực mã OTP",
+  subtitle = "Vui lòng nhập mã 6 số đã được gửi đến bạn.",
   loginIdentifier,
   onResend,
 }: OtpVerificationModalProps) {
   const theme = useTheme();
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
   const [timer, setTimer] = useState(60);
 
   useEffect(() => {
     if (visible) {
-      setOtp('');
+      setOtp("");
       setError(null);
       setTimer(60);
     }
@@ -49,7 +63,7 @@ export function OtpVerificationModal({
 
   const handleVerify = async () => {
     if (otp.length !== 6) {
-      setError('Vui lòng nhập đủ 6 chữ số.');
+      setError("Vui lòng nhập đủ 6 chữ số.");
       return;
     }
 
@@ -57,7 +71,7 @@ export function OtpVerificationModal({
       setError(null);
       await onVerify(otp);
     } catch (err: any) {
-      setError(err?.message || 'Mã xác thực không hợp lệ hoặc đã hết hạn.');
+      setError(err?.message || "Mã xác thực không hợp lệ hoặc đã hết hạn.");
     }
   };
 
@@ -70,35 +84,49 @@ export function OtpVerificationModal({
       await onResend();
       setTimer(60);
     } catch (err: any) {
-      setError(err?.message || 'Không thể gửi lại mã.');
+      setError(err?.message || "Không thể gửi lại mã.");
     } finally {
       setResending(false);
     }
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
-      <TouchableWithoutFeedback onPress={() => {
-        Keyboard.dismiss();
-        if (!loading) onDismiss();
-      }}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onDismiss}
+    >
+      <TouchableWithoutFeedback
+        onPress={() => {
+          Keyboard.dismiss();
+          if (!loading) onDismiss();
+        }}
+      >
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
             <Surface style={styles.container} elevation={5}>
               <View style={styles.header}>
-                <Text variant="titleLarge" style={styles.title}>{title}</Text>
-                <IconButton icon="close" size={24} onPress={onDismiss} disabled={loading} />
+                <Text variant="titleLarge" style={styles.title}>
+                  {title}
+                </Text>
+                <IconButton
+                  icon="close"
+                  size={24}
+                  onPress={onDismiss}
+                  disabled={loading}
+                />
               </View>
 
               <Text variant="bodyMedium" style={styles.subtitle}>
-                {subtitle} {loginIdentifier ? `(${loginIdentifier})` : ''}
+                {subtitle} {loginIdentifier ? `(${loginIdentifier})` : ""}
               </Text>
 
               <TextInput
                 mode="outlined"
                 value={otp}
                 onChangeText={(text) => {
-                  const cleaned = text.replace(/[^0-9]/g, '').slice(0, 6);
+                  const cleaned = text.replace(/[^0-9]/g, "").slice(0, 6);
                   setOtp(cleaned);
                   if (error) setError(null);
                 }}
@@ -108,12 +136,17 @@ export function OtpVerificationModal({
                 maxLength={6}
                 disabled={loading}
                 autoFocus
-                outlineStyle={error ? { borderColor: theme.colors.error } : undefined}
+                outlineStyle={
+                  error ? { borderColor: theme.colors.error } : undefined
+                }
                 contentStyle={styles.inputContent}
               />
 
               {error && (
-                <Text variant="bodySmall" style={[styles.errorText, { color: theme.colors.error }]}>
+                <Text
+                  variant="bodySmall"
+                  style={[styles.errorText, { color: theme.colors.error }]}
+                >
                   {error}
                 </Text>
               )}
@@ -137,7 +170,7 @@ export function OtpVerificationModal({
                   compact
                   labelStyle={styles.resendLabel}
                 >
-                  {timer > 0 ? `Gửi lại sau ${timer}s` : 'Gửi lại mã'}
+                  {timer > 0 ? `Gửi lại sau ${timer}s` : "Gửi lại mã"}
                 </Button>
               </View>
             </Surface>
@@ -151,41 +184,41 @@ export function OtpVerificationModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
     padding: 24,
   },
   container: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     borderRadius: 24,
     padding: 24,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 8,
   },
   title: {
-    fontWeight: '800',
+    fontWeight: "700",
   },
   subtitle: {
-    color: '#667085',
+    color: colors.textSecondary,
     marginBottom: 24,
   },
   input: {
     marginBottom: 8,
     fontSize: 24,
-    textAlign: 'center',
+    textAlign: "center",
   },
   inputContent: {
-    textAlign: 'center',
+    textAlign: "center",
     letterSpacing: 8,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   errorText: {
     marginBottom: 16,
-    textAlign: 'center',
+    textAlign: "center",
   },
   button: {
     borderRadius: 12,
@@ -195,13 +228,13 @@ const styles = StyleSheet.create({
     height: 48,
   },
   resendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: 16,
   },
   resendLabel: {
-    fontWeight: '700',
+    fontWeight: "700",
     fontSize: 13,
   },
 });

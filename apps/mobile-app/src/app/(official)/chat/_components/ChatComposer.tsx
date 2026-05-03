@@ -224,3 +224,5 @@ export function ChatComposer({
     </>
   );
 }
+
+export default ChatComposer;

@@ -128,3 +128,5 @@ export function ChatMessageList({
     </>
   );
 }
+
+export default ChatMessageList;

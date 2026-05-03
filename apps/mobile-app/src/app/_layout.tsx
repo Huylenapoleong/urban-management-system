@@ -1,19 +1,20 @@
-import React from "react";
-import { AppState, LogBox } from "react-native";
-import { Stack, usePathname } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import { PaperProvider } from "react-native-paper";
+import FloatingAiChatbot from "@/components/shared/FloatingAiChatbot";
+import colors from "@/constants/colors";
+import { ApiClient } from "@/lib/api-client";
+import AsyncStorageShim from "@/lib/async-storage-shim";
+import { socketClient } from "@/lib/socket-client";
+import { AuthProvider, useAuth } from "@/providers/AuthProvider";
+import { queryKeys } from "@/services/query-keys";
+import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
-import AsyncStorageShim from "@/lib/async-storage-shim";
-import { AuthProvider, useAuth } from "@/providers/AuthProvider";
-import { socketClient } from "@/lib/socket-client";
-import FloatingAiChatbot from "@/components/shared/FloatingAiChatbot";
-import { ApiClient } from "@/lib/api-client";
-import { queryKeys } from "@/services/query-keys";
+import { Stack, usePathname } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import React from "react";
+import { AppState, LogBox, Platform } from "react-native";
+import { MD3LightTheme, PaperProvider } from "react-native-paper";
 
-import { WebRTCProvider } from '../providers/WebRTCProvider';
+import { WebRTCProvider } from "../providers/WebRTCProvider";
 
 LogBox.ignoreLogs([
   "Unexpected text node",
@@ -29,7 +30,8 @@ const queryClient = new QueryClient({
       staleTime: 30 * 1000,
       gcTime: 10 * 60 * 1000,
       retry: 2,
-      retryDelay: (failureCount) => Math.min(1000 * 2 ** failureCount, 10 * 1000),
+      retryDelay: (failureCount) =>
+        Math.min(1000 * 2 ** failureCount, 10 * 1000),
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       refetchOnMount: true,
@@ -37,58 +39,88 @@ const queryClient = new QueryClient({
   },
 });
 
-queryClient.setQueryDefaults(['messages'], {
+const paperTheme = {
+  ...MD3LightTheme,
+  colors: {
+    ...MD3LightTheme.colors,
+    primary: colors.primary,
+    secondary: colors.secondary,
+    background: colors.background,
+    surface: colors.card,
+    surfaceVariant: colors.surface,
+    primaryContainer: "rgba(10,207,254,0.14)",
+    secondaryContainer: "rgba(73,90,255,0.14)",
+    outline: colors.border,
+    onSurface: colors.text,
+    onSurfaceVariant: colors.textSecondary,
+  },
+};
+
+type AsyncStorageLike = typeof AsyncStorageShim;
+
+function getSafeAsyncStorage(): AsyncStorageLike {
+  if (Platform.OS === "web") {
+    return AsyncStorageShim;
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const module = require("@react-native-async-storage/async-storage") as {
+      default?: AsyncStorageLike;
+    };
+
+    if (module?.default) {
+      return module.default;
+    }
+  } catch (error) {
+    console.warn(
+      "[RootLayout] AsyncStorage native module unavailable, falling back to in-memory shim.",
+      error,
+    );
+  }
+
+  return AsyncStorageShim;
+}
+
+queryClient.setQueryDefaults(["messages"], {
   staleTime: Infinity,
   gcTime: 30 * 60 * 1000,
   refetchOnMount: false,
   refetchOnReconnect: false,
 });
-queryClient.setQueryDefaults(['profile'], {
+queryClient.setQueryDefaults(["profile"], {
   staleTime: 5 * 60 * 1000,
   gcTime: 30 * 60 * 1000,
 });
-queryClient.setQueryDefaults(['reports'], {
+queryClient.setQueryDefaults(["reports"], {
   staleTime: 30 * 1000,
   gcTime: 10 * 60 * 1000,
 });
-queryClient.setQueryDefaults(['feed'], {
+queryClient.setQueryDefaults(["feed"], {
   staleTime: 30 * 1000,
   gcTime: 10 * 60 * 1000,
 });
-queryClient.setQueryDefaults(['static'], {
+queryClient.setQueryDefaults(["static"], {
   staleTime: 60 * 60 * 1000,
   gcTime: 24 * 60 * 60 * 1000,
 });
-queryClient.setQueryDefaults(['uploads', 'avatar-library'], {
+queryClient.setQueryDefaults(["uploads", "avatar-library"], {
   staleTime: 60 * 60 * 1000,
   gcTime: 24 * 60 * 60 * 1000,
 });
 
-const getPersistStorage = () => {
-  try {
-    // Using require here prevents module-evaluation crashes when native linkage is broken.
-    const nativeModule = require('@react-native-async-storage/async-storage');
-    const nativeStorage = nativeModule?.default;
-    if (nativeStorage?.getItem && nativeStorage?.setItem) {
-      return nativeStorage;
-    }
-  } catch {
-    // Fallback keeps the app bootable while native module issues are being fixed.
-  }
-
-  return AsyncStorageShim;
-};
+const getPersistStorage = () => getSafeAsyncStorage();
 
 const queryPersister = createAsyncStoragePersister({
   storage: getPersistStorage(),
-  key: 'rq-mobile-cache-v1',
+  key: "rq-mobile-cache-v1",
   throttleTime: 1000,
 });
 
-const WEB_RUNTIME_GUARD_TAG = '[web-runtime-guard:mobile-app]';
-const WEB_RUNTIME_GUARD_FLAG = '__umsWebRuntimeGuardInstalled__';
-const SAFE_HISTORY_METHOD_FLAG = '__umsSafeHistoryMethod__';
-const HISTORY_FALLBACK_IN_PROGRESS_FLAG = '__umsHistoryFallbackInProgress__';
+const WEB_RUNTIME_GUARD_TAG = "[web-runtime-guard:mobile-app]";
+const WEB_RUNTIME_GUARD_FLAG = "__umsWebRuntimeGuardInstalled__";
+const SAFE_HISTORY_METHOD_FLAG = "__umsSafeHistoryMethod__";
+const HISTORY_FALLBACK_IN_PROGRESS_FLAG = "__umsHistoryFallbackInProgress__";
 let splashHidden = false;
 
 async function hideSplashOnce() {
@@ -101,7 +133,11 @@ async function hideSplashOnce() {
 }
 
 function installWebRuntimeGuards() {
-  if (typeof window === 'undefined') {
+  if (
+    Platform.OS !== "web" ||
+    typeof window === "undefined" ||
+    typeof window.addEventListener !== "function"
+  ) {
     return;
   }
 
@@ -111,50 +147,52 @@ function installWebRuntimeGuards() {
   }
   globalWindow[WEB_RUNTIME_GUARD_FLAG] = true;
 
-  const toMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-  const toStack = (error: unknown): string | undefined => (error instanceof Error ? error.stack : undefined);
+  const toMessage = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+  const toStack = (error: unknown): string | undefined =>
+    error instanceof Error ? error.stack : undefined;
 
   const isHistoryDispatchError = (error: unknown): boolean => {
     const message = toMessage(error);
-    return message.includes('dispatchEvent') && message.includes('null');
+    return message.includes("dispatchEvent") && message.includes("null");
   };
 
   const isRemoveChildNotFoundError = (error: unknown): boolean => {
     const message = toMessage(error);
-    return message.includes('removeChild') && message.includes('not a child');
+    return message.includes("removeChild") && message.includes("not a child");
   };
 
   const serializeArgs = (args: unknown[]): string => {
     try {
       return JSON.stringify(args);
     } catch {
-      return '[unserializable-args]';
+      return "[unserializable-args]";
     }
   };
 
   const getHistoryTargets = () => {
     const targets: { label: string; target: any }[] = [
-      { label: 'window.history', target: window.history as any },
+      { label: "window.history", target: window.history as any },
     ];
 
     const historyProto = (globalThis as any).History?.prototype;
     if (historyProto) {
-      targets.push({ label: 'History.prototype', target: historyProto });
+      targets.push({ label: "History.prototype", target: historyProto });
     }
 
     return targets;
   };
 
   const toFallbackUrl = (nextUrl: unknown): string | null => {
-    if (typeof nextUrl === 'string') {
+    if (typeof nextUrl === "string") {
       return nextUrl;
     }
 
-    if (typeof URL !== 'undefined' && nextUrl instanceof URL) {
+    if (typeof URL !== "undefined" && nextUrl instanceof URL) {
       return nextUrl.toString();
     }
 
-    if (nextUrl && typeof nextUrl === 'object') {
+    if (nextUrl && typeof nextUrl === "object") {
       const candidate = nextUrl as Record<string, unknown>;
       const nestedPath =
         candidate.pathname ??
@@ -163,7 +201,7 @@ function installWebRuntimeGuards() {
         candidate.href ??
         candidate.url;
 
-      if (typeof nestedPath === 'string' && nestedPath.trim()) {
+      if (typeof nestedPath === "string" && nestedPath.trim()) {
         return nestedPath;
       }
     }
@@ -171,10 +209,10 @@ function installWebRuntimeGuards() {
     return null;
   };
 
-  const wrapHistoryMethod = (method: 'pushState' | 'replaceState') => {
+  const wrapHistoryMethod = (method: "pushState" | "replaceState") => {
     for (const { label, target } of getHistoryTargets()) {
       const original = target?.[method];
-      if (typeof original !== 'function') {
+      if (typeof original !== "function") {
         continue;
       }
 
@@ -218,7 +256,7 @@ function installWebRuntimeGuards() {
             });
 
             window.setTimeout(() => {
-              if (method === 'pushState') {
+              if (method === "pushState") {
                 window.location.assign(safeFallbackUrl);
               } else {
                 window.location.replace(safeFallbackUrl);
@@ -242,25 +280,33 @@ function installWebRuntimeGuards() {
       } catch (error) {
         try {
           target[method] = safeMethod;
-          console.info(`${WEB_RUNTIME_GUARD_TAG} assigned ${method} on ${label}`);
+          console.info(
+            `${WEB_RUNTIME_GUARD_TAG} assigned ${method} on ${label}`,
+          );
         } catch {
-          console.warn(`${WEB_RUNTIME_GUARD_TAG} failed to wrap ${method} on ${label}`, {
-            message: toMessage(error),
-          });
+          console.warn(
+            `${WEB_RUNTIME_GUARD_TAG} failed to wrap ${method} on ${label}`,
+            {
+              message: toMessage(error),
+            },
+          );
         }
       }
     }
   };
 
   const nodeProto = (globalThis as any).Node?.prototype;
-  if (nodeProto && typeof nodeProto.removeChild === 'function') {
+  if (nodeProto && typeof nodeProto.removeChild === "function") {
     const originalRemoveChild = nodeProto.removeChild;
 
     nodeProto.removeChild = function (child: unknown) {
       if (child && (child as any).parentNode !== this) {
-        console.warn(`${WEB_RUNTIME_GUARD_TAG} blocked removeChild for detached node`, {
-          href: window.location.href,
-        });
+        console.warn(
+          `${WEB_RUNTIME_GUARD_TAG} blocked removeChild for detached node`,
+          {
+            href: window.location.href,
+          },
+        );
         return child;
       }
 
@@ -284,8 +330,11 @@ function installWebRuntimeGuards() {
     console.info(`${WEB_RUNTIME_GUARD_TAG} wrapped Node.removeChild`);
   }
 
-  window.addEventListener('unhandledrejection', (event) => {
-    if (!isHistoryDispatchError(event.reason) && !isRemoveChildNotFoundError(event.reason)) {
+  window.addEventListener("unhandledrejection", (event) => {
+    if (
+      !isHistoryDispatchError(event.reason) &&
+      !isRemoveChildNotFoundError(event.reason)
+    ) {
       return;
     }
 
@@ -299,7 +348,7 @@ function installWebRuntimeGuards() {
     });
   });
 
-  window.addEventListener('error', (event) => {
+  window.addEventListener("error", (event) => {
     const error = event.error;
     if (!isHistoryDispatchError(error) && !isRemoveChildNotFoundError(error)) {
       return;
@@ -317,14 +366,14 @@ function installWebRuntimeGuards() {
     });
   });
 
-  wrapHistoryMethod('pushState');
-  wrapHistoryMethod('replaceState');
+  wrapHistoryMethod("pushState");
+  wrapHistoryMethod("replaceState");
 
   let rewrapTicks = 0;
   const rewrapTimer = window.setInterval(() => {
     rewrapTicks += 1;
-    wrapHistoryMethod('pushState');
-    wrapHistoryMethod('replaceState');
+    wrapHistoryMethod("pushState");
+    wrapHistoryMethod("replaceState");
 
     if (rewrapTicks >= 20) {
       window.clearInterval(rewrapTimer);
@@ -340,10 +389,11 @@ function NavigationQueryLifecycleManager() {
   React.useEffect(() => {
     void queryClient.cancelQueries({
       predicate: (query) => {
-        const isFetching = query.state.fetchStatus === 'fetching';
-        const isActive = typeof (query as any).isActive === 'function'
-          ? Boolean((query as any).isActive())
-          : true;
+        const isFetching = query.state.fetchStatus === "fetching";
+        const isActive =
+          typeof (query as any).isActive === "function"
+            ? Boolean((query as any).isActive())
+            : true;
 
         return isFetching && !isActive;
       },
@@ -355,13 +405,13 @@ function NavigationQueryLifecycleManager() {
 
 function SocketLifecycleManager() {
   React.useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'background' || nextState === 'inactive') {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "background" || nextState === "inactive") {
         socketClient.pause();
         return;
       }
 
-      if (nextState === 'active') {
+      if (nextState === "active") {
         void socketClient.resume().catch(() => {});
       }
     });
@@ -385,7 +435,7 @@ function WebRuntimeSafetyManager() {
 function SplashPreloadManager({ queryHydrated }: { queryHydrated: boolean }) {
   const queryClient = useQueryClient();
   const { user, isLoading, logout } = useAuth();
-  const userId = user?.sub ?? '';
+  const userId = user?.sub ?? "";
 
   React.useEffect(() => {
     if (!queryHydrated || isLoading) {
@@ -407,7 +457,8 @@ function SplashPreloadManager({ queryHydrated }: { queryHydrated: boolean }) {
         try {
           await queryClient.prefetchQuery({
             queryKey: profileKey,
-            queryFn: ({ signal }) => ApiClient.get('/users/me', undefined, { signal }),
+            queryFn: ({ signal }) =>
+              ApiClient.get("/users/me", undefined, { signal }),
             staleTime: 5 * 60 * 1000,
             gcTime: 30 * 60 * 1000,
           });
@@ -449,7 +500,7 @@ export default function RootLayout() {
       <NavigationQueryLifecycleManager />
       <SocketLifecycleManager />
       <WebRuntimeSafetyManager />
-      <PaperProvider>
+      <PaperProvider theme={paperTheme}>
         <AuthProvider>
           <SplashPreloadManager queryHydrated={queryHydrated} />
           <WebRTCProvider>

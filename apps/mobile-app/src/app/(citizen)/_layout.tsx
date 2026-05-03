@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { LinearGradient } from "@/components/shared/SafeLinearGradient";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -144,6 +145,12 @@ function ChatBubbleOverlay() {
           });
         }}
       >
+        <LinearGradient
+          colors={colors.gradient.primary}
+          start={colors.gradient.start}
+          end={colors.gradient.end}
+          style={StyleSheet.absoluteFillObject}
+        />
         <Ionicons name="chatbubble-ellipses" size={26} color="white" />
         <View style={styles.chatBubbleBadge}>
           <Text style={styles.chatBubbleBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
@@ -188,8 +195,8 @@ export default function CitizenLayout() {
         headerShown: false,
         animation: "shift",
         tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textSecondary,
+        tabBarActiveTintColor: colors.secondary,
+        tabBarInactiveTintColor: colors.muted,
         tabBarStyle: {
           backgroundColor: "rgba(255,255,255,0.94)",
           borderTopWidth: 1,
@@ -216,7 +223,7 @@ export default function CitizenLayout() {
           marginTop: 2,
           borderRadius: 18,
         },
-        tabBarActiveBackgroundColor: "#eef4ff",
+        tabBarActiveBackgroundColor: "rgba(73,90,255,0.12)",
         sceneStyle: {
           backgroundColor: colors.background,
         },
@@ -298,7 +305,8 @@ const styles = StyleSheet.create({
     borderRadius: 29,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.primary,
+    overflow: "hidden",
+    backgroundColor: colors.secondary,
     shadowColor: "#0f172a",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.22,

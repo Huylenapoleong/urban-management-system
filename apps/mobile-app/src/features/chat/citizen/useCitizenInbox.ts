@@ -12,15 +12,55 @@ import { listConversations } from "@/services/api/conversation.api";
 import { connectChatSocket } from "@/services/chat-socket";
 import { rememberEvent } from "./chat-utils";
 
+const INBOX_CACHE_STALE_MS = 60000;
+
+const CITIZEN_INBOX_CACHE: {
+  conversations: ConversationSummary[];
+  joinedGroups: GroupMetadata[];
+  hiddenConversationIds: Set<string>;
+  loadedAt: number;
+} = {
+  conversations: [],
+  joinedGroups: [],
+  hiddenConversationIds: new Set<string>(),
+  loadedAt: 0,
+};
+
 export function useCitizenInbox() {
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [joinedGroups, setJoinedGroups] = useState<GroupMetadata[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [conversations, setConversations] = useState<ConversationSummary[]>(
+    () => CITIZEN_INBOX_CACHE.conversations,
+  );
+  const [joinedGroups, setJoinedGroups] = useState<GroupMetadata[]>(
+    () => CITIZEN_INBOX_CACHE.joinedGroups,
+  );
+  const [hiddenConversationIds, setHiddenConversationIds] = useState<Set<string>>(
+    () => new Set(CITIZEN_INBOX_CACHE.hiddenConversationIds),
+  );
+  const [loading, setLoading] = useState(() => CITIZEN_INBOX_CACHE.loadedAt === 0);
   const [error, setError] = useState<string | null>(null);
   const seenEventIds = useRef(new Set<string>());
-  const hasLoadedOnceRef = useRef(false);
+  const hasLoadedOnceRef = useRef(CITIZEN_INBOX_CACHE.loadedAt > 0);
 
-  const refresh = useCallback(async (activeRef?: { current: boolean }) => {
+  const refresh = useCallback(async (
+    activeRef?: { current: boolean },
+    options?: { force?: boolean },
+  ) => {
+    const hasFreshCache =
+      CITIZEN_INBOX_CACHE.loadedAt > 0 &&
+      Date.now() - CITIZEN_INBOX_CACHE.loadedAt < INBOX_CACHE_STALE_MS;
+
+    if (!options?.force && hasFreshCache) {
+      if (!hasLoadedOnceRef.current) {
+        setConversations(CITIZEN_INBOX_CACHE.conversations);
+        setJoinedGroups(CITIZEN_INBOX_CACHE.joinedGroups);
+        setHiddenConversationIds(new Set(CITIZEN_INBOX_CACHE.hiddenConversationIds));
+        hasLoadedOnceRef.current = true;
+      }
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     if (!hasLoadedOnceRef.current) {
       setLoading(true);
     }
@@ -35,8 +75,25 @@ export function useCitizenInbox() {
         return;
       }
 
+      CITIZEN_INBOX_CACHE.conversations = conversationItems;
+      CITIZEN_INBOX_CACHE.joinedGroups = groupItems;
+      CITIZEN_INBOX_CACHE.loadedAt = Date.now();
+
       setConversations(conversationItems);
       setJoinedGroups(groupItems);
+
+      const refreshedConversationIds = new Set(
+        conversationItems.map((item) => item.conversationId),
+      );
+      const nextHiddenConversationIds = new Set(CITIZEN_INBOX_CACHE.hiddenConversationIds);
+      for (const conversationId of nextHiddenConversationIds) {
+        if (refreshedConversationIds.has(conversationId)) {
+          nextHiddenConversationIds.delete(conversationId);
+        }
+      }
+      CITIZEN_INBOX_CACHE.hiddenConversationIds = nextHiddenConversationIds;
+      setHiddenConversationIds(nextHiddenConversationIds);
+
       hasLoadedOnceRef.current = true;
       setError(null);
     } catch (err: unknown) {
@@ -67,17 +124,35 @@ export function useCitizenInbox() {
               return;
             }
 
+            if (event.summary?.conversationId) {
+              setHiddenConversationIds((prev) => {
+                if (!prev.has(event.summary.conversationId)) {
+                  return prev;
+                }
+
+                const nextHidden = new Set(prev);
+                nextHidden.delete(event.summary.conversationId);
+                CITIZEN_INBOX_CACHE.hiddenConversationIds = nextHidden;
+                return nextHidden;
+              });
+            }
+
             setConversations((prev) => {
               const index = prev.findIndex(
                 (item) => item.conversationId === event.conversationId,
               );
 
               if (index === -1) {
-                return [event.summary, ...prev];
+                const next = [event.summary, ...prev];
+                CITIZEN_INBOX_CACHE.conversations = next;
+                CITIZEN_INBOX_CACHE.loadedAt = Date.now();
+                return next;
               }
 
               const next = [...prev];
               next[index] = event.summary;
+              CITIZEN_INBOX_CACHE.conversations = next;
+              CITIZEN_INBOX_CACHE.loadedAt = Date.now();
               return next;
             });
           };
@@ -87,9 +162,23 @@ export function useCitizenInbox() {
               return;
             }
 
-            setConversations((prev) =>
-              prev.filter((item) => item.conversationId !== event.conversationId),
-            );
+            setHiddenConversationIds((prev) => {
+              if (prev.has(event.conversationId)) {
+                return prev;
+              }
+
+              const nextHidden = new Set(prev);
+              nextHidden.add(event.conversationId);
+              CITIZEN_INBOX_CACHE.hiddenConversationIds = nextHidden;
+              return nextHidden;
+            });
+
+            setConversations((prev) => {
+              const next = prev.filter((item) => item.conversationId !== event.conversationId);
+              CITIZEN_INBOX_CACHE.conversations = next;
+              CITIZEN_INBOX_CACHE.loadedAt = Date.now();
+              return next;
+            });
           };
 
           chatSocket.on(CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED, handleConversationUpdated);
@@ -122,13 +211,44 @@ export function useCitizenInbox() {
     }, [refresh]),
   );
 
+  const hideConversation = useCallback((conversationId: string) => {
+    const normalizedConversationId = conversationId?.trim();
+    if (!normalizedConversationId) {
+      return;
+    }
+
+    setHiddenConversationIds((prev) => {
+      if (prev.has(normalizedConversationId)) {
+        return prev;
+      }
+
+      const nextHidden = new Set(prev);
+      nextHidden.add(normalizedConversationId);
+      CITIZEN_INBOX_CACHE.hiddenConversationIds = nextHidden;
+      return nextHidden;
+    });
+
+    setConversations((prev) => {
+      const next = prev.filter((item) => item.conversationId !== normalizedConversationId);
+      CITIZEN_INBOX_CACHE.conversations = next;
+      CITIZEN_INBOX_CACHE.loadedAt = Date.now();
+      return next;
+    });
+  }, []);
+
   const visibleConversations = useMemo(() => {
     const conversationMap = new Map(
-      conversations.map((item) => [item.conversationId, item] as const),
+      conversations
+        .filter((item) => !hiddenConversationIds.has(item.conversationId))
+        .map((item) => [item.conversationId, item] as const),
     );
 
     for (const group of joinedGroups) {
       const conversationId = `group:${group.id}`;
+      if (hiddenConversationIds.has(conversationId)) {
+        continue;
+      }
+
       const existingConversation = conversationMap.get(conversationId);
 
       if (existingConversation) {
@@ -163,12 +283,13 @@ export function useCitizenInbox() {
       const rightTime = new Date(right.updatedAt).getTime();
       return rightTime - leftTime;
     });
-  }, [conversations, joinedGroups]);
+  }, [conversations, joinedGroups, hiddenConversationIds]);
 
   return {
     conversations: visibleConversations,
     loading,
     error,
-    refresh: () => refresh(),
+    refresh: () => refresh(undefined, { force: true }),
+    hideConversation,
   };
 }

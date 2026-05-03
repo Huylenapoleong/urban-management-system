@@ -7,12 +7,12 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { OtpPurpose } from '@urban/shared-constants';
 import type {
   AuthSessionInfo,
   AuthenticatedUser,
   JwtClaims,
 } from '@urban/shared-types';
-import type { OtpPurpose } from '@urban/shared-constants';
 import {
   createUlid,
   normalizeEmail,
@@ -20,34 +20,36 @@ import {
   nowIso,
 } from '@urban/shared-utils';
 import {
-  ensureLocationCode,
+  toAuthSessionInfo,
+  toAuthenticatedUser,
+  toUserProfile,
+} from '../../common/mappers';
+import type { SessionClientMetadata } from '../../common/request-session-metadata';
+import type {
+  StoredAuthIdentityAttempt,
+  StoredUser,
+} from '../../common/storage-records';
+import {
   ensureObject,
   optionalString,
   requirePhoneOrEmail,
   requiredString,
 } from '../../common/validation';
-import { JwtTokenService } from '../../infrastructure/security/jwt-token.service';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
+import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { ObservabilityService } from '../../infrastructure/observability/observability.service';
+import { AuthOtpService } from '../../infrastructure/security/auth-otp.service';
+import { JwtTokenService } from '../../infrastructure/security/jwt-token.service';
 import {
   PasswordPolicyService,
   type PasswordPolicyProfile,
 } from '../../infrastructure/security/password-policy.service';
 import { PasswordService } from '../../infrastructure/security/password.service';
-import {
-  toAuthenticatedUser,
-  toAuthSessionInfo,
-  toUserProfile,
-} from '../../common/mappers';
-import type { StoredUser } from '../../common/storage-records';
-import { UsersService } from '../users/users.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
-import { ChatRealtimeService } from '../conversations/chat-realtime.service';
-import type { SessionClientMetadata } from '../../common/request-session-metadata';
-import { AuthOtpService } from '../../infrastructure/security/auth-otp.service';
-import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
-import { AppConfigService } from '../../infrastructure/config/app-config.service';
-import type { StoredAuthIdentityAttempt } from '../../common/storage-records';
 import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
+import { ChatRealtimeService } from '../conversations/chat-realtime.service';
+import { LocationsService } from '../locations/locations.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthService {
@@ -65,6 +67,7 @@ export class AuthService {
     private readonly repository: UrbanTableRepository,
     private readonly mediaAssetService: MediaAssetService,
     private readonly config: AppConfigService,
+    private readonly locationsService: LocationsService,
   ) {}
 
   async register(payload: unknown, metadata?: SessionClientMetadata) {
@@ -110,7 +113,7 @@ export class AuthService {
       minLength: 2,
       maxLength: 100,
     });
-    const locationCode = ensureLocationCode(
+    const locationCode = this.locationsService.ensureKnownLocationCode(
       requiredString(body, 'locationCode'),
     );
     const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
@@ -222,7 +225,11 @@ export class AuthService {
       ? await this.usersService.findByEmail(normalizeEmail(login))
       : await this.usersService.findByPhone(normalizePhone(login));
 
-    if (!user || user.deletedAt || (user.status !== 'ACTIVE' && user.status !== 'LOCKED')) {
+    if (
+      !user ||
+      user.deletedAt ||
+      (user.status !== 'ACTIVE' && user.status !== 'LOCKED')
+    ) {
       await this.recordAuthAttemptFailure('LOGIN', identity);
       throw new UnauthorizedException('Invalid credentials.');
     }
@@ -238,11 +245,14 @@ export class AuthService {
     }
 
     if (user.status === 'LOCKED') {
-      throw new HttpException({
-        statusCode: HttpStatus.FORBIDDEN,
-        errorCode: 'ACCOUNT_LOCKED',
-        message: 'Tài khoản của bạn đã bị khóa.',
-      }, HttpStatus.FORBIDDEN);
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.FORBIDDEN,
+          errorCode: 'ACCOUNT_LOCKED',
+          message: 'Tài khoản của bạn đã bị khóa.',
+        },
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     await this.clearAuthAttempts('LOGIN', identity);
@@ -342,7 +352,9 @@ export class AuthService {
     const user = await this.resolveUserByLogin(login);
 
     if (!user || user.deletedAt) {
-      throw new NotFoundException('Tài khoản không tồn tại.');
+      return {
+        requested: true,
+      };
     }
 
     if (user.status !== 'ACTIVE') {
@@ -1255,9 +1267,7 @@ export class AuthService {
       { consumeOnSuccess: false },
     );
 
-    const unlockedUser = await this.usersService.unlockOwnAccount(
-      user.userId,
-    );
+    const unlockedUser = await this.usersService.unlockOwnAccount(user.userId);
     await this.consumeOtpBestEffort({
       purpose: 'UNLOCK_ACCOUNT',
       email: user.email,

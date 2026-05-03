@@ -5,14 +5,14 @@
 
 // User Roles
 export enum UserRole {
-  SUPER_ADMIN = "SUPER_ADMIN",
-  PROVINCE_OFFICER = "PROVINCE_OFFICER",
-  WARD_OFFICER = "WARD_OFFICER",
-  CITIZEN = "CITIZEN",
+  SUPER_ADMIN = 'SUPER_ADMIN',
+  PROVINCE_OFFICER = 'PROVINCE_OFFICER',
+  WARD_OFFICER = 'WARD_OFFICER',
+  CITIZEN = 'CITIZEN',
 }
 
 // Permissions Matrix
-export type PermissionType = "read" | "write" | "delete" | "approve";
+export type PermissionType = 'read' | 'write' | 'delete' | 'approve';
 
 export interface Permission {
   resource: string;
@@ -67,7 +67,7 @@ export interface TwoFactorSetup {
 }
 
 // API Response Types
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;

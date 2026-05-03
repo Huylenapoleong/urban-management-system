@@ -7,14 +7,13 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependencies
-node_modules
-
 # Build outputs
 dist
 dist-ssr
 .vite
 coverage
+*.tsbuildinfo
+.eslintcache
 
 # Environment variables
 .env
@@ -24,23 +23,10 @@ coverage
 .env.production.local
 
 # Temp files
+# Local env files
 *.local
 .tmp
 .temp
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
 
 # Test coverage
 .nyc_output

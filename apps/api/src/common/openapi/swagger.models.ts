@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  GROUP_MESSAGE_POLICIES,
   GROUP_MEMBER_ROLES,
+  GROUP_MESSAGE_POLICIES,
   GROUP_TYPES,
   MESSAGE_DELIVERY_STATES,
   MESSAGE_RECALL_SCOPES,
@@ -20,14 +20,14 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
-  IsInt,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
   Matches,
-  MaxLength,
   Max,
+  MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
@@ -220,7 +220,7 @@ export class UserProfileDto {
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   locationCode!: string;
 
   @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
@@ -298,7 +298,7 @@ export class FriendUserItemDto {
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   locationCode!: string;
 
   @ApiPropertyOptional({ type: () => MediaAssetDto })
@@ -338,7 +338,7 @@ export class FriendRequestItemDto {
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   locationCode!: string;
 
   @ApiPropertyOptional({ type: () => MediaAssetDto })
@@ -384,7 +384,7 @@ export class BlockedUserItemDto {
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   locationCode!: string;
 
   @ApiPropertyOptional({ type: () => MediaAssetDto })
@@ -449,7 +449,7 @@ export class UserDirectoryItemDto {
   @ApiProperty({ enum: USER_ROLES, example: 'CITIZEN' })
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   locationCode!: string;
 
   @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
@@ -702,7 +702,7 @@ export class GroupMetadataDto {
   })
   messagePolicy!: (typeof GROUP_MESSAGE_POLICIES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   locationCode!: string;
 
   @ApiProperty({ example: '01JPCY0000WARDOFFICER00000' })
@@ -830,6 +830,40 @@ export class GroupOwnershipTransferResultDto {
   transferredAt!: string;
 }
 
+export class CallEventInfoDto {
+  @ApiProperty({
+    enum: ['REJECTED', 'ENDED', 'PARTICIPANT_LEFT'],
+    example: 'ENDED',
+  })
+  status!: 'REJECTED' | 'ENDED' | 'PARTICIPANT_LEFT';
+
+  @ApiProperty({ example: true })
+  isVideo!: boolean;
+
+  @ApiProperty({ example: '2026-04-22T14:00:00.000Z' })
+  startedAt!: string;
+
+  @ApiPropertyOptional({
+    example: '2026-04-22T14:00:08.000Z',
+    nullable: true,
+    description:
+      'Canonical server timestamp when the call first became active. FE should use this value to start any in-call timer for all participants.',
+  })
+  acceptedAt?: string | null;
+
+  @ApiProperty({ example: '2026-04-22T14:05:08.000Z' })
+  endedAt!: string;
+
+  @ApiProperty({ example: 300 })
+  durationSeconds!: number;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  initiatedByUserId!: string;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENB00000000' })
+  endedByUserId?: string;
+}
+
 export class MessageReplyReferenceDto {
   @ApiProperty({ example: '01JPCY3000GROUPMSG00000001' })
   id!: string;
@@ -845,6 +879,13 @@ export class MessageReplyReferenceDto {
 
   @ApiProperty({ example: '{"text":"O ga truoc so 123 Le Loi","mention":[]}' })
   content!: string;
+
+  @ApiPropertyOptional({
+    type: () => CallEventInfoDto,
+    description:
+      'Present for persisted call-system messages so FE can render call history cards and durations without inferring from plain text.',
+  })
+  callEvent?: CallEventInfoDto;
 
   @ApiPropertyOptional({ type: () => MediaAssetDto })
   attachmentAsset?: MediaAssetDto;
@@ -886,6 +927,13 @@ export class MessageItemDto {
 
   @ApiProperty({ example: '{"text":"O ga truoc so 123 Le Loi","mention":[]}' })
   content!: string;
+
+  @ApiPropertyOptional({
+    type: () => CallEventInfoDto,
+    description:
+      'Present for persisted call-system messages. FE should prefer this metadata over trying to derive call duration from text.',
+  })
+  callEvent?: CallEventInfoDto;
 
   @ApiPropertyOptional({ type: () => MediaAssetDto })
   attachmentAsset?: MediaAssetDto;
@@ -1088,7 +1136,7 @@ export class ReportItemDto {
   @ApiProperty({ enum: REPORT_CATEGORIES, example: 'INFRASTRUCTURE' })
   category!: (typeof REPORT_CATEGORIES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   locationCode!: string;
 
   @ApiProperty({ enum: REPORT_STATUSES, example: 'NEW' })
@@ -1170,7 +1218,7 @@ export class RegisterRequestDto {
   @MaxLength(100)
   fullName!: string;
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   @IsString()
   @MaxLength(30)
   locationCode!: string;
@@ -1495,7 +1543,7 @@ export class UpdateProfileRequestDto {
   @MaxLength(200)
   unit?: string;
 
-  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
@@ -1553,7 +1601,7 @@ export class CreateUserRequestDto {
   @IsIn(USER_ROLES)
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   @IsString()
   @MaxLength(30)
   locationCode!: string;
@@ -1604,7 +1652,7 @@ export class CreateGroupRequestDto {
   @IsIn(GROUP_TYPES)
   groupType!: (typeof GROUP_TYPES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   @IsString()
   @MaxLength(30)
   locationCode!: string;
@@ -1660,7 +1708,7 @@ export class UpdateGroupRequestDto {
   @IsIn(GROUP_TYPES)
   groupType?: (typeof GROUP_TYPES)[number];
 
-  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
@@ -2068,7 +2116,7 @@ export class CreateReportRequestDto {
   @IsIn(REPORT_PRIORITIES)
   priority!: (typeof REPORT_PRIORITIES)[number];
 
-  @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
+  @ApiProperty({ example: 'VN-79-25747' })
   @IsString()
   @MaxLength(30)
   locationCode!: string;
@@ -2135,7 +2183,7 @@ export class UpdateReportRequestDto {
   @IsIn(REPORT_PRIORITIES)
   priority?: (typeof REPORT_PRIORITIES)[number];
 
-  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
@@ -2206,7 +2254,7 @@ export class ListUsersQueryDto {
   @IsIn(USER_STATUSES)
   status?: string;
 
-  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
@@ -2291,7 +2339,7 @@ export class ListGroupsQueryDto {
   @IsIn(GROUP_TYPES)
   groupType?: string;
 
-  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
   @IsOptional()
   @IsString()
   @MaxLength(30)
@@ -2450,7 +2498,7 @@ export class ListReportsQueryDto {
   @MaxLength(50)
   assignedOfficerId?: string;
 
-  @ApiPropertyOptional({ example: 'VN-HCM-BQ1-P01' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
   @IsOptional()
   @IsString()
   @MaxLength(30)

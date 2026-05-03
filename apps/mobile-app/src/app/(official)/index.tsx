@@ -12,6 +12,7 @@ import CitizenReportCard from '../../components/shared/CitizenReportCard';
 import { isSameProvince, isSameWard } from '@urban/shared-utils';
 import { CardListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
 import { prefetchReport } from '@/services/prefetch';
+import colors from '@/constants/colors';
 
 const DASHBOARD_HERO_IMAGE =
   'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?q=80&w=1470&auto=format&fit=crop';
@@ -100,9 +101,9 @@ export default function OfficialDashboardScreen() {
           
           <View style={styles.statsGrid}>
             <Surface style={[styles.statsCard, { backgroundColor: '#e3f2fd' }]} elevation={0}>
-              <MaterialCommunityIcons name="clipboard-text-multiple" size={28} color="#1976D2" style={styles.statIcon} />
-              <Text variant="headlineMedium" style={[styles.statNumber, { color: '#1976D2' }]}>{totalReports}</Text>
-              <Text variant="labelMedium" style={{ color: '#1565C0', fontWeight: '500' }}>Tổng số</Text>
+              <MaterialCommunityIcons name="clipboard-text-multiple" size={28} color={colors.secondary} style={styles.statIcon} />
+              <Text variant="headlineMedium" style={[styles.statNumber, { color: colors.secondary }]}>{totalReports}</Text>
+              <Text variant="labelMedium" style={{ color: colors.secondary, fontWeight: '500' }}>Tổng số</Text>
             </Surface>
 
             <Surface style={[styles.statsCard, { backgroundColor: '#ffebee' }]} elevation={0}>
@@ -123,7 +124,7 @@ export default function OfficialDashboardScreen() {
         <View style={styles.recentSection}>
           <View style={styles.sectionHeader}>
             <Text variant="titleMedium" style={styles.sectionTitle}>Sự cố gần đây</Text>
-            <Button mode="text" labelStyle={{ fontWeight: 'bold' }} onPress={() => router.push('/(official)/reports')}>XEM TẤT CẢ</Button>
+            <Button mode="text" labelStyle={{ fontWeight: '700' }} onPress={() => router.push('/(official)/reports')}>XEM TẤT CẢ</Button>
           </View>
 
           {isFirstLoad ? (
@@ -160,18 +161,18 @@ const styles = StyleSheet.create({
   heroOverlay: { flex: 1, backgroundColor: 'rgba(0,35,90,0.6)', paddingTop: 50, paddingHorizontal: 24, justifyContent: 'center' },
   headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   greetingText: { color: 'rgba(255,255,255,0.9)', fontSize: 16, marginBottom: 4 },
-  userName: { color: '#ffffff', fontSize: 26, fontWeight: '800', letterSpacing: 0.5 },
+  userName: { color: '#ffffff', fontSize: 26, fontWeight: '700', letterSpacing: 0 },
   notificationBadge: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   
   statsContainer: { paddingHorizontal: 20, marginTop: -30 },
   statsGrid: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   statsCard: { flex: 1, paddingVertical: 18, paddingHorizontal: 8, borderRadius: 20, alignItems: 'center' },
   statIcon: { marginBottom: 8 },
-  statNumber: { fontWeight: '900', fontSize: 28 },
+  statNumber: { fontWeight: '700', fontSize: 28 },
   
   recentSection: { paddingHorizontal: 20, marginTop: 24 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontWeight: '800', fontSize: 18, color: '#1a1a1a' },
+  sectionTitle: { fontWeight: '700', fontSize: 18, color: colors.text },
   
   emptyState: { alignItems: 'center', marginTop: 40, padding: 20 }
 });

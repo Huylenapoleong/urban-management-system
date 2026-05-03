@@ -1,3 +1,22 @@
+import Header from "@/components/Header";
+import { LinearGradient } from "@/components/shared/SafeLinearGradient";
+import { ListSkeleton } from "@/components/skeleton/Skeleton";
+import colors from "@/constants/colors";
+import {
+  getResolvedLocationLabel,
+  useResolvedLocations,
+} from "@/hooks/shared/useResolvedLocations";
+import { ApiClient } from "@/lib/api-client";
+import { readTempCache, writeTempCache } from "@/lib/page-temp-cache";
+import { useAuth } from "@/providers/AuthProvider";
+import { createGroup, addMember, joinGroup, leaveGroup } from "@/services/api/group.api";
+import { listMyFriends } from "@/services/api/friends.api";
+import { prefetchConversationMessages } from "@/services/prefetch";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useQueryClient } from "@tanstack/react-query";
+import { GROUP_TYPES } from "@urban/shared-constants";
+import type { GroupMetadata } from "@urban/shared-types";
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -9,25 +28,13 @@ import {
   TextInput,
   View,
 } from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { GROUP_TYPES } from "@urban/shared-constants";
-import type { GroupMetadata } from "@urban/shared-types";
-import { useRouter } from "expo-router";
-import { useQueryClient } from "@tanstack/react-query";
-import Header from "@/components/Header";
-import colors from "@/constants/colors";
-import { ApiClient } from "@/lib/api-client";
-import { useAuth } from "@/providers/AuthProvider";
-import { createGroup, joinGroup, leaveGroup } from "@/services/api/group.api";
-import { readTempCache, writeTempCache } from "@/lib/page-temp-cache";
-import { ListSkeleton } from "@/components/skeleton/Skeleton";
-import { prefetchConversationMessages } from "@/services/prefetch";
 
 type GroupWithStatus = GroupMetadata & {
   joined: boolean;
 };
 
-const PRIVATE_GROUP_TYPE = GROUP_TYPES.find((type) => type === "PRIVATE") ?? "PRIVATE";
+const PRIVATE_GROUP_TYPE =
+  GROUP_TYPES.find((type) => type === "PRIVATE") ?? "PRIVATE";
 const GROUPS_CACHE_TTL_MS = 45 * 1000;
 
 function normalizeText(value: string) {
@@ -66,9 +73,17 @@ function fuzzyScore(query: string, target: string) {
 }
 
 const toSearchTarget = (group: GroupMetadata) =>
-  normalizeText([group.groupName, group.description ?? "", group.groupType, group.locationCode].join(" "));
+  normalizeText(
+    [
+      group.groupName,
+      group.description ?? "",
+      group.groupType,
+      group.locationCode,
+    ].join(" "),
+  );
 
-const toRankTarget = (group: GroupMetadata) => normalizeText([group.groupName, group.description ?? ""].join(" "));
+const toRankTarget = (group: GroupMetadata) =>
+  normalizeText([group.groupName, group.description ?? ""].join(" "));
 
 export default function GroupsScreen() {
   const { user } = useAuth();
@@ -82,42 +97,67 @@ export default function GroupsScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [description, setDescription] = useState("");
+  const [myFriends, setMyFriends] = useState<any[]>([]);
+  const [selectedFriendIds, setSelectedFriendIds] = useState<Set<string>>(new Set());
+  const [friendsLoading, setFriendsLoading] = useState(false);
 
-  const normalizedSearch = useMemo(() => normalizeText(searchText), [searchText]);
+  const MIN_MEMBERS_FOR_PRIVATE = 2; // creator + 2 = min 3 members total
 
-  const loadGroups = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const keyword = searchText.trim() || undefined;
-      const cacheKey = `citizen.groups.${keyword || 'all'}`;
-      const cached = readTempCache<{ all: GroupMetadata[]; mine: GroupMetadata[] }>(cacheKey, GROUPS_CACHE_TTL_MS);
-      if (cached) {
-        setAllGroups(cached.all);
-        setJoinedGroups(cached.mine);
+  const normalizedSearch = useMemo(
+    () => normalizeText(searchText),
+    [searchText],
+  );
+
+  const loadGroups = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      try {
+        const keyword = searchText.trim() || undefined;
+        const cacheKey = `citizen.groups.${keyword || "all"}`;
+        const cached = readTempCache<{
+          all: GroupMetadata[];
+          mine: GroupMetadata[];
+        }>(cacheKey, GROUPS_CACHE_TTL_MS);
+        if (cached) {
+          setAllGroups(cached.all);
+          setJoinedGroups(cached.mine);
+          setLoading(false);
+        }
+
+        const [all, mine] = await Promise.all([
+          ApiClient.get<GroupMetadata[]>(
+            "/groups",
+            { q: keyword, limit: 100 },
+            { signal },
+          ),
+          ApiClient.get<GroupMetadata[]>(
+            "/groups",
+            { mine: true, limit: 100 },
+            { signal },
+          ),
+        ]);
+
+        if (signal?.aborted) {
+          return;
+        }
+
+        setAllGroups(all);
+        setJoinedGroups(mine);
+        writeTempCache(cacheKey, { all, mine });
+      } catch (err: unknown) {
+        if ((err as any)?.name === "AbortError") {
+          return;
+        }
+        Alert.alert(
+          "Lỗi",
+          (err as Error)?.message ?? "Không thể tải danh sách nhóm",
+        );
+      } finally {
         setLoading(false);
       }
-
-      const [all, mine] = await Promise.all([
-        ApiClient.get<GroupMetadata[]>('/groups', { q: keyword, limit: 100 }, { signal }),
-        ApiClient.get<GroupMetadata[]>('/groups', { mine: true, limit: 100 }, { signal }),
-      ]);
-
-      if (signal?.aborted) {
-        return;
-      }
-
-      setAllGroups(all);
-      setJoinedGroups(mine);
-      writeTempCache(cacheKey, { all, mine });
-    } catch (err: unknown) {
-      if ((err as any)?.name === 'AbortError') {
-        return;
-      }
-      Alert.alert("Lỗi", (err as Error)?.message ?? "Không thể tải danh sách nhóm");
-    } finally {
-      setLoading(false);
-    }
-  }, [searchText]);
+    },
+    [searchText],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -127,7 +167,10 @@ export default function GroupsScreen() {
     };
   }, [loadGroups]);
 
-  const joinedIds = useMemo(() => new Set(joinedGroups.map((group) => group.id)), [joinedGroups]);
+  const joinedIds = useMemo(
+    () => new Set(joinedGroups.map((group) => group.id)),
+    [joinedGroups],
+  );
 
   const visibleGroups = useMemo<GroupWithStatus[]>(() => {
     return allGroups
@@ -157,10 +200,16 @@ export default function GroupsScreen() {
         return right.memberCount - left.memberCount;
       });
   }, [allGroups, joinedIds, normalizedSearch]);
+  const { data: groupLocationMap } = useResolvedLocations(
+    visibleGroups.map((group) => group.locationCode),
+  );
 
   const handleJoinToggle = async (group: GroupWithStatus) => {
     if (group.createdBy === user?.sub) {
-      Alert.alert("Không thể rời nhóm", "Bạn là chủ nhóm, hiện tại không thể rời nhóm do chính mình tạo.");
+      Alert.alert(
+        "Không thể rời nhóm",
+        "Bạn là chủ nhóm, hiện tại không thể rời nhóm do chính mình tạo.",
+      );
       return;
     }
 
@@ -172,12 +221,25 @@ export default function GroupsScreen() {
       }
       await loadGroups();
     } catch (err: unknown) {
-      Alert.alert("Lỗi", (err as Error)?.message ?? "Không thể cập nhật trạng thái tham gia");
+      Alert.alert(
+        "Lỗi",
+        (err as Error)?.message ??
+          "Không thể cập nhật trạng thái tham gia",
+      );
     }
   };
 
   const handleCreateGroup = async () => {
     if (!groupName.trim() || !user?.locationCode) {
+      return;
+    }
+
+    // Enforce min 3 members (creator + 2 friends) for PRIVATE groups
+    if (selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE) {
+      Alert.alert(
+        "Cần thêm bạn bè",
+        `Nhóm phải có ít nhất 3 người. Hãy chọn ít nhất ${MIN_MEMBERS_FOR_PRIVATE} bạn bè.`,
+      );
       return;
     }
 
@@ -189,29 +251,87 @@ export default function GroupsScreen() {
         locationCode: user.locationCode,
         description: description.trim() || undefined,
       });
+
+      // Add selected friends as members
+      const friendIds = [...selectedFriendIds];
+      if (friendIds.length > 0) {
+        const results = await Promise.allSettled(
+          friendIds.map((uid) =>
+            addMember(createdGroup.id, { userId: uid, roleInGroup: "MEMBER" }),
+          ),
+        );
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) {
+          Alert.alert(
+            "Cảnh báo",
+            `${failed} thành viên chưa được thêm vào nhóm. Bạn có thể thêm lại sau.`,
+          );
+        }
+      }
+
       setShowCreateModal(false);
       setGroupName("");
       setDescription("");
+      setSelectedFriendIds(new Set());
       await loadGroups();
       Alert.alert(
         "Thành công",
         "Đã tạo nhóm PRIVATE của bạn. Chỉ thành viên mới có thể thấy và vào phòng chat này.",
       );
-      void prefetchConversationMessages(queryClient, `group:${createdGroup.id}`);
+      void prefetchConversationMessages(
+        queryClient,
+        `group:${createdGroup.id}`,
+      );
       router.push({
         pathname: "/(citizen)/chat/[id]",
         params: { id: `group:${createdGroup.id}` },
       });
     } catch (err: unknown) {
-      Alert.alert("Lỗi", (err as Error)?.message ?? "Không thể tạo nhóm");
+      Alert.alert(
+        "Lỗi",
+        (err as Error)?.message ?? "Không thể tạo nhóm",
+      );
     } finally {
       setSaving(false);
     }
   };
 
+  const handleOpenCreateModal = async () => {
+    setShowCreateModal(true);
+    setGroupName("");
+    setDescription("");
+    setSelectedFriendIds(new Set());
+
+    // Load friends lazily when modal opens
+    setFriendsLoading(true);
+    try {
+      const friends = await listMyFriends({ limit: 100 });
+      setMyFriends(friends);
+    } catch {
+      setMyFriends([]);
+    } finally {
+      setFriendsLoading(false);
+    }
+  };
+
+  const toggleFriend = (friendId: string) => {
+    setSelectedFriendIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(friendId)) {
+        next.delete(friendId);
+      } else {
+        next.add(friendId);
+      }
+      return next;
+    });
+  };
+
   const openGroupChat = (group: GroupWithStatus) => {
     if (!group.joined) {
-      Alert.alert("Chưa tham gia", "Hãy tham gia nhóm trước khi vào phòng chat.");
+      Alert.alert(
+        "Chưa tham gia",
+        "Hãy tham gia nhóm trước khi vào phòng chat.",
+      );
       return;
     }
 
@@ -224,17 +344,33 @@ export default function GroupsScreen() {
 
   return (
     <View style={styles.container}>
-      <Header title="Nhóm cộng đồng" subtitle="Một nơi duy nhất để tìm, tham gia và tạo nhóm" />
+      <Header
+        title="Nhóm cộng đồng"
+        subtitle="Một nơi duy nhất để tìm, tham gia và tạo nhóm"
+      />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.heroCard}>
           <View style={styles.heroText}>
             <Text style={styles.heroTitle}>Trung tâm nhóm công dân</Text>
             <Text style={styles.heroSubtitle}>
-              Tìm nhóm bạn đã có quyền truy cập, tham gia nhanh và tạo nhóm PRIVATE trong khu vực của bạn.
+              Tìm nhóm bạn đã có quyền truy cập, tham gia nhanh và
+              tạo nhóm PRIVATE trong khu vực của bạn.
             </Text>
           </View>
-          <Pressable style={styles.heroButton} onPress={() => setShowCreateModal(true)}>
+          <Pressable
+            style={styles.heroButton}
+            onPress={() => void handleOpenCreateModal()}
+          >
+            <LinearGradient
+              colors={colors.gradient.primary}
+              start={colors.gradient.start}
+              end={colors.gradient.end}
+              style={StyleSheet.absoluteFillObject}
+            />
             <Ionicons name="add" size={18} color="white" />
             <Text style={styles.heroButtonText}>Tạo</Text>
           </Pressable>
@@ -260,13 +396,20 @@ export default function GroupsScreen() {
             <View style={[styles.statusDot, styles.statusDotIdle]} />
             <Text style={styles.legendText}>Chưa tham gia</Text>
           </View>
-          <Text style={styles.legendSummary}>{`${joinedGroups.length} nhóm của bạn`}</Text>
+          <Text
+            style={styles.legendSummary}
+          >{`${joinedGroups.length} nhóm của bạn`}</Text>
         </View>
 
         <View style={styles.noticeCard}>
-          <Ionicons name="information-circle-outline" size={18} color="#1d4ed8" />
+          <Ionicons
+            name="information-circle-outline"
+            size={18}
+            color={colors.secondary}
+          />
           <Text style={styles.noticeText}>
-            Nhóm do citizen tạo sẽ là PRIVATE. Cán bộ cùng địa bàn sẽ không tự thấy nhóm này nếu chưa được thêm vào.
+            Nhóm do citizen tạo sẽ là PRIVATE. Cán bộ cùng địa bàn
+            sẽ không tự thấy nhóm này nếu chưa được thêm vào.
           </Text>
         </View>
 
@@ -274,9 +417,18 @@ export default function GroupsScreen() {
           <ListSkeleton count={6} />
         ) : visibleGroups.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Ionicons name="people-circle-outline" size={42} color={colors.textSecondary} />
-            <Text style={styles.emptyTitle}>Không tìm thấy nhóm phù hợp</Text>
-            <Text style={styles.emptyText}>Thử tìm theo từ khóa gần đúng hoặc tạo nhóm riêng để bắt đầu.</Text>
+            <Ionicons
+              name="people-circle-outline"
+              size={42}
+              color={colors.textSecondary}
+            />
+            <Text style={styles.emptyTitle}>
+              Không tìm thấy nhóm phù hợp
+            </Text>
+            <Text style={styles.emptyText}>
+              Thử tìm theo từ khóa gần đúng hoặc tạo nhóm riêng
+              để bắt đầu.
+            </Text>
           </View>
         ) : (
           visibleGroups.map((group) => (
@@ -291,17 +443,30 @@ export default function GroupsScreen() {
                     <View
                       style={[
                         styles.statusDot,
-                        group.joined ? styles.statusDotJoined : styles.statusDotIdle,
+                        group.joined
+                          ? styles.statusDotJoined
+                          : styles.statusDotIdle,
                       ]}
                     />
                     <Text style={styles.groupName}>{group.groupName}</Text>
                   </View>
-                  <Text style={styles.groupMeta}>{`${group.groupType} • ${group.memberCount} thành viên`}</Text>
-                  <Text style={styles.groupLocation}>{group.locationCode}</Text>
+                  <Text
+                    style={styles.groupMeta}
+                  >{`${group.groupType} • ${group.memberCount} thành viên`}</Text>
+                  <Text style={styles.groupLocation}>
+                    {getResolvedLocationLabel(
+                      groupLocationMap,
+                      group.locationCode,
+                      "",
+                    )}
+                  </Text>
                 </View>
                 <View style={styles.actionsColumn}>
                   <Pressable
-                    style={[styles.chatButton, !group.joined && styles.chatButtonDisabled]}
+                    style={[
+                      styles.chatButton,
+                      !group.joined && styles.chatButtonDisabled,
+                    ]}
                     onPress={() => openGroupChat(group)}
                   >
                     <Ionicons
@@ -310,7 +475,10 @@ export default function GroupsScreen() {
                       color={group.joined ? "#0f172a" : "#94a3b8"}
                     />
                     <Text
-                      style={[styles.chatButtonText, !group.joined && styles.chatButtonTextDisabled]}
+                      style={[
+                        styles.chatButtonText,
+                        !group.joined && styles.chatButtonTextDisabled,
+                      ]}
                     >
                       Trò chuyện
                     </Text>
@@ -327,10 +495,16 @@ export default function GroupsScreen() {
                       style={[
                         styles.joinButtonText,
                         group.joined ? styles.leaveButtonText : null,
-                        group.createdBy === user?.sub ? styles.ownerButtonText : null,
+                        group.createdBy === user?.sub
+                          ? styles.ownerButtonText
+                          : null,
                       ]}
                     >
-                      {group.createdBy === user?.sub ? "Chủ nhóm" : group.joined ? "Rời nhóm" : "Tham gia"}
+                      {group.createdBy === user?.sub
+                        ? "Chủ nhóm"
+                        : group.joined
+                          ? "Rời nhóm"
+                          : "Tham gia"}
                     </Text>
                   </Pressable>
                 </View>
@@ -343,12 +517,19 @@ export default function GroupsScreen() {
         )}
       </ScrollView>
 
-      <Modal animationType="fade" transparent visible={showCreateModal} onRequestClose={() => setShowCreateModal(false)}>
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showCreateModal}
+        onRequestClose={() => setShowCreateModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Tạo nhóm riêng tư</Text>
             <Text style={styles.modalText}>
-              Citizen chỉ được tạo nhóm PRIVATE trong đúng địa bàn của mình. Nhóm này chỉ thành viên mới có thể thấy và tham gia.
+              Citizen chỉ được tạo nhóm PRIVATE trong đúng địa
+              bàn của mình. Nhóm này chỉ thành viên mới có thể
+              thấy và tham gia.
             </Text>
             <TextInput
               style={styles.modalInput}
@@ -363,19 +544,66 @@ export default function GroupsScreen() {
               onChangeText={setDescription}
               multiline
             />
+            <Text style={styles.modalFriendLabel}>
+              Thêm bạn bè (chọn ít nhất 2){" "}
+              <Text style={{ color: selectedFriendIds.size >= 2 ? "#16a34a" : "#ef4444" }}>
+                {selectedFriendIds.size}/{MIN_MEMBERS_FOR_PRIVATE} tối thiểu
+              </Text>
+            </Text>
+            {friendsLoading ? (
+              <Text style={styles.modalFriendHint}>Đang tải danh sách bạn bè...</Text>
+            ) : myFriends.length === 0 ? (
+              <Text style={styles.modalFriendHint}>
+                Bạn chưa có bạn bè. Hãy kết bạn trước khi tạo nhóm PRIVATE.
+              </Text>
+            ) : (
+              <ScrollView style={styles.friendList} nestedScrollEnabled>
+                {myFriends.map((friend) => {
+                  const id = friend.userId;
+                  const name = friend.fullName;
+                  const selected = selectedFriendIds.has(id);
+                  return (
+                    <Pressable
+                      key={id}
+                      style={[styles.friendRow, selected && styles.friendRowSelected]}
+                      onPress={() => toggleFriend(id)}
+                    >
+                      <View style={[styles.friendCheck, selected && styles.friendCheckSelected]}>
+                        {selected && <Text style={styles.friendCheckMark}>✓</Text>}
+                      </View>
+                      <Text style={styles.friendName} numberOfLines={1}>{name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            )}
             <View style={styles.modalActions}>
-              <Pressable style={styles.modalGhostButton} onPress={() => setShowCreateModal(false)}>
+              <Pressable
+                style={styles.modalGhostButton}
+                onPress={() => setShowCreateModal(false)}
+              >
                 <Text style={styles.modalGhostText}>Hủy</Text>
               </Pressable>
               <Pressable
                 style={[
                   styles.modalPrimaryButton,
-                  (!groupName.trim() || !user?.locationCode || saving) && styles.modalPrimaryDisabled,
+                  (!groupName.trim() || !user?.locationCode || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE) &&
+                    styles.modalPrimaryDisabled,
                 ]}
                 onPress={() => void handleCreateGroup()}
-                disabled={!groupName.trim() || !user?.locationCode || saving}
+                disabled={!groupName.trim() || !user?.locationCode || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE}
               >
-                <Text style={styles.modalPrimaryText}>{saving ? "Đang tạo..." : "Tạo nhóm"}</Text>
+                {!groupName.trim() || !user?.locationCode || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE ? null : (
+                  <LinearGradient
+                    colors={colors.gradient.primary}
+                    start={colors.gradient.start}
+                    end={colors.gradient.end}
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                )}
+                <Text style={styles.modalPrimaryText}>
+                  {saving ? "Đang tạo..." : "Tạo nhóm"}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -386,7 +614,7 @@ export default function GroupsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f4f8ff" },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 16, paddingBottom: 120 },
   heroCard: {
     backgroundColor: "rgba(255,255,255,0.88)",
@@ -402,14 +630,20 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   heroText: { marginBottom: 16 },
-  heroTitle: { fontSize: 24, fontWeight: "800", color: "#0f172a" },
-  heroSubtitle: { marginTop: 8, color: colors.textSecondary, lineHeight: 21, fontSize: 14 },
+  heroTitle: { fontSize: 24, fontWeight: "700", color: colors.text },
+  heroSubtitle: {
+    marginTop: 8,
+    color: colors.textSecondary,
+    lineHeight: 21,
+    fontSize: 14,
+  },
   heroButton: {
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#1d4ed8",
+    overflow: "hidden",
+    backgroundColor: colors.secondary,
     borderRadius: 18,
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -423,7 +657,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
     marginBottom: 14,
   },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 15, color: colors.text },
@@ -436,23 +670,28 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   legendItem: { flexDirection: "row", alignItems: "center" },
-  legendText: { marginLeft: 6, color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
-  legendSummary: { color: "#0f172a", fontWeight: "700", fontSize: 12 },
+  legendText: {
+    marginLeft: 6,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  legendSummary: { color: colors.text, fontWeight: "700", fontSize: 12 },
   noticeCard: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 10,
-    backgroundColor: "#eff6ff",
+    backgroundColor: "rgba(10,207,254,0.1)",
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: "rgba(73,90,255,0.18)",
     marginBottom: 14,
   },
   noticeText: {
     flex: 1,
-    color: "#1e3a8a",
+    color: colors.text,
     fontSize: 13,
     lineHeight: 19,
     fontWeight: "600",
@@ -467,16 +706,26 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
-  emptyTitle: { marginTop: 10, fontSize: 18, fontWeight: "700", color: "#0f172a" },
-  emptyText: { marginTop: 6, color: colors.textSecondary, textAlign: "center", lineHeight: 20 },
+  emptyTitle: {
+    marginTop: 10,
+    fontSize: 18,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  emptyText: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+  },
   groupCard: {
     backgroundColor: "rgba(255,255,255,0.9)",
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
     shadowColor: "#0f172a",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.06,
@@ -487,12 +736,28 @@ const styles = StyleSheet.create({
   groupCardTop: { flexDirection: "row", alignItems: "flex-start" },
   groupMain: { flex: 1, paddingRight: 12 },
   groupTitleRow: { flexDirection: "row", alignItems: "center" },
-  groupName: { marginLeft: 8, fontSize: 18, fontWeight: "800", color: "#0f172a", flex: 1 },
-  groupMeta: { marginTop: 6, color: colors.textSecondary, fontSize: 13, fontWeight: "600" },
+  groupName: {
+    marginLeft: 8,
+    fontSize: 18,
+    fontWeight: "700",
+    color: colors.text,
+    flex: 1,
+  },
+  groupMeta: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
   groupLocation: { marginTop: 4, color: "#64748b", fontSize: 12 },
-  groupDescription: { marginTop: 12, color: colors.text, lineHeight: 20, fontSize: 14 },
+  groupDescription: {
+    marginTop: 12,
+    color: colors.text,
+    lineHeight: 20,
+    fontSize: 14,
+  },
   joinButton: {
-    backgroundColor: "#dbeafe",
+    backgroundColor: "rgba(73,90,255,0.12)",
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -510,15 +775,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
   chatButtonDisabled: {
     backgroundColor: "#f8fafc",
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
   chatButtonText: {
-    color: "#0f172a",
-    fontWeight: "800",
+    color: colors.text,
+    fontWeight: "700",
     fontSize: 13,
   },
   chatButtonTextDisabled: {
@@ -526,8 +791,8 @@ const styles = StyleSheet.create({
   },
   leaveButton: { backgroundColor: "#eef2ff" },
   ownerButton: { backgroundColor: "#e2e8f0" },
-  joinButtonText: { color: "#1d4ed8", fontWeight: "800", fontSize: 13 },
-  leaveButtonText: { color: "#4338ca" },
+  joinButtonText: { color: colors.secondary, fontWeight: "700", fontSize: 13 },
+  leaveButtonText: { color: colors.secondary },
   ownerButtonText: { color: "#475569" },
   modalOverlay: {
     flex: 1,
@@ -542,7 +807,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     padding: 20,
   },
-  modalTitle: { fontSize: 22, fontWeight: "800", color: "#0f172a" },
+  modalTitle: { fontSize: 22, fontWeight: "700", color: colors.text },
   modalText: { marginTop: 8, color: colors.textSecondary, lineHeight: 20 },
   modalInput: {
     backgroundColor: "#f8fafc",
@@ -551,7 +816,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
   modalTextarea: { minHeight: 96, textAlignVertical: "top" },
   modalActions: { flexDirection: "row", gap: 10, marginTop: 18 },
@@ -562,16 +827,62 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#f8fafc",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: colors.border,
   },
-  modalGhostText: { color: "#0f172a", fontWeight: "700" },
+  modalGhostText: { color: colors.text, fontWeight: "700" },
   modalPrimaryButton: {
     flex: 1,
     borderRadius: 16,
     paddingVertical: 12,
     alignItems: "center",
-    backgroundColor: "#1d4ed8",
+    overflow: "hidden",
+    backgroundColor: colors.secondary,
   },
   modalPrimaryDisabled: { backgroundColor: "#bfd3fb" },
-  modalPrimaryText: { color: "white", fontWeight: "800" },
+  modalPrimaryText: { color: "white", fontWeight: "700" },
+  // Friend picker inside create modal
+  modalFriendLabel: {
+    marginTop: 14,
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  modalFriendHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontStyle: "italic",
+  },
+  friendList: {
+    maxHeight: 160,
+    marginTop: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#f8fafc",
+  },
+  friendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  friendRowSelected: { backgroundColor: "rgba(73,90,255,0.08)" },
+  friendCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  friendCheckSelected: {
+    borderColor: colors.secondary,
+    backgroundColor: colors.secondary,
+  },
+  friendCheckMark: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  friendName: { flex: 1, fontSize: 14, color: colors.text, fontWeight: "600" },
 });

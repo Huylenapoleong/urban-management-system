@@ -10,6 +10,7 @@ import { ReportCard } from '../../../components/shared/ReportCard';
 import { useAuth } from '../../../providers/AuthProvider';
 import { CardListSkeleton, useSkeletonQuery } from '@/components/skeleton/Skeleton';
 import { prefetchReport } from '@/services/prefetch';
+import colors from '@/constants/colors';
 
 export default function OfficialReportsScreen() {
   const router = useRouter();
@@ -82,7 +83,7 @@ export default function OfficialReportsScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: '#f5f7fa' }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.headerWrap}>
         <Surface style={styles.headerCard} elevation={1}>
           <View style={styles.headerTopRow}>
@@ -96,7 +97,7 @@ export default function OfficialReportsScreen() {
               <Text variant="labelSmall" style={styles.scopeLabel}>{scopeLabel}</Text>
             </View>
             <View style={styles.headerIconWrap}>
-              <MaterialCommunityIcons name="clipboard-list-outline" size={24} color="#1d4ed8" />
+              <MaterialCommunityIcons name="clipboard-list-outline" size={24} color={colors.secondary} />
             </View>
           </View>
 
@@ -173,10 +174,10 @@ const styles = StyleSheet.create({
   },
   headerCard: {
     borderRadius: 20,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: colors.border,
   },
   headerTopRow: {
     flexDirection: 'row',
@@ -186,16 +187,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerTitle: {
-    fontWeight: '900',
-    color: '#0f172a',
+    fontWeight: '700',
+    color: colors.text,
     marginBottom: 2,
   },
   headerSubtitle: {
-    color: '#475569',
+    color: colors.textSecondary,
     marginBottom: 4,
   },
   scopeLabel: {
-    color: '#64748b',
+    color: colors.textSecondary,
     fontWeight: '700',
   },
   headerIconWrap: {
@@ -204,7 +205,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#dbeafe',
+    backgroundColor: 'rgba(73,90,255,0.12)',
   },
   quickStatsRow: {
     flexDirection: 'row',
@@ -219,7 +220,7 @@ const styles = StyleSheet.create({
   },
   quickStatValue: {
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '700',
     lineHeight: 22,
   },
   quickStatLabel: {
@@ -228,7 +229,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   segmentedBtn: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
     borderRadius: 12,
   },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -244,12 +245,12 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   emptyTitle: {
-    color: '#334155',
-    fontWeight: '800',
+    color: colors.text,
+    fontWeight: '700',
     marginBottom: 6,
   },
   emptyText: {
-    color: '#64748b',
+    color: colors.textSecondary,
     fontWeight: '500',
     textAlign: 'center',
   },

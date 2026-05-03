@@ -13,8 +13,8 @@ import type {
   ChatConversationUpdatedEvent,
   MediaAsset,
   PushDevice,
-  UserContactAlias,
   UserBlockedItem,
+  UserContactAlias,
   UserDirectoryItem,
   UserFriendItem,
   UserFriendRequestItem,
@@ -34,31 +34,29 @@ import {
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
 import {
+  toConversationSummary,
+  toUserBlockedItem,
+  toUserFriendItem,
+  toUserFriendRequestItem,
+  toUserProfile,
+} from '../../common/mappers';
+import {
   buildPaginatedResponse,
   paginateSortedItems,
 } from '../../common/pagination';
-import {
-  toConversationSummary,
-  toUserFriendItem,
-  toUserFriendRequestItem,
-  toUserBlockedItem,
-  toUserProfile,
-} from '../../common/mappers';
 import type {
   StoredConversation,
+  StoredDirectMessageRequest,
+  StoredUser,
   StoredUserBlockEdge,
   StoredUserContactAlias,
   StoredUserFriendEdge,
   StoredUserFriendRequest,
-  StoredDirectMessageRequest,
-  StoredUser,
   StoredUserIdentityClaim,
 } from '../../common/storage-records';
 import {
-  ensureLocationCode,
   ensureObject,
   optionalQueryString,
-  parseLocationCodeQuery,
   optionalString,
   parseLimit,
   requirePhoneOrEmail,
@@ -67,17 +65,18 @@ import {
 } from '../../common/validation';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
+import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
+import { ObservabilityService } from '../../infrastructure/observability/observability.service';
 import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
-import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
-import { ChatRealtimeService } from '../../modules/conversations/chat-realtime.service';
 import {
   PasswordPolicyService,
   type PasswordPolicyProfile,
 } from '../../infrastructure/security/password-policy.service';
 import { PasswordService } from '../../infrastructure/security/password.service';
 import { RefreshSessionService } from '../../infrastructure/security/refresh-session.service';
-import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
-import { ObservabilityService } from '../../infrastructure/observability/observability.service';
+import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
+import { ChatRealtimeService } from '../../modules/conversations/chat-realtime.service';
+import { LocationsService } from '../locations/locations.service';
 
 interface PreparedCitizenRegistrationInput {
   phone?: string;
@@ -100,6 +99,7 @@ export class UsersService {
     private readonly passwordService: PasswordService,
     private readonly passwordPolicyService: PasswordPolicyService,
     private readonly authorizationService: AuthorizationService,
+    private readonly locationsService: LocationsService,
     private readonly chatPresenceService: ChatPresenceService,
     private readonly chatRealtimeService: ChatRealtimeService,
     private readonly refreshSessionService: RefreshSessionService,
@@ -190,7 +190,7 @@ export class UsersService {
       minLength: 2,
       maxLength: 100,
     });
-    const locationCode = ensureLocationCode(
+    const locationCode = this.locationsService.ensureKnownLocationCode(
       requiredString(body, 'locationCode'),
     );
     const avatarUrl = optionalString(body, 'avatarUrl', { maxLength: 500 });
@@ -218,7 +218,9 @@ export class UsersService {
   async registerCitizenWithPreparedInput(
     input: PreparedCitizenRegistrationInput,
   ): Promise<UserProfile> {
-    const locationCode = ensureLocationCode(input.locationCode);
+    const locationCode = this.locationsService.ensureKnownLocationCode(
+      input.locationCode,
+    );
 
     const now = nowIso();
     const userId = createUlid();
@@ -413,9 +415,7 @@ export class UsersService {
       }
 
       if (current.status !== 'LOCKED') {
-        throw new BadRequestException(
-          'Only locked accounts can be unlocked via OTP.',
-        );
+        throw new BadRequestException('Only locked accounts can be unlocked.');
       }
 
       const nextUser: StoredUser = {
@@ -523,7 +523,7 @@ export class UsersService {
       maxLength: 100,
     });
     const role = requiredEnum(body, 'role', USER_ROLES);
-    const locationCode = ensureLocationCode(
+    const locationCode = this.locationsService.ensureKnownLocationCode(
       requiredString(body, 'locationCode'),
     );
     const unit = optionalString(body, 'unit', { maxLength: 200 });
@@ -588,10 +588,16 @@ export class UsersService {
       .filter((user) => this.authorizationService.canReadUser(actor, user));
     const role = optionalQueryString(query.role, 'role');
     const status = optionalQueryString(query.status, 'status');
-    const locationCode = parseLocationCodeQuery(
+    const locationCodeInput = optionalQueryString(
       query.locationCode,
       'locationCode',
     );
+    const locationCode = locationCodeInput
+      ? this.locationsService.ensureKnownLocationCode(
+          locationCodeInput,
+          'locationCode',
+        )
+      : undefined;
     const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
     const limit = parseLimit(query.limit);
 
@@ -834,7 +840,7 @@ export class UsersService {
     });
 
     const nextLocationCode = locationCodeInput
-      ? ensureLocationCode(locationCodeInput)
+      ? this.locationsService.ensureKnownLocationCode(locationCodeInput)
       : current.locationCode;
 
     if (locationCodeInput && actor.role === 'CITIZEN') {
@@ -995,7 +1001,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<UserFriendItem[], ApiResponseMeta>> {
-    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     const limit = parseLimit(query.limit);
     const edges = (
@@ -1115,7 +1120,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     query: Record<string, unknown>,
   ): Promise<ApiSuccessResponse<UserFriendRequestItem[], ApiResponseMeta>> {
-    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     const limit = parseLimit(query.limit);
     const directionRaw = optionalQueryString(query.direction, 'direction');
@@ -1322,11 +1326,10 @@ export class UsersService {
           return true;
         }
 
-        const haystacks = [user.fullName, user.phone ?? '', user.email ?? '']
+        return [user.fullName, user.phone ?? '', user.email ?? '']
           .join(' ')
-          .toLowerCase();
-
-        return haystacks.includes(keyword);
+          .toLowerCase()
+          .includes(keyword);
       })
       .map((user) => {
         const relationState = this.resolveFriendRelationState(
@@ -1340,12 +1343,11 @@ export class UsersService {
         const directMessageRequest = directMessageRequestByUserId.get(
           user.userId,
         );
-        const hasAcceptedDirectMessageRequest =
-          directMessageRequest?.status === 'ACCEPTED';
         const canMessage =
-          friendUserIds.has(user.userId) ||
-          hasAcceptedDirectMessageRequest ||
-          canAccessDirectConversation;
+          user.role === 'CITIZEN' && actor.role === 'CITIZEN'
+            ? friendUserIds.has(user.userId) ||
+              directMessageRequest?.status === 'ACCEPTED'
+            : canAccessDirectConversation;
         const canSendFriendRequest =
           actor.role === 'CITIZEN' &&
           user.role === 'CITIZEN' &&
@@ -1425,7 +1427,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     targetUserId: string,
   ): Promise<UserFriendRequestItem> {
-    this.assertCitizenFriendshipActor(actor);
     const requester = await this.getActiveByIdOrThrow(actor.id);
     const target = await this.getActiveByIdOrThrow(targetUserId);
     this.assertFriendshipEligiblePair(requester, target);
@@ -1519,7 +1520,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     requesterUserId: string,
   ): Promise<UserFriendItem> {
-    this.assertCitizenFriendshipActor(actor);
     const receiver = await this.getActiveByIdOrThrow(actor.id);
     const requester = await this.getActiveByIdOrThrow(requesterUserId);
     this.assertFriendshipEligiblePair(receiver, requester);
@@ -1620,7 +1620,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     requesterUserId: string,
   ): Promise<{ userId: string; action: 'REJECTED'; occurredAt: string }> {
-    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     await this.getByIdOrThrow(requesterUserId);
 
@@ -1677,7 +1676,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     targetUserId: string,
   ): Promise<{ userId: string; action: 'CANCELED'; occurredAt: string }> {
-    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     await this.getByIdOrThrow(targetUserId);
 
@@ -1734,7 +1732,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     friendUserId: string,
   ): Promise<{ userId: string; removedAt: string }> {
-    this.assertCitizenFriendshipActor(actor);
     await this.getActiveByIdOrThrow(actor.id);
     await this.getByIdOrThrow(friendUserId);
 
@@ -2032,20 +2029,18 @@ export class UsersService {
       return false;
     }
 
-    const directEdge = await this.getFriendEdge(userId, otherUserId);
-
-    if (directEdge) {
-      return true;
-    }
-
-    const reverseEdge = await this.getFriendEdge(otherUserId, userId);
-    return Boolean(reverseEdge);
+    const edge = await this.getFriendEdge(userId, otherUserId);
+    return Boolean(edge);
   }
 
   async canStartCitizenDm(
     actor: AuthenticatedUser,
     target: StoredUser,
   ): Promise<boolean> {
+    if (actor.role !== 'CITIZEN' || target.role !== 'CITIZEN') {
+      return true;
+    }
+
     return this.areFriends(actor.id, target.userId);
   }
 
@@ -2165,11 +2160,11 @@ export class UsersService {
     actor: AuthenticatedUser,
     target: StoredUser,
   ): boolean {
-    if (actor.id === target.userId) {
-      return false;
+    if (actor.role === 'CITIZEN' && target.role === 'CITIZEN') {
+      return true;
     }
 
-    return true;
+    return this.authorizationService.canAccessDirectConversation(actor, target);
   }
 
   private async getUsersByIds(userIds: string[]): Promise<StoredUser[]> {
@@ -2196,25 +2191,9 @@ export class UsersService {
     leftUser: StoredUser,
     rightUser: StoredUser,
   ): void {
-    if (leftUser.deletedAt || rightUser.deletedAt) {
-      throw new BadRequestException('User account is unavailable.');
-    }
-
-    if (leftUser.status !== 'ACTIVE' || rightUser.status !== 'ACTIVE') {
-      throw new BadRequestException('Only active accounts can use friendship.');
-    }
-
     if (leftUser.role !== 'CITIZEN' || rightUser.role !== 'CITIZEN') {
       throw new BadRequestException(
         'Friend requests are only supported between citizen accounts.',
-      );
-    }
-  }
-
-  private assertCitizenFriendshipActor(actor: AuthenticatedUser): void {
-    if (actor.role !== 'CITIZEN') {
-      throw new ForbiddenException(
-        'Friendship is only available for citizen accounts.',
       );
     }
   }

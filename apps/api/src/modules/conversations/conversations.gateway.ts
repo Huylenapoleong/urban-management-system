@@ -13,14 +13,9 @@ import {
   CHAT_SOCKET_EVENTS,
   CHAT_SOCKET_NAMESPACE,
 } from '@urban/shared-constants';
-import {
-  isDmConversationId,
-  isGroupConversationId,
-  makeDmConversationId,
-  nowIso,
-} from '@urban/shared-utils';
 import type {
   AuthenticatedUser,
+  CallEventInfo,
   ChatCallAcceptPayload,
   ChatCallEndPayload,
   ChatCallHeartbeatPayload,
@@ -39,7 +34,6 @@ import type {
   ChatMessageUpdatePayload,
   ChatPresenceSnapshotEvent,
   ChatPresenceUpdatedEvent,
-  RecallMessageResult,
   ChatReadAccepted,
   ChatSocketAck,
   ChatSocketError,
@@ -50,17 +44,24 @@ import type {
   ChatWebRTCAnswerPayload,
   ChatWebRTCIceCandidatePayload,
   ChatWebRTCOfferPayload,
+  RecallMessageResult,
 } from '@urban/shared-types';
+import {
+  isDmConversationId,
+  isGroupConversationId,
+  makeDmConversationId,
+  nowIso,
+} from '@urban/shared-utils';
 import type { Server, Socket } from 'socket.io';
 import { Public } from '../../common/decorators/public.decorator';
 import {
   ensureObject,
-  requiredBoolean,
   optionalString,
+  requiredBoolean,
   requiredString,
 } from '../../common/validation';
-import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
 import { ObservabilityService } from '../../infrastructure/observability/observability.service';
+import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
 import { ChatCallSessionService } from './chat-call-session.service';
 import { ChatRealtimeService } from './chat-realtime.service';
 import { ChatSocketAuthService } from './chat-socket-auth.service';
@@ -542,15 +543,17 @@ export class ConversationsGateway
           client,
           payload,
         );
-        const signalPayload = this.buildCallInitPayload(
-          access.conversationId,
-          body,
-          user,
-        );
         const result = await this.chatCallSessionService.initiateCall(
           access,
           user.id,
-          signalPayload.isVideo,
+          requiredBoolean(body, 'isVideo'),
+        );
+        const signalPayload = this.buildCallInitPayload(
+          access.conversationKey,
+          result.session,
+          user,
+          body.callerName as string | undefined,
+          body.callerAvatarUrl as string | undefined,
         );
 
         if (result.shouldEmit) {
@@ -563,7 +566,12 @@ export class ConversationsGateway
           );
         }
 
-        return { success: true };
+        return {
+          success: true,
+          startedAt: result.session?.createdAt,
+          acceptedAt: result.session?.acceptedAt,
+          serverTimestamp: nowIso(),
+        };
       },
       'CHAT_CALL_INIT_FAILED',
       CHAT_SOCKET_EVENTS.CALL_INIT,
@@ -580,14 +588,16 @@ export class ConversationsGateway
         const { access, user } = await this.resolveSignalAccess(
           client,
           payload,
-        );
-        const signalPayload = this.buildCallAcceptPayload(
-          access.conversationId,
-          user,
+          true, // Use call-session fast path: bypass canAccessDmConversation for active sessions
         );
         const result = await this.chatCallSessionService.acceptCall(
           access,
           user.id,
+        );
+        const signalPayload = this.buildCallAcceptPayload(
+          access.conversationKey,
+          result.session,
+          user,
         );
 
         if (result.shouldEmit) {
@@ -597,10 +607,17 @@ export class ConversationsGateway
             signalPayload,
             client.id,
             user.id,
+            undefined,
+            true,
           );
         }
 
-        return { success: true };
+        return {
+          success: true,
+          acceptedAt: result.session?.acceptedAt,
+          startedAt: result.session?.createdAt,
+          serverTimestamp: nowIso(),
+        };
       },
       'CHAT_CALL_ACCEPT_FAILED',
       CHAT_SOCKET_EVENTS.CALL_ACCEPT,
@@ -617,14 +634,19 @@ export class ConversationsGateway
         const { access, user } = await this.resolveSignalAccess(
           client,
           payload,
-        );
-        const signalPayload = this.buildCallRejectPayload(
-          access.conversationId,
-          user,
+          true, // Use call-session fast path: bypass canAccessDmConversation for active sessions
         );
         const result = await this.chatCallSessionService.rejectCall(
           access,
           user.id,
+        );
+        const callEvent = result.session
+          ? this.buildCallEventInfo(result.session, 'REJECTED', user.id)
+          : undefined;
+        const signalPayload = this.buildCallRejectPayload(
+          access.conversationKey,
+          user,
+          callEvent,
         );
 
         if (result.shouldEmit) {
@@ -634,12 +656,15 @@ export class ConversationsGateway
             signalPayload,
             client.id,
             user.id,
+            undefined, // no specific recipients — broadcast to all participants
+            true, // P1: includeActor=true → actor's other devices dismiss their popup
           );
           void this.persistBestEffortCallSystemMessage(
             user,
-            access.conversationKey,
-            'Call was rejected.',
+            access,
+            this.buildCallSystemMessageText(callEvent, user.fullName),
             CHAT_SOCKET_EVENTS.CALL_REJECT,
+            callEvent,
           );
         }
 
@@ -660,14 +685,28 @@ export class ConversationsGateway
         const { access, user } = await this.resolveSignalAccess(
           client,
           payload,
-        );
-        const signalPayload = this.buildCallEndPayload(
-          access.conversationId,
-          user,
+          true, // Use call-session fast path: bypass canAccessDmConversation for active sessions
         );
         const result = await this.chatCallSessionService.endCall(
           access,
           user.id,
+        );
+        const callStillActive = Boolean(
+          result.session?.isGroup &&
+          result.session.acceptedByUserIds.length > 0,
+        );
+        const callEvent = result.session
+          ? this.buildCallEventInfo(
+              result.session,
+              callStillActive ? 'PARTICIPANT_LEFT' : 'ENDED',
+              user.id,
+            )
+          : undefined;
+        const signalPayload = this.buildCallEndPayload(
+          access.conversationKey,
+          user,
+          callEvent,
+          callStillActive,
         );
 
         if (result.shouldEmit) {
@@ -677,12 +716,15 @@ export class ConversationsGateway
             signalPayload,
             client.id,
             user.id,
+            // includeActor=false (default): only notify the OTHER party.
+            // The sender cleans up locally on the client side immediately.
           );
           void this.persistBestEffortCallSystemMessage(
             user,
-            access.conversationKey,
-            'Call ended.',
+            access,
+            this.buildCallSystemMessageText(callEvent, user.fullName),
             CHAT_SOCKET_EVENTS.CALL_END,
+            callEvent,
           );
         }
 
@@ -705,12 +747,13 @@ export class ConversationsGateway
           payload,
           true,
         );
-        await this.chatCallSessionService.touchSignalingSession(
+        const session = await this.chatCallSessionService.touchSignalingSession(
           access,
           user.id,
         );
         const heartbeatPayload = this.buildCallHeartbeatPayload(
-          access.conversationId,
+          access.conversationKey,
+          session,
           user,
         );
 
@@ -797,7 +840,7 @@ export class ConversationsGateway
             user.id,
           );
         const signalPayload = this.buildWebRtcPayload(
-          access.conversationId,
+          access.conversationKey,
           body,
           field,
           user,
@@ -895,9 +938,20 @@ export class ConversationsGateway
 
   private buildCallInitPayload(
     conversationId: string,
-    body: Record<string, unknown>,
+    session:
+      | {
+          createdAt: string;
+          isVideo: boolean;
+        }
+      | undefined,
     user: AuthenticatedUser,
+    clientCallerName?: string,
+    clientCallerAvatarUrl?: string,
   ): ChatCallInitPayload {
+    if (!session) {
+      throw new HttpException('Active call session is required.', 409);
+    }
+
     return {
       conversationId,
       callerId: user.id,
@@ -909,42 +963,68 @@ export class ConversationsGateway
 
   private buildCallAcceptPayload(
     conversationId: string,
+    session:
+      | {
+          acceptedAt: string | null;
+        }
+      | undefined,
     user: AuthenticatedUser,
   ): ChatCallAcceptPayload {
+    if (!session) {
+      throw new HttpException('Active call session is required.', 409);
+    }
+
     return {
       conversationId,
       calleeId: user.id,
+      acceptedAt: session.acceptedAt ?? undefined,
+      serverTimestamp: nowIso(),
     };
   }
 
   private buildCallRejectPayload(
     conversationId: string,
     user: AuthenticatedUser,
+    callEvent?: CallEventInfo,
   ): ChatCallRejectPayload {
     return {
       conversationId,
       calleeId: user.id,
+      startedAt: callEvent?.startedAt,
+      acceptedAt: callEvent?.acceptedAt ?? null,
+      endedAt: callEvent?.endedAt,
+      durationSeconds: callEvent?.durationSeconds,
     };
   }
 
   private buildCallEndPayload(
     conversationId: string,
     user: AuthenticatedUser,
+    callEvent?: CallEventInfo,
+    callStillActive = false,
   ): ChatCallEndPayload {
     return {
       conversationId,
       userId: user.id,
       endedByUserId: user.id,
+      startedAt: callEvent?.startedAt,
+      acceptedAt: callEvent?.acceptedAt ?? null,
+      endedAt: callEvent?.endedAt,
+      durationSeconds: callEvent?.durationSeconds,
+      callStillActive,
     };
   }
 
   private buildCallHeartbeatPayload(
     conversationId: string,
+    session: { acceptedAt: string | null },
     user: AuthenticatedUser,
   ): ChatCallHeartbeatPayload {
     return {
       conversationId,
       userId: user.id,
+      acceptedAt: session.acceptedAt ?? undefined,
+      serverTimestamp: nowIso(),
     };
   }
 
@@ -973,18 +1053,22 @@ export class ConversationsGateway
 
   private async persistBestEffortCallSystemMessage(
     user: AuthenticatedUser,
-    conversationKey: string,
+    access: ResolvedConversationAccess,
     content: string,
     event: string,
+    callEvent?: CallEventInfo,
   ): Promise<void> {
+    if (!content.trim()) {
+      return;
+    }
+
     await this.conversationsService
-      .sendMessage(user, conversationKey, {
-        content,
-        type: 'SYSTEM',
+      .sendConversationSystemMessage(user, access, content, {
+        callEvent,
       })
       .catch(() => {
         this.logger.warn(
-          `Failed to persist ${event} system message for ${conversationKey}.`,
+          `Failed to persist ${event} system message for ${access.conversationKey}.`,
         );
       });
   }
@@ -996,18 +1080,108 @@ export class ConversationsGateway
     _exceptSocketId: string,
     actorUserId: string,
     recipientUserIds?: string[],
+    includeActor = false,
   ): void {
-    const recipients =
-      recipientUserIds ??
-      access.participants.filter(
-        (participantId) => participantId !== actorUserId,
-      );
+    const fallbackRecipients = includeActor
+      ? [...access.participants]
+      : access.participants.filter(
+          (participantId) => participantId !== actorUserId,
+        );
+    const recipients = recipientUserIds ?? fallbackRecipients;
 
     if (recipients.length === 0) {
       return;
     }
 
     this.chatRealtimeService.emitToUsers(recipients, event, payload);
+  }
+
+  private buildCallEventInfo(
+    session: {
+      acceptedAt: string | null;
+      createdAt: string;
+      initiatedByUserId: string;
+      isVideo: boolean;
+    },
+    status: CallEventInfo['status'],
+    endedByUserId: string,
+  ): CallEventInfo {
+    const endedAt = nowIso();
+    const durationSeconds = this.computeCallDurationSeconds(
+      session.acceptedAt,
+      endedAt,
+    );
+
+    return {
+      status,
+      isVideo: session.isVideo,
+      startedAt: session.createdAt,
+      acceptedAt: session.acceptedAt,
+      endedAt,
+      durationSeconds,
+      initiatedByUserId: session.initiatedByUserId,
+      endedByUserId,
+    };
+  }
+
+  private computeCallDurationSeconds(
+    acceptedAt: string | null | undefined,
+    endedAt: string,
+  ): number {
+    if (!acceptedAt) {
+      return 0;
+    }
+
+    const acceptedAtMs = Date.parse(acceptedAt);
+    const endedAtMs = Date.parse(endedAt);
+
+    if (Number.isNaN(acceptedAtMs) || Number.isNaN(endedAtMs)) {
+      return 0;
+    }
+
+    return Math.max(Math.floor((endedAtMs - acceptedAtMs) / 1000), 0);
+  }
+
+  private formatCallDuration(durationSeconds: number): string {
+    const safeDuration = Math.max(Math.floor(durationSeconds), 0);
+    const hours = Math.floor(safeDuration / 3600);
+    const minutes = Math.floor((safeDuration % 3600) / 60);
+    const seconds = safeDuration % 60;
+
+    if (hours > 0) {
+      return [hours, minutes, seconds]
+        .map((value) => String(value).padStart(2, '0'))
+        .join(':');
+    }
+
+    return [minutes, seconds]
+      .map((value) => String(value).padStart(2, '0'))
+      .join(':');
+  }
+
+  private buildCallSystemMessageText(
+    callEvent: CallEventInfo | undefined,
+    actorName: string,
+  ): string {
+    if (!callEvent) {
+      return 'Call event.';
+    }
+
+    const callLabel = callEvent.isVideo ? 'Video call' : 'Voice call';
+
+    if (callEvent.status === 'REJECTED') {
+      return `${callLabel} was rejected.`;
+    }
+
+    if (callEvent.status === 'PARTICIPANT_LEFT') {
+      return `${actorName} left the call.`;
+    }
+
+    if (callEvent.durationSeconds > 0) {
+      return `${callLabel} ended (${this.formatCallDuration(callEvent.durationSeconds)}).`;
+    }
+
+    return `${callLabel} ended.`;
   }
 
   private async emitPresenceSnapshot(

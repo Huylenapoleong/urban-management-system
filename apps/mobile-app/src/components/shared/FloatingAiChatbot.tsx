@@ -8,10 +8,14 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from '@/components/shared/SafeLinearGradient';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
-import { usePathname } from 'expo-router';
+import { usePathname, useSegments } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { askChatbot } from '@/services/api/chatbot.api';
 import { useAuth } from '@/providers/AuthProvider';
+import colors from '@/constants/colors';
+import { subscribeAiChatbot } from '@/lib/ai-chatbot-controller';
 
 type BotMessage = {
   id: string;
@@ -40,6 +44,8 @@ function createMessage(role: BotMessage['role'], text: string): BotMessage {
 export default function FloatingAiChatbot() {
   const { user, isLoading } = useAuth();
   const pathname = usePathname();
+  const segments = useSegments();
+  const insets = useSafeAreaInsets();
   const [isOpen, setIsOpen] = React.useState(false);
   const [question, setQuestion] = React.useState('');
   const [isSending, setIsSending] = React.useState(false);
@@ -50,7 +56,39 @@ export default function FloatingAiChatbot() {
     ),
   ]);
 
-  const hidden = shouldHideOnPath(pathname);
+  const chatSegmentIndex = segments.findIndex((segment) => segment === 'chat');
+  const isChatRoute = chatSegmentIndex >= 0;
+  const isChatDetail = isChatRoute && segments.length > chatSegmentIndex + 1;
+  const isChatList = isChatRoute && !isChatDetail;
+  const hidden = shouldHideOnPath(pathname) || isChatDetail;
+  const fabBottom = isChatList ? Math.max(insets.bottom + 74, 82) : Math.max(insets.bottom + 88, 96);
+  const chatWindowBottom = fabBottom + 72;
+  const chatWindowPosition = isChatList
+    ? { top: insets.top + 112 }
+    : { bottom: chatWindowBottom };
+  const fabPosition = { bottom: fabBottom };
+
+  React.useEffect(() => {
+    return subscribeAiChatbot((action) => {
+      if (action === 'open') {
+        setIsOpen(true);
+        return;
+      }
+
+      if (action === 'close') {
+        setIsOpen(false);
+        return;
+      }
+
+      setIsOpen((prev) => !prev);
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (hidden) {
+      setIsOpen(false);
+    }
+  }, [hidden]);
 
   if (isLoading || !user || hidden) {
     return null;
@@ -98,7 +136,7 @@ export default function FloatingAiChatbot() {
         <KeyboardAvoidingView
           pointerEvents="box-none"
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.chatWindowWrap}
+          style={[styles.chatWindowWrap, chatWindowPosition]}
         >
           <Card style={styles.chatCard}>
             <Card.Title
@@ -120,6 +158,14 @@ export default function FloatingAiChatbot() {
                       message.role === 'user' ? styles.userBubble : styles.assistantBubble,
                     ]}
                   >
+                    {message.role === 'user' ? (
+                      <LinearGradient
+                        colors={colors.gradient.primary}
+                        start={colors.gradient.start}
+                        end={colors.gradient.end}
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                    ) : null}
                     <Text
                       style={
                         message.role === 'user' ? styles.userBubbleText : styles.assistantBubbleText
@@ -150,9 +196,21 @@ export default function FloatingAiChatbot() {
       <Pressable
         accessibilityRole="button"
         onPress={() => setIsOpen((prev) => !prev)}
-        style={styles.fab}
+        style={[styles.fab, isChatList ? styles.fabChatList : null, fabPosition]}
       >
-        <Ionicons name={isOpen ? 'close' : 'sparkles'} size={22} color="#ffffff" />
+        {!isChatList ? (
+          <LinearGradient
+            colors={colors.gradient.primary}
+            start={colors.gradient.start}
+            end={colors.gradient.end}
+            style={StyleSheet.absoluteFillObject}
+          />
+        ) : null}
+        <Ionicons
+          name={isOpen ? 'close' : 'sparkles'}
+          size={isChatList ? 24 : 22}
+          color={isChatList ? colors.secondary : '#ffffff'}
+        />
       </Pressable>
     </View>
   );
@@ -167,14 +225,13 @@ const styles = StyleSheet.create({
   },
   chatWindowWrap: {
     position: 'absolute',
-    right: 16,
-    bottom: 92,
+    right: 18,
     width: 340,
     maxWidth: '92%',
     maxHeight: '72%',
   },
   chatCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
     borderRadius: 16,
   },
   chatContent: {
@@ -192,15 +249,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
+    overflow: 'hidden',
   },
   userBubble: {
     alignSelf: 'flex-end',
-    backgroundColor: '#1d4ed8',
+    backgroundColor: colors.secondary,
     maxWidth: '90%',
   },
   assistantBubble: {
     alignSelf: 'flex-start',
-    backgroundColor: '#f1f5f9',
+    backgroundColor: colors.surface,
     maxWidth: '92%',
   },
   userBubbleText: {
@@ -208,26 +266,37 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   assistantBubbleText: {
-    color: '#1f2937',
+    color: colors.text,
     lineHeight: 19,
   },
   input: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.card,
   },
   fab: {
     position: 'absolute',
-    right: 16,
-    bottom: 24,
+    right: 18,
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: '#2563eb',
+    overflow: 'hidden',
+    backgroundColor: colors.secondary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0f172a',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.22,
     shadowRadius: 16,
     elevation: 12,
+  },
+  fabChatList: {
+    right: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.card,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });
