@@ -452,6 +452,9 @@ export class UserDirectoryItemDto {
   @ApiProperty({ example: 'VN-HCM-BQ1-P01' })
   locationCode!: string;
 
+  @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
+  unit?: string;
+
   @ApiPropertyOptional({ type: () => MediaAssetDto })
   avatarAsset?: MediaAssetDto;
 
@@ -1629,6 +1632,16 @@ export class CreateGroupRequestDto {
   @IsOptional()
   @IsIn(GROUP_MESSAGE_POLICIES)
   messagePolicy?: (typeof GROUP_MESSAGE_POLICIES)[number];
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['01JPCY0000CITIZENA00000000'],
+    description: 'Optional initial member user ids to add to the group.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  userIds?: string[];
 }
 
 export class UpdateGroupRequestDto {

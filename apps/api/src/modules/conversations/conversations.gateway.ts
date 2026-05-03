@@ -903,6 +903,7 @@ export class ConversationsGateway
       callerId: user.id,
       callerName: user.fullName,
       isVideo: requiredBoolean(body, 'isVideo'),
+      isGroup: isGroupConversationId(conversationId)
     };
   }
 

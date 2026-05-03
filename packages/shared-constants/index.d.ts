@@ -121,6 +121,7 @@ export const CHAT_SOCKET_EVENTS: {
   readonly PRESENCE_SNAPSHOT: "presence.snapshot";
   readonly PRESENCE_UPDATED: "presence.updated";
   readonly CALL_INIT: "call.init";
+  readonly CALL_INVITE: "call.invite";
   readonly CALL_ACCEPT: "call.accept";
   readonly CALL_REJECT: "call.reject";
   readonly CALL_END: "call.end";

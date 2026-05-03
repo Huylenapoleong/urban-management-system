@@ -1,0 +1,75 @@
+Flutter crash report.
+Please report a bug at https://github.com/flutter/flutter/issues.
+
+## command
+
+flutter run -d chrome
+
+## exception
+
+ProcessException: ProcessException: An Application Control policy has blocked this file (at ../../runtime/bin/process_win.cc:577)
+  Command: C:\flutter\flutter\bin\cache\artifacts\engine\windows-x64\impellerc.exe --sksl --iplr --json --sl=build\flutter_assets\shaders/ink_sparkle.frag --spirv=build\flutter_assets\shaders/ink_sparkle.frag.spirv --input=C:\flutter\flutter\packages\flutter\lib\src\material\shaders\ink_sparkle.frag --input-type=frag --include=C:\flutter\flutter\packages\flutter\lib\src\material\shaders --include=C:\flutter\flutter\bin\cache\artifacts\engine\windows-x64\shader_lib
+
+```
+#0      _ProcessImpl._start (dart:io-patch/process_patch.dart:411:33)
+#1      Process.start (dart:io-patch/process_patch.dart:42:20)
+#2      LocalProcessManager.start (package:process/src/interface/local_process_manager.dart:42:22)
+#3      ErrorHandlingProcessManager.start.<anonymous closure> (package:flutter_tools/src/base/error_handling_io.dart:654:26)
+#4      _run (package:flutter_tools/src/base/error_handling_io.dart:514:20)
+#5      ErrorHandlingProcessManager.start (package:flutter_tools/src/base/error_handling_io.dart:652:12)
+#6      ShaderCompiler.compileShader (package:flutter_tools/src/build_system/tools/shader_compiler.dart:188:60)
+#7      writeBundle.<anonymous closure> (package:flutter_tools/src/bundle_builder.dart:208:46)
+<asynchronous suspension>
+#8      Future.wait.<anonymous closure> (dart:async/future.dart:546:21)
+<asynchronous suspension>
+#9      writeBundle (package:flutter_tools/src/bundle_builder.dart:171:3)
+<asynchronous suspension>
+#10     WebDevFS.update (package:flutter_tools/src/isolated/devfs_web.dart:342:9)
+<asynchronous suspension>
+#11     ResidentWebRunner._updateDevFS (package:flutter_tools/src/isolated/resident_web_runner.dart:801:35)
+<asynchronous suspension>
+#12     ResidentWebRunner.run.<anonymous closure> (package:flutter_tools/src/isolated/resident_web_runner.dart:334:41)
+<asynchronous suspension>
+#13     asyncGuard.<anonymous closure> (package:flutter_tools/src/base/async_guard.dart:108:24)
+<asynchronous suspension>
+```
+
+## flutter doctor
+
+```
+[32m[✓][39m Flutter (Channel stable, 3.41.7, on Microsoft Windows [Version 10.0.26200.8246], locale en-US)
+    [520ms]
+    [32m•[39m Flutter version 3.41.7 on channel stable at C:\flutter\flutter
+    [32m•[39m Upstream repository https://github.com/flutter/flutter.git
+    [32m•[39m Framework revision cc0734ac71 (11 days ago), 2026-04-15 21:21:08 -0700
+    [32m•[39m Engine revision 59aa584fdf
+    [32m•[39m Dart version 3.11.5
+    [32m•[39m DevTools version 2.54.2
+    [32m•[39m Feature flags: enable-web, enable-linux-desktop, enable-macos-desktop, enable-windows-desktop,
+      enable-android, enable-ios, cli-animations, enable-native-assets, omit-legacy-version-file,
+      enable-lldb-debugging, enable-uiscene-migration
+
+[32m[✓][39m Windows Version (Windows 11 or higher, 25H2, 2009) [1,587ms]
+
+[31m[✗][39m Android toolchain - develop for Android devices [67ms]
+    [31m✗[39m ANDROID_HOME = C:\Users\nguye\AppData\Local\Android\Sdk
+      but Android SDK not found at this location.
+
+[32m[✓][39m Chrome - develop for the web [42ms]
+    [32m•[39m Chrome at C:\Program Files\Google\Chrome\Application\chrome.exe
+
+[31m[✗][39m Visual Studio - develop Windows apps [39ms]
+    [31m✗[39m Visual Studio not installed; this is necessary to develop Windows apps.
+      Download at https://visualstudio.microsoft.com/downloads/.
+      Please install the "Desktop development with C++" workload, including all of its default components
+
+[32m[✓][39m Connected device (3 available) [56ms]
+    [32m•[39m Windows (desktop) • windows • windows-x64    • Microsoft Windows [Version 10.0.26200.8246]
+    [32m•[39m Chrome (web)      • chrome  • web-javascript • Google Chrome 147.0.7727.102
+    [32m•[39m Edge (web)        • edge    • web-javascript • Microsoft Edge 146.0.3856.62
+
+[32m[✓][39m Network resources [456ms]
+    [32m•[39m All expected network resources are available.
+
+[33m![39m Doctor found issues in 2 categories.
+```

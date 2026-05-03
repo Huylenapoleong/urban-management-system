@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getUserById } from "@/services/user.api";
 
-function RemotePeerVideo({ peerId, stream, isVideoOn, fallbackName, fallbackAvatar }: { peerId: string, stream: MediaStream, isVideoOn: boolean, fallbackName?: string, fallbackAvatar?: string }) {
+function RemotePeerVideo({ peerId, stream, fallbackName, fallbackAvatar }: { peerId: string, stream: MediaStream, fallbackName?: string, fallbackAvatar?: string }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const handleVideoRef = (node: HTMLVideoElement | null) => {
@@ -105,7 +105,7 @@ export function CallModal({ rtc }: CallModalProps) {
     const fetchName = (id: string) => {
       if (!peerNames[id]) {
         getUserById(id).then(user => {
-          setPeerNames(prev => ({ ...prev, [id]: user.fullName || user.username || id }));
+          setPeerNames(prev => ({ ...prev, [id]: user.fullName || id }));
         }).catch(() => {});
       }
     };
@@ -224,7 +224,6 @@ export function CallModal({ rtc }: CallModalProps) {
              <RemotePeerVideo 
                 peerId={peerId} 
                 stream={stream} 
-                isVideoOn={true} 
                 fallbackName={getPeerName(peerId, !isGroup ? peerName : undefined)}
                 fallbackAvatar={!isGroup ? activeConfig?.peerAvatarUrl : undefined}
              />

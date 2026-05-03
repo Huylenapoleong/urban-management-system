@@ -590,6 +590,33 @@ export class UsersController {
     return this.usersService.registerPushDevice(user, body);
   }
 
+  @Post('sync-contacts')
+  @ApiOperation({
+    summary: 'Sync local contacts with registered users',
+    description: 'Accepts an array of phone numbers and returns matching registered users.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        phones: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+      },
+    },
+  })
+  @ApiOkEnvelopeResponse(UserDirectoryItemDto, {
+    isArray: true,
+    description: 'Matching users for the provided phone numbers.',
+  })
+  async syncContacts(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: { phones: string[] },
+  ) {
+    return this.usersService.syncContacts(user, body?.phones || []);
+  }
+
   @Delete('me/push-devices/:deviceId')
   @ApiOperation({ summary: 'Delete one of my registered push devices' })
   @ApiParam({ name: 'deviceId', type: String })

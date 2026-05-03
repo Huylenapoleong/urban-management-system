@@ -22,6 +22,7 @@ import type {
 } from '@urban/shared-types';
 import {
   createUlid,
+  isSameWard,
   makeConversationSummarySk,
   makeDmConversationId,
   makeInboxPk,
@@ -627,7 +628,7 @@ export class UsersService {
 
     return buildPaginatedResponse(
       await Promise.all(
-        page.items.map((item) => this.serializeUserProfile(item)),
+        page.items.map((item) => this.serializeUserProfile(item, actor)),
       ),
       page.nextCursor,
     );
@@ -638,12 +639,155 @@ export class UsersService {
     userId: string,
   ): Promise<UserProfile> {
     const target = await this.getByIdOrThrow(userId);
+    return await this.serializeUserProfile(target, actor);
+  }
 
-    if (!this.authorizationService.canReadUser(actor, target)) {
-      throw new ForbiddenException('You cannot access this profile.');
+  async syncContacts(
+    actor: AuthenticatedUser,
+    phones: string[],
+  ): Promise<UserDirectoryItem[]> {
+    if (phones.length === 0) {
+      return [];
     }
 
-    return this.serializeUserProfile(target);
+    // 1. Find users by phones (unique and not self)
+    const uniquePhones = Array.from(new Set(phones)).filter(
+      (p) => p !== actor.phone,
+    );
+    const usersFound: StoredUser[] = [];
+
+    for (const phone of uniquePhones) {
+      const user = await this.findByPhone(phone);
+      if (user && user.userId !== actor.id && user.status === 'ACTIVE') {
+        usersFound.push(user);
+      }
+    }
+
+    if (usersFound.length === 0) {
+      return [];
+    }
+
+    const targetUserIds = usersFound.map((u) => u.userId);
+
+    // 2. Resolve relations
+    const [edges, requests, outgoingBlocks] = await Promise.all([
+      this.repository.queryByPk<StoredUserFriendEdge>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'FRIEND#',
+        },
+      ),
+      this.repository.queryByPk<StoredUserFriendRequest>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'FRIEND_REQUEST#',
+        },
+      ),
+      this.repository.queryByPk<StoredUserBlockEdge>(
+        this.config.dynamodbUsersTableName,
+        makeUserPk(actor.id),
+        {
+          beginsWith: 'BLOCK#',
+        },
+      ),
+    ]);
+
+    const directMessageRequests =
+      await this.repository.batchGet<StoredDirectMessageRequest>(
+        this.config.dynamodbConversationsTableName,
+        targetUserIds.map((userId) => ({
+          PK: `DMREQ#${makeDmConversationId(actor.id, userId)}`,
+          SK: 'STATE',
+        })),
+      );
+    const directMessageRequestByUserId = new Map<
+      string,
+      StoredDirectMessageRequest
+    >();
+
+    for (const request of directMessageRequests) {
+      if (request.entityType !== 'DIRECT_MESSAGE_REQUEST') {
+        continue;
+      }
+
+      const otherUserId =
+        request.requesterUserId === actor.id
+          ? request.targetUserId
+          : request.requesterUserId;
+
+      directMessageRequestByUserId.set(otherUserId, request);
+    }
+
+    const aliasMap = await this.getContactAliasMap(actor.id, targetUserIds);
+
+    const friendUserIds = new Set(
+      edges
+        .filter((edge) => edge.entityType === 'USER_FRIEND_EDGE')
+        .map((edge) => edge.friendUserId),
+    );
+    const incomingRequestUserIds = new Set(
+      requests
+        .filter((request) => request.entityType === 'USER_FRIEND_REQUEST')
+        .filter((request) => request.direction === 'INCOMING')
+        .map((request) => request.requesterUserId),
+    );
+    const outgoingRequestUserIds = new Set(
+      requests
+        .filter((request) => request.entityType === 'USER_FRIEND_REQUEST')
+        .filter((request) => request.direction === 'OUTGOING')
+        .map((request) => request.targetUserId),
+    );
+
+    // 3. Map to directory items
+    return Promise.all(
+      usersFound.map((user) => {
+        const relationState = this.resolveFriendRelationState(
+          user.userId,
+          friendUserIds,
+          incomingRequestUserIds,
+          outgoingRequestUserIds,
+        );
+        const canAccessDirectConversation =
+          this.authorizationService.canAccessDirectConversation(actor, user);
+        const directMessageRequest = directMessageRequestByUserId.get(
+          user.userId,
+        );
+        const hasAcceptedDirectMessageRequest =
+          directMessageRequest?.status === 'ACCEPTED';
+        const canMessage =
+          friendUserIds.has(user.userId) ||
+          hasAcceptedDirectMessageRequest ||
+          canAccessDirectConversation;
+        const canSendFriendRequest =
+          actor.role === 'CITIZEN' &&
+          user.role === 'CITIZEN' &&
+          relationState === 'NONE';
+        const canSendMessageRequest =
+          actor.role === 'CITIZEN' &&
+          user.role === 'CITIZEN' &&
+          relationState === 'NONE' &&
+          canAccessDirectConversation &&
+          directMessageRequest === undefined;
+
+        return this.serializeUserDirectoryItem({
+          userId: user.userId,
+          fullName: user.fullName,
+          displayName: user.fullName,
+          role: user.role,
+          locationCode: user.locationCode,
+          avatarAsset: user.avatarAsset,
+          avatarUrl: user.avatarUrl,
+          status: user.status,
+          relationState,
+          canMessage,
+          canSendFriendRequest,
+          canSendMessageRequest,
+          contactAlias: aliasMap.get(user.userId)?.alias,
+        });
+      }),
+    );
   }
 
   async searchExact(
@@ -668,7 +812,7 @@ export class UsersService {
       );
     }
 
-    return toUserProfile(user);
+    return await this.serializeUserProfile(user, actor);
   }
 
   async updateProfile(
@@ -2480,7 +2624,30 @@ export class UsersService {
     };
   }
 
-  private async serializeUserProfile(user: StoredUser): Promise<UserProfile> {
+  private isAuthorizedForPrivateInfo(
+    actor: AuthenticatedUser,
+    target: StoredUser,
+  ): boolean {
+    if (actor.id === target.userId) {
+      return true;
+    }
+
+    if (actor.role === 'ADMIN' || actor.role === 'PROVINCE_OFFICER') {
+      return true;
+    }
+
+    if (actor.role === 'WARD_OFFICER') {
+      return isSameWard(actor.locationCode, target.locationCode);
+    }
+
+    // Citizens can only see private info of others in the same ward (legacy logic)
+    return isSameWard(actor.locationCode, target.locationCode);
+  }
+
+  private async serializeUserProfile(
+    user: StoredUser,
+    actor?: AuthenticatedUser,
+  ): Promise<UserProfile> {
     const profile = toUserProfile(user);
     const { asset, url } =
       await this.mediaAssetService.resolveAssetWithLegacyUrl(
@@ -2488,11 +2655,19 @@ export class UsersService {
         profile.avatarUrl,
       );
 
-    return {
+    const result: UserProfile = {
       ...profile,
       avatarAsset: asset,
       avatarUrl: url,
     };
+
+    if (actor && !this.isAuthorizedForPrivateInfo(actor, user)) {
+      result.phone = undefined;
+      result.email = undefined;
+      result.unit = undefined;
+    }
+
+    return result;
   }
 
   private async serializeUserFriendItem(

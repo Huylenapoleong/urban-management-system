@@ -1,0 +1,55 @@
+name: mobile_app_fluter
+description: Urban Management System mobile application (Flutter port)
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.8.0+1
+  flutter_secure_storage: ^9.2.4
+  provider: ^6.1.2
+  intl: ^0.20.2
+  image_picker: ^1.1.2
+  file_picker: ^8.0.7
+  flutter_keyboard_visibility: ^6.0.0
+  mime: ^1.0.5
+  http_parser: ^4.1.1
+  google_fonts: ^6.2.1
+  skeletonizer: any
+  flutter_slidable: any
+  path_provider: any
+  isar: ^3.1.0+1
+  isar_flutter_libs: ^3.1.0+1
+  firebase_core: any
+  firebase_messaging: any
+  flutter_image_compress: any
+  infinite_scroll_pagination: ^4.0.0
+  background_downloader: ^8.6.0
+  socket_io_client: ^3.1.4
+  shared_preferences: ^2.5.2
+  geolocator: ^13.0.2
+  url_launcher: ^6.3.2
+  flutter_contacts: ^2.0.2
+  permission_handler: ^12.0.1
+  cached_network_image: ^3.4.1
+  flutter_webrtc: ^1.4.1
+
+  logger: ^2.7.0
+  record: ^6.2.0
+  audioplayers: ^6.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  build_runner: ^2.4.13
+  isar_generator: ^3.1.0+1
+
+flutter:
+  uses-material-design: true

@@ -1650,6 +1650,7 @@ export function ChatPage() {
       peerName: activeContact.groupName || activeContact.conversationId,
       peerAvatarUrl: activeContactAvatarUrl,
       conversationId: activeContact.conversationId,
+      isGroup: activeContact.isGroup,
     });
   };
 
