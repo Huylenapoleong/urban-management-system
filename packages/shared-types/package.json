@@ -4,6 +4,9 @@
   "private": true,
   "main": "index.js",
   "types": "index.d.ts",
+  "dependencies": {
+    "@urban/shared-constants": "workspace:*"
+  },
   "exports": {
     ".": {
       "types": "./index.d.ts",

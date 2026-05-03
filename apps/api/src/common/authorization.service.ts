@@ -322,10 +322,7 @@ export class AuthorizationService {
         );
       }
 
-      return (
-        target.role !== 'CITIZEN' &&
-        this.canAccessLocationScope(target, actor.locationCode)
-      );
+      return this.canAccessLocationScope(target, actor.locationCode);
     }
 
     if (target.role === 'CITIZEN') {

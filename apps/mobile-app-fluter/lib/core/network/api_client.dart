@@ -293,4 +293,18 @@ class ApiClient {
     }
     return null;
   }
+
+  /// Extract error message from exception
+  static String extractError(dynamic error) {
+    if (error is ApiException) {
+      return error.message;
+    }
+    if (error is DioException) {
+      return error.message ?? "Network error";
+    }
+    if (error is Exception) {
+      return error.toString();
+    }
+    return "An error occurred";
+  }
 }
