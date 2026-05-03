@@ -1,35 +1,35 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  GROUP_MEMBER_ROLES,
-  GROUP_MESSAGE_POLICIES,
-  GROUP_TYPES,
-  MESSAGE_DELIVERY_STATES,
-  MESSAGE_RECALL_SCOPES,
-  MESSAGE_TYPES,
-  OTP_PURPOSES,
-  PUSH_DEVICE_PROVIDERS,
-  REPORT_CATEGORIES,
-  REPORT_PRIORITIES,
-  REPORT_STATUSES,
-  SESSION_SCOPES,
-  UPLOAD_TARGETS,
-  USER_ROLES,
-  USER_STATUSES,
+    GROUP_MEMBER_ROLES,
+    GROUP_MESSAGE_POLICIES,
+    GROUP_TYPES,
+    MESSAGE_DELIVERY_STATES,
+    MESSAGE_RECALL_SCOPES,
+    MESSAGE_TYPES,
+    OTP_PURPOSES,
+    PUSH_DEVICE_PROVIDERS,
+    REPORT_CATEGORIES,
+    REPORT_PRIORITIES,
+    REPORT_STATUSES,
+    SESSION_SCOPES,
+    UPLOAD_TARGETS,
+    USER_ROLES,
+    USER_STATUSES,
 } from '@urban/shared-constants';
 import {
-  ArrayMaxSize,
-  IsArray,
-  IsBoolean,
-  IsIn,
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Matches,
-  Max,
-  MaxLength,
-  Min,
-  MinLength,
+    ArrayMaxSize,
+    IsArray,
+    IsBoolean,
+    IsIn,
+    IsInt,
+    IsNumber,
+    IsOptional,
+    IsString,
+    Matches,
+    Max,
+    MaxLength,
+    Min,
+    MinLength,
 } from 'class-validator';
 
 const GROUP_MEMBER_ACTIONS = ['add', 'update', 'remove'] as const;
@@ -52,6 +52,7 @@ const DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES = [
   'OUTGOING',
 ] as const;
 const USER_DISCOVERY_MODE_VALUES = ['all', 'chat', 'friend'] as const;
+const KNOWLEDGE_DOCUMENT_STATUS_VALUES = ['ACTIVE', 'INACTIVE'] as const;
 const INTEGER_QUERY_PATTERN = /^\d+$/;
 
 export class HealthStatusDto {
@@ -2522,6 +2523,178 @@ export class ListReportsQueryDto {
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
   limit?: string;
+}
+
+export class KnowledgeDocumentMetadataDto {
+  @ApiPropertyOptional({ example: 'Land Law 2024' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  lawName?: string;
+
+  @ApiPropertyOptional({ example: 'Chapter I' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  chapter?: string;
+
+  @ApiPropertyOptional({ example: 'Article 3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  section?: string;
+}
+
+export class KnowledgeDocumentDto {
+  @ApiProperty({ example: '01JPCTKNOWLEDGE0000000000' })
+  id!: string;
+
+  @ApiProperty({ example: 'Article 3. Glossary of land terms' })
+  title!: string;
+
+  @ApiProperty({ example: 'Land is owned by the entire people...' })
+  content!: string;
+
+  @ApiProperty({ example: 'land' })
+  category!: string;
+
+  @ApiProperty({ example: 'Land Law 2024 - Article 3' })
+  source!: string;
+
+  @ApiProperty({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES, example: 'ACTIVE' })
+  status!: (typeof KNOWLEDGE_DOCUMENT_STATUS_VALUES)[number];
+
+  @ApiPropertyOptional({ example: '2026-01-01T00:00:00.000Z' })
+  effectiveDate?: string | null;
+
+  @ApiPropertyOptional({ type: () => KnowledgeDocumentMetadataDto })
+  metadata?: KnowledgeDocumentMetadataDto;
+
+  @ApiPropertyOptional({ example: '2026-03-01T00:00:00.000Z' })
+  createdAt?: string;
+
+  @ApiProperty({ example: '2026-03-17T06:15:00.000Z' })
+  updatedAt!: string;
+}
+
+export class CreateKnowledgeDocumentRequestDto {
+  @ApiProperty({ example: 'Article 3. Glossary of land terms' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  title!: string;
+
+  @ApiProperty({ example: 'Land is owned by the entire people...' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  content!: string;
+
+  @ApiProperty({ example: 'land' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(50)
+  category!: string;
+
+  @ApiProperty({ example: 'Land Law 2024 - Article 3' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  source!: string;
+
+  @ApiPropertyOptional({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES })
+  @IsOptional()
+  @IsIn(KNOWLEDGE_DOCUMENT_STATUS_VALUES)
+  status?: string;
+
+  @ApiPropertyOptional({ example: '2026-01-01T00:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  effectiveDate?: string;
+
+  @ApiPropertyOptional({ type: () => KnowledgeDocumentMetadataDto })
+  @IsOptional()
+  metadata?: KnowledgeDocumentMetadataDto;
+}
+
+export class UpdateKnowledgeDocumentRequestDto {
+  @ApiPropertyOptional({ example: 'Article 3. Glossary of land terms' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  title?: string;
+
+  @ApiPropertyOptional({ example: 'Land is owned by the entire people...' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  content?: string;
+
+  @ApiPropertyOptional({ example: 'land' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  category?: string;
+
+  @ApiPropertyOptional({ example: 'Land Law 2024 - Article 3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  source?: string;
+
+  @ApiPropertyOptional({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES })
+  @IsOptional()
+  @IsIn(KNOWLEDGE_DOCUMENT_STATUS_VALUES)
+  status?: string;
+
+  @ApiPropertyOptional({ example: '2026-01-01T00:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  effectiveDate?: string | null;
+
+  @ApiPropertyOptional({ type: () => KnowledgeDocumentMetadataDto })
+  @IsOptional()
+  metadata?: KnowledgeDocumentMetadataDto | null;
+}
+
+export class ListKnowledgeDocumentsQueryDto {
+  @ApiPropertyOptional({ example: 'land' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  category?: string;
+
+  @ApiPropertyOptional({ example: 'Article 3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES })
+  @IsOptional()
+  @IsIn(KNOWLEDGE_DOCUMENT_STATUS_VALUES)
+  status?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+}
+
+export class DeleteKnowledgeDocumentResultDto {
+  @ApiProperty({ example: '01JPCTKNOWLEDGE0000000000' })
+  id!: string;
 }
 
 export class UploadedAssetDto {
