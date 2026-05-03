@@ -107,6 +107,8 @@ class SocketService {
     socket.onConnect((_) {
       _logger.i("Socket.IO Connected to /chat");
       _connectionStatusController.add(true);
+      // Emit chat.ready to notify backend that this socket is ready
+      socket.emit("chat.ready", {});
     });
 
     socket.onDisconnect((_) {

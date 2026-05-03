@@ -956,8 +956,9 @@ export class ConversationsGateway
       conversationId,
       callerId: user.id,
       callerName: user.fullName,
-      isVideo: requiredBoolean(body, 'isVideo'),
-      isGroup: isGroupConversationId(conversationId)
+      callerAvatarUrl: clientCallerAvatarUrl,
+      isVideo: session.isVideo,
+      isGroup: isGroupConversationId(conversationId),
     };
   }
 

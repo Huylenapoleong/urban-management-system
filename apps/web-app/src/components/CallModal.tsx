@@ -6,7 +6,7 @@ import { getUserById } from "@/services/user.api";
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-function RemotePeerVideo({ peerId, stream, fallbackName, fallbackAvatar }: { peerId: string, stream: MediaStream, fallbackName?: string, fallbackAvatar?: string }) {
+function RemotePeerVideo({ peerId, stream, fallbackName, fallbackAvatar, onSpeakingChange }: { peerId: string, stream: MediaStream, fallbackName?: string, fallbackAvatar?: string, onSpeakingChange?: (peerId: string, isSpeaking: boolean) => void }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const speakingUpdateTimerRef = useRef<number | null>(null);
 
@@ -349,6 +349,7 @@ export function CallModal({ rtc }: CallModalProps) {
                 stream={stream} 
                 fallbackName={getPeerName(peerId, !isGroup ? peerName : undefined)}
                 fallbackAvatar={!isGroup ? activeConfig?.peerAvatarUrl : undefined}
+                onSpeakingChange={(id, speaking) => setSpeakingPeers(prev => ({ ...prev, [id]: speaking }))}
              />
           </div>
         ))}

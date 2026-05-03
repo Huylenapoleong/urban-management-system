@@ -65,6 +65,8 @@ class SocketClient {
 
         this.socket.on("connect", () => {
           console.log("[Web Socket] Connected");
+          // Emit chat.ready to notify backend that this socket is ready
+          this.socket?.emit(CHAT_SOCKET_EVENTS.READY, {});
           this.connectPromise = null;
           resolve();
         });

@@ -1910,9 +1910,9 @@ export function ChatPage() {
       callerAvatarUrl,
       peerName: activeContact.groupName || activeContact.conversationId,
       peerAvatarUrl: activeContactAvatarUrl,
-      conversationId: activeContact.conversationId,
       isGroup: activeContact.isGroup,
-    });
+    };
+    startCall(config);  
   };
 
   const resolveMessageType = (file?: File | null): ChatMessageType => {
