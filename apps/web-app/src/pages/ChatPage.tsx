@@ -5,66 +5,66 @@ import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
 import { useAuth } from "@/providers/auth-context";
 import { useWebRTCRuntime } from "@/providers/webrtc-context";
 import {
-  listMyFriendRequests,
-  listMyFriends,
-  sendFriendRequest,
+    listMyFriendRequests,
+    listMyFriends,
+    sendFriendRequest,
 } from "@/services/friends.api";
 import {
-  addGroupMember,
-  createGroupInviteLink,
-  leaveGroupWithPayload,
-  listGroupInviteLinks,
-  listGroupMembers,
-  removeGroupMember,
-  revokeGroupInviteLink,
-  updateGroup,
-  updateGroupMemberRole,
+    addGroupMember,
+    createGroupInviteLink,
+    leaveGroupWithPayload,
+    listGroupInviteLinks,
+    listGroupMembers,
+    removeGroupMember,
+    revokeGroupInviteLink,
+    updateGroup,
+    updateGroupMemberRole,
 } from "@/services/group.api";
 import { uploadMedia } from "@/services/upload.api";
 import {
-  getUserById,
-  getUserPresence,
-  searchUserExactByContact,
-  type PresenceState,
+    getUserById,
+    getUserPresence,
+    searchUserExactByContact,
+    type PresenceState,
 } from "@/services/user.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GroupMemberRole } from "@urban/shared-constants";
 import type {
-  GroupInviteLink,
-  MessageItem,
-  MessageReplyReference,
-  UserProfile,
+    GroupInviteLink,
+    MessageItem,
+    MessageReplyReference,
+    UserProfile,
 } from "@urban/shared-types";
 import { format } from "date-fns";
 import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
 import {
-  Copy,
-  FileText,
-  ImagePlus,
-  Info,
-  MoreHorizontal,
-  Paperclip,
-  Pencil,
-  Phone,
-  Quote,
-  Search,
-  Send,
-  Share2,
-  Smile,
-  SmilePlus,
-  Trash2,
-  UserRound,
-  Video,
-  X,
+    Copy,
+    FileText,
+    ImagePlus,
+    Info,
+    MoreHorizontal,
+    Paperclip,
+    Pencil,
+    Phone,
+    Quote,
+    Search,
+    Send,
+    Share2,
+    Smile,
+    SmilePlus,
+    Trash2,
+    UserRound,
+    Video,
+    X,
 } from "lucide-react";
 import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
+    Fragment,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
 } from "react";
 import { toast } from "react-hot-toast";
 import { useLocation } from "react-router-dom";
@@ -4530,7 +4530,7 @@ export function ChatPage() {
             {/* Vùng nhập liệu */}
             <form
               onSubmit={handleSend}
-              className="p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2"
+              className="p-2 sm:p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2"
             >
               {replyingMessage ? (
                 <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
@@ -4604,7 +4604,7 @@ export function ChatPage() {
                 </div>
               ) : null}
 
-              <div className="flex gap-2">
+              <div className="flex gap-1.5 sm:gap-2 items-center">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -4615,16 +4615,16 @@ export function ChatPage() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="h-11 w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
+                  className="h-10 w-10 sm:h-11 sm:w-11 shrink-0 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
                   title="Dinh kem anh hoac file"
                 >
                   <Paperclip size={18} />
                 </button>
-                <div className="relative" ref={emojiPickerRef}>
+                <div className="relative shrink-0" ref={emojiPickerRef}>
                   <button
                     type="button"
                     onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
-                    className="h-11 w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
+                    className="h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-md transition-colors"
                     title="Chọn emoji"
                   >
                     <Smile size={18} />
@@ -4644,15 +4644,15 @@ export function ChatPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="relative flex-1">
+                <div className="relative flex-1 min-w-0">
                   <Input
                     type="text"
                     placeholder={
                       activeGroupId
-                        ? "Nhập tin nhắn... gõ @ để tag thành viên"
+                        ? "Nhập tin nhắn..."
                         : "Nhập tin nhắn..."
                     }
-                    className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-11"
+                    className="w-full bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-10 sm:h-11"
                     ref={composerInputRef}
                     value={inputText}
                     onChange={(e) => {
@@ -4717,13 +4717,13 @@ export function ChatPage() {
                     isUploading ||
                     (!inputText.trim() && queuedAttachments.length === 0)
                   }
-                  className="h-11 w-11 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
+                  className="h-10 w-10 sm:h-11 sm:w-11 shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
                   title="Gửi"
                 >
                   {isUploading ? (
                     <span className="text-xs">...</span>
                   ) : (
-                    <Send size={18} />
+                    <Send size={16} className="sm:w-[18px] sm:h-[18px]" />
                   )}
                 </button>
               </div>

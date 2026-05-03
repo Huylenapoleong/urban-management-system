@@ -1,26 +1,26 @@
 import { useAuth } from "@/providers/auth-context";
-import {
-  addGroupMember,
-  createGroup,
-  getGroups,
-  joinGroup,
-  joinGroupByInvite,
-  leaveGroup,
-} from "@/services/group.api";
 import { listMyFriends } from "@/services/friends.api";
+import {
+    addGroupMember,
+    createGroup,
+    getGroups,
+    joinGroup,
+    joinGroupByInvite,
+    leaveGroup,
+} from "@/services/group.api";
 import { resolveLocationCode } from "@/services/location.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GroupType } from "@urban/shared-constants";
 import {
-  Check,
-  Loader2,
-  LogOut,
-  MessageCircle,
-  Plus,
-  ShieldCheck,
-  UserPlus,
-  Users,
-  X,
+    Check,
+    Loader2,
+    LogOut,
+    MessageCircle,
+    Plus,
+    ShieldCheck,
+    UserPlus,
+    Users,
+    X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "react-hot-toast";
@@ -305,7 +305,7 @@ export default function GroupsPage() {
 
   return (
     <div className="container mx-auto p-4 max-w-4xl space-y-6">
-      <header className="flex items-center justify-between mb-8">
+      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3">
             <Users className="w-8 h-8 text-blue-600" />
@@ -317,7 +317,7 @@ export default function GroupsPage() {
         </div>
         <button
           onClick={handleOpenCreate}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+          className="flex w-full sm:w-auto items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
         >
           <Plus className="w-4 h-4" />
           Tạo nhóm

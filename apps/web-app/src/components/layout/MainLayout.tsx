@@ -8,18 +8,18 @@ import { WebRTCProvider } from "@/providers/WebRTCProvider";
 import { getProfile } from "@/services/user.api";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bot,
-  ClipboardList,
-  Home,
-  LayoutDashboard,
-  LogOut,
-  MessageCircle,
-  Moon,
-  Settings2,
-  Sun,
-  UserPlus2,
-  Users,
-  type LucideIcon,
+    Bot,
+    ClipboardList,
+    Home,
+    LayoutDashboard,
+    LogOut,
+    MessageCircle,
+    Moon,
+    Settings2,
+    Sun,
+    UserPlus2,
+    Users,
+    type LucideIcon,
 } from "lucide-react";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
@@ -152,10 +152,10 @@ export function Sidebar({
 
   return (
     <div
-      className={`w-16 h-screen flex flex-col items-center py-4 border-r flex-shrink-0 ${isDarkMode ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}
+      className={`w-full md:w-16 h-14 md:h-screen flex flex-row md:flex-col items-center py-2 md:py-4 px-3 md:px-0 border-t md:border-t-0 md:border-r flex-shrink-0 order-2 md:order-1 ${isDarkMode ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}
     >
       <div
-        className="mb-8 cursor-pointer"
+        className="mb-0 md:mb-8 cursor-pointer"
         onClick={() => navigate("/settings")}
         title="Hồ sơ"
       >
@@ -170,7 +170,7 @@ export function Sidebar({
           </AvatarFallback>
         </Avatar>
       </div>
-      <div className="flex-1 flex flex-col gap-6 w-full items-center">
+      <div className="flex-1 flex flex-row md:flex-col gap-4 md:gap-6 w-full items-center justify-center">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -185,9 +185,9 @@ export function Sidebar({
               item.to === "/chat" ? () => void preloadChatPage() : undefined
             }
             className={({ isActive }) =>
-              `p-3 rounded-xl transition-all duration-200 block ${
+              `p-2.5 md:p-3 rounded-xl transition-all duration-200 block ${
                 isActive
-                  ? "bg-blue-600 text-white shadow-md w-[48px] flex items-center justify-center p-0 h-[48px]"
+                  ? "bg-blue-600 text-white shadow-md w-10 h-10 md:w-[48px] md:h-[48px] flex items-center justify-center p-0"
                   : isDarkMode
                     ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100"
                     : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"
@@ -211,49 +211,50 @@ export function Sidebar({
         <button
           onClick={onOpenChatbot}
           title="Chatbot"
-          className={`p-3 rounded-xl transition-all duration-200 ${isDarkMode ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100" : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"}`}
+          className={`p-2.5 md:p-3 rounded-xl transition-all duration-200 ${isDarkMode ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100" : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"}`}
         >
           <Bot size={24} />
         </button>
       </div>
+      <div className="flex items-center gap-2 md:flex-col md:gap-2">
+        <button
+          onClick={onToggleTheme}
+          title={
+            isDarkMode
+              ? "Chuyển sang giao diện sáng"
+              : "Chuyển sang giao diện tối"
+          }
+          className={`p-2.5 md:p-3 rounded-xl transition-all duration-200 ${isDarkMode ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100" : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"}`}
+        >
+          {isDarkMode ? <Sun size={22} /> : <Moon size={22} />}
+        </button>
 
-      <button
-        onClick={onToggleTheme}
-        title={
-          isDarkMode
-            ? "Chuyển sang giao diện sáng"
-            : "Chuyển sang giao diện tối"
-        }
-        className={`mb-2 p-3 rounded-xl transition-all duration-200 ${isDarkMode ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100" : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"}`}
-      >
-        {isDarkMode ? <Sun size={22} /> : <Moon size={22} />}
-      </button>
+        <NavLink
+          to="/settings"
+          title="Cài đặt"
+          className={({ isActive }) =>
+            `p-2.5 md:p-3 rounded-xl transition-all duration-200 ${
+              isActive
+                ? "bg-blue-600 text-white shadow-md"
+                : isDarkMode
+                  ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100"
+                  : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"
+            }`
+          }
+        >
+          {({ isActive }) => (
+            <Settings2 size={22} strokeWidth={isActive ? 2.5 : 2} />
+          )}
+        </NavLink>
 
-      <NavLink
-        to="/settings"
-        title="Cài đặt"
-        className={({ isActive }) =>
-          `mb-2 p-3 rounded-xl transition-all duration-200 ${
-            isActive
-              ? "bg-blue-600 text-white shadow-md"
-              : isDarkMode
-                ? "text-gray-400 hover:bg-slate-800 hover:text-gray-100"
-                : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"
-          }`
-        }
-      >
-        {({ isActive }) => (
-          <Settings2 size={22} strokeWidth={isActive ? 2.5 : 2} />
-        )}
-      </NavLink>
-
-      <button
-        onClick={handleLogout}
-        title="Đăng xuất"
-        className="mb-2 p-3 rounded-xl text-red-300 hover:bg-red-900/40 hover:text-red-100 transition-all duration-200"
-      >
-        <LogOut size={22} />
-      </button>
+        <button
+          onClick={handleLogout}
+          title="Đăng xuất"
+          className="p-2.5 md:p-3 rounded-xl text-red-300 hover:bg-red-900/40 hover:text-red-100 transition-all duration-200"
+        >
+          <LogOut size={22} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -282,13 +283,13 @@ export function MainLayout() {
 
   return (
     <WebRTCProvider>
-      <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground font-sans relative transition-colors duration-200">
+      <div className="flex h-screen w-screen flex-col md:flex-row overflow-hidden bg-background text-foreground font-sans relative transition-colors duration-200">
         <Sidebar
           onOpenChatbot={() => setIsChatbotOpen(true)}
           isDarkMode={isDarkMode}
           onToggleTheme={handleToggleTheme}
         />
-        <main className="flex-1 flex min-h-0 overflow-y-auto overflow-x-hidden">
+        <main className="flex-1 flex min-h-0 overflow-y-auto overflow-x-hidden order-1 md:order-2">
           <Suspense
             fallback={
               <div className="flex-1 flex items-center justify-center text-sm text-slate-500 dark:text-slate-400">

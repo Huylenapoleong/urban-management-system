@@ -25,3 +25,5 @@ Thumbs.db
 /.gitnexus/
 AGENTS.md
 CLAUDE.md
+/md
+/.vscode
