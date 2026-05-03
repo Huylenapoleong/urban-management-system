@@ -13,6 +13,7 @@ export interface KnowledgeDocumentMetadata {
 export interface StoredKnowledgeDocumentRecord {
   PK: typeof KNOWLEDGE_DOCUMENT_PK;
   SK: string;
+  entityType: 'KNOWLEDGE_DOCUMENT';
   category: string;
   docId: string;
   title: string;

@@ -158,6 +158,7 @@ export class KnowledgeBaseService {
     const record: StoredKnowledgeDocumentRecord = {
       PK: KNOWLEDGE_DOCUMENT_PK,
       SK: docId,
+      entityType: 'KNOWLEDGE_DOCUMENT',
       docId,
       category,
       title,
@@ -201,6 +202,7 @@ export class KnowledgeBaseService {
 
     const next: StoredKnowledgeDocumentRecord = {
       ...current,
+      entityType: 'KNOWLEDGE_DOCUMENT',
       title: title ?? current.title,
       content: content ?? current.content,
       category: category ?? current.category,

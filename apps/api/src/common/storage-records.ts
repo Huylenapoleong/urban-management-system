@@ -47,7 +47,8 @@ export type StorageEntityType =
   | 'GROUP_AUDIT_EVENT'
   | 'REPORT'
   | 'REPORT_AUDIT_EVENT'
-  | 'REPORT_CONVERSATION_LINK';
+  | 'REPORT_CONVERSATION_LINK'
+  | 'KNOWLEDGE_DOCUMENT';
 
 export interface TableItemBase {
   PK: string;
