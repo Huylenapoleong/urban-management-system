@@ -111,6 +111,19 @@ Du an urban-management-system la he sinh thai quan ly do thi (SmartCity) gom BE 
 - POST /uploads/presign/upload
 - POST /uploads/presign/download
 
+### Locations (Public, không cần Auth)
+- GET /locations/provinces — Danh sách 63 tỉnh/thành từ snapshot V2
+- GET /locations/wards?provinceCode={xx} — Danh sách phường/xã theo tỉnh
+- GET /locations/search?q={query}&limit={n} — Tìm kiếm tỉnh/phường theo tên
+- GET /locations/resolve?locationCode={code} — Phân giải locationCode thành nhãn hiển thị
+
+**Format locationCode V2** (thay thế format cũ 4-phần):
+- Province-level: `VN-{provinceCode}` (ví dụ: `VN-79` = TP.HCM)
+- Ward-level: `VN-{provinceCode}-{wardCode}` (ví dụ: `VN-79-00001`)
+- ProvinceCode: 2 chữ số, WardCode: 5 chữ số
+- Pattern: `/^VN-(\d{2})(?:-(\d{5}))?$/`
+- Data source: `vietnam-location-v2.snapshot.json` (load local)
+
 ### Health + Maintenance
 - GET /api (health check)
 - GET /health/live, /health/ready
@@ -158,9 +171,10 @@ Du an urban-management-system la he sinh thai quan ly do thi (SmartCity) gom BE 
 
 ### shared-utils
 - Ulid + nowIso helpers
-- Normalize phone/email, parse locationCode
+- Normalize phone/email, parse locationCode (hỗ trợ legacy 4-phần lẫn V2 mới)
 - DynamoDB key builders (USER#, GROUP#, CONV#, REPORT#, OUTBOX#)
 - Conversation id helpers (DM/GRP)
+- `isSameProvince(left, right)` / `isSameWard(left, right)` để so sánh phạm vi địa lý
 
 ## Hien trang mobile-app-fluter
 - README hien la template Flutter mac dinh, chua neu ro cac man hinh hay flow nghiep vu
@@ -212,7 +226,7 @@ Du an urban-management-system la he sinh thai quan ly do thi (SmartCity) gom BE 
 ### 1) Chuc nang san pham
 - Dong bo ro luong nghiep vu chat va group theo tai lieu thiet ke
 - Hoan thien luong bao cao su co: tao, danh muc, tien trinh, phan cong
-- Quan ly nhan vien va phan quyen theo locationCode
+- Quan ly nhan vien va phan quyen theo locationCode V2 (`VN-{provinceCode}` hoặc `VN-{provinceCode}-{wardCode}`)
 
 ### 2) Hieu nang va do tre
 - Giam do tre chat bang outbox replay theo su kien (event-driven)
@@ -328,6 +342,22 @@ Du an urban-management-system la he sinh thai quan ly do thi (SmartCity) gom BE 
 - **Độ mượt:** 60FPS ổn định, không còn hiện tượng giật lag khi gửi tin nhắn.
 - **UI/UX:** Đã chuyển đổi sang ngôn ngữ thiết kế Premium (Rounded corners, Soft shadows, Modern typography).
 - **Sync:** Đã hoàn thành cơ chế đồng bộ danh bạ và quản lý hội thoại nâng cao.
+
+#### [x] 8. Tái thiết kế Auth & Profile - Premium Glassmorphism & Architecture Migration
+- **Auth UI Premium:** Tái thiết kế toàn bộ màn hình Đăng nhập/Đăng ký theo phong cách **Glassmorphism** (thủy tinh mờ), sử dụng hiệu ứng BackdropFilter và Gradient hiện đại.
+- **Location Picker V2:** Thay thế việc nhập mã địa điểm thủ công bằng **BottomSheet chọn địa điểm đa bước** (Tỉnh -> Phường). Tự động phân giải và hiển thị tên địa danh thân thiện.
+- **Architecture Migration:** Chuyển đổi thành công điểm đầu vào của ứng dụng (`main.dart`) sang kiến trúc **Riverpod + GoRouter**, loại bỏ sự phụ thuộc vào các lớp cũ (Provider legacy).
+- **Profile Completion:** 
+  - Hoàn thiện trang **Chỉnh sửa hồ sơ** cho cả Công dân và Cán bộ.
+  - Tích hợp **Quản lý phiên đăng nhập** (Security) cho phép xem thiết bị đang truy cập và đăng xuất từ xa.
+  - Đồng bộ typography bằng **Google Fonts (Poppins)** và tối ưu hóa UI "Pro Max" cho toàn bộ tab Cá nhân.
+- **Bắt buộc đồng ý điều khoản:** Tích hợp quy trình xác nhận chính sách và điều khoản sử dụng vào luồng đăng ký tài khoản.
+
+## Trạng thái hiện tại (Cập nhật 04/05/2026)
+- **Kiến trúc:** Đã chuyển đổi hoàn toàn sang Riverpod + GoRouter ổn định.
+- **Auth:** Luồng Đăng nhập/Đăng ký Premium đã sẵn sàng, hỗ trợ chọn địa điểm thông minh.
+- **Profile:** Hoàn tất 100% các tính năng chỉnh sửa thông tin, bảo mật và quản lý avatar.
+- **Dependencies:** Đã cấu hình và fix lỗi cho `flutter_markdown`, `google_fonts` và các thư viện hỗ trợ UI.
 
 ## Đề xuất tài liệu bổ sung
 - [x] Bổ sung README cho mobile-app-fluter: cấu trúc thư mục, màn hình, flow chính.

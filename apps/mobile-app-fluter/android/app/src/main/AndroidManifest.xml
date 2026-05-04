@@ -22,7 +22,7 @@
         </intent>
     </queries>
     <application
-        android:label="mobile_app_fluter"
+        android:label="Cư Dân Online"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -50,3 +50,8 @@ flutter run --release --dart-define=API_BASE_URL=http://192.168.2.195:3001
 ## 4. Các lưu ý khi phát triển
 - Luôn kiểm tra `update.md` để nắm bắt tiến độ và định hướng của dự án.
 - Tra cứu danh sách API tại `FE_BE_SYNC.md`.
+- **locationCode V2**: Khi seed data hoặc test, dùng format mới `VN-{provinceCode}-{wardCode}` (ví dụ: `VN-79-00001`).
+  - Lấy danh sách tỉnh: `GET http://localhost:3001/locations/provinces`
+  - Lấy phường/xã: `GET http://localhost:3001/locations/wards?provinceCode=79`
+  - Tìm kiếm: `GET http://localhost:3001/locations/search?q=Hồ+Chí+Minh`
+  - Format cũ (`VN-HCM-BQ1-P01`) vẫn được resolve nhưng không còn dùng khi tạo user/group mới.
