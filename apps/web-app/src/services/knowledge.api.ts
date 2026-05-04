@@ -1,6 +1,6 @@
 import {
-  buildSessionMetadataHeaders,
-  readAccessToken,
+    buildSessionMetadataHeaders,
+    readAccessToken,
 } from "@/lib/api-client";
 
 export type KnowledgeDocumentStatus = "ACTIVE" | "INACTIVE";

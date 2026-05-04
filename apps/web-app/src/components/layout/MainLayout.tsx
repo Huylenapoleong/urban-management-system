@@ -8,6 +8,7 @@ import { WebRTCProvider } from "@/providers/WebRTCProvider";
 import { getProfile } from "@/services/user.api";
 import { useQuery } from "@tanstack/react-query";
 import {
+    BookOpen,
     Bot,
     ClipboardList,
     Home,
@@ -110,6 +111,7 @@ export function Sidebar({
       badgeCount: incomingFriendRequestCount,
     },
     { to: "/groups", icon: Users, label: "Nhóm" },
+    { to: "/knowledge-base", icon: BookOpen, label: "Pháp luật" },
     { to: "/reports", icon: ClipboardList, label: "Báo cáo duyệt" },
   ].filter(Boolean) as NavItem[];
 
