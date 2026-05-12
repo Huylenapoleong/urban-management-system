@@ -58,8 +58,8 @@ export function readAccessToken(): string | null {
 }
 
 export function writeAccessToken(token: string): void {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
   sessionStorage.setItem(AUTH_TOKEN_KEY, token);
-  localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
 export function clearAccessToken(): void {
@@ -75,8 +75,8 @@ export function readRefreshToken(): string | null {
 }
 
 export function writeRefreshToken(token: string): void {
+  localStorage.setItem(REFRESH_TOKEN_KEY, token);
   sessionStorage.setItem(REFRESH_TOKEN_KEY, token);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 export function clearRefreshToken(): void {
@@ -172,7 +172,9 @@ function normalizeConversationRoute(url?: string): string | undefined {
 }
 
 client.interceptors.request.use((config) => {
-  config.headers = config.headers ?? {};
+  if (!config.headers) {
+    (config as any).headers = {};
+  }
 
   const sessionHeaders = buildSessionMetadataHeaders();
   config.headers["x-app-variant"] = sessionHeaders["x-app-variant"];
@@ -216,7 +218,9 @@ client.interceptors.response.use(
       originalRequest._retry = true;
       const nextAccessToken = await refreshAccessToken();
       if (nextAccessToken) {
-        originalRequest.headers = originalRequest.headers ?? {};
+        if (!originalRequest.headers) {
+          (originalRequest as any).headers = {};
+        }
         originalRequest.headers.Authorization = `Bearer ${nextAccessToken}`;
         return client(originalRequest);
       }

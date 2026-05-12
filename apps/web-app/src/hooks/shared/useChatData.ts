@@ -182,14 +182,14 @@ export function useConversations(searchTerm?: string) {
   return query;
 }
 
-export function useMessages(conversationId?: string) {
+export function useMessages(conversationId?: string, searchTerm?: string, messageType?: string) {
   const queryClient = useQueryClient();
   const [typingUsersByConversation, setTypingUsersByConversation] = useState<
     Record<string, Record<string, ChatTypingStateEvent>>
   >({});
   const messageQueryKey = useMemo(
-    () => ["messages", conversationId] as const,
-    [conversationId],
+    () => ["messages", conversationId, searchTerm?.trim() || "", messageType || ""] as const,
+    [conversationId, searchTerm, messageType],
   );
   const messageRefreshTimerRef = useRef<number | null>(null);
   const conversationRefreshTimerRef = useRef<number | null>(null);
@@ -260,6 +260,8 @@ export function useMessages(conversationId?: string) {
       listMessagesPage(conversationId!, {
         limit: 40,
         cursor: pageParam,
+        q: searchTerm?.trim(),
+        type: messageType,
       }),
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     enabled: !!conversationId,

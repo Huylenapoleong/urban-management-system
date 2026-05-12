@@ -5,22 +5,14 @@ import type {
   GroupType,
 } from "@urban/shared-constants";
 import type {
+  AuditEventItem,
   GroupBan,
   GroupInviteLink,
   GroupMembership,
   GroupMetadata,
 } from "@urban/shared-types";
 
-export type AuditEventItem = {
-  eventId: string;
-  eventType: string;
-  actorId?: string;
-  targetId?: string;
-  occurredAt: string;
-  metadata?: Record<string, unknown>;
-};
-
-type ManageMemberAction = "add" | "update" | "remove";
+type ManageMemberAction = "add" | "update" | "remove" | "transfer";
 
 export interface GroupListParams {
   mine?: boolean;
@@ -120,8 +112,11 @@ export async function joinGroup(groupId: string): Promise<GroupMembership> {
   return await ApiClient.post(`/groups/${encodeURIComponent(groupId)}/join`);
 }
 
-export async function leaveGroup(groupId: string): Promise<GroupMembership> {
-  return await leaveGroupWithPayload(groupId);
+export async function leaveGroup(
+  groupId: string,
+  payload?: LeaveGroupInput,
+): Promise<GroupMembership> {
+  return await leaveGroupWithPayload(groupId, payload);
 }
 
 export async function leaveGroupWithPayload(

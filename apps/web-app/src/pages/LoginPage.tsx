@@ -4,7 +4,7 @@ import { useAuth } from "@/providers/auth-context";
 import { login, type LoginRequest } from "@/services/auth.api";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (typeof error !== "object" || error === null) {
@@ -17,6 +17,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login: authenticate } = useAuth();
   const [formData, setFormData] = useState<LoginRequest>({
     login: "",
@@ -29,7 +30,8 @@ export function LoginPage() {
     onSuccess: (data) => {
       if (data.tokens?.accessToken) {
         authenticate(data.tokens.accessToken);
-        navigate("/");
+        const from = (location.state as any)?.from?.pathname || "/";
+        navigate(from, { replace: true });
       } else {
         setError("Token đăng nhập không được tìm thấy.");
       }

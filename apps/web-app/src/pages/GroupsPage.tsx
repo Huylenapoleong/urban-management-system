@@ -7,7 +7,9 @@ import {
     joinGroup,
     joinGroupByInvite,
     leaveGroup,
+    listGroupMembers,
 } from "@/services/group.api";
+import type { GroupMembership } from "@urban/shared-types";
 import { resolveLocationCode } from "@/services/location.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GroupType } from "@urban/shared-constants";
@@ -24,7 +26,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "react-hot-toast";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 type GroupFormState = {
   groupName: string;
@@ -35,7 +37,8 @@ type GroupFormState = {
 
 export default function GroupsPage() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
+   const { code } = useParams<{ code?: string }>();
+   const navigate = useNavigate();
   const { user } = useAuth();
   const accountLocationCode = user?.locationCode?.trim() ?? "";
   const canCreateOfficialGroup =
@@ -65,14 +68,28 @@ export default function GroupsPage() {
     locationCode: user?.locationCode ?? "",
   });
 
-  const { data: groups = [], isLoading } = useQuery({
-    queryKey: ["groups", "all"],
-    queryFn: () => getGroups(),
-  });
-
   const { data: joinedGroups = [] } = useQuery({
     queryKey: ["groups", "mine"],
     queryFn: () => getGroups({ mine: true }),
+  });
+
+  const [leaveGroupId, setLeaveGroupId] = useState<string | null>(null);
+  const [leaveSuccessorId, setLeaveSuccessorId] = useState("");
+  const groupToLeave = useMemo(
+    () => joinedGroups.find((g) => g.id === leaveGroupId),
+    [joinedGroups, leaveGroupId]
+  );
+  const isOwnerOfGroupToLeave = groupToLeave?.createdBy === user?.sub;
+
+  const { data: leaveGroupMembers = [] } = useQuery({
+    queryKey: ["group-members", leaveGroupId],
+    queryFn: () => listGroupMembers(leaveGroupId!),
+    enabled: Boolean(leaveGroupId && isOwnerOfGroupToLeave),
+  });
+
+  const { data: groups = [], isLoading } = useQuery({
+    queryKey: ["groups", "all"],
+    queryFn: () => getGroups(),
   });
 
   // Load friends only when create modal is open (lazy)
@@ -103,12 +120,15 @@ export default function GroupsPage() {
   });
 
   const leaveGroupMutation = useMutation({
-    mutationFn: leaveGroup,
-    onMutate: (id) => setIsLeaving(id),
+    mutationFn: ({ groupId, successorUserId }: { groupId: string; successorUserId?: string }) =>
+      leaveGroup(groupId, { successorUserId }),
+    onMutate: ({ groupId }) => setIsLeaving(groupId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Đã rời nhóm.");
+      setLeaveGroupId(null);
+      setLeaveSuccessorId("");
     },
     onError: (error: { message?: string }) => {
       toast.error(error?.message || "Không thể rời nhóm lúc này.");
@@ -157,18 +177,34 @@ export default function GroupsPage() {
 
   const joinByInviteMutation = useMutation({
     mutationFn: (code: string) => joinGroupByInvite(code),
-    onSuccess: () => {
+    onSuccess: (data: GroupMembership) => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Đã tham gia nhóm bằng link mời");
       setInviteCodeInput("");
+      
+      // Navigate to chat of the joined group
+      navigate("/chat", {
+        state: {
+          conversationId: `group:${data.groupId}`,
+          displayName: "Nhóm mới tham gia",
+        },
+      });
     },
+
     onError: (error: { message?: string }) => {
       toast.error(error?.message || "Link hoặc mã mời không hợp lệ.");
+      navigate("/groups", { replace: true });
     },
   });
 
-  const handleOpenCreate = () => {
+   useEffect(() => {
+     if (code) {
+       joinByInviteMutation.mutate(code);
+     }
+   }, [code, joinByInviteMutation]);
+
+   const handleOpenCreate = () => {
     setFormState({
       groupName: "",
       description: "",
@@ -545,7 +581,13 @@ export default function GroupsPage() {
                     Mở chat nhóm
                   </button>
                   <button
-                    onClick={() => leaveGroupMutation.mutate(group.id)}
+                    onClick={() => {
+                      if (group.createdBy === user?.sub) {
+                        setLeaveGroupId(group.id);
+                      } else if (window.confirm("Bạn có chắc chắn muốn rời nhóm này?")) {
+                        leaveGroupMutation.mutate({ groupId: group.id });
+                      }
+                    }}
                     disabled={isLeaving === group.id}
                     className="w-full flex justify-center items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-600 rounded-lg transition-colors disabled:opacity-50"
                   >
@@ -580,6 +622,86 @@ export default function GroupsPage() {
           </div>
         )}
       </div>
+
+      {/* Modal chọn người kế nhiệm khi rời nhóm (dành cho Owner) */}
+      {leaveGroupId && groupToLeave && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <LogOut className="text-red-500" size={24} />
+                Rời nhóm
+              </h3>
+              <button
+                onClick={() => setLeaveGroupId(null)}
+                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl">
+                <p className="text-sm text-amber-800 dark:text-amber-200 flex gap-2">
+                  <span className="shrink-0 font-bold text-amber-600">Lưu ý:</span>
+                  Bạn là nhóm trưởng của <strong>{groupToLeave.groupName}</strong>. Bạn cần chọn một thành viên khác để giao quyền nhóm trưởng trước khi rời đi.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                  Chọn người kế nhiệm
+                </label>
+                <select
+                  className="w-full h-11 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                  value={leaveSuccessorId}
+                  onChange={(e) => setLeaveSuccessorId(e.target.value)}
+                >
+                  <option value="">-- Chọn thành viên --</option>
+                  {leaveGroupMembers
+                    .filter((m) => m.userId !== user?.sub)
+                    .map((member) => (
+                      <option key={member.userId} value={member.userId}>
+                        {member.userId} (Thành viên)
+                      </option>
+                    ))}
+                </select>
+                {leaveGroupMembers.length <= 1 && (
+                  <p className="text-xs text-red-500 italic">
+                    Nhóm không có thành viên khác để giao quyền. Bạn có thể giải tán nhóm nếu muốn.
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="p-6 pt-2 flex gap-3">
+              <button
+                onClick={() => setLeaveGroupId(null)}
+                className="flex-1 h-11 rounded-xl font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => {
+                  if (!leaveSuccessorId) {
+                    toast.error("Vui lòng chọn người kế nhiệm.");
+                    return;
+                  }
+                  leaveGroupMutation.mutate({
+                    groupId: leaveGroupId,
+                    successorUserId: leaveSuccessorId,
+                  });
+                }}
+                disabled={!leaveSuccessorId || leaveGroupMutation.isPending}
+                className="flex-1 h-11 rounded-xl font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+              >
+                {leaveGroupMutation.isPending && (
+                  <Loader2 className="animate-spin" size={18} />
+                )}
+                Rời nhóm & Giao quyền
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

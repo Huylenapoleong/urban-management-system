@@ -22,6 +22,7 @@ type ChatMessageType =
 export interface SendMessageInput {
   text?: string;
   attachmentKey?: string;
+  attachmentUrl?: string;
   type?: ChatMessageType;
   replyTo?: string;
   mentions?: string[];
@@ -220,7 +221,7 @@ export async function listConversations(
           result.push({
             conversationId: convId,
             groupName: group.groupName,
-            lastMessagePreview: "Nhóm mới tham gia",
+            lastMessagePreview: "Bạn vừa tham gia nhóm bằng link mời",
             lastSenderName: "Hệ thống",
             unreadCount: 0,
             isGroup: true,
@@ -278,6 +279,8 @@ export async function listMessagesPage(
   params?: {
     cursor?: string;
     limit?: number;
+    q?: string;
+    type?: string;
   },
 ): Promise<CursorPage<MessageItem>> {
   const limit = params?.limit ?? 40;
@@ -285,6 +288,12 @@ export async function listMessagesPage(
   query.set("limit", String(limit));
   if (params?.cursor) {
     query.set("cursor", params.cursor);
+  }
+  if (params?.q) {
+    query.set("q", params.q);
+  }
+  if (params?.type) {
+    query.set("type", params.type);
   }
 
   const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
