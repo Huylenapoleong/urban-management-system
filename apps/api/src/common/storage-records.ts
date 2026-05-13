@@ -42,6 +42,7 @@ export type StorageEntityType =
   | 'MESSAGE_SEARCH'
   | 'MESSAGE_DEDUP'
   | 'CONVERSATION'
+  | 'CONVERSATION_MEMBER_ALIAS'
   | 'DIRECT_MESSAGE_REQUEST'
   | 'CHAT_OUTBOX_EVENT'
   | 'CONVERSATION_AUDIT_EVENT'
@@ -345,6 +346,16 @@ export interface StoredConversation
   userId: string;
   conversationId: string;
   lastReadAt?: string | null;
+}
+
+export interface StoredConversationMemberAlias extends TableItemBase {
+  entityType: 'CONVERSATION_MEMBER_ALIAS';
+  conversationId: string;
+  ownerUserId: string;
+  targetUserId: string;
+  alias: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StoredDirectMessageRequest extends TableItemBase {

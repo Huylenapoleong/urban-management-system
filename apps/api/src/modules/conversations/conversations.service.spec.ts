@@ -11,6 +11,7 @@ import { ConversationsService } from './conversations.service';
 describe('ConversationsService', () => {
   const repository = {
     delete: jest.fn(),
+    batchGet: jest.fn(),
     get: jest.fn(),
     put: jest.fn(),
     queryByPkPage: jest.fn(),
@@ -263,6 +264,7 @@ describe('ConversationsService', () => {
         fallbackFullName,
     );
     repository.delete.mockResolvedValue(undefined);
+    repository.batchGet.mockResolvedValue([]);
     repository.scanAll.mockResolvedValue([]);
     repository.put.mockResolvedValue(undefined);
     repository.queryByPkPage.mockResolvedValue({
@@ -337,10 +339,13 @@ describe('ConversationsService', () => {
       `dm:${otherUser.userId}`,
     );
 
-    expect(repository.delete).toHaveBeenCalledWith(
+    expect(repository.put).toHaveBeenCalledWith(
       'Conversations',
-      actorSummary.PK,
-      actorSummary.SK,
+      expect.objectContaining({
+        PK: actorSummary.PK,
+        SK: actorSummary.SK,
+        deletedAt: expect.any(String),
+      }),
     );
     expect(repository.delete).not.toHaveBeenCalledWith(
       'Messages',
@@ -457,10 +462,13 @@ describe('ConversationsService', () => {
     const result = await service.deleteConversation(actor, 'group:group-1');
 
     expect(groupsService.getGroup).not.toHaveBeenCalled();
-    expect(repository.delete).toHaveBeenCalledWith(
+    expect(repository.put).toHaveBeenCalledWith(
       'Conversations',
-      groupSummary.PK,
-      groupSummary.SK,
+      expect.objectContaining({
+        PK: groupSummary.PK,
+        SK: groupSummary.SK,
+        deletedAt: expect.any(String),
+      }),
     );
     expect(chatRealtimeService.leaveConversationForUser).toHaveBeenCalledWith(
       actor.id,
@@ -991,6 +999,94 @@ describe('ConversationsService', () => {
         nextCursor: expect.any(String),
       },
     });
+  });
+
+  it('applies a conversation-scoped alias to DM inbox labels', async () => {
+    repository.queryByPk.mockResolvedValue([actorSummary]);
+    repository.batchGet.mockResolvedValue([
+      {
+        PK: makeConversationPk(conversationKey),
+        SK: `ALIAS#${actor.id}#${otherUser.userId}`,
+        entityType: 'CONVERSATION_MEMBER_ALIAS',
+        conversationId: conversationKey,
+        ownerUserId: actor.id,
+        targetUserId: otherUser.userId,
+        alias: 'Anh Hai trong DM',
+        createdAt: '2026-03-18T10:06:00.000Z',
+        updatedAt: '2026-03-18T10:06:00.000Z',
+      },
+    ]);
+
+    const result = await service.listConversations(actor, { q: 'anh hai' });
+
+    expect(repository.batchGet).toHaveBeenCalledWith('Conversations', [
+      {
+        PK: makeConversationPk(conversationKey),
+        SK: `ALIAS#${actor.id}#${otherUser.userId}`,
+        conversationId: conversationKey,
+        targetUserId: otherUser.userId,
+      },
+    ]);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        groupName: 'Anh Hai trong DM',
+      }),
+    );
+  });
+
+  it('stores an alias scoped to a group conversation participant', async () => {
+    groupsService.getGroup.mockResolvedValue({
+      id: 'group-1',
+      groupId: 'group-1',
+      groupType: 'AREA',
+      messagePolicy: 'ALL_MEMBERS',
+      locationCode: actor.locationCode,
+      createdBy: actor.id,
+      memberCount: 2,
+      isOfficial: false,
+      deletedAt: null,
+      createdAt: '2026-03-18T10:00:00.000Z',
+      updatedAt: '2026-03-18T10:00:00.000Z',
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      roleInGroup: 'MEMBER',
+      deletedAt: null,
+    });
+    groupsService.listMembers.mockResolvedValue([
+      { userId: actor.id },
+      { userId: otherUser.userId },
+    ]);
+    repository.get.mockResolvedValue(undefined);
+
+    const result = await service.setConversationAlias(
+      actor,
+      'group:group-1',
+      actor.id,
+      { alias: 'Toi trong nhom' },
+    );
+
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        PK: makeConversationPk('GRP#group-1'),
+        SK: `ALIAS#${actor.id}#${actor.id}`,
+        entityType: 'CONVERSATION_MEMBER_ALIAS',
+        conversationId: 'GRP#group-1',
+        ownerUserId: actor.id,
+        targetUserId: actor.id,
+        alias: 'Toi trong nhom',
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        userId: actor.id,
+        alias: 'Toi trong nhom',
+      }),
+    );
   });
 
   it('blocks editing a public-group message after the actor left the group', async () => {

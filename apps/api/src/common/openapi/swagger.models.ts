@@ -521,6 +521,43 @@ export class UserContactAliasRemovalResultDto {
   clearedAt!: string;
 }
 
+export class SetConversationAliasRequestDto {
+  @ApiProperty({
+    example: 'Anh Hai',
+    description:
+      'Private alias for a participant inside this conversation only. Maximum 100 characters.',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  alias!: string;
+}
+
+export class ConversationAliasDto {
+  @ApiProperty({ example: 'dm:01JPCY0000CITIZENB00000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Anh Hai' })
+  alias!: string;
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class ConversationAliasRemovalResultDto {
+  @ApiProperty({ example: 'dm:01JPCY0000CITIZENB00000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: '2026-03-20T06:05:00.000Z' })
+  clearedAt!: string;
+}
+
 export class PushDeviceDto {
   @ApiProperty({ example: 'device-admin-web-01' })
   deviceId!: string;

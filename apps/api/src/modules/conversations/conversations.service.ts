@@ -21,6 +21,8 @@ import type {
   AuditEventItem,
   AuthenticatedUser,
   CallEventInfo,
+  ConversationAlias,
+  ConversationAliasRemovalResult,
   ConversationHistoryClearedResult,
   ConversationSummary,
   MediaAsset,
@@ -54,6 +56,7 @@ import {
 import type {
   StoredChatOutboxEvent,
   StoredConversation,
+  StoredConversationMemberAlias,
   StoredConversationAuditEvent,
   StoredDirectMessageRequest,
   StoredMessage,
@@ -124,6 +127,7 @@ const MAX_SEARCH_TOKENS_PER_MESSAGE = 16;
 const MAX_MESSAGE_SEARCH_QUERY_TOKENS = 5;
 const MESSAGE_SEARCH_INDEX_PAGE_SIZE = 75;
 const MESSAGE_SEARCH_INDEX_MAX_PAGES = 4;
+const CONVERSATION_ALIAS_SK_PREFIX = 'ALIAS#';
 
 interface MessageSearchCursorPayload {
   kind: 'messageSearch';
@@ -199,6 +203,12 @@ export class ConversationsService {
       }
     }
     const deduplicatedItems = Array.from(uniqueItemsMap.values());
+    const aliasByConversationTargetForSearch = keyword
+      ? await this.getConversationAliasMapForSummaries(
+          actor.id,
+          deduplicatedItems,
+        )
+      : new Map<string, StoredConversationMemberAlias>();
 
     const filtered = deduplicatedItems.filter((item) => {
       if (item.deletedAt) {
@@ -224,8 +234,22 @@ export class ConversationsService {
       if (!keyword) {
         return true;
       }
+      const counterpartId = this.getDmCounterpartId(actor.id, item);
+      const alias = counterpartId
+        ? aliasByConversationTargetForSearch.get(
+            this.makeConversationAliasLookupKey(
+              item.conversationId,
+              counterpartId,
+            ),
+          )?.alias
+        : undefined;
 
-      return [item.groupName, item.lastMessagePreview, item.lastSenderName]
+      return [
+        alias,
+        item.groupName,
+        item.lastMessagePreview,
+        item.lastSenderName,
+      ]
         .join(' ')
         .toLowerCase()
         .includes(keyword);
@@ -237,10 +261,19 @@ export class ConversationsService {
       (item) => `${item.isPinned ? '1' : '0'}|${item.updatedAt}`,
       (item) => item.conversationId,
     );
+    const aliasByConversationTarget = keyword
+      ? aliasByConversationTargetForSearch
+      : await this.getConversationAliasMapForSummaries(actor.id, page.items);
 
     return buildPaginatedResponse(
-      page.items.map((item) =>
-        this.serializeConversationSummary(actor.id, item),
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeConversationSummary(
+            actor.id,
+            item,
+            aliasByConversationTarget,
+          ),
+        ),
       ),
       page.nextCursor,
     );
@@ -291,10 +324,18 @@ export class ConversationsService {
       (item) => item.updatedAt,
       (item) => item.conversationId,
     );
+    const aliasByConversationTarget =
+      await this.getConversationAliasMapForSummaries(actor.id, page.items);
 
     return buildPaginatedResponse(
-      page.items.map((item) =>
-        this.serializeConversationSummary(actor.id, item),
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeConversationSummary(
+            actor.id,
+            item,
+            aliasByConversationTarget,
+          ),
+        ),
       ),
       page.nextCursor,
     );
@@ -406,6 +447,99 @@ export class ConversationsService {
 
     return this.serializeConversationSummary(actor.id, nextConversation);
   }
+
+  async listConversationAliases(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationAlias[]> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const participants = new Set(access.participants);
+    const aliasMap = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
+
+    return Array.from(aliasMap.values())
+      .filter((alias) => participants.has(alias.targetUserId))
+      .sort((left, right) =>
+        left.targetUserId.localeCompare(right.targetUserId),
+      )
+      .map((alias) => this.toConversationAlias(access.conversationId, alias));
+  }
+
+  async setConversationAlias(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    targetUserId: string,
+    payload: unknown,
+  ): Promise<ConversationAlias> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const target = await this.usersService.getByIdOrThrow(targetUserId);
+
+    this.ensureConversationAliasTarget(access, target.userId);
+
+    const body = ensureObject(payload);
+    const alias = requiredString(body, 'alias', {
+      minLength: 1,
+      maxLength: 100,
+    });
+    const occurredAt = nowIso();
+    const existingAlias = await this.getConversationAlias(
+      actor.id,
+      access.conversationKey,
+      target.userId,
+    );
+    const nextAlias: StoredConversationMemberAlias = {
+      PK: makeConversationPk(access.conversationKey),
+      SK: this.makeConversationAliasSk(actor.id, target.userId),
+      entityType: 'CONVERSATION_MEMBER_ALIAS',
+      conversationId: access.conversationKey,
+      ownerUserId: actor.id,
+      targetUserId: target.userId,
+      alias,
+      createdAt: existingAlias?.createdAt ?? occurredAt,
+      updatedAt: occurredAt,
+    };
+
+    await this.repository.put(
+      this.config.dynamodbConversationsTableName,
+      nextAlias,
+    );
+
+    return this.toConversationAlias(access.conversationId, nextAlias);
+  }
+
+  async clearConversationAlias(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    targetUserId: string,
+  ): Promise<ConversationAliasRemovalResult> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+
+    this.ensureConversationAliasTarget(access, targetUserId);
+
+    const existingAlias = await this.getConversationAlias(
+      actor.id,
+      access.conversationKey,
+      targetUserId,
+    );
+    const clearedAt = nowIso();
+
+    if (existingAlias) {
+      await this.repository.delete(
+        this.config.dynamodbConversationsTableName,
+        existingAlias.PK,
+        existingAlias.SK,
+      );
+    }
+
+    return {
+      conversationId: access.conversationId,
+      userId: targetUserId,
+      clearedAt,
+    };
+  }
+
   async resolveConversationAccess(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -527,11 +661,15 @@ export class ConversationsService {
       access.participants,
       access.conversationKey,
     );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
 
     return buildPaginatedResponse(
       await Promise.all(
         page.items.map((item) =>
-          this.serializeMessage(actor.id, item, deliveryContext),
+          this.serializeMessage(actor.id, item, deliveryContext, aliasByUserId),
         ),
       ),
       page.nextCursor,
@@ -580,9 +718,18 @@ export class ConversationsService {
       access.participants,
       access.conversationKey,
     );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
     const data = await Promise.all(
       visiblePinnedMessages.map((message) =>
-        this.serializeMessage(actor.id, message, deliveryContext),
+        this.serializeMessage(
+          actor.id,
+          message,
+          deliveryContext,
+          aliasByUserId,
+        ),
       ),
     );
 
@@ -3033,9 +3180,18 @@ export class ConversationsService {
       access.participants,
       access.conversationKey,
     );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
     const data = await Promise.all(
       pageItems.map(({ message }) =>
-        this.serializeMessage(actor.id, message, deliveryContext),
+        this.serializeMessage(
+          actor.id,
+          message,
+          deliveryContext,
+          aliasByUserId,
+        ),
       ),
     );
 
@@ -3073,11 +3229,15 @@ export class ConversationsService {
       access.participants,
       access.conversationKey,
     );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
 
     return buildPaginatedResponse(
       await Promise.all(
         page.items.map((item) =>
-          this.serializeMessage(actor.id, item, deliveryContext),
+          this.serializeMessage(actor.id, item, deliveryContext, aliasByUserId),
         ),
       ),
       page.nextCursor,
@@ -4169,25 +4329,209 @@ export class ConversationsService {
     );
   }
 
-  private serializeConversationSummary(
+  private makeConversationAliasSk(
+    ownerUserId: string,
+    targetUserId: string,
+  ): string {
+    return `${CONVERSATION_ALIAS_SK_PREFIX}${ownerUserId}#${targetUserId}`;
+  }
+
+  private makeConversationAliasLookupKey(
+    conversationId: string,
+    targetUserId: string,
+  ): string {
+    return `${conversationId}#${targetUserId}`;
+  }
+
+  private getDmCounterpartId(
     actorId: string,
     conversation: StoredConversation,
-  ): ConversationSummary {
-    return this.conversationStateService.serializeConversationSummary(
+  ): string | undefined {
+    if (
+      conversation.isGroup ||
+      !isDmConversationId(conversation.conversationId)
+    ) {
+      return undefined;
+    }
+
+    const participantIds = conversation.conversationId
+      .slice('DM#'.length)
+      .split('#');
+
+    return participantIds.find((participantId) => participantId !== actorId);
+  }
+
+  private async getConversationAlias(
+    ownerUserId: string,
+    conversationId: string,
+    targetUserId: string,
+  ): Promise<StoredConversationMemberAlias | undefined> {
+    const alias = await this.repository.get<StoredConversationMemberAlias>(
+      this.config.dynamodbConversationsTableName,
+      makeConversationPk(conversationId),
+      this.makeConversationAliasSk(ownerUserId, targetUserId),
+    );
+
+    if (!alias || alias.entityType !== 'CONVERSATION_MEMBER_ALIAS') {
+      return undefined;
+    }
+
+    return alias;
+  }
+
+  private async getConversationAliasMap(
+    ownerUserId: string,
+    conversationId: string,
+  ): Promise<Map<string, StoredConversationMemberAlias>> {
+    const aliases =
+      await this.repository.queryByPk<StoredConversationMemberAlias>(
+        this.config.dynamodbConversationsTableName,
+        makeConversationPk(conversationId),
+        {
+          beginsWith: this.makeConversationAliasSk(ownerUserId, ''),
+        },
+      );
+
+    return new Map(
+      aliases
+        .filter(
+          (alias): alias is StoredConversationMemberAlias =>
+            alias.entityType === 'CONVERSATION_MEMBER_ALIAS' &&
+            alias.ownerUserId === ownerUserId,
+        )
+        .map((alias) => [alias.targetUserId, alias]),
+    );
+  }
+
+  private async getConversationAliasMapForSummaries(
+    ownerUserId: string,
+    conversations: StoredConversation[],
+  ): Promise<Map<string, StoredConversationMemberAlias>> {
+    const keysByLookupKey = new Map<
+      string,
+      { PK: string; SK: string; conversationId: string; targetUserId: string }
+    >();
+
+    for (const conversation of conversations) {
+      const targetUserId = this.getDmCounterpartId(ownerUserId, conversation);
+
+      if (!targetUserId) {
+        continue;
+      }
+
+      const lookupKey = this.makeConversationAliasLookupKey(
+        conversation.conversationId,
+        targetUserId,
+      );
+
+      keysByLookupKey.set(lookupKey, {
+        PK: makeConversationPk(conversation.conversationId),
+        SK: this.makeConversationAliasSk(ownerUserId, targetUserId),
+        conversationId: conversation.conversationId,
+        targetUserId,
+      });
+    }
+
+    if (keysByLookupKey.size === 0) {
+      return new Map();
+    }
+
+    const aliases: StoredConversationMemberAlias[] = [];
+    const keys = Array.from(keysByLookupKey.values());
+
+    for (let index = 0; index < keys.length; index += 100) {
+      aliases.push(
+        ...(await this.repository.batchGet<StoredConversationMemberAlias>(
+          this.config.dynamodbConversationsTableName,
+          keys.slice(index, index + 100),
+        )),
+      );
+    }
+
+    return new Map(
+      aliases
+        .filter(
+          (alias): alias is StoredConversationMemberAlias =>
+            alias.entityType === 'CONVERSATION_MEMBER_ALIAS' &&
+            alias.ownerUserId === ownerUserId,
+        )
+        .map((alias) => [
+          this.makeConversationAliasLookupKey(
+            alias.conversationId,
+            alias.targetUserId,
+          ),
+          alias,
+        ]),
+    );
+  }
+
+  private ensureConversationAliasTarget(
+    access: ResolvedConversationAccess,
+    targetUserId: string,
+  ): void {
+    if (!access.participants.includes(targetUserId)) {
+      throw new ForbiddenException(
+        'You can only set aliases for participants in this conversation.',
+      );
+    }
+  }
+
+  private toConversationAlias(
+    publicConversationId: string,
+    alias: StoredConversationMemberAlias,
+  ): ConversationAlias {
+    return {
+      conversationId: publicConversationId,
+      userId: alias.targetUserId,
+      alias: alias.alias,
+      updatedAt: alias.updatedAt,
+    };
+  }
+
+  private async serializeConversationSummary(
+    actorId: string,
+    conversation: StoredConversation,
+    aliasByConversationTarget?: Map<string, StoredConversationMemberAlias>,
+  ): Promise<ConversationSummary> {
+    const summary = this.conversationStateService.serializeConversationSummary(
       actorId,
       conversation,
     );
+    const targetUserId = this.getDmCounterpartId(actorId, conversation);
+
+    if (!targetUserId) {
+      return summary;
+    }
+
+    const alias =
+      aliasByConversationTarget?.get(
+        this.makeConversationAliasLookupKey(
+          conversation.conversationId,
+          targetUserId,
+        ),
+      ) ??
+      (await this.getConversationAlias(
+        actorId,
+        conversation.conversationId,
+        targetUserId,
+      ));
+
+    return alias?.alias ? { ...summary, groupName: alias.alias } : summary;
   }
 
   private async serializeMessage(
     actorId: string,
     message: StoredMessage,
     deliveryContext?: MessageDeliveryContext,
+    aliasByUserId?: Map<string, StoredConversationMemberAlias>,
   ): Promise<MessageItem> {
-    const item = this.conversationStateService.serializeMessage(
-      actorId,
-      message,
-      deliveryContext,
+    const item = this.applyConversationAliasesToMessage(
+      this.conversationStateService.serializeMessage(
+        actorId,
+        message,
+        deliveryContext,
+      ),
+      aliasByUserId,
     );
     const isRecalled = Boolean(item.recalledAt);
     const senderAvatar = await this.mediaAssetService.resolveAssetWithLegacyUrl(
@@ -4209,6 +4553,36 @@ export class ConversationsService {
       attachmentAsset: attachment.asset,
       attachmentUrl: attachment.url,
       replyMessage: isRecalled ? undefined : item.replyMessage,
+    };
+  }
+
+  private applyConversationAliasesToMessage(
+    item: MessageItem,
+    aliasByUserId?: Map<string, StoredConversationMemberAlias>,
+  ): MessageItem {
+    if (!aliasByUserId || aliasByUserId.size === 0) {
+      return item;
+    }
+
+    const senderAlias = aliasByUserId.get(item.senderId)?.alias;
+    const replyAlias = item.replyMessage
+      ? aliasByUserId.get(item.replyMessage.senderId)?.alias
+      : undefined;
+    const forwardedFromAlias = item.forwardedFromSenderId
+      ? aliasByUserId.get(item.forwardedFromSenderId)?.alias
+      : undefined;
+
+    return {
+      ...item,
+      senderName: senderAlias ?? item.senderName,
+      replyMessage: item.replyMessage
+        ? {
+            ...item.replyMessage,
+            senderName: replyAlias ?? item.replyMessage.senderName,
+          }
+        : item.replyMessage,
+      forwardedFromSenderName:
+        forwardedFromAlias ?? item.forwardedFromSenderName,
     };
   }
 

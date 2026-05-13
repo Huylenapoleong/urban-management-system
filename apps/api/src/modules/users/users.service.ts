@@ -27,7 +27,6 @@ import {
   makeInboxPk,
   makeInboxStatsKey,
   makeUserContactAliasSk,
-  makeUserGroupsKey,
   makeUserPk,
   makeUserProfileSk,
   nowIso,
@@ -1814,13 +1813,10 @@ export class UsersService {
       target.userId,
     );
     const friends = await this.areFriends(actor.id, target.userId);
-    const coMembers = friends
-      ? false
-      : await this.areGroupCoMembers(actor.id, target.userId);
 
-    if (!friends && !directSummary && !coMembers) {
+    if (!friends && !directSummary) {
       throw new ForbiddenException(
-        'You can only set an alias for friends, group members, or existing direct conversations.',
+        'You can only set a contact alias for friends or existing direct conversations. Use conversation aliases for group members.',
       );
     }
 
@@ -1899,34 +1895,6 @@ export class UsersService {
       alias: item.alias,
       updatedAt: item.updatedAt,
     }));
-  }
-
-  private async areGroupCoMembers(
-    actorId: string,
-    targetId: string,
-  ): Promise<boolean> {
-    const actorMemberships = await this.repository.queryByGsi1<{
-      groupId: string;
-    }>(
-      this.config.dynamodbMembershipsTableName,
-      this.config.dynamodbMembershipsUserGroupsIndexName,
-      makeUserGroupsKey(actorId),
-    );
-
-    if (actorMemberships.length === 0) {
-      return false;
-    }
-
-    const targetMemberships = await this.repository.queryByGsi1<{
-      groupId: string;
-    }>(
-      this.config.dynamodbMembershipsTableName,
-      this.config.dynamodbMembershipsUserGroupsIndexName,
-      makeUserGroupsKey(targetId),
-    );
-
-    const actorGroupIds = new Set(actorMemberships.map((m) => m.groupId));
-    return targetMemberships.some((m) => actorGroupIds.has(m.groupId));
   }
 
   async areFriends(userId: string, otherUserId: string): Promise<boolean> {

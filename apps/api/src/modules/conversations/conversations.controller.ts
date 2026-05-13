@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import {
@@ -33,6 +34,8 @@ import {
 } from '../../common/openapi/swagger-errors';
 import {
   AuditEventItemDto,
+  ConversationAliasDto,
+  ConversationAliasRemovalResultDto,
   ConversationDeletedResultDto,
   ConversationHistoryClearedResultDto,
   ConversationSummaryDto,
@@ -47,6 +50,7 @@ import {
   PinMessageRequestDto,
   RecallMessageRequestDto,
   RecallMessageResultDto,
+  SetConversationAliasRequestDto,
   SendDirectMessageRequestDto,
   SendMessageRequestDto,
   UpdateConversationPreferencesRequestDto,
@@ -544,6 +548,72 @@ export class ConversationsController {
     return this.conversationsService.blockDirectMessageRequest(
       user,
       conversationId,
+    );
+  }
+
+  @Get(':conversationId/aliases')
+  @ApiOperation({
+    summary: 'List my aliases in a conversation',
+    description:
+      'Returns private participant aliases scoped to this conversation only. The same target user can have different aliases in direct chats and group chats.',
+  })
+  @ApiOkEnvelopeResponse(ConversationAliasDto, {
+    isArray: true,
+    description:
+      'Private aliases set by the authenticated user for participants in this conversation.',
+  })
+  listConversationAliases(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.listConversationAliases(
+      user,
+      conversationId,
+    );
+  }
+
+  @Put(':conversationId/aliases/:userId')
+  @ApiOperation({
+    summary: 'Set a private conversation alias',
+    description:
+      'Sets a private alias for yourself, the direct-chat counterpart, or a group member within this conversation only.',
+  })
+  @ApiBody({ type: SetConversationAliasRequestDto })
+  @ApiOkEnvelopeResponse(ConversationAliasDto, {
+    description: 'Returns the saved conversation-scoped alias.',
+  })
+  setConversationAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+    @Param('userId') userId: string,
+    @Body() body: SetConversationAliasRequestDto,
+  ) {
+    return this.conversationsService.setConversationAlias(
+      user,
+      conversationId,
+      userId,
+      body,
+    );
+  }
+
+  @Delete(':conversationId/aliases/:userId')
+  @ApiOperation({
+    summary: 'Clear a private conversation alias',
+    description:
+      'Clears the alias for one participant in this conversation without touching aliases in other direct or group chats.',
+  })
+  @ApiOkEnvelopeResponse(ConversationAliasRemovalResultDto, {
+    description: 'Returns the cleared alias target and timestamp.',
+  })
+  clearConversationAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.conversationsService.clearConversationAlias(
+      user,
+      conversationId,
+      userId,
     );
   }
 

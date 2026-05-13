@@ -165,6 +165,19 @@ export interface UserContactAlias {
   updatedAt: string;
 }
 
+export interface ConversationAlias {
+  conversationId: string;
+  userId: string;
+  alias: string;
+  updatedAt: string;
+}
+
+export interface ConversationAliasRemovalResult {
+  conversationId: string;
+  userId: string;
+  clearedAt: string;
+}
+
 export interface GroupMetadata {
   id: string;
   groupName: string;
