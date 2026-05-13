@@ -1,35 +1,35 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-    GROUP_MEMBER_ROLES,
-    GROUP_MESSAGE_POLICIES,
-    GROUP_TYPES,
-    MESSAGE_DELIVERY_STATES,
-    MESSAGE_RECALL_SCOPES,
-    MESSAGE_TYPES,
-    OTP_PURPOSES,
-    PUSH_DEVICE_PROVIDERS,
-    REPORT_CATEGORIES,
-    REPORT_PRIORITIES,
-    REPORT_STATUSES,
-    SESSION_SCOPES,
-    UPLOAD_TARGETS,
-    USER_ROLES,
-    USER_STATUSES,
+  GROUP_MEMBER_ROLES,
+  GROUP_MESSAGE_POLICIES,
+  GROUP_TYPES,
+  MESSAGE_DELIVERY_STATES,
+  MESSAGE_RECALL_SCOPES,
+  MESSAGE_TYPES,
+  OTP_PURPOSES,
+  PUSH_DEVICE_PROVIDERS,
+  REPORT_CATEGORIES,
+  REPORT_PRIORITIES,
+  REPORT_STATUSES,
+  SESSION_SCOPES,
+  UPLOAD_TARGETS,
+  USER_ROLES,
+  USER_STATUSES,
 } from '@urban/shared-constants';
 import {
-    ArrayMaxSize,
-    IsArray,
-    IsBoolean,
-    IsIn,
-    IsInt,
-    IsNumber,
-    IsOptional,
-    IsString,
-    Matches,
-    Max,
-    MaxLength,
-    Min,
-    MinLength,
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
 } from 'class-validator';
 
 const GROUP_MEMBER_ACTIONS = ['add', 'update', 'remove'] as const;
@@ -944,6 +944,20 @@ export class MessageItemDto {
 
   @ApiPropertyOptional({ type: () => MessageReplyReferenceDto })
   replyMessage?: MessageReplyReferenceDto;
+
+  @ApiPropertyOptional({
+    example: '2026-03-17T08:02:00.000Z',
+    nullable: true,
+    description: 'Set when this message is pinned in the conversation.',
+  })
+  pinnedAt?: string | null;
+
+  @ApiPropertyOptional({
+    example: '01JPCY0000CITIZENA00000000',
+    nullable: true,
+    description: 'User id that pinned the message.',
+  })
+  pinnedByUserId?: string | null;
 
   @ApiPropertyOptional({ example: null, nullable: true })
   recalledAt?: string | null;
@@ -2052,6 +2066,18 @@ export class UpdateMessageRequestDto {
   @IsString()
   @MaxLength(500)
   attachmentUrl?: string;
+}
+
+export class PinMessageRequestDto {
+  @ApiPropertyOptional({
+    example: '01JPCY3000GROUPMSG00000001',
+    description:
+      'Required when the conversation already has 3 pinned messages. Must be one of the currently pinned message ids to replace.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  replaceMessageId?: string;
 }
 
 export class RecallMessageRequestDto {

@@ -33,22 +33,23 @@ import {
 } from '../../common/openapi/swagger-errors';
 import {
   AuditEventItemDto,
-  ConversationHistoryClearedResultDto,
   ConversationDeletedResultDto,
+  ConversationHistoryClearedResultDto,
   ConversationSummaryDto,
   CreateDirectMessageRequestDto,
   ErrorResponseDto,
+  ForwardMessageRequestDto,
   ListAuditQueryDto,
   ListConversationsQueryDto,
   ListDirectRequestsQueryDto,
   ListMessagesQueryDto,
   MessageItemDto,
+  PinMessageRequestDto,
   RecallMessageRequestDto,
   RecallMessageResultDto,
-  UpdateConversationPreferencesRequestDto,
   SendDirectMessageRequestDto,
   SendMessageRequestDto,
-  ForwardMessageRequestDto,
+  UpdateConversationPreferencesRequestDto,
   UpdateMessageRequestDto,
 } from '../../common/openapi/swagger.models';
 import { ConversationsService } from './conversations.service';
@@ -613,6 +614,97 @@ export class ConversationsController {
       user,
       conversationId,
       query as Record<string, unknown>,
+    );
+  }
+
+  @Get(':conversationId/messages/pinned')
+  @ApiOperation({
+    summary: 'List pinned messages in a conversation',
+    description:
+      'Returns the currently pinned messages in the conversation. A conversation can have at most 3 pinned messages.',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
+  })
+  @ApiOkEnvelopeResponse(MessageItemDto, {
+    isArray: true,
+    description: 'Pinned messages ordered by most recently pinned first.',
+  })
+  listPinnedMessages(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.listPinnedMessages(user, conversationId);
+  }
+
+  @Post(':conversationId/messages/:messageId/pin')
+  @ApiOperation({
+    summary: 'Pin a message in a conversation',
+    description:
+      'Pins a message for the conversation. When 3 messages are already pinned, provide replaceMessageId to unpin one of them and pin the requested message atomically.',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
+  })
+  @ApiParam({ name: 'messageId', type: String })
+  @ApiBody({ type: PinMessageRequestDto })
+  @ApiOkEnvelopeResponse(MessageItemDto, {
+    description: 'Pinned message with pin metadata.',
+  })
+  @ApiConflictExamples('The pinned message list changed or is full.', [
+    {
+      name: 'pinLimitReached',
+      summary: 'Pinned message limit reached',
+      message:
+        'Pinned message limit reached. Provide replaceMessageId to replace one of the current pinned messages.',
+      path: '/api/conversations/group:01JPCY1000AREAGROUP0000000/messages/01JPCY3000GROUPMSG00000002/pin',
+    },
+  ])
+  pinMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+    @Param('messageId') messageId: string,
+    @Body() body: PinMessageRequestDto,
+  ) {
+    return this.conversationsService.pinMessage(
+      user,
+      conversationId,
+      messageId,
+      body,
+    );
+  }
+
+  @Delete(':conversationId/messages/:messageId/pin')
+  @ApiOperation({
+    summary: 'Unpin a message in a conversation',
+    description:
+      'Removes the message from the conversation pinned list. Repeating the request for an already unpinned message is idempotent.',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    type: String,
+    description:
+      'Accepts route-safe ids like group:<groupId> or dm:<userId>. Legacy ids GRP#... and DM#... also work when URL-encoded.',
+  })
+  @ApiParam({ name: 'messageId', type: String })
+  @ApiOkEnvelopeResponse(MessageItemDto, {
+    description: 'Message after pin metadata has been cleared.',
+  })
+  unpinMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.conversationsService.unpinMessage(
+      user,
+      conversationId,
+      messageId,
     );
   }
 

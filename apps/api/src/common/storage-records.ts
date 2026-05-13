@@ -38,6 +38,8 @@ export type StorageEntityType =
   | 'GROUP_DELETE_CLEANUP_TASK'
   | 'MESSAGE'
   | 'MESSAGE_REF'
+  | 'MESSAGE_PIN'
+  | 'MESSAGE_SEARCH'
   | 'MESSAGE_DEDUP'
   | 'CONVERSATION'
   | 'DIRECT_MESSAGE_REQUEST'
@@ -289,6 +291,10 @@ export interface StoredMessage
   messageId: string;
   conversationId: string;
   replyMessage?: MessageReplyReference;
+  pinnedAt?: string | null;
+  pinnedByUserId?: string | null;
+  pinRecordSk?: string | null;
+  searchTokens?: string[];
   deletedForUserAt?: Record<string, string>;
 }
 
@@ -298,6 +304,26 @@ export interface StoredMessageRef extends TableItemBase {
   messageId: string;
   messageSk: string;
   senderId: string;
+  sentAt: string;
+  updatedAt: string;
+}
+
+export interface StoredMessagePin extends TableItemBase {
+  entityType: 'MESSAGE_PIN';
+  conversationId: string;
+  messageId: string;
+  messageSk: string;
+  pinnedByUserId: string;
+  pinnedAt: string;
+  updatedAt: string;
+}
+
+export interface StoredMessageSearchRecord extends TableItemBase {
+  entityType: 'MESSAGE_SEARCH';
+  conversationId: string;
+  messageId: string;
+  messageSk: string;
+  token: string;
   sentAt: string;
   updatedAt: string;
 }

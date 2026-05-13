@@ -259,6 +259,8 @@ export interface MessageItem {
   attachmentUrl?: string;
   replyTo?: string;
   replyMessage?: MessageReplyReference;
+  pinnedAt?: string | null;
+  pinnedByUserId?: string | null;
   recalledAt?: string | null;
   recalledByUserId?: string | null;
   deletedForSenderAt?: string | null;
