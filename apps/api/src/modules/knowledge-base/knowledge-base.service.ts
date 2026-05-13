@@ -1,29 +1,29 @@
 import {
-    BadRequestException,
-    Injectable,
-    NotFoundException,
+  BadRequestException,
+  Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { createUlid, nowIso } from '@urban/shared-utils';
 import {
-    buildPaginatedResponse,
-    paginateSortedItems,
+  buildPaginatedResponse,
+  paginateSortedItems,
 } from '../../common/pagination';
 import {
-    ensureObject,
-    optionalQueryString,
-    optionalString,
-    parseLimit,
-    requiredString,
+  ensureObject,
+  optionalQueryString,
+  optionalString,
+  parseLimit,
+  requiredString,
 } from '../../common/validation';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import {
-    KNOWLEDGE_DOCUMENT_PK,
-    KNOWLEDGE_DOCUMENT_STATUSES,
-    type KnowledgeDocumentMetadata,
-    type KnowledgeDocumentStatus,
-    type KnowledgeDocumentSummary,
-    type StoredKnowledgeDocumentRecord,
+  KNOWLEDGE_DOCUMENT_PK,
+  KNOWLEDGE_DOCUMENT_STATUSES,
+  type KnowledgeDocumentMetadata,
+  type KnowledgeDocumentStatus,
+  type KnowledgeDocumentSummary,
+  type StoredKnowledgeDocumentRecord,
 } from './knowledge-base.types';
 
 const CATEGORY_INDEX_NAME = 'category-index';
@@ -44,7 +44,9 @@ export class KnowledgeBaseService {
 
   async listDocuments(query: Record<string, unknown>) {
     const category = optionalQueryString(query.category, 'category');
-    const status = this.parseStatus(optionalQueryString(query.status, 'status'));
+    const status = this.parseStatus(
+      optionalQueryString(query.status, 'status'),
+    );
     const search = optionalQueryString(query.q, 'q');
     const limit = parseLimit(query.limit);
     const cursor = query.cursor;
@@ -180,7 +182,9 @@ export class KnowledgeBaseService {
     const body = ensureObject(payload);
     const current = await this.getRecordOrThrow(docId);
 
-    const title = optionalString(body, 'title', { maxLength: MAX_TITLE_LENGTH });
+    const title = optionalString(body, 'title', {
+      maxLength: MAX_TITLE_LENGTH,
+    });
     const content = optionalString(body, 'content', {
       maxLength: MAX_CONTENT_LENGTH,
     });
@@ -212,7 +216,7 @@ export class KnowledgeBaseService {
       metadata:
         metadata === null
           ? undefined
-          : metadata ?? current.metadata ?? undefined,
+          : (metadata ?? current.metadata ?? undefined),
       updatedAt: nowIso(),
     };
 
@@ -246,7 +250,9 @@ export class KnowledgeBaseService {
     return record;
   }
 
-  private toSummary(record: StoredKnowledgeDocumentRecord): KnowledgeDocumentSummary {
+  private toSummary(
+    record: StoredKnowledgeDocumentRecord,
+  ): KnowledgeDocumentSummary {
     return {
       id: record.docId,
       title: record.title,
@@ -268,7 +274,9 @@ export class KnowledgeBaseService {
       return undefined;
     }
 
-    if (!KNOWLEDGE_DOCUMENT_STATUSES.includes(value as KnowledgeDocumentStatus)) {
+    if (
+      !KNOWLEDGE_DOCUMENT_STATUSES.includes(value as KnowledgeDocumentStatus)
+    ) {
       throw new BadRequestException('status is invalid.');
     }
 

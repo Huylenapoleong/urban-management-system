@@ -1,36 +1,36 @@
 import {
-    Body,
-    Controller,
-    Delete,
-    Get,
-    Param,
-    Patch,
-    Post,
-    Query,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
 } from '@nestjs/common';
 import {
-    ApiBearerAuth,
-    ApiBody,
-    ApiForbiddenResponse,
-    ApiOperation,
-    ApiParam,
-    ApiQuery,
-    ApiTags,
-    ApiUnauthorizedResponse,
+  ApiBearerAuth,
+  ApiBody,
+  ApiForbiddenResponse,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import {
-    ApiCreatedEnvelopeResponse,
-    ApiOkEnvelopeResponse,
+  ApiCreatedEnvelopeResponse,
+  ApiOkEnvelopeResponse,
 } from '../../common/openapi/swagger-envelope';
 import {
-    CreateKnowledgeDocumentRequestDto,
-    DeleteKnowledgeDocumentResultDto,
-    ErrorResponseDto,
-    KnowledgeDocumentDto,
-    ListKnowledgeDocumentsQueryDto,
-    UpdateKnowledgeDocumentRequestDto,
+  CreateKnowledgeDocumentRequestDto,
+  DeleteKnowledgeDocumentResultDto,
+  ErrorResponseDto,
+  KnowledgeDocumentDto,
+  ListKnowledgeDocumentsQueryDto,
+  UpdateKnowledgeDocumentRequestDto,
 } from '../../common/openapi/swagger.models';
 import { KnowledgeBaseService } from './knowledge-base.service';
 

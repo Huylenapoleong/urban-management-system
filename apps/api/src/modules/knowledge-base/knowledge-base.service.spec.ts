@@ -1,6 +1,9 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { KnowledgeBaseService } from './knowledge-base.service';
-import { KNOWLEDGE_DOCUMENT_PK } from './knowledge-base.types';
+import {
+  KNOWLEDGE_DOCUMENT_PK,
+  type StoredKnowledgeDocumentRecord,
+} from './knowledge-base.types';
 
 describe('KnowledgeBaseService', () => {
   const repository = {
@@ -62,7 +65,10 @@ describe('KnowledgeBaseService', () => {
     });
 
     expect(repository.put).toHaveBeenCalledTimes(1);
-    const saved = repository.put.mock.calls[0][1];
+    const putMock = repository.put as jest.MockedFunction<
+      (tableName: string, item: StoredKnowledgeDocumentRecord) => Promise<void>
+    >;
+    const saved = putMock.mock.calls[0][1];
     expect(saved.PK).toBe(KNOWLEDGE_DOCUMENT_PK);
     expect(saved.SK).toEqual(saved.docId);
     expect(saved.status).toBe('ACTIVE');
