@@ -526,6 +526,16 @@ export class UsersController {
     return this.usersService.clearContactAlias(user, userId);
   }
 
+  @Get('me/contacts/aliases')
+  @ApiOperation({
+    summary: 'List all my private contact aliases',
+    description: 'Returns a list of all nicknames set by the current user.',
+  })
+  @ApiOkEnvelopeResponse(UserContactAliasDto, { isArray: true })
+  listContactAliases(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.listAliases(user);
+  }
+
   @Get('discover')
   @ApiOperation({
     summary: 'Search users for chat/friend actions',

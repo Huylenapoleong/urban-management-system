@@ -94,3 +94,14 @@ export async function deleteContactAlias(userId: string): Promise<void> {
     `/users/me/contacts/${encodeURIComponent(userId)}/alias`,
   );
 }
+
+export interface UserContactAlias {
+  userId: string;
+  alias: string;
+  updatedAt: string;
+}
+
+/** List all private aliases set by the current user. */
+export async function listContactAliases(): Promise<UserContactAlias[]> {
+  return await ApiClient.get("/users/me/contacts/aliases");
+}

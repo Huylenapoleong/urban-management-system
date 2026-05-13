@@ -209,12 +209,21 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
             };
           }
 
-          if (
-            oldData.pages.some((page) =>
-              page.items.some((msg) => msg.id === message.id),
-            )
-          ) {
-            return oldData;
+          // If message already exists, update it
+          const exists = oldData.pages.some((page) =>
+            page.items.some((msg) => msg.id === message.id),
+          );
+
+          if (exists) {
+            return {
+              ...oldData,
+              pages: oldData.pages.map((page) => ({
+                ...page,
+                items: page.items.map((msg) =>
+                  msg.id === message.id ? message : msg,
+                ),
+              })),
+            };
           }
 
           const [firstPage, ...restPages] = oldData.pages;
@@ -328,6 +337,19 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       }
     };
 
+    const handleMessageUpdated = (
+      payload: any,
+    ) => {
+      const updatedMsg =
+        payload?.message ||
+        payload?.data ||
+        (payload?.id ? (payload as MessageItem) : undefined);
+
+      if (updatedMsg?.conversationId === conversationId) {
+        upsertMessageInCache(updatedMsg);
+      }
+    };
+
     const handleConversationRemoved = (payload: ConversationRemovedPayload) => {
       const removedConversationId = extractConversationId(payload);
       if (!removedConversationId || removedConversationId !== conversationId) {
@@ -351,6 +373,10 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
       handleMessageCreated,
     );
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
+      handleMessageUpdated,
+    );
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
     socketClient.socket?.on(
       CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
@@ -366,6 +392,10 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       socketClient.socket?.off(
         CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
         handleMessageCreated,
+      );
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
+        handleMessageUpdated,
       );
       socketClient.socket?.off(
         CHAT_SOCKET_EVENTS.TYPING_STATE,

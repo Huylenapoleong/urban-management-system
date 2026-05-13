@@ -1388,11 +1388,11 @@ export class ConversationsService {
     const removedAt = nowIso();
 
     if (current && !current.deletedAt) {
-      await this.repository.delete(
-        this.config.dynamodbConversationsTableName,
-        current.PK,
-        current.SK,
-      );
+      await this.repository.put(this.config.dynamodbConversationsTableName, {
+        ...current,
+        deletedAt: removedAt,
+        updatedAt: removedAt,
+      } as StoredConversation);
     }
 
     this.chatRealtimeService.leaveConversationForUser(

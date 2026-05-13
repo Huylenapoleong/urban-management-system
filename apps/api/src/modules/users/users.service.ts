@@ -27,6 +27,7 @@ import {
   makeInboxPk,
   makeInboxStatsKey,
   makeUserContactAliasSk,
+  makeUserGroupsKey,
   makeUserPk,
   makeUserProfileSk,
   nowIso,
@@ -1813,10 +1814,13 @@ export class UsersService {
       target.userId,
     );
     const friends = await this.areFriends(actor.id, target.userId);
+    const coMembers = friends
+      ? false
+      : await this.areGroupCoMembers(actor.id, target.userId);
 
-    if (!friends && !directSummary) {
+    if (!friends && !directSummary && !coMembers) {
       throw new ForbiddenException(
-        'You can only set an alias for friends or existing direct conversations.',
+        'You can only set an alias for friends, group members, or existing direct conversations.',
       );
     }
 
@@ -1856,7 +1860,10 @@ export class UsersService {
     const existingAlias = await this.getContactAlias(actor.id, targetUserId);
 
     if (!existingAlias) {
-      throw new NotFoundException('Contact alias not found.');
+      return {
+        userId: targetUserId,
+        clearedAt: nowIso(),
+      };
     }
 
     const clearedAt = nowIso();
@@ -1878,6 +1885,48 @@ export class UsersService {
       userId: targetUserId,
       clearedAt,
     };
+  }
+
+  async listAliases(actor: AuthenticatedUser): Promise<UserContactAlias[]> {
+    const items = await this.repository.queryByPk<StoredUserContactAlias>(
+      this.config.dynamodbUsersTableName,
+      makeUserPk(actor.id),
+      { beginsWith: 'ALIAS#' },
+    );
+
+    return items.map((item) => ({
+      userId: item.targetUserId,
+      alias: item.alias,
+      updatedAt: item.updatedAt,
+    }));
+  }
+
+  private async areGroupCoMembers(
+    actorId: string,
+    targetId: string,
+  ): Promise<boolean> {
+    const actorMemberships = await this.repository.queryByGsi1<{
+      groupId: string;
+    }>(
+      this.config.dynamodbMembershipsTableName,
+      this.config.dynamodbMembershipsUserGroupsIndexName,
+      makeUserGroupsKey(actorId),
+    );
+
+    if (actorMemberships.length === 0) {
+      return false;
+    }
+
+    const targetMemberships = await this.repository.queryByGsi1<{
+      groupId: string;
+    }>(
+      this.config.dynamodbMembershipsTableName,
+      this.config.dynamodbMembershipsUserGroupsIndexName,
+      makeUserGroupsKey(targetId),
+    );
+
+    const actorGroupIds = new Set(actorMemberships.map((m) => m.groupId));
+    return targetMemberships.some((m) => actorGroupIds.has(m.groupId));
   }
 
   async areFriends(userId: string, otherUserId: string): Promise<boolean> {

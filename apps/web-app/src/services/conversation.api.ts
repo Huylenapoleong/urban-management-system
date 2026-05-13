@@ -525,3 +525,117 @@ export async function forwardMessage(
 
   throw lastError;
 }
+
+export async function deleteConversation(
+  conversationId: string,
+): Promise<void> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      await ApiClient.delete(`/conversations/${encodeURIComponent(id)}`);
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function listPinnedMessages(
+  conversationId: string,
+): Promise<MessageItem[]> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      return await ApiClient.get(
+        `/conversations/${encodeURIComponent(id)}/messages/pinned`,
+      );
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function pinMessage(
+  conversationId: string,
+  messageId: string,
+  replaceMessageId?: string,
+): Promise<void> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      await ApiClient.post(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/pin`,
+        { replaceMessageId },
+      );
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function unpinMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      await ApiClient.delete(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/pin`,
+      );
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function clearConversationHistory(
+  conversationId: string,
+): Promise<void> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      await ApiClient.post(`/conversations/${encodeURIComponent(id)}/clear`);
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}

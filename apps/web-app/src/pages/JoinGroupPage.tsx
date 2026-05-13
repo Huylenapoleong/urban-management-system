@@ -1,6 +1,6 @@
 import { useAuth } from "@/providers/auth-context";
-import { joinGroupByInvite } from "@/services/group.api";
-import { useMutation } from "@tanstack/react-query";
+import { getGroup, joinGroupByInvite } from "@/services/group.api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Users, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
@@ -21,14 +21,27 @@ export default function JoinGroupPage() {
   const { user, isLoading: isAuthLoading } = useAuth();
   const hasAttemptedJoinRef = useRef(false);
 
+  const queryClient = useQueryClient();
+
   const joinMutation = useMutation({
     mutationFn: (inviteCode: string) => joinGroupByInvite(inviteCode),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      // Invalidate conversations to make it show up in the sidebar
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      
+      let groupName = "";
+      try {
+        const group = await getGroup(data.groupId);
+        groupName = group.groupName;
+      } catch (err) {
+        console.error("Failed to fetch group info after joining", err);
+      }
+
       toast.success("Đã tham gia nhóm thành công!");
       navigate("/chat", {
         state: {
           conversationId: `group:${data.groupId}`,
-          displayName: "", // Let ChatPage resolve the actual name
+          displayName: groupName,
         },
       });
     },

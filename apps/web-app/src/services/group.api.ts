@@ -70,7 +70,7 @@ export interface BanGroupMemberInput {
 }
 
 export interface TransferOwnershipInput {
-  newOwnerUserId: string;
+  targetUserId: string;
 }
 
 export async function getGroups(

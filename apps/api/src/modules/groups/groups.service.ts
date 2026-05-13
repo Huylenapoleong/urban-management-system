@@ -817,6 +817,12 @@ export class GroupsService {
         `Ownership was transferred from ${actor.fullName} to ${this.getUserDisplayName(successorUser, successorUserId)}.`,
       );
 
+      await this.emitGroupLifecycleSystemMessage(
+        actor,
+        groupId,
+        `${actor.fullName} left the group.`,
+      );
+
       await this.removeGroupConversationAccess(actor.id, groupId, occurredAt);
 
       return toMembership(nextMembership);
