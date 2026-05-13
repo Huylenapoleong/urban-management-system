@@ -2,15 +2,24 @@ import { useAuth } from "@/providers/auth-context";
 import { joinGroupByInvite } from "@/services/group.api";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Users, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { toast } from "react-hot-toast";
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error !== "object" || error === null || !("message" in error)) {
+    return fallback;
+  }
+
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
 
 export default function JoinGroupPage() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
   const { user, isLoading: isAuthLoading } = useAuth();
-  const [isJoining, setIsJoining] = useState(false);
+  const hasAttemptedJoinRef = useRef(false);
 
   const joinMutation = useMutation({
     mutationFn: (inviteCode: string) => joinGroupByInvite(inviteCode),
@@ -23,19 +32,21 @@ export default function JoinGroupPage() {
         },
       });
     },
-    onError: (error: any) => {
-      toast.error(error?.message || "Mã mời không hợp lệ hoặc đã hết hạn.");
-      setIsJoining(false);
+    onError: (error: unknown) => {
+      toast.error(
+        getErrorMessage(error, "Mã mời không hợp lệ hoặc đã hết hạn."),
+      );
     },
   });
+  const isJoining = joinMutation.isPending;
 
   useEffect(() => {
     // Auto-join if logged in and we haven't tried yet
-    if (user && code && !isJoining) {
-      setIsJoining(true);
+    if (user && code && !hasAttemptedJoinRef.current) {
+      hasAttemptedJoinRef.current = true;
       joinMutation.mutate(code);
     }
-  }, [user, code, isJoining, joinMutation]);
+  }, [user, code, joinMutation]);
 
   if (isAuthLoading || (user && isJoining)) {
     return (

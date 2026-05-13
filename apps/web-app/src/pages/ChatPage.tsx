@@ -193,9 +193,52 @@ type TenorGif = {
   previewUrl: string;
 };
 
+type TenorApiResponse = {
+  results?: unknown;
+  next?: unknown;
+};
+
+type PollOption = {
+  id: string;
+  text: string;
+  votes: string[];
+};
+
+type PollMessageContent = {
+  text?: string;
+  poll?: {
+    question: string;
+    options: PollOption[];
+    isMultipleChoice?: boolean;
+  };
+};
+
+type ParsedPollMessage = {
+  pollData?: PollMessageContent;
+  text?: string;
+};
+
+type ManageGroupTab = "members" | "bans" | "links" | "audit" | "settings";
+
+const MANAGE_GROUP_TABS: Array<{
+  id: ManageGroupTab;
+  label: string;
+  icon: typeof UserRound;
+}> = [
+  { id: "members", label: "Thành viên", icon: UserRound },
+  { id: "bans", label: "Danh sách cấm", icon: Ban },
+  { id: "links", label: "Link tham gia", icon: Link2 },
+  { id: "audit", label: "Nhật ký hoạt động", icon: History },
+  { id: "settings", label: "Cài đặt", icon: ShieldAlert },
+];
+
 type RecallScope = "SELF" | "EVERYONE";
 
 const CALL_SUMMARY_STORAGE_KEY = "urban:web-app:call-summaries:v2";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 function loadCallSummaries(): CallEndedSummary[] {
   if (typeof window === "undefined") {
@@ -560,7 +603,8 @@ export function ChatPage() {
   const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
   const [isManageGroupModalOpen, setIsManageGroupModalOpen] = useState(false);
-  const [manageGroupActiveTab, setManageGroupActiveTab] = useState<"members" | "bans" | "links" | "audit" | "settings">("members");
+  const [manageGroupActiveTab, setManageGroupActiveTab] =
+    useState<ManageGroupTab>("members");
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState<
     string | null
   >(null);
@@ -738,39 +782,33 @@ export function ChatPage() {
     try {
       await updateMessageAsync({ messageId: msg.id, text: newContent });
       setActiveMessageMenuId(null);
-    } catch (err) {
+    } catch {
       toast.error("Không thể thực hiện ghim tin nhắn");
     }
   };
 
-  const parsePollMessage = (
-    rawContent: string,
-  ): { pollData?: Record<string, any>; text?: string } => {
+  const parsePollMessage = (rawContent: string): ParsedPollMessage => {
     try {
-      const parsed = JSON.parse(rawContent);
-      if (parsed && typeof parsed === "object") {
+      const parsed: unknown = JSON.parse(rawContent);
+      if (isRecord(parsed)) {
         if ("poll" in parsed) {
           return {
-            pollData: parsed as Record<string, any>,
-            text:
-              typeof (parsed as Record<string, any>).text === "string"
-                ? (parsed as Record<string, any>).text
-                : undefined,
+            pollData: parsed as PollMessageContent,
+            text: typeof parsed.text === "string" ? parsed.text : undefined,
           };
         }
 
-        const nestedText = (parsed as Record<string, any>).text;
+        const nestedText = parsed.text;
         if (typeof nestedText === "string") {
           try {
-            const nestedParsed = JSON.parse(nestedText);
-            if (nestedParsed && typeof nestedParsed === "object") {
+            const nestedParsed: unknown = JSON.parse(nestedText);
+            if (isRecord(nestedParsed)) {
               if ("poll" in nestedParsed) {
                 return {
-                  pollData: nestedParsed as Record<string, any>,
+                  pollData: nestedParsed as PollMessageContent,
                   text:
-                    typeof (nestedParsed as Record<string, any>).text ===
-                    "string"
-                      ? (nestedParsed as Record<string, any>).text
+                    typeof nestedParsed.text === "string"
+                      ? nestedParsed.text
                       : nestedText,
                 };
               }
@@ -818,35 +856,39 @@ export function ChatPage() {
       setIsPollModalOpen(false);
       setPollQuestion("");
       setPollOptions(["", ""]);
-    } catch (err) {
+    } catch {
       toast.error("Không thể tạo bình chọn");
     }
   };
 
   const handleVote = async (msg: MessageItem, optionId: string) => {
     try {
+      const voterId = user?.sub;
+      if (!voterId) return;
+
       const parsed = parsePollMessage(msg.content);
       const pollData = parsed.pollData;
-      if (!pollData?.poll) return;
+      const poll = pollData?.poll;
+      if (!poll) return;
 
-      const newOptions = pollData.poll.options.map((opt: any) => {
+      const newOptions = poll.options.map((opt) => {
         const votes = opt.votes || [];
-        const hasVoted = votes.includes(user?.sub);
+        const hasVoted = votes.includes(voterId);
 
         if (opt.id === optionId) {
           return {
             ...opt,
             votes: hasVoted
-              ? votes.filter((id: string) => id !== user?.sub)
-              : [...votes, user?.sub]
+              ? votes.filter((id) => id !== voterId)
+              : [...votes, voterId]
           };
         }
 
         // Single choice logic: remove vote from other options
-        if (!pollData.poll.isMultipleChoice) {
+        if (!poll.isMultipleChoice) {
           return {
             ...opt,
-            votes: votes.filter((id: string) => id !== user?.sub)
+            votes: votes.filter((id) => id !== voterId)
           };
         }
 
@@ -855,11 +897,11 @@ export function ChatPage() {
 
       const newContent = JSON.stringify({
         ...pollData,
-        poll: { ...pollData.poll, options: newOptions }
+        poll: { ...poll, options: newOptions }
       });
 
       await updateMessageAsync({ messageId: msg.id, text: newContent });
-    } catch (err) {
+    } catch {
       toast.error("Không thể bình chọn");
     }
   };
@@ -891,7 +933,7 @@ export function ChatPage() {
         type: "IMAGE",
       });
       setIsGifPickerOpen(false);
-    } catch (error) {
+    } catch {
       toast.error("Không thể gửi GIF");
     } finally {
       setIsUploading(false);
@@ -926,33 +968,48 @@ export function ChatPage() {
         throw new Error("Tenor request failed");
       }
 
-      const payload = await response.json();
-      const results: any[] = Array.isArray(payload?.results)
+      const payload = (await response.json()) as TenorApiResponse;
+      const results = Array.isArray(payload.results)
         ? payload.results
         : [];
       const items = results
-        .map((item: any): TenorGif | null => {
-          const formats = item?.media_formats || {};
+        .map((item): TenorGif | null => {
+          if (!isRecord(item)) {
+            return null;
+          }
+
+          const formats = isRecord(item.media_formats)
+            ? item.media_formats
+            : {};
+          const gif = isRecord(formats.gif) ? formats.gif : undefined;
+          const mediumGif = isRecord(formats.mediumgif)
+            ? formats.mediumgif
+            : undefined;
+          const tinyGif = isRecord(formats.tinygif)
+            ? formats.tinygif
+            : undefined;
           const url =
-            formats?.gif?.url ||
-            formats?.mediumgif?.url ||
-            formats?.tinygif?.url;
+            (typeof gif?.url === "string" && gif.url) ||
+            (typeof mediumGif?.url === "string" && mediumGif.url) ||
+            (typeof tinyGif?.url === "string" && tinyGif.url);
           if (!url || typeof url !== "string") {
             return null;
           }
           const previewUrl =
-            formats?.tinygif?.url || formats?.gif?.url || url;
+            (typeof tinyGif?.url === "string" && tinyGif.url) ||
+            (typeof gif?.url === "string" && gif.url) ||
+            url;
           return {
-            id: String(item?.id || url),
+            id: typeof item.id === "string" ? item.id : url,
             url,
-            previewUrl: typeof previewUrl === "string" ? previewUrl : url,
+            previewUrl,
           };
         })
         .filter((item: TenorGif | null): item is TenorGif => Boolean(item));
 
       return {
         items,
-        next: typeof payload?.next === "string" ? payload.next : null,
+        next: typeof payload.next === "string" ? payload.next : null,
       };
     },
     [],
@@ -4932,7 +4989,7 @@ export function ChatPage() {
                                     if (parsed.pollData?.poll) {
                                       const poll = parsed.pollData.poll;
                                       const totalVotes = poll.options.reduce(
-                                        (sum: number, opt: any) =>
+                                        (sum, opt) =>
                                           sum + (opt.votes?.length || 0),
                                         0,
                                       );
@@ -4960,8 +5017,9 @@ export function ChatPage() {
                                             </h3>
                                           </div>
                                           <div className="space-y-1.5">
-                                            {poll.options.map((option: any) => {
+                                            {poll.options.map((option) => {
                                               const votes = option.votes || [];
+                                              const voterId = user?.sub;
                                               const percentage =
                                                 totalVotes > 0
                                                   ? Math.round(
@@ -4969,9 +5027,9 @@ export function ChatPage() {
                                                         100,
                                                     )
                                                   : 0;
-                                              const hasVoted = votes.includes(
-                                                user?.sub,
-                                              );
+                                              const hasVoted = voterId
+                                                ? votes.includes(voterId)
+                                                : false;
 
                                               return (
                                                 <button
@@ -5897,16 +5955,10 @@ export function ChatPage() {
                   <div className="flex flex-1 overflow-hidden">
                     {/* Tabs Sidebar */}
                     <div className="w-40 border-r border-slate-100 bg-slate-50/50 p-2 dark:border-slate-800 dark:bg-slate-900/50">
-                      {[
-                        { id: "members", label: "Thành viên", icon: UserRound },
-                        { id: "bans", label: "Danh sách cấm", icon: Ban },
-                        { id: "links", label: "Link tham gia", icon: Link2 },
-                        { id: "audit", label: "Nhật ký hoạt động", icon: History },
-                        { id: "settings", label: "Cài đặt", icon: ShieldAlert },
-                      ].map((tab) => (
+                      {MANAGE_GROUP_TABS.map((tab) => (
                         <button
                           key={tab.id}
-                          onClick={() => setManageGroupActiveTab(tab.id as any)}
+                          onClick={() => setManageGroupActiveTab(tab.id)}
                           className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-all ${manageGroupActiveTab === tab.id
                             ? "bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none"
                             : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"

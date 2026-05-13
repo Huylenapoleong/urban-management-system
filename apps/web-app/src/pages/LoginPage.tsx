@@ -15,6 +15,20 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return typeof message === "string" && message.trim() ? message : fallback;
 }
 
+function getRedirectPath(state: unknown): string {
+  if (typeof state !== "object" || state === null || !("from" in state)) {
+    return "/";
+  }
+
+  const from = (state as { from?: unknown }).from;
+  if (typeof from !== "object" || from === null || !("pathname" in from)) {
+    return "/";
+  }
+
+  const pathname = (from as { pathname?: unknown }).pathname;
+  return typeof pathname === "string" && pathname.trim() ? pathname : "/";
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -30,7 +44,7 @@ export function LoginPage() {
     onSuccess: (data) => {
       if (data.tokens?.accessToken) {
         authenticate(data.tokens.accessToken);
-        const from = (location.state as any)?.from?.pathname || "/";
+        const from = getRedirectPath(location.state);
         navigate(from, { replace: true });
       } else {
         setError("Token đăng nhập không được tìm thấy.");
