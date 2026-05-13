@@ -2,9 +2,20 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useWebRTC } from "@/hooks/shared/useWebRTC";
 import { useAuth } from "@/providers/auth-context";
+import { listConversationAliases } from "@/services/conversation.api";
 import { getUserById } from "@/services/user.api";
+import type { UserProfile } from "@urban/shared-types";
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+type ParticipantProfile = Pick<
+  UserProfile,
+  "fullName" | "avatarAsset" | "avatarUrl"
+>;
+
+function resolveProfileAvatarUrl(profile?: ParticipantProfile): string | undefined {
+  return profile?.avatarAsset?.resolvedUrl || profile?.avatarUrl;
+}
 
 function RemotePeerVideo({
   peerId,
@@ -20,6 +31,11 @@ function RemotePeerVideo({
   onSpeakingChange?: (peerId: string, isSpeaking: boolean) => void;
 }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [hasRenderableVideo, setHasRenderableVideo] = useState(() =>
+    stream
+      .getVideoTracks()
+      .some((track) => track.readyState === "live" && !track.muted && track.enabled),
+  );
   const speakingUpdateTimerRef = useRef<number | null>(null);
 
   const handleVideoRef = (node: HTMLVideoElement | null) => {
@@ -93,7 +109,33 @@ function RemotePeerVideo({
     };
   }, [isSpeaking, onSpeakingChange, peerId]);
 
-  const hasVideoTrack = stream.getVideoTracks().length > 0;
+  useEffect(() => {
+    const videoTracks = stream.getVideoTracks();
+    const updateVideoState = () => {
+      setHasRenderableVideo(
+        videoTracks.some(
+          (track) =>
+            track.readyState === "live" && !track.muted && track.enabled,
+        ),
+      );
+    };
+
+    updateVideoState();
+    videoTracks.forEach((track) => {
+      track.addEventListener("mute", updateVideoState);
+      track.addEventListener("unmute", updateVideoState);
+      track.addEventListener("ended", updateVideoState);
+    });
+
+    return () => {
+      videoTracks.forEach((track) => {
+        track.removeEventListener("mute", updateVideoState);
+        track.removeEventListener("unmute", updateVideoState);
+        track.removeEventListener("ended", updateVideoState);
+      });
+    };
+  }, [stream]);
+
   const displayName = fallbackName || `Thành viên (${peerId.slice(0, 4)})`;
 
   return (
@@ -101,7 +143,7 @@ function RemotePeerVideo({
       className={`relative w-full h-full flex flex-col items-center justify-center bg-slate-900 border border-slate-800/50 rounded-xl overflow-hidden transition-all duration-300 ${isSpeaking ? "ring-2 ring-emerald-400" : ""}`}
     >
       <audio ref={handleAudioRef} autoPlay playsInline />
-      {hasVideoTrack ? (
+      {hasRenderableVideo ? (
         <video
           ref={handleVideoRef}
           autoPlay
@@ -155,17 +197,22 @@ export function CallModal({ rtc }: CallModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const isDraggingRef = useRef(false);
+  const requestedParticipantProfileIdsRef = useRef<Set<string>>(new Set());
   const [dragPosition, setDragPosition] = useState<{
     x: number;
     y: number;
   } | null>(null);
-  const [peerNames, setPeerNames] = useState<Record<string, string>>({});
+  const [aliasState, setAliasState] = useState<{
+    conversationId?: string;
+    aliases: Record<string, string>;
+  }>({ aliases: {} });
+  const [participantProfiles, setParticipantProfiles] = useState<
+    Record<string, ParticipantProfile>
+  >({});
   const [speakingPeers, setSpeakingPeers] = useState<Record<string, boolean>>(
     {},
   );
 
-  const peerName =
-    activeConfig?.peerName || activeConfig?.callerName || "Người dùng";
   const title =
     callState === "CALLING"
       ? "Đang gọi"
@@ -175,51 +222,125 @@ export function CallModal({ rtc }: CallModalProps) {
   const isGroup = /^(group:|grp#|group#)/i.test(
     activeConfig?.conversationId || "",
   );
+  const remotePeerIdsKey = useMemo(
+    () => Array.from(remoteStreams.keys()).sort().join("|"),
+    [remoteStreams],
+  );
+  const primaryPeerId =
+    activeConfig?.callerId && activeConfig.callerId !== user?.sub
+      ? activeConfig.callerId
+      : activeConfig?.targetUserId;
+  const aliasByUserId =
+    activeConfig?.conversationId &&
+    aliasState.conversationId === activeConfig.conversationId
+      ? aliasState.aliases
+      : {};
 
   useEffect(() => {
-    if (!isGroup || callState === "IDLE") return;
-
-    // Helper to fetch and update name
-    const fetchName = (id: string) => {
-      if (!peerNames[id]) {
-        getUserById(id)
-          .then((user) => {
-            setPeerNames((prev) => ({ ...prev, [id]: user.fullName || id }));
-          })
-          .catch(() => {});
-      }
-    };
-
-    // Fetch for all current remote peers
-    Array.from(remoteStreams.keys()).forEach(fetchName);
-
-    // Fetch for activeConfig targets/callers if they are peer IDs
-    if (activeConfig?.callerId && activeConfig.callerId !== user?.sub) {
-      fetchName(activeConfig.callerId);
+    const conversationId = activeConfig?.conversationId;
+    if (callState === "IDLE" || !conversationId) {
+      return;
     }
+
+    let canceled = false;
+
+    listConversationAliases(conversationId)
+      .then((aliases) => {
+        if (canceled) return;
+        setAliasState({
+          conversationId,
+          aliases: Object.fromEntries(
+            aliases.map((alias) => [alias.userId, alias.alias]),
+          ),
+        });
+      })
+      .catch(() => {
+        if (canceled) return;
+        setAliasState({ conversationId, aliases: {} });
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [activeConfig?.conversationId, callState]);
+
+  useEffect(() => {
+    if (callState === "IDLE") {
+      return;
+    }
+
+    const participantIds = new Set(
+      [
+        ...(remotePeerIdsKey ? remotePeerIdsKey.split("|") : []),
+        activeConfig?.callerId,
+        activeConfig?.targetUserId,
+        user?.sub,
+      ].filter((id): id is string => Boolean(id)),
+    );
+
+    participantIds.forEach((participantId) => {
+      if (requestedParticipantProfileIdsRef.current.has(participantId)) return;
+      requestedParticipantProfileIdsRef.current.add(participantId);
+
+      getUserById(participantId)
+        .then((profile) => {
+          setParticipantProfiles((current) => ({
+            ...current,
+            [participantId]: profile,
+          }));
+        })
+        .catch(() => {});
+    });
   }, [
-    remoteStreams,
-    isGroup,
-    peerNames,
+    remotePeerIdsKey,
     callState,
     activeConfig?.callerId,
+    activeConfig?.targetUserId,
     user?.sub,
   ]);
 
   const getPeerName = (peerId: string, fallbackName?: string) => {
-    if (!isGroup) return fallbackName || peerName;
-    if (peerNames[peerId]) return peerNames[peerId];
-    return `Thành viên (${peerId.slice(0, 4)})`;
+    return (
+      aliasByUserId[peerId] ||
+      activeConfig?.participantNames?.[peerId] ||
+      participantProfiles[peerId]?.fullName ||
+      fallbackName ||
+      `Thành viên (${peerId.slice(0, 4)})`
+    );
   };
 
-  const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
+  const getPeerAvatar = (peerId: string, fallbackAvatar?: string) =>
+    activeConfig?.participantAvatarUrls?.[peerId] ||
+    resolveProfileAvatarUrl(participantProfiles[peerId]) ||
+    fallbackAvatar;
+
+  const basePeerName =
+    activeConfig?.peerName || activeConfig?.callerName || "Người dùng";
+  const peerName = primaryPeerId
+    ? getPeerName(primaryPeerId, basePeerName)
+    : basePeerName;
+  const primaryPeerAvatar = primaryPeerId
+    ? getPeerAvatar(
+        primaryPeerId,
+        activeConfig?.peerAvatarUrl || activeConfig?.callerAvatarUrl,
+      )
+    : activeConfig?.peerAvatarUrl || activeConfig?.callerAvatarUrl;
+  const localDisplayName = user?.sub ? getPeerName(user.sub, "Bạn") : "Bạn";
+  const localAvatarUrl = user?.sub
+    ? getPeerAvatar(user.sub, activeConfig?.callerAvatarUrl)
+    : activeConfig?.callerAvatarUrl;
+  const hasLocalVideoTrack = Boolean(
+    localStream
+      ?.getVideoTracks()
+      .some((track) => track.readyState === "live" && track.enabled),
+  );
   const remoteEntries = Array.from(remoteStreams.entries());
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream]);
+  }, [hasLocalVideoTrack, isVideoOn, localStream]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -386,7 +507,7 @@ export function CallModal({ rtc }: CallModalProps) {
                 !isGroup ? peerName : undefined,
               )}
               fallbackAvatar={
-                !isGroup ? activeConfig?.peerAvatarUrl : undefined
+                getPeerAvatar(peerId, !isGroup ? primaryPeerAvatar : undefined)
               }
             />
           </div>
@@ -395,8 +516,8 @@ export function CallModal({ rtc }: CallModalProps) {
         {remoteEntries.length === 0 && callState !== "INCOMING" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
             <Avatar className="h-20 w-20 mb-4 border border-slate-700 bg-slate-800/80">
-              {activeConfig?.peerAvatarUrl ? (
-                <AvatarImage src={activeConfig?.peerAvatarUrl} />
+              {primaryPeerAvatar ? (
+                <AvatarImage src={primaryPeerAvatar} alt={peerName} />
               ) : null}
               <AvatarFallback>
                 {peerName.slice(0, 2).toUpperCase()}
@@ -408,15 +529,28 @@ export function CallModal({ rtc }: CallModalProps) {
 
         {localStream && activeConfig?.isVideo && (
           <div className="absolute bottom-3 right-3 h-28 w-20 overflow-hidden rounded-xl border border-slate-600/70 bg-slate-800 shadow-lg">
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="h-full w-full scale-x-[-1] object-cover"
-            />
+            {hasLocalVideoTrack && isVideoOn ? (
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="h-full w-full scale-x-[-1] object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-slate-900">
+                <Avatar className="h-12 w-12 border border-slate-700">
+                  {localAvatarUrl ? (
+                    <AvatarImage src={localAvatarUrl} alt={localDisplayName} />
+                  ) : null}
+                  <AvatarFallback className="bg-slate-800 text-sm font-semibold text-slate-100">
+                    {localDisplayName.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              </div>
+            )}
             <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white">
-              Bạn
+              {localDisplayName}
             </div>
           </div>
         )}

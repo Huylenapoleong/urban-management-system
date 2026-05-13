@@ -5,6 +5,8 @@ import ApiClient, {
 import { socketClient } from "@/lib/socket-client";
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type {
+  ConversationAlias,
+  ConversationAliasRemovalResult,
   ConversationSummary,
   GroupMetadata,
   MessageItem,
@@ -60,6 +62,10 @@ type SendMessageAck = {
 
 const CONVERSATION_LIST_MIN_FETCH_INTERVAL_MS = 1500;
 const conversationListCache = new Map<string, ConversationListCacheEntry>();
+
+export function clearConversationListCache(): void {
+  conversationListCache.clear();
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -629,6 +635,76 @@ export async function clearConversationHistory(
     try {
       await ApiClient.post(`/conversations/${encodeURIComponent(id)}/clear`);
       return;
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function listConversationAliases(
+  conversationId: string,
+): Promise<ConversationAlias[]> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      return await ApiClient.get(
+        `/conversations/${encodeURIComponent(id)}/aliases`,
+      );
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function setConversationAlias(
+  conversationId: string,
+  userId: string,
+  alias: string,
+): Promise<ConversationAlias> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      return await ApiClient.put(
+        `/conversations/${encodeURIComponent(id)}/aliases/${encodeURIComponent(userId)}`,
+        { alias },
+      );
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function deleteConversationAlias(
+  conversationId: string,
+  userId: string,
+): Promise<ConversationAliasRemovalResult> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      return await ApiClient.delete(
+        `/conversations/${encodeURIComponent(id)}/aliases/${encodeURIComponent(userId)}`,
+      );
     } catch (error: unknown) {
       lastError = error;
       if (getErrorStatus(error) !== 400) {
