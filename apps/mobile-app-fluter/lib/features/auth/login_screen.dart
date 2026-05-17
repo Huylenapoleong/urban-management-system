@@ -1,7 +1,11 @@
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
+import "package:google_fonts/google_fonts.dart";
 
 import "../../state/session_controller.dart";
+import "../../services/app_services.dart";
+import "../../services/location_service.dart";
+import "../shared/widgets/location_picker_widget.dart";
 import "forgot_password_screen.dart";
 
 class LoginScreen extends StatefulWidget {
@@ -17,10 +21,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final _fullNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _locationController = TextEditingController(text: "VN-HCM-D1-W1");
+  final _locationController = TextEditingController();
 
   bool _registerMode = false;
   bool _isOtpMode = false;
+  bool _obscurePassword = true;
   final _otpController = TextEditingController();
 
   @override
@@ -43,8 +48,8 @@ class _LoginScreenState extends State<LoginScreen> {
       bool success = false;
       if (_registerMode) {
         success = await session.verifyRegisterOtp(
-          login: _emailController.text.trim().isNotEmpty 
-              ? _emailController.text.trim() 
+          login: _emailController.text.trim().isNotEmpty
+              ? _emailController.text.trim()
               : _phoneController.text.trim(),
           otpCode: _otpController.text.trim(),
         );
@@ -57,12 +62,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
       if (!success && session.errorMessage != null) {
-        _showError(session.errorMessage!);
+        _showError(_localizeErrorMessage(session.errorMessage));
       }
       return;
     }
 
     if (_registerMode) {
+      if (_emailController.text.trim().isEmpty && _phoneController.text.trim().isEmpty) {
+        _showError("Vui lòng nhập Email hoặc Số điện thoại để đăng ký.");
+        return;
+      }
+      if (_passwordController.text.length < 10) {
+        _showError("Mật khẩu phải có ít nhất 10 ký tự.");
+        return;
+      }
+      if (_locationController.text.trim().isEmpty) {
+        _showError("Vui lòng chọn Tỉnh/Thành phố và Phường/Xã hợp lệ.");
+        return;
+      }
+
       final success = await session.requestRegisterOtp(
         fullName: _fullNameController.text.trim(),
         password: _passwordController.text,
@@ -70,14 +88,13 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim().isEmpty
             ? null
             : _emailController.text.trim(),
-        phone:
-            _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
       );
       if (!mounted) return;
       if (success) {
         setState(() => _isOtpMode = true);
       } else if (session.errorMessage != null) {
-        _showError(session.errorMessage!);
+        _showError(_localizeErrorMessage(session.errorMessage));
       }
       return;
     }
@@ -90,194 +107,418 @@ class _LoginScreenState extends State<LoginScreen> {
     if (success) {
       setState(() => _isOtpMode = true);
     } else if (session.errorMessage != null) {
-      _showError(session.errorMessage!);
+      _showError(_localizeErrorMessage(session.errorMessage));
     }
+  }
+
+  String _localizeErrorMessage(String? message) {
+    if (message == null) return "Đã có lỗi xảy ra. Vui lòng thử lại.";
+    
+    final lowerMsg = message.toLowerCase();
+    
+    // OTP related
+    if (lowerMsg.contains("invalid otp") || lowerMsg.contains("incorrect") || lowerMsg.contains("not match")) {
+      return "Mã OTP không chính xác. Vui lòng kiểm tra lại.";
+    }
+    if (lowerMsg.contains("expired")) {
+      return "Mã OTP đã hết hạn. Vui lòng yêu cầu gửi lại.";
+    }
+    if (lowerMsg.contains("too many attempts")) {
+      return "Bạn đã thử quá nhiều lần. Vui lòng chờ 15 phút rồi thử lại.";
+    }
+    
+    // Registration/Validation
+    if (lowerMsg.contains("password must be longer")) {
+      return "Mật khẩu phải có ít nhất 10 ký tự.";
+    }
+    if (lowerMsg.contains("email is invalid")) {
+      return "Địa chỉ email không hợp lệ.";
+    }
+    if (lowerMsg.contains("phone already exists") || lowerMsg.contains("email already exists") || lowerMsg.contains("conflict")) {
+      return "Tài khoản (Email hoặc SĐT) này đã được đăng ký.";
+    }
+    
+    // Login
+    if (lowerMsg.contains("invalid credentials") || lowerMsg.contains("not found")) {
+      return "Thông tin đăng nhập không chính xác.";
+    }
+    
+    return message;
   }
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.shade600,
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionController>();
+    final appServices = context.read<AppServices>();
     final loading = session.isLoading;
 
+    final locationService = LocationService(apiClient: appServices.apiClient);
+
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        _isOtpMode
-                            ? "Verification"
-                            : (_registerMode ? "Create account" : "Citizen and Official chat"),
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _isOtpMode
-                            ? "Enter the OTP sent to your email or phone."
-                            : (_registerMode
-                                ? "Register and continue to mobile workspace."
-                                : "Sign in to continue."),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Colors.grey.shade600,
-                            ),
-                      ),
-                      const SizedBox(height: 20),
-                      if (_isOtpMode) ...[
-                        TextField(
-                          controller: _otpController,
-                          keyboardType: TextInputType.number,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _submit(session),
-                          decoration: const InputDecoration(
-                            labelText: "OTP Code",
-                            hintText: "123456",
-                          ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF0F172A), // Slate 900
+              Color(0xFF1E293B), // Slate 800
+              Color(0xFF0F172A), // Slate 900
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 40.0),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // App Logo
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFF10B981).withOpacity(0.3),
+                          width: 2,
                         ),
-                        const SizedBox(height: 20),
-                      ] else ...[
-                        if (_registerMode) ...[
-                          TextField(
-                            controller: _fullNameController,
-                            textInputAction: TextInputAction.next,
-                            decoration: const InputDecoration(
-                              labelText: "Full name",
-                              hintText: "Nguyen Van A",
-                            ),
+                      ),
+                      child: Image.asset(
+                        'assets/images/app_logo.png',
+                        width: 80,
+                        height: 80,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      "Urban Management",
+                      style: GoogleFonts.poppins(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "Cổng thông tin quản lý cư dân",
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        color: Colors.blueGrey.shade400,
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+
+                    // Login Card
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.2),
+                            blurRadius: 24,
+                            offset: const Offset(0, 12),
                           ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _emailController,
-                            textInputAction: TextInputAction.next,
-                            keyboardType: TextInputType.emailAddress,
-                            decoration: const InputDecoration(
-                              labelText: "Email (optional)",
-                              hintText: "name@example.com",
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _phoneController,
-                            textInputAction: TextInputAction.next,
-                            keyboardType: TextInputType.phone,
-                            decoration: const InputDecoration(
-                              labelText: "Phone (optional)",
-                              hintText: "09xxxxxxxx",
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _locationController,
-                            textInputAction: TextInputAction.next,
-                            decoration: const InputDecoration(
-                              labelText: "Location code",
-                              hintText: "VN-HCM-D1-W1",
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                        ] else ...[
-                          TextField(
-                            controller: _loginController,
-                            textInputAction: TextInputAction.next,
-                            keyboardType: TextInputType.emailAddress,
-                            decoration: const InputDecoration(
-                              labelText: "Email or phone",
-                              hintText: "you@example.com",
-                            ),
-                          ),
-                          const SizedBox(height: 12),
                         ],
-                        TextField(
-                          controller: _passwordController,
-                          obscureText: true,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _submit(session),
-                          decoration: const InputDecoration(
-                            labelText: "Password",
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                      ],
-                      FilledButton.icon(
-                        onPressed: loading ? null : () => _submit(session),
-                        icon: loading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Icon(_isOtpMode
-                                ? Icons.check_circle_outline
-                                : (_registerMode ? Icons.person_add_alt : Icons.login)),
-                        label: Text(_isOtpMode
-                            ? "Verify OTP"
-                            : (_registerMode ? "Register" : "Sign in")),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(52),
-                        ),
                       ),
-                      const SizedBox(height: 12),
-                      if (!_isOtpMode && !_registerMode)
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: loading
-                                ? null
-                                : () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => const ForgotPasswordScreen(),
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            _isOtpMode
+                                ? "Xác thực OTP"
+                                : (_registerMode ? "Tạo tài khoản" : "Đăng nhập"),
+                            style: GoogleFonts.poppins(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _isOtpMode
+                                ? "Vui lòng nhập mã OTP đã được gửi."
+                                : (_registerMode
+                                    ? "Đăng ký để sử dụng không gian làm việc số."
+                                    : "Đăng nhập để tiếp tục."),
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              color: Colors.blueGrey.shade500,
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+                          if (_isOtpMode) ...[
+                            _buildTextField(
+                              controller: _otpController,
+                              label: "Mã OTP",
+                              hint: "123456",
+                              icon: Icons.security,
+                              keyboardType: TextInputType.number,
+                              onSubmit: (_) => _submit(session),
+                            ),
+                            const SizedBox(height: 24),
+                          ] else ...[
+                            if (_registerMode) ...[
+                              _buildTextField(
+                                controller: _fullNameController,
+                                label: "Họ và tên",
+                                hint: "Nguyễn Văn A",
+                                icon: Icons.person_outline,
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTextField(
+                                controller: _emailController,
+                                label: "Email (hoặc nhập SĐT)",
+                                hint: "name@example.com",
+                                icon: Icons.email_outlined,
+                                keyboardType: TextInputType.emailAddress,
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTextField(
+                                controller: _phoneController,
+                                label: "Số điện thoại (hoặc nhập Email)",
+                                hint: "09xxxxxxxx",
+                                icon: Icons.phone_outlined,
+                                keyboardType: TextInputType.phone,
+                              ),
+                              const SizedBox(height: 16),
+                              Theme(
+                                data: Theme.of(context).copyWith(
+                                  textTheme: Theme.of(context).textTheme.copyWith(
+                                        labelLarge: GoogleFonts.inter(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          color: const Color(0xFF0F172A),
+                                        ),
                                       ),
-                                    );
+                                ),
+                                child: LocationPickerWidget(
+                                  locationService: locationService,
+                                  initialLocationCode: _locationController.text,
+                                  onLocationSelected: (code) {
+                                    _locationController.text = code;
                                   },
-                            child: const Text("Forgot password?"),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ] else ...[
+                              _buildTextField(
+                                controller: _loginController,
+                                label: "Email hoặc số điện thoại",
+                                hint: "you@example.com",
+                                icon: Icons.person_outline,
+                                keyboardType: TextInputType.emailAddress,
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            _buildTextField(
+                              controller: _passwordController,
+                              label: "Mật khẩu",
+                              hint: "••••••••",
+                              icon: Icons.lock_outline,
+                              isPassword: true,
+                              obscureText: _obscurePassword,
+                              onToggleVisibility: () {
+                                setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                });
+                              },
+                              onSubmit: (_) => _submit(session),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                          FilledButton(
+                            onPressed: loading ? null : () => _submit(session),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 0,
+                            ),
+                            child: loading
+                                ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        _isOtpMode
+                                            ? Icons.check_circle_outline
+                                            : (_registerMode
+                                                ? Icons.person_add_alt
+                                                : Icons.login),
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _isOtpMode
+                                            ? "Xác nhận OTP"
+                                            : (_registerMode ? "Đăng ký" : "Đăng nhập"),
+                                        style: GoogleFonts.inter(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                           ),
-                        ),
-                      if (!_isOtpMode)
-                        TextButton(
-                          onPressed: loading
-                              ? null
-                              : () => setState(() {
-                                    _registerMode = !_registerMode;
-                                  }),
-                          child: Text(
-                            _registerMode
-                                ? "Already have an account? Sign in"
-                                : "Need an account? Register",
-                          ),
-                        )
-                      else
-                        TextButton(
-                          onPressed: loading
-                              ? null
-                              : () => setState(() {
-                                    _isOtpMode = false;
-                                  }),
-                          child: const Text("Go back"),
-                        ),
-                    ],
-                  ),
+                          const SizedBox(height: 16),
+                          if (!_isOtpMode && !_registerMode)
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: loading
+                                    ? null
+                                    : () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const ForgotPasswordScreen(),
+                                          ),
+                                        );
+                                      },
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF10B981),
+                                ),
+                                child: Text(
+                                  "Quên mật khẩu?",
+                                  style: GoogleFonts.inter(fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                            ),
+                          const Divider(height: 32),
+                          if (!_isOtpMode)
+                            TextButton(
+                              onPressed: loading
+                                  ? null
+                                  : () => setState(() {
+                                        _registerMode = !_registerMode;
+                                      }),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.blueGrey.shade600,
+                              ),
+                              child: Text(
+                                _registerMode
+                                    ? "Đã có tài khoản? Đăng nhập"
+                                    : "Chưa có tài khoản? Đăng ký",
+                                style: GoogleFonts.inter(),
+                              ),
+                            )
+                          else
+                            TextButton(
+                              onPressed: loading
+                                  ? null
+                                  : () => setState(() {
+                                        _isOtpMode = false;
+                                      }),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.blueGrey.shade600,
+                              ),
+                              child: Text(
+                                "Quay lại",
+                                style: GoogleFonts.inter(),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    bool isPassword = false,
+    bool? obscureText,
+    VoidCallback? onToggleVisibility,
+    TextInputType? keyboardType,
+    Function(String)? onSubmit,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: const Color(0xFF0F172A),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          obscureText: isPassword ? (obscureText ?? true) : false,
+          keyboardType: keyboardType,
+          textInputAction: onSubmit != null ? TextInputAction.done : TextInputAction.next,
+          onSubmitted: onSubmit,
+          style: GoogleFonts.inter(fontSize: 15),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: GoogleFonts.inter(color: Colors.blueGrey.shade400, fontSize: 15),
+            prefixIcon: Icon(icon, color: Colors.blueGrey.shade400, size: 20),
+            suffixIcon: isPassword && onToggleVisibility != null
+                ? IconButton(
+                    icon: Icon(
+                      (obscureText ?? true) ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      color: Colors.blueGrey.shade400,
+                      size: 20,
+                    ),
+                    onPressed: onToggleVisibility,
+                  )
+                : null,
+            filled: true,
+            fillColor: Colors.blueGrey.shade50,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.blueGrey.shade200, width: 1),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5),
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+        ),
+      ],
     );
   }
 }

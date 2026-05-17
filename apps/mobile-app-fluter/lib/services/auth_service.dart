@@ -116,7 +116,7 @@ class AuthService {
     final raw = await _apiClient.post(
       "/auth/register/verify-otp",
       data: {
-        "login": login,
+        "email": login, // Backend expects 'email' instead of 'login'
         "otpCode": otpCode,
       },
     );

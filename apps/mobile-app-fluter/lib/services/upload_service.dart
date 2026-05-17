@@ -29,7 +29,8 @@ class UploadService {
       try {
         final tempDir = await getTemporaryDirectory();
         final fileNameOnly = fileName ?? filePath.split("/").last;
-        final targetPath = "${tempDir.path}/compressed_$fileNameOnly";
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final targetPath = "${tempDir.path}/compressed_${timestamp}.jpg";
         
         final compressed = await FlutterImageCompress.compressAndGetFile(
           filePath,

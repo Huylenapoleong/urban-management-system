@@ -24,6 +24,12 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+
+  void _setIndex(int index) {
+    setState(() {
+      _index = index;
+    });
+  }
   StreamSubscription? _callInitSub;
   StreamSubscription? _callInviteSub;
 
@@ -92,7 +98,7 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     final pages = <Widget>[
-      HomeScreen(),
+      const HomeScreen(),
       ChatWorkspaceScreen(
         conversationService: services.conversationService,
         uploadService: services.uploadService,
@@ -103,9 +109,14 @@ class _HomeShellState extends State<HomeShell> {
         currentUser: user,
       ),
       const ContactsScreen(),
-      ReportsScreen(reportService: services.reportService),
+      ReportsScreen(
+        reportService: services.reportService,
+        uploadService: services.uploadService,
+      ),
       ProfileScreen(
         user: user,
+        userService: services.userService,
+        uploadService: services.uploadService,
         onRefreshProfile: session.refreshProfile,
         onLogout: session.logout,
       ),
@@ -113,55 +124,62 @@ class _HomeShellState extends State<HomeShell> {
 
     return Stack(
       children: [
-        Scaffold(
-          body: IndexedStack(
-            index: _index,
-            children: pages,
-          ),
-          bottomNavigationBar: Container(
-            decoration: BoxDecoration(
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
-                ),
-              ],
+        NotificationListener<HomeNavigationNotification>(
+          onNotification: (notification) {
+            _setIndex(notification.index);
+            return true;
+          },
+          child: Scaffold(
+            body: IndexedStack(
+              index: _index,
+              children: pages,
             ),
-            child: NavigationBar(
-              backgroundColor: Colors.white,
-              indicatorColor: const Color(0xFF7C3AED).withOpacity(0.1),
-              selectedIndex: _index,
-              onDestinationSelected: (value) => setState(() => _index = value),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home, color: Color(0xFF7C3AED)),
-                  label: "Trang chủ",
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.chat_bubble_outline),
-                  selectedIcon:
-                      Icon(Icons.chat_bubble, color: Color(0xFF7C3AED)),
-                  label: "Tin nhắn",
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.people_outline),
-                  selectedIcon: Icon(Icons.people, color: Color(0xFF7C3AED)),
-                  label: "Bạn bè",
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.description_outlined),
-                  selectedIcon:
-                      Icon(Icons.description, color: Color(0xFF7C3AED)),
-                  label: "Báo cáo",
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.person_outline),
-                  selectedIcon: Icon(Icons.person, color: Color(0xFF7C3AED)),
-                  label: "Cá nhân",
-                ),
-              ],
+            bottomNavigationBar: Container(
+              decoration: BoxDecoration(
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: NavigationBar(
+                backgroundColor: Colors.white,
+                indicatorColor: const Color(0xFF7C3AED).withOpacity(0.1),
+                selectedIndex: _index,
+                onDestinationSelected: (value) => setState(() => _index = value),
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home, color: Color(0xFF7C3AED)),
+                    label: "Trang chủ",
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.chat_bubble_outline),
+                    selectedIcon:
+                        Icon(Icons.chat_bubble, color: Color(0xFF7C3AED)),
+                    label: "Tin nhắn",
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.people_outline),
+                    selectedIcon: Icon(Icons.people, color: Color(0xFF7C3AED)),
+                    label: "Bạn bè",
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.description_outlined),
+                    selectedIcon:
+                        Icon(Icons.description, color: Color(0xFF7C3AED)),
+                    label: "Báo cáo",
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.person_outline),
+                    selectedIcon: Icon(Icons.person, color: Color(0xFF7C3AED)),
+                    label: "Cá nhân",
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -225,4 +243,9 @@ class _HomeShellState extends State<HomeShell> {
       },
     );
   }
+}
+
+class HomeNavigationNotification extends Notification {
+  final int index;
+  HomeNavigationNotification(this.index);
 }

@@ -183,8 +183,8 @@ class SocketService {
     });
 
     socket.on("typing.state", (data) {
-      if (data is Map<String, dynamic>) {
-        _typingStateController.add(data);
+      if (data is Map) {
+        _typingStateController.add(data.cast<String, dynamic>());
       }
     });
 
@@ -223,10 +223,18 @@ class SocketService {
     });
   }
 
-  void joinConversation(String conversationId) {
-    if (isConnected) {
-      _socket?.emit("conversation.join", {"conversationId": conversationId});
-    }
+  Future<Map<String, dynamic>?> joinConversation(String conversationId) async {
+    if (!isConnected) return null;
+    
+    final completer = Completer<Map<String, dynamic>?>();
+    _socket?.emitWithAck("conversation.join", {"conversationId": conversationId}, ack: (data) {
+      if (data is Map && data["success"] == true) {
+        completer.complete(Map<String, dynamic>.from(data["data"]));
+      } else {
+        completer.complete(null);
+      }
+    });
+    return completer.future;
   }
 
   void leaveConversation(String conversationId) {

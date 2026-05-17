@@ -15,6 +15,7 @@ import "../../services/webrtc_service.dart";
 import "chat_detail_screen.dart";
 import "../contacts/contacts_screen.dart";
 import "../shared/widgets/user_avatar.dart";
+import "../shared/widgets/app_logo_button.dart";
 
 class ChatWorkspaceScreen extends StatefulWidget {
   final ConversationService conversationService;
@@ -405,6 +406,7 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
             pinned: false,
             backgroundColor: Colors.white,
             elevation: 0,
+            leading: const AppLogoButton(),
             title: const Text(
               "Tin nhắn",
               style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 24),

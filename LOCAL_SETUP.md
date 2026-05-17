@@ -43,7 +43,7 @@ cd apps/mobile-app-fluter
 flutter pub get
 
 # Chạy trên máy ảo (Emulator) hoặc máy thật
-flutter run --release --dart-define=API_BASE_URL=http://192.168.2.195:3001
+flutter run --release --dart-define=API_BASE_URL=http://192.168.1.8:3001
 ```
 *Lưu ý:* Cần trỏ IP kết nối API/Socket trong config của Flutter đến IP máy tính (VD: `192.168.1.x:3001`) thay vì `localhost` nếu chạy trên thiết bị thật/máy ảo Android.
 

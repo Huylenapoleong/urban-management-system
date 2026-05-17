@@ -1,4 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+
 
 export class LocationProvinceDto {
   @ApiProperty({ example: '79' })
@@ -79,18 +81,25 @@ export class ResolvedLocationDto {
 
 export class ListLocationWardsQueryDto {
   @ApiProperty({ example: '79' })
+  @IsString()
+  @IsNotEmpty()
   provinceCode!: string;
 }
 
 export class SearchLocationsQueryDto {
   @ApiProperty({ example: 'bến nghé' })
+  @IsString()
+  @IsNotEmpty()
   q!: string;
 
   @ApiPropertyOptional({ example: 20 })
+  @IsOptional()
   limit?: number;
 }
 
 export class ResolveLocationQueryDto {
   @ApiProperty({ example: 'VN-79-26734' })
+  @IsString()
+  @IsNotEmpty()
   locationCode!: string;
 }

@@ -3,11 +3,13 @@ class AuthUser {
     required this.id,
     required this.fullName,
     required this.role,
+    this.avatarUrl,
   });
 
   final String id;
   final String fullName;
   final String role;
+  final String? avatarUrl;
 
   bool get isOfficial {
     const officialRoles = {
@@ -26,6 +28,7 @@ class AuthUser {
       id: (map['id'] ?? map['sub'] ?? '').toString(),
       fullName: (map['fullName'] ?? map['name'] ?? 'User').toString(),
       role: (map['role'] ?? 'CITIZEN').toString(),
+      avatarUrl: map['avatarUrl']?.toString(),
     );
   }
 }

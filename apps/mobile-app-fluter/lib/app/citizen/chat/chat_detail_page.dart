@@ -14,6 +14,9 @@ import 'package:record/record.dart';
 import '../../../core/models/chat_models.dart';
 import '../../../state/auth_controller.dart';
 import '../../../state/chat_detail_controller.dart';
+import '../../../state/providers.dart';
+import '../../../features/chat/conversation_info_screen.dart';
+import '../../../models/conversation_summary.dart' as model;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette
@@ -183,7 +186,23 @@ class _CitizenChatDetailPageState extends ConsumerState<CitizenChatDetailPage>
                       ),
                       IconButton(
                         icon: const Icon(Icons.more_vert_rounded, color: _kTextMuted),
-                        onPressed: () {},
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ConversationInfoScreen(
+                                conversation: model.ConversationSummary(
+                                  conversationId: widget.conversationId,
+                                  groupName: widget.title,
+                                  unreadCount: 0,
+                                  isGroup: widget.conversationId.startsWith("group:"),
+                                  updatedAt: DateTime.now().toIso8601String(),
+                                ),
+                                conversationService: ref.read(conversationServiceProvider),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),

@@ -4,6 +4,14 @@ import '../../state/session_controller.dart';
 import '../../services/app_services.dart';
 import '../notifications/notifications_screen.dart';
 import '../contacts/contacts_screen.dart';
+import '../chatbot/ai_assistant_page.dart';
+import '../reports/reports_screen.dart';
+import '../map/map_screen.dart';
+import '../events/events_screen.dart';
+import '../profile/about_app_screen.dart';
+import '../shared/widgets/app_logo_button.dart';
+
+
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -40,65 +48,65 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AiAssistantPage()),
+          );
+        },
+        backgroundColor: const Color(0xFF0F172A),
+        icon: const Icon(Icons.auto_awesome, color: Colors.white),
+        label: const Text('Trợ lý AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
     );
   }
 
   Widget _buildAppBar(BuildContext context, dynamic user) {
     final name = user.fullName;
     return SliverAppBar(
-      expandedHeight: 120,
       floating: false,
       pinned: true,
       backgroundColor: Colors.white,
       elevation: 0,
-      flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Hello,",
-                  style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.normal),
-                ),
-                Text(
-                  name,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B)),
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.people_outline, color: Color(0xFF1E1B4B)),
-                  onPressed: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => const ContactsScreen(),
-                    ));
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.notifications_outlined, color: Color(0xFF1E1B4B)),
-                  onPressed: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => const NotificationsScreen(),
-                    ));
-                  },
-                ),
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: const Color(0xFF7C3AED),
-                  backgroundImage: user.avatarUrl != null ? NetworkImage(user.avatarUrl!) : null,
-                  child: user.avatarUrl == null ? const Icon(Icons.person, color: Colors.white, size: 20) : null,
-                ),
-              ],
-            ),
-          ],
+      leading: const AppLogoButton(),
+      title: const Text(
+        "Urban Management",
+        style: TextStyle(
+          fontWeight: FontWeight.bold, 
+          fontSize: 18, 
+          color: Color(0xFF1E1B4B)
         ),
       ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.people_outline, color: Color(0xFF1E1B4B)),
+          onPressed: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const ContactsScreen(),
+            ));
+          },
+        ),
+        IconButton(
+          icon: const Icon(Icons.notifications_outlined, color: Color(0xFF1E1B4B)),
+          onPressed: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const NotificationsScreen(),
+            ));
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 16.0, left: 8.0),
+          child: Center(
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFF7C3AED),
+              backgroundImage: user.avatarUrl != null ? NetworkImage(user.avatarUrl!) : null,
+              child: user.avatarUrl == null ? const Icon(Icons.person, color: Colors.white, size: 18) : null,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -157,19 +165,74 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _buildQuickActions(BuildContext context) {
+    final services = context.read<AppServices>();
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        _buildActionItem(context, Icons.report_problem_outlined, "Report", const Color(0xFFFEE2E2), const Color(0xFFEF4444)),
-        _buildActionItem(context, Icons.map_outlined, "Map", const Color(0xFFE0F2FE), const Color(0xFF0EA5E9)),
-        _buildActionItem(context, Icons.event_note_outlined, "Events", const Color(0xFFF0FDF4), const Color(0xFF22C55E)),
-        _buildActionItem(context, Icons.info_outline, "About", const Color(0xFFFEF9C3), const Color(0xFFEAB308)),
+        _buildActionItem(
+          context, 
+          Icons.report_problem_outlined, 
+          "Report", 
+          const Color(0xFFFEE2E2), 
+          const Color(0xFFEF4444),
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ReportsScreen(reportService: services.reportService),
+            ));
+          },
+        ),
+        _buildActionItem(
+          context, 
+          Icons.map_outlined, 
+          "Map", 
+          const Color(0xFFE0F2FE), 
+          const Color(0xFF0EA5E9),
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => const MapScreen(),
+            ));
+          },
+        ),
+        _buildActionItem(
+          context, 
+          Icons.event_note_outlined, 
+          "Events", 
+          const Color(0xFFF0FDF4), 
+          const Color(0xFF22C55E),
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => const EventsScreen(),
+            ));
+          },
+        ),
+        _buildActionItem(
+          context, 
+          Icons.info_outline, 
+          "About", 
+          const Color(0xFFFEF9C3), 
+          const Color(0xFFEAB308),
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => const AboutAppScreen(),
+            ));
+          },
+        ),
       ],
     );
   }
 
-  Widget _buildActionItem(BuildContext context, IconData icon, String label, Color bgColor, Color iconColor) {
-    return Column(
+  Widget _buildActionItem(
+    BuildContext context, 
+    IconData icon, 
+    String label, 
+    Color bgColor, 
+    Color iconColor, 
+    {required VoidCallback onTap}
+  ) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Column(
       children: [
         Container(
           width: 60,
@@ -183,8 +246,9 @@ class HomeScreen extends StatelessWidget {
         const SizedBox(height: 8),
         Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E1B4B))),
       ],
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildStatusCard(BuildContext context) {
     return Container(

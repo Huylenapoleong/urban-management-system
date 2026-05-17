@@ -64,6 +64,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _sending = false;
   MessageItem? _replyingTo;
   Map<String, List<String>> _messageReactions = {};
+  Map<String, String> _typingUsers = {};
+  StreamSubscription? _typingSub;
+  String? _conversationKey;
 
   @override
   void initState() {
@@ -79,7 +82,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
 
     widget.webRTCService.callState.addListener(_handleCallStateChange);
-    widget.socketService.joinConversation(widget.conversation.conversationId);
+    widget.socketService
+        .joinConversation(widget.conversation.conversationId)
+        .then((data) {
+      if (mounted && data != null) {
+        setState(() {
+          _conversationKey = data["conversationKey"];
+        });
+      }
+    });
 
     _msgSub = widget.socketService.onMessageCreated.listen((msg) {
       if (mounted && msg.conversationId == widget.conversation.conversationId) {
@@ -91,6 +102,31 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             newList.insert(0, msg);
             _pagingController.itemList = newList;
           }
+        }
+        // Remove from typing if message arrived
+        if (msg.senderId != widget.currentUser.id) {
+          setState(() {
+            _typingUsers.remove(msg.senderId);
+          });
+        }
+      }
+    });
+
+    _typingSub = widget.socketService.onTypingState.listen((data) {
+      if (mounted &&
+          _conversationKey != null &&
+          data["conversationKey"] == _conversationKey) {
+        final userId = data["userId"]?.toString();
+        final fullName = data["fullName"]?.toString() ?? "Ai đó";
+        final isTyping = data["isTyping"] == true;
+        if (userId != null && userId != widget.currentUser.id) {
+          setState(() {
+            if (isTyping) {
+              _typingUsers[userId] = fullName;
+            } else {
+              _typingUsers.remove(userId);
+            }
+          });
         }
       }
     });
@@ -149,6 +185,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _msgSub?.cancel();
     _presenceSub?.cancel();
     _snapshotSub?.cancel();
+    _typingSub?.cancel();
     _pagingController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -746,11 +783,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           _buildHeader(),
           _buildActiveCallBanner(),
           Expanded(child: _buildMessageList()),
+          _buildTypingIndicator(),
           if (_replyingTo != null) _buildReplyPreview(),
           ChatComposer(
             onSend: _sendMessage,
             onLocationRequest: _sendLocation,
             uploadService: widget.uploadService,
+            socketService: widget.socketService,
+            conversationId: widget.conversation.conversationId,
             sending: _sending,
           ),
         ],
@@ -991,6 +1031,47 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
+  Widget _buildTypingIndicator() {
+    if (_typingUsers.isEmpty) return const SizedBox.shrink();
+
+    final names = _typingUsers.values.toList();
+    String text = "";
+    if (names.length == 1) {
+      text = "${names[0]} đang nhập...";
+    } else if (names.length == 2) {
+      text = "${names[0]} và ${names[1]} đang nhập...";
+    } else {
+      text = "${names.length} người đang nhập...";
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: Color(0xFF7C3AED),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _formatLastSeen(DateTime date) {
     final diff = DateTime.now().difference(date);
     if (diff.inDays > 0) return "${diff.inDays} ngày";
@@ -1032,6 +1113,8 @@ class ChatComposer extends StatefulWidget {
       {required String text, _PendingAttachment? attachment}) onSend;
   final VoidCallback onLocationRequest;
   final UploadService uploadService;
+  final SocketService socketService;
+  final String conversationId;
   final bool sending;
 
   const ChatComposer(
@@ -1039,6 +1122,8 @@ class ChatComposer extends StatefulWidget {
       required this.onSend,
       required this.onLocationRequest,
       required this.uploadService,
+      required this.socketService,
+      required this.conversationId,
       required this.sending});
 
   @override
@@ -1052,12 +1137,41 @@ class _ChatComposerState extends State<ChatComposer> {
   bool _isRecording = false;
   int _recordDuration = 0;
   Timer? _timer;
+  Timer? _typingTimer;
+  bool _isTypingSent = false;
 
   @override
   void initState() {
     super.initState();
     _textController.addListener(() {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+        _handleTyping();
+      }
+    });
+  }
+
+  void _handleTyping() {
+    if (_textController.text.trim().isEmpty) {
+      if (_isTypingSent) {
+        widget.socketService.stopTyping(widget.conversationId);
+        _isTypingSent = false;
+      }
+      _typingTimer?.cancel();
+      return;
+    }
+
+    if (!_isTypingSent) {
+      widget.socketService.startTyping(widget.conversationId);
+      _isTypingSent = true;
+    }
+
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _isTypingSent) {
+        widget.socketService.stopTyping(widget.conversationId);
+        _isTypingSent = false;
+      }
     });
   }
 
@@ -1066,6 +1180,7 @@ class _ChatComposerState extends State<ChatComposer> {
     _textController.dispose();
     _audioRecorder.dispose();
     _timer?.cancel();
+    _typingTimer?.cancel();
     super.dispose();
   }
 

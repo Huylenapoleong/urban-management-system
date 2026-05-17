@@ -3,11 +3,11 @@ import "package:mobile_app_fluter/models/user_profile.dart";
 import "../../models/conversation_summary.dart";
 import "../../services/conversation_service.dart";
 import "../shared/widgets/user_avatar.dart";
-import "../../services/app_services.dart";
-import "package:provider/provider.dart";
-import "../../state/session_controller.dart";
+import "package:flutter_riverpod/flutter_riverpod.dart";
+import "../../state/providers.dart";
+import "../../state/auth_controller.dart";
 
-class ConversationInfoScreen extends StatefulWidget {
+class ConversationInfoScreen extends ConsumerStatefulWidget {
   final ConversationSummary conversation;
   final ConversationService conversationService;
 
@@ -18,10 +18,10 @@ class ConversationInfoScreen extends StatefulWidget {
   });
 
   @override
-  State<ConversationInfoScreen> createState() => _ConversationInfoScreenState();
+  ConsumerState<ConversationInfoScreen> createState() => _ConversationInfoScreenState();
 }
 
-class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
+class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen> {
   bool _loading = false;
   List<Map<String, dynamic>> _members = [];
   final Map<String, dynamic> _profileCache = {};
@@ -41,13 +41,15 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
       return;
     }
 
-    final services = context.read<AppServices>();
+    final userService = ref.read(userServiceProvider);
+    final groupService = ref.read(groupServiceProvider);
+    final conversationService = ref.read(conversationServiceProvider);
     setState(() => _loading = true);
     
     // 1. Load members (Main Priority)
     try {
       final groupId = widget.conversation.groupId ?? widget.conversation.conversationId;
-      final members = await services.groupService.listMembers(groupId);
+      final members = await groupService.listMembers(groupId);
       if (mounted) {
         setState(() {
           _members = members;
@@ -69,7 +71,7 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
 
     // 2. Load friends for fallback names (Optional)
     try {
-      final friends = await services.userService.listFriends();
+      final friends = await userService.listFriends();
       if (mounted) {
         setState(() {
           _friends = friends;
@@ -81,7 +83,7 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
 
     // 3. Harvest names/avatars from messages as fallback (Optional)
     try {
-      final messages = await services.conversationService.listMessages(widget.conversation.conversationId, limit: 50);
+      final messages = await conversationService.listMessages(widget.conversation.conversationId, limit: 50);
       bool changed = false;
       for (final msg in messages.items) {
         final senderId = msg.senderId;
@@ -107,9 +109,9 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
   }
 
   Future<void> _fetchProfile(String userId) async {
-    final services = context.read<AppServices>();
+    final userService = ref.read(userServiceProvider);
     try {
-      final profile = await services.userService.getUserById(userId);
+      final profile = await userService.getUserById(userId);
       if (mounted) {
         setState(() {
           _profileCache[userId] = profile;
@@ -141,15 +143,15 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
               child: Column(
                 children: [
                   UserAvatar(
-                    userId: isGroup ? null : widget.conversation.getPeerId(context.read<SessionController>().user?.id),
+                    userId: isGroup ? null : widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id),
                     groupId: isGroup ? widget.conversation.groupId : null,
                     initialAvatarUrl: isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
                     initialDisplayName: title,
                     radius: 50,
                     showStatus: !isGroup,
-                    isActive: !isGroup && widget.conversation.getPeerId(context.read<SessionController>().user?.id) != null, // Note: We don't have realtime presence here easily without a stream, but we can at least show the status indicator if we had the state.
-                    userService: context.read<AppServices>().userService,
-                    groupService: context.read<AppServices>().groupService,
+                    isActive: !isGroup && widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id) != null, // Note: We don't have realtime presence here easily without a stream, but we can at least show the status indicator if we had the state.
+                    userService: ref.read(userServiceProvider),
+                    groupService: ref.read(groupServiceProvider),
                   ),
                   const SizedBox(height: 16),
                   Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
@@ -255,16 +257,16 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
                               fallbackAvatar = friend.avatarUrl;
                             }
                             
-                            final session = context.read<SessionController>();
-                            final isMe = userId == session.user?.id;
+                            final user = ref.read(authControllerProvider).user;
+                            final isMe = userId == user?.id;
                             
                             final fullName = isMe ? "Bạn" : (profile?.fullName ?? fallbackName ?? m["fullName"] ?? "Thành viên");
-                            final avatarUrl = isMe ? session.user?.avatarUrl : (profile?.avatarUrl ?? fallbackAvatar ?? m["avatarUrl"]);
+                            final avatarUrl = isMe ? user?.avatarUrl : (profile?.avatarUrl ?? fallbackAvatar ?? m["avatarUrl"]);
 
                             return ListTile(
                               leading: UserAvatar(
                                 userId: userId,
-                                userService: context.read<AppServices>().userService,
+                                userService: ref.read(userServiceProvider),
                                 initialAvatarUrl: avatarUrl,
                                 initialDisplayName: fullName,
                                 radius: 18,
@@ -384,7 +386,7 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
   }
 
   Future<void> _leaveGroup() async {
-    final services = context.read<AppServices>();
+    final groupService = ref.read(groupServiceProvider);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -401,7 +403,7 @@ class _ConversationInfoScreenState extends State<ConversationInfoScreen> {
       setState(() => _loading = true);
       try {
         final groupId = widget.conversation.groupId ?? widget.conversation.conversationId;
-        await services.groupService.leaveGroup(groupId);
+        await groupService.leaveGroup(groupId);
         if (mounted) {
           Navigator.pop(context); // Back to info
           Navigator.pop(context); // Back to list

@@ -6,6 +6,7 @@ import "widgets/request_list_tab.dart";
 import "widgets/discover_tab.dart";
 import "widgets/group_list_tab.dart";
 import "../groups/create_group_screen.dart";
+import "../shared/widgets/app_logo_button.dart";
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -34,9 +35,10 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text("Bạn bè", style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 22)),
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppLogoButton(),
+        title: const Text("Bạn bè", style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 22)),
         centerTitle: false,
         iconTheme: const IconThemeData(color: Color(0xFF1E1B4B)),
         actions: [

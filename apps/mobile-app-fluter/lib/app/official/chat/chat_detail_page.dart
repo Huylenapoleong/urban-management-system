@@ -4,7 +4,10 @@ import 'package:intl/intl.dart';
 
 import '../../../state/chat_detail_controller.dart';
 import '../../../state/auth_controller.dart';
+import '../../../state/providers.dart';
 import '../../../core/models/chat_models.dart';
+import '../../../features/chat/conversation_info_screen.dart';
+import '../../../models/conversation_summary.dart' as model;
 
 class OfficialChatDetailPage extends ConsumerStatefulWidget {
   final String conversationId;
@@ -51,7 +54,21 @@ class _OfficialChatDetailPageState extends ConsumerState<OfficialChatDetailPage>
           IconButton(
             icon: const Icon(Icons.info_outline),
             onPressed: () {
-              // Show group info or peer info
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ConversationInfoScreen(
+                    conversation: model.ConversationSummary(
+                      conversationId: widget.conversationId,
+                      groupName: widget.title,
+                      unreadCount: 0,
+                      isGroup: widget.conversationId.startsWith("group:"),
+                      updatedAt: DateTime.now().toIso8601String(),
+                    ),
+                    conversationService: ref.read(conversationServiceProvider),
+                  ),
+                ),
+              );
             },
           )
         ],

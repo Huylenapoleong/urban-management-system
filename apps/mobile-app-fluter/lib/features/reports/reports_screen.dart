@@ -1,14 +1,22 @@
 import "package:flutter/material.dart";
 import "package:intl/intl.dart";
 import "package:geolocator/geolocator.dart";
+import "package:image_picker/image_picker.dart";
+import "package:geocoding/geocoding.dart";
+import "package:provider/provider.dart";
+import "dart:io";
 
 import "../../models/report_item.dart";
 import "../../services/report_service.dart";
+import "../../services/upload_service.dart";
+import "../../state/session_controller.dart";
+import "../shared/widgets/app_logo_button.dart";
 
 class ReportsScreen extends StatefulWidget {
-  const ReportsScreen({super.key, required this.reportService});
+  const ReportsScreen({super.key, required this.reportService, this.uploadService});
 
   final ReportService reportService;
+  final UploadService? uploadService;
 
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
@@ -18,7 +26,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   final _searchController = TextEditingController();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _locationController = TextEditingController(text: "VN-HCM-D1-W1");
+  final _locationController = TextEditingController(text: "VN-79");
 
   String _category = "INFRASTRUCTURE";
   String _priority = "MEDIUM";
@@ -26,6 +34,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String? _error;
   List<ReportItem> _reports = const <ReportItem>[];
   String _filterStatus = "ALL";
+  final List<XFile> _selectedMedia = [];
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -75,9 +85,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text("My Reports", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
         backgroundColor: Colors.white,
         elevation: 0,
+        leading: const AppLogoButton(),
+        title: const Text(
+          "Báo cáo sự cố",
+          style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold),
+        ),
         centerTitle: false,
         actions: [
           IconButton(
@@ -221,13 +235,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
             children: [
               Center(child: Container(width: 40, height: 4, decoration: const BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.all(Radius.circular(2))))),
               const SizedBox(height: 20),
-              const Text("New Report", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
+              const Text("Báo cáo mới", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
               const SizedBox(height: 24),
               TextField(
                 controller: _titleController,
                 decoration: InputDecoration(
-                  labelText: "What's happening?",
-                  hintText: "Brief title of the issue",
+                  labelText: "Chuyện gì đang xảy ra?",
+                  hintText: "Tiêu đề ngắn gọn của sự cố",
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
@@ -236,8 +250,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 controller: _descriptionController,
                 maxLines: 4,
                 decoration: InputDecoration(
-                  labelText: "Description",
-                  hintText: "Provide more details...",
+                  labelText: "Mô tả chi tiết",
+                  hintText: "Cung cấp thêm thông tin...",
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
@@ -245,17 +259,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
               _buildLocationField(),
               const SizedBox(height: 16),
               _buildDropdowns(),
+              const SizedBox(height: 16),
+              const Text("Hình ảnh & Video đính kèm", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              _buildMediaPicker(),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 height: 54,
                 child: FilledButton(
-                  onPressed: _submitReport,
+                  onPressed: _submitting ? null : _submitReport,
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF7C3AED),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  child: const Text("Submit Report", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  child: _submitting 
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text("Gửi báo cáo", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -265,6 +285,92 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  Widget _buildMediaPicker() {
+    return SizedBox(
+      height: 100,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _selectedMedia.length + 1,
+        itemBuilder: (context, index) {
+          if (index == _selectedMedia.length) {
+            return GestureDetector(
+              onTap: _pickMedia,
+              child: Container(
+                width: 100,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade300, style: BorderStyle.solid),
+                ),
+                child: const Icon(Icons.add_a_photo_outlined, color: Colors.grey),
+              ),
+            );
+          }
+          final file = _selectedMedia[index];
+          final isVideo = file.path.endsWith(".mp4") || file.path.endsWith(".mov");
+          return Stack(
+            children: [
+              Container(
+                width: 100,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  image: isVideo ? null : DecorationImage(image: FileImage(File(file.path)), fit: BoxFit.cover),
+                  color: isVideo ? Colors.black87 : null,
+                ),
+                child: isVideo ? const Center(child: Icon(Icons.videocam, color: Colors.white)) : null,
+              ),
+              Positioned(
+                top: 4,
+                right: 12,
+                child: GestureDetector(
+                  onTap: () => setState(() => _selectedMedia.removeAt(index)),
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                    child: const Icon(Icons.close, size: 16, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _pickMedia() async {
+    final picker = ImagePicker();
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(leading: const Icon(Icons.camera_alt), title: const Text("Chụp ảnh"), onTap: () => Navigator.pop(context, ImageSource.camera)),
+            ListTile(leading: const Icon(Icons.videocam), title: const Text("Quay video"), onTap: () async {
+              Navigator.pop(context);
+              final video = await picker.pickVideo(source: ImageSource.camera);
+              if (video != null) setState(() => _selectedMedia.add(video));
+            }),
+            ListTile(leading: const Icon(Icons.photo_library), title: const Text("Chọn từ thư viện"), onTap: () async {
+              Navigator.pop(context);
+              final media = await picker.pickMedia();
+              if (media != null) setState(() => _selectedMedia.add(media));
+            }),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    
+    final xFile = await picker.pickImage(source: source);
+    if (xFile != null) {
+      setState(() => _selectedMedia.add(xFile));
+    }
+  }
+
   Widget _buildLocationField() {
     return Row(
       children: [
@@ -272,8 +378,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
           child: TextField(
             controller: _locationController,
             decoration: InputDecoration(
-              labelText: "Location Code",
-              hintText: "e.g. VN-HCM-D1-W1",
+              labelText: "Địa chỉ sự cố",
+              hintText: "Nhập địa chỉ hoặc nhấn định vị bên cạnh",
+              prefixIcon: const Icon(Icons.location_on_outlined),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
@@ -282,7 +389,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         IconButton.filledTonal(
           onPressed: _detectLocation,
           icon: const Icon(Icons.my_location),
-          tooltip: "Detect Current Location",
+          tooltip: "Định vị vị trí hiện tại",
         ),
       ],
     );
@@ -319,18 +426,40 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
-      // For now, we don't have reverse geocoding to locationCode, 
-      // so we'll just show the coordinates if they want, or keep current code.
-      // But let's show success.
+      
       if (mounted) {
+        String address = "${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}";
+        
+        try {
+          List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+          if (placemarks.isNotEmpty) {
+            final p = placemarks.first;
+            // Format: Street, Ward, District, City
+            final parts = [
+              if (p.street != null && p.street!.isNotEmpty) p.street,
+              if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
+              if (p.locality != null && p.locality!.isNotEmpty) p.locality,
+              if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty) p.administrativeArea,
+            ];
+            if (parts.isNotEmpty) {
+              address = parts.join(", ");
+            }
+          }
+        } catch (e) {
+          print("Reverse geocoding failed: $e");
+          // Keep coordinates as fallback
+        }
+
+        setState(() {
+          _locationController.text = address;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Location detected: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}"))
+          const SnackBar(content: Text("Đã xác định vị trí thành công!"))
         );
-        // If we had a mapping service, we'd update _locationController here.
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error detecting location: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi định vị: $e")));
       }
     }
   }
@@ -341,11 +470,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
         Expanded(
           child: DropdownButtonFormField<String>(
             value: _category,
-            decoration: InputDecoration(labelText: "Category", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+            decoration: InputDecoration(labelText: "Phân loại", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
             items: const [
-              DropdownMenuItem(value: "INFRASTRUCTURE", child: Text("Infra")),
-              DropdownMenuItem(value: "ENVIRONMENT", child: Text("Env")),
-              DropdownMenuItem(value: "SECURITY", child: Text("Security")),
+              DropdownMenuItem(value: "INFRASTRUCTURE", child: Text("Hạ tầng")),
+              DropdownMenuItem(value: "ENVIRONMENT", child: Text("Môi trường")),
+              DropdownMenuItem(value: "SECURITY", child: Text("An ninh")),
             ],
             onChanged: (val) => setState(() => _category = val!),
           ),
@@ -354,11 +483,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
         Expanded(
           child: DropdownButtonFormField<String>(
             value: _priority,
-            decoration: InputDecoration(labelText: "Priority", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+            decoration: InputDecoration(labelText: "Ưu tiên", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
             items: const [
-              DropdownMenuItem(value: "LOW", child: Text("Low")),
-              DropdownMenuItem(value: "MEDIUM", child: Text("Med")),
-              DropdownMenuItem(value: "HIGH", child: Text("High")),
+              DropdownMenuItem(value: "LOW", child: Text("Thấp")),
+              DropdownMenuItem(value: "MEDIUM", child: Text("Trung bình")),
+              DropdownMenuItem(value: "HIGH", child: Text("Cao")),
             ],
             onChanged: (val) => setState(() => _priority = val!),
           ),
@@ -367,23 +496,81 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  String _normalizeLocationCode(String code) {
+    // Backend V2 requires VN-XX (digits). 
+    // If we have legacy VN-HCM..., map HCM to 79.
+    final upper = code.trim().toUpperCase();
+    if (upper.contains("HCM") || upper.contains("HCMC")) return "VN-79";
+    if (upper.contains("HAN") || upper.contains("HANOI")) return "VN-01";
+    
+    // If it already matches V2 pattern, keep it
+    if (RegExp(r'^VN-(\d{2})(?:-(\d{5}))?$').hasMatch(upper)) return upper;
+    
+    // Fallback to HCM if unknown but has VN prefix
+    if (upper.startsWith("VN")) return "VN-79";
+    
+    return "VN-79";
+  }
+
   Future<void> _submitReport() async {
+    if (_titleController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vui lòng nhập tiêu đề")));
+      return;
+    }
+
+    setState(() => _submitting = true);
     try {
+      final List<String> mediaKeys = [];
+      final List<String> mediaUrls = [];
+
+      if (widget.uploadService != null && _selectedMedia.isNotEmpty) {
+        for (final file in _selectedMedia) {
+          final asset = await widget.uploadService!.uploadMedia(
+            filePath: file.path,
+            target: "REPORT",
+          );
+          mediaKeys.add(asset.key);
+          if (asset.url != null) {
+            mediaUrls.add(asset.url!);
+          }
+        }
+      }
+
+      final session = context.read<SessionController>();
+      final userLocationCode = session.user?.locationCode ?? "VN-79";
+      
+      String inputLocation = _locationController.text.trim();
+      String finalDescription = _descriptionController.text.trim();
+      
+      // If user typed a human address or detected one, put it in description
+      if (!inputLocation.startsWith("VN-")) {
+        finalDescription = "Địa chỉ: $inputLocation\n\n$finalDescription";
+      }
+
+      // We MUST send a location code that matches the user's scope to avoid 403,
+      // and it MUST be in V2 format to avoid 400.
+      final apiLocationCode = _normalizeLocationCode(userLocationCode);
+
       await widget.reportService.createReport(
         title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
+        description: finalDescription,
         category: _category,
         priority: _priority,
-        locationCode: _locationController.text.trim(),
+        locationCode: apiLocationCode,
+        mediaKeys: mediaKeys,
+        mediaUrls: mediaUrls,
       );
       if (!mounted) return;
       Navigator.pop(context);
       _titleController.clear();
       _descriptionController.clear();
+      _selectedMedia.clear();
       _loadReports();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Report submitted successfully!")));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Gửi báo cáo thành công!")));
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: \$e")));
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 }
@@ -422,14 +609,14 @@ class _ReportCard extends StatelessWidget {
           const SizedBox(height: 12),
           Text(report.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
           const SizedBox(height: 6),
-          Text(report.description ?? "No description", maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          Text(report.description ?? "Không có mô tả", maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
           const SizedBox(height: 16),
           Row(
             children: [
-              Icon(Icons.category_outlined, size: 14, color: Colors.grey.shade400),
+              Icon(Icons.location_on_outlined, size: 14, color: Colors.grey.shade400),
               const SizedBox(width: 4),
-              Text(report.category, style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-              const Spacer(),
+              Expanded(child: Text(report.locationCode, style: TextStyle(color: Colors.grey.shade500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              const SizedBox(width: 8),
               _buildPriorityBadge(report.priority),
             ],
           ),
