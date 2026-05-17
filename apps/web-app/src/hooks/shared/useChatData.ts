@@ -445,6 +445,13 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       const newMsg = "message" in payload ? payload.message : payload;
       if (newMsg?.conversationId === conversationId) {
         upsertMessageInCache(newMsg);
+        
+        // When a system message arrives (e.g. alias change), refresh aliases for all participants
+        if (newMsg.type === "SYSTEM") {
+          queryClient.invalidateQueries({
+            queryKey: ["conversation-aliases", conversationId],
+          });
+        }
       }
     };
 

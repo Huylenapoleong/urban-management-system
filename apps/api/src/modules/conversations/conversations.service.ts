@@ -454,8 +454,9 @@ export class ConversationsService {
   ): Promise<ConversationAlias[]> {
     const access = await this.resolveConversationAccess(actor, conversationId);
     const participants = new Set(access.participants);
+    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
     const aliasMap = await this.getConversationAliasMap(
-      actor.id,
+      ownerId,
       access.conversationKey,
     );
 
@@ -484,17 +485,18 @@ export class ConversationsService {
       maxLength: 100,
     });
     const occurredAt = nowIso();
+    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
     const existingAlias = await this.getConversationAlias(
-      actor.id,
+      ownerId,
       access.conversationKey,
       target.userId,
     );
     const nextAlias: StoredConversationMemberAlias = {
       PK: makeConversationPk(access.conversationKey),
-      SK: this.makeConversationAliasSk(actor.id, target.userId),
+      SK: this.makeConversationAliasSk(ownerId, target.userId),
       entityType: 'CONVERSATION_MEMBER_ALIAS',
       conversationId: access.conversationKey,
-      ownerUserId: actor.id,
+      ownerUserId: ownerId,
       targetUserId: target.userId,
       alias,
       createdAt: existingAlias?.createdAt ?? occurredAt,
@@ -504,6 +506,12 @@ export class ConversationsService {
     await this.repository.put(
       this.config.dynamodbConversationsTableName,
       nextAlias,
+    );
+
+    await this.sendConversationSystemMessage(
+      actor,
+      access,
+      `${actor.fullName} đã đổi biệt danh của ${target.fullName} thành ${alias}`,
     );
 
     return this.toConversationAlias(access.conversationId, nextAlias);
@@ -518,8 +526,10 @@ export class ConversationsService {
 
     this.ensureConversationAliasTarget(access, targetUserId);
 
+    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
+
     const existingAlias = await this.getConversationAlias(
-      actor.id,
+      ownerId,
       access.conversationKey,
       targetUserId,
     );
@@ -530,6 +540,13 @@ export class ConversationsService {
         this.config.dynamodbConversationsTableName,
         existingAlias.PK,
         existingAlias.SK,
+      );
+
+      const target = await this.usersService.getByIdOrThrow(targetUserId);
+      await this.sendConversationSystemMessage(
+        actor,
+        access,
+        `${actor.fullName} đã xóa biệt danh của ${target.fullName}`,
       );
     }
 
