@@ -57,14 +57,14 @@ export function ReportsPage() {
 
   return (
     <div className="container mx-auto p-4 max-w-5xl space-y-6 text-slate-900 dark:text-slate-100">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
           <FileText className="w-6 h-6 text-blue-600" />
           Quản lý Báo Cáo
         </h1>
         <Link
           to="/reports/new"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition cursor-pointer flex items-center gap-2"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition cursor-pointer flex items-center gap-2 justify-center w-full sm:w-auto"
         >
           <Plus className="w-4 h-4" />
           Tạo báo cáo mới
@@ -72,7 +72,7 @@ export function ReportsPage() {
       </div>
 
       <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="relative md:col-span-2">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -99,7 +99,7 @@ export function ReportsPage() {
             onClick={() =>
               setSortOrder((prev) => (prev === "newest" ? "oldest" : "newest"))
             }
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:w-auto"
           >
             <ArrowUpDown className="h-4 w-4" />
             {sortOrder === "newest" ? "Mới nhất trước" : "Cũ nhất trước"}
@@ -113,7 +113,7 @@ export function ReportsPage() {
 
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="w-full min-w-[640px] text-sm text-left">
             <thead className="text-xs text-gray-500 dark:text-slate-300 uppercase bg-gray-100 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700">
               <tr>
                 <th scope="col" className="px-6 py-4">

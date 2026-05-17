@@ -1,21 +1,24 @@
 import { makeConversationPk, makeDmConversationId } from '@urban/shared-utils';
+import { ConversationStateService } from '../../common/services/conversation-state.service';
 import type {
   StoredConversation,
   StoredMessage,
   StoredUser,
 } from '../../common/storage-records';
-import { ConversationStateService } from '../../common/services/conversation-state.service';
-import { ConversationsService } from './conversations.service';
 import { ConversationSummaryService } from './conversation-summary.service';
+import { ConversationsService } from './conversations.service';
 
 describe('ConversationsService', () => {
   const repository = {
     delete: jest.fn(),
+    batchGet: jest.fn(),
     get: jest.fn(),
     put: jest.fn(),
+    queryByPkPage: jest.fn(),
     queryByPk: jest.fn(),
     scanAll: jest.fn(),
     transactPut: jest.fn(),
+    transactWrite: jest.fn(),
   };
   const authorizationService = {
     canAccessDirectConversation: jest.fn(),
@@ -261,9 +264,15 @@ describe('ConversationsService', () => {
         fallbackFullName,
     );
     repository.delete.mockResolvedValue(undefined);
+    repository.batchGet.mockResolvedValue([]);
     repository.scanAll.mockResolvedValue([]);
     repository.put.mockResolvedValue(undefined);
+    repository.queryByPkPage.mockResolvedValue({
+      items: [],
+      lastEvaluatedKey: undefined,
+    });
     repository.transactPut.mockResolvedValue(undefined);
+    repository.transactWrite.mockResolvedValue(undefined);
     chatOutboxService.buildChatOutboxEvent.mockImplementation(
       ({
         actorUserId,
@@ -330,10 +339,13 @@ describe('ConversationsService', () => {
       `dm:${otherUser.userId}`,
     );
 
-    expect(repository.delete).toHaveBeenCalledWith(
+    expect(repository.put).toHaveBeenCalledWith(
       'Conversations',
-      actorSummary.PK,
-      actorSummary.SK,
+      expect.objectContaining({
+        PK: actorSummary.PK,
+        SK: actorSummary.SK,
+        deletedAt: expect.any(String),
+      }),
     );
     expect(repository.delete).not.toHaveBeenCalledWith(
       'Messages',
@@ -450,10 +462,13 @@ describe('ConversationsService', () => {
     const result = await service.deleteConversation(actor, 'group:group-1');
 
     expect(groupsService.getGroup).not.toHaveBeenCalled();
-    expect(repository.delete).toHaveBeenCalledWith(
+    expect(repository.put).toHaveBeenCalledWith(
       'Conversations',
-      groupSummary.PK,
-      groupSummary.SK,
+      expect.objectContaining({
+        PK: groupSummary.PK,
+        SK: groupSummary.SK,
+        deletedAt: expect.any(String),
+      }),
     );
     expect(chatRealtimeService.leaveConversationForUser).toHaveBeenCalledWith(
       actor.id,
@@ -540,6 +555,322 @@ describe('ConversationsService', () => {
     await expect(
       service.listMessages(actor, 'group:group-1', {}),
     ).rejects.toThrow('You are banned from this group.');
+  });
+
+  it('pins a visible message and creates a bounded pin record', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === `MSGREF#${latestMessage.messageId}`
+        ) {
+          return {
+            PK: latestMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: latestMessage.messageId,
+            messageSk: latestMessage.SK,
+            senderId: latestMessage.senderId,
+            sentAt: latestMessage.sentAt,
+            updatedAt: latestMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === latestMessage.SK
+        ) {
+          return latestMessage;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'PIN#'
+        ) {
+          return [];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.pinMessage(
+      actor,
+      `dm:${otherUser.userId}`,
+      latestMessage.messageId,
+      {},
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: latestMessage.messageId,
+        pinnedAt: expect.any(String),
+        pinnedByUserId: actor.id,
+      }),
+    );
+    expect(repository.transactWrite).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            entityType: 'MESSAGE',
+            messageId: latestMessage.messageId,
+            pinnedAt: expect.any(String),
+            pinnedByUserId: actor.id,
+          }),
+        }),
+        expect.objectContaining({
+          kind: 'put',
+          tableName: 'Messages',
+          item: expect.objectContaining({
+            entityType: 'MESSAGE_PIN',
+            messageId: latestMessage.messageId,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('requires an explicit replacement when the pinned list is full', async () => {
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === `MSGREF#${latestMessage.messageId}`
+        ) {
+          return {
+            PK: latestMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: latestMessage.messageId,
+            messageSk: latestMessage.SK,
+            senderId: latestMessage.senderId,
+            sentAt: latestMessage.sentAt,
+            updatedAt: latestMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === latestMessage.SK
+        ) {
+          return latestMessage;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          options?.beginsWith === 'PIN#'
+        ) {
+          return [1, 2, 3].map((index) => ({
+            PK: latestMessage.PK,
+            SK: `PIN#2026-03-18T10:0${index}:00.000Z#pinned-${index}`,
+            entityType: 'MESSAGE_PIN',
+            conversationId: conversationKey,
+            messageId: `pinned-${index}`,
+            messageSk: `MSG#2026-03-18T10:0${index}:00.000Z#pinned-${index}`,
+            pinnedByUserId: actor.id,
+            pinnedAt: `2026-03-18T10:0${index}:00.000Z`,
+            updatedAt: `2026-03-18T10:0${index}:00.000Z`,
+          }));
+        }
+
+        return [];
+      },
+    );
+
+    await expect(
+      service.pinMessage(
+        actor,
+        `dm:${otherUser.userId}`,
+        latestMessage.messageId,
+        {},
+      ),
+    ).rejects.toThrow('Pinned message limit reached. Provide replaceMessageId');
+    expect(repository.transactWrite).not.toHaveBeenCalled();
+  });
+
+  it('unpins a pinned message idempotently through the pin record', async () => {
+    const pinnedMessage: StoredMessage = {
+      ...latestMessage,
+      pinnedAt: '2026-03-18T10:06:00.000Z',
+      pinnedByUserId: actor.id,
+      pinRecordSk: `PIN#2026-03-18T10:06:00.000Z#${latestMessage.messageId}`,
+    };
+    const pinRecord = {
+      PK: latestMessage.PK,
+      SK: pinnedMessage.pinRecordSk,
+      entityType: 'MESSAGE_PIN',
+      conversationId: conversationKey,
+      messageId: latestMessage.messageId,
+      messageSk: latestMessage.SK,
+      pinnedByUserId: actor.id,
+      pinnedAt: pinnedMessage.pinnedAt,
+      updatedAt: pinnedMessage.pinnedAt,
+    };
+
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === `MSGREF#${latestMessage.messageId}`
+        ) {
+          return {
+            PK: latestMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: latestMessage.messageId,
+            messageSk: latestMessage.SK,
+            senderId: latestMessage.senderId,
+            sentAt: latestMessage.sentAt,
+            updatedAt: latestMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === latestMessage.SK
+        ) {
+          return pinnedMessage;
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === pinnedMessage.pinRecordSk
+        ) {
+          return pinRecord;
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.unpinMessage(
+      actor,
+      `dm:${otherUser.userId}`,
+      latestMessage.messageId,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: latestMessage.messageId,
+        pinnedAt: null,
+        pinnedByUserId: null,
+      }),
+    );
+    expect(repository.transactWrite).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'delete',
+          tableName: 'Messages',
+          key: {
+            PK: pinRecord.PK,
+            SK: pinRecord.SK,
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('searches conversation messages through the message search index', async () => {
+    const searchRecord = {
+      PK: latestMessage.PK,
+      SK: `SEARCH#xin#${latestMessage.sentAt}#${latestMessage.messageId}`,
+      entityType: 'MESSAGE_SEARCH',
+      conversationId: conversationKey,
+      messageId: latestMessage.messageId,
+      messageSk: latestMessage.SK,
+      token: 'xin',
+      sentAt: latestMessage.sentAt,
+      updatedAt: latestMessage.updatedAt,
+    };
+
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === actorSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [actorSummary];
+        }
+
+        return [];
+      },
+    );
+    repository.queryByPkPage.mockResolvedValue({
+      items: [searchRecord],
+      lastEvaluatedKey: undefined,
+    });
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === latestMessage.PK &&
+          sk === latestMessage.SK
+        ) {
+          return latestMessage;
+        }
+
+        return undefined;
+      },
+    );
+
+    const result = await service.listMessages(actor, `dm:${otherUser.userId}`, {
+      q: 'Xin chao',
+    });
+
+    expect(repository.queryByPkPage).toHaveBeenCalledWith(
+      'Messages',
+      latestMessage.PK,
+      expect.objectContaining({
+        beginsWith: 'SEARCH#xin#',
+      }),
+    );
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        id: latestMessage.messageId,
+        content: latestMessage.content,
+      }),
+    ]);
   });
 
   it('blocks member message sends when the group policy only allows owners and deputies', async () => {
@@ -668,6 +999,94 @@ describe('ConversationsService', () => {
         nextCursor: expect.any(String),
       },
     });
+  });
+
+  it('applies a conversation-scoped alias to DM inbox labels', async () => {
+    repository.queryByPk.mockResolvedValue([actorSummary]);
+    repository.batchGet.mockResolvedValue([
+      {
+        PK: makeConversationPk(conversationKey),
+        SK: `ALIAS#${actor.id}#${otherUser.userId}`,
+        entityType: 'CONVERSATION_MEMBER_ALIAS',
+        conversationId: conversationKey,
+        ownerUserId: actor.id,
+        targetUserId: otherUser.userId,
+        alias: 'Anh Hai trong DM',
+        createdAt: '2026-03-18T10:06:00.000Z',
+        updatedAt: '2026-03-18T10:06:00.000Z',
+      },
+    ]);
+
+    const result = await service.listConversations(actor, { q: 'anh hai' });
+
+    expect(repository.batchGet).toHaveBeenCalledWith('Conversations', [
+      {
+        PK: makeConversationPk(conversationKey),
+        SK: `ALIAS#${actor.id}#${otherUser.userId}`,
+        conversationId: conversationKey,
+        targetUserId: otherUser.userId,
+      },
+    ]);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        groupName: 'Anh Hai trong DM',
+      }),
+    );
+  });
+
+  it('stores an alias scoped to a group conversation participant', async () => {
+    groupsService.getGroup.mockResolvedValue({
+      id: 'group-1',
+      groupId: 'group-1',
+      groupType: 'AREA',
+      messagePolicy: 'ALL_MEMBERS',
+      locationCode: actor.locationCode,
+      createdBy: actor.id,
+      memberCount: 2,
+      isOfficial: false,
+      deletedAt: null,
+      createdAt: '2026-03-18T10:00:00.000Z',
+      updatedAt: '2026-03-18T10:00:00.000Z',
+    });
+    groupsService.getMembership.mockResolvedValue({
+      groupId: 'group-1',
+      userId: actor.id,
+      roleInGroup: 'MEMBER',
+      deletedAt: null,
+    });
+    groupsService.listMembers.mockResolvedValue([
+      { userId: actor.id },
+      { userId: otherUser.userId },
+    ]);
+    repository.get.mockResolvedValue(undefined);
+
+    const result = await service.setConversationAlias(
+      actor,
+      'group:group-1',
+      actor.id,
+      { alias: 'Toi trong nhom' },
+    );
+
+    expect(repository.put).toHaveBeenCalledWith(
+      'Conversations',
+      expect.objectContaining({
+        PK: makeConversationPk('GRP#group-1'),
+        SK: `ALIAS#${actor.id}#${actor.id}`,
+        entityType: 'CONVERSATION_MEMBER_ALIAS',
+        conversationId: 'GRP#group-1',
+        ownerUserId: actor.id,
+        targetUserId: actor.id,
+        alias: 'Toi trong nhom',
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: 'group:group-1',
+        userId: actor.id,
+        alias: 'Toi trong nhom',
+      }),
+    );
   });
 
   it('blocks editing a public-group message after the actor left the group', async () => {

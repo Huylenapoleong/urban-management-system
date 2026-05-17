@@ -1,5 +1,6 @@
 import { socketClient } from "@/lib/socket-client";
 import {
+  clearConversationListCache,
   deleteMessage,
   forwardMessage,
   listConversations,
@@ -21,6 +22,7 @@ import {
 import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
 import type {
   ChatConversationRemovedEvent,
+  ChatConversationUpdatedEvent,
   ChatMessageCreatedEvent,
   ChatTypingStateEvent,
   ConversationSummary,
@@ -37,8 +39,21 @@ type ConversationRemovedPayload =
       };
     };
 
+type ConversationUpdatedPayload =
+  | ChatConversationUpdatedEvent
+  | {
+      conversationId?: string;
+      summary?: ConversationSummary;
+      reason?: ChatConversationUpdatedEvent["reason"];
+      data?: {
+        conversationId?: string;
+        summary?: ConversationSummary;
+        reason?: ChatConversationUpdatedEvent["reason"];
+      };
+    };
+
 function extractConversationId(
-  payload?: ConversationRemovedPayload | null,
+  payload?: ConversationRemovedPayload | ConversationUpdatedPayload | null,
 ): string | undefined {
   if (!payload) {
     return undefined;
@@ -55,6 +70,46 @@ function extractConversationId(
   return undefined;
 }
 
+function extractConversationUpdate(
+  payload?: ConversationUpdatedPayload | null,
+): {
+  conversationId?: string;
+  reason?: ChatConversationUpdatedEvent["reason"];
+  summary?: ConversationSummary;
+} {
+  if (!payload) {
+    return {};
+  }
+
+  const summary =
+    "summary" in payload && payload.summary
+      ? payload.summary
+      : "data" in payload
+        ? payload.data?.summary
+        : undefined;
+  const reason =
+    "reason" in payload && payload.reason
+      ? payload.reason
+      : "data" in payload
+        ? payload.data?.reason
+        : undefined;
+
+  return {
+    conversationId: extractConversationId(payload) || summary?.conversationId,
+    reason,
+    summary,
+  };
+}
+
+function isMessageItem(value: unknown): value is MessageItem {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    typeof (value as { id?: unknown }).id === "string"
+  );
+}
+
 export function useConversations(searchTerm?: string) {
   const queryClient = useQueryClient();
   const joinedConversationIdsRef = useRef<Set<string>>(new Set());
@@ -68,6 +123,7 @@ export function useConversations(searchTerm?: string) {
 
     if (elapsed >= minIntervalMs) {
       lastConversationRefreshAtRef.current = now;
+      clearConversationListCache();
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       return;
     }
@@ -80,6 +136,7 @@ export function useConversations(searchTerm?: string) {
     scheduledConversationRefreshRef.current = window.setTimeout(() => {
       scheduledConversationRefreshRef.current = null;
       lastConversationRefreshAtRef.current = Date.now();
+      clearConversationListCache();
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     }, waitMs);
   }, [queryClient]);
@@ -92,8 +149,20 @@ export function useConversations(searchTerm?: string) {
 
     const handleConversationRemoved = (payload: ConversationRemovedPayload) => {
       const removedConversationId = extractConversationId(payload);
+      clearConversationListCache();
       if (removedConversationId) {
         joinedConversationIdsRef.current.delete(removedConversationId);
+        queryClient.setQueriesData(
+          { queryKey: ["conversations"] },
+          (oldData: unknown) =>
+            Array.isArray(oldData)
+              ? oldData.filter(
+                  (item) =>
+                    (item as ConversationSummary).conversationId !==
+                    removedConversationId,
+                )
+              : oldData,
+        );
         queryClient.removeQueries({
           queryKey: ["messages", removedConversationId],
         });
@@ -101,8 +170,41 @@ export function useConversations(searchTerm?: string) {
       scheduleConversationsRefresh();
     };
 
+    const handleConversationUpdated = (payload: ConversationUpdatedPayload) => {
+      const { conversationId, summary } = extractConversationUpdate(payload);
+      clearConversationListCache();
+
+      if (conversationId && summary) {
+        queryClient.setQueriesData(
+          { queryKey: ["conversations"] },
+          (oldData: unknown) => {
+            if (!Array.isArray(oldData)) {
+              return oldData;
+            }
+
+            let didUpdate = false;
+            const next = oldData.map((item) => {
+              if (
+                (item as ConversationSummary).conversationId !== conversationId
+              ) {
+                return item;
+              }
+
+              didUpdate = true;
+              return summary;
+            });
+
+            return didUpdate ? next : oldData;
+          },
+        );
+      }
+
+      scheduleConversationsRefresh();
+    };
+
     const handleSocketConnect = () => {
       joinedConversationIdsRef.current.clear();
+      clearConversationListCache();
       scheduleConversationsRefresh();
     };
 
@@ -113,6 +215,10 @@ export function useConversations(searchTerm?: string) {
     socketClient.socket?.on(
       CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
       handleConversationRemoved,
+    );
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
+      handleConversationUpdated,
     );
     socketClient.socket?.on("connect", handleSocketConnect);
 
@@ -128,6 +234,10 @@ export function useConversations(searchTerm?: string) {
       socketClient.socket?.off(
         CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
         handleConversationRemoved,
+      );
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
+        handleConversationUpdated,
       );
       socketClient.socket?.off("connect", handleSocketConnect);
     };
@@ -182,14 +292,14 @@ export function useConversations(searchTerm?: string) {
   return query;
 }
 
-export function useMessages(conversationId?: string) {
+export function useMessages(conversationId?: string, searchTerm?: string, messageType?: string) {
   const queryClient = useQueryClient();
   const [typingUsersByConversation, setTypingUsersByConversation] = useState<
     Record<string, Record<string, ChatTypingStateEvent>>
   >({});
   const messageQueryKey = useMemo(
-    () => ["messages", conversationId] as const,
-    [conversationId],
+    () => ["messages", conversationId, searchTerm?.trim() || "", messageType || ""] as const,
+    [conversationId, searchTerm, messageType],
   );
   const messageRefreshTimerRef = useRef<number | null>(null);
   const conversationRefreshTimerRef = useRef<number | null>(null);
@@ -209,12 +319,21 @@ export function useMessages(conversationId?: string) {
             };
           }
 
-          if (
-            oldData.pages.some((page) =>
-              page.items.some((msg) => msg.id === message.id),
-            )
-          ) {
-            return oldData;
+          // If message already exists, update it
+          const exists = oldData.pages.some((page) =>
+            page.items.some((msg) => msg.id === message.id),
+          );
+
+          if (exists) {
+            return {
+              ...oldData,
+              pages: oldData.pages.map((page) => ({
+                ...page,
+                items: page.items.map((msg) =>
+                  msg.id === message.id ? message : msg,
+                ),
+              })),
+            };
           }
 
           const [firstPage, ...restPages] = oldData.pages;
@@ -249,6 +368,7 @@ export function useMessages(conversationId?: string) {
 
     conversationRefreshTimerRef.current = window.setTimeout(() => {
       conversationRefreshTimerRef.current = null;
+      clearConversationListCache();
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     }, 700);
   }, [queryClient]);
@@ -260,6 +380,8 @@ export function useMessages(conversationId?: string) {
       listMessagesPage(conversationId!, {
         limit: 40,
         cursor: pageParam,
+        q: searchTerm?.trim(),
+        type: messageType,
       }),
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     enabled: !!conversationId,
@@ -323,6 +445,29 @@ export function useMessages(conversationId?: string) {
       const newMsg = "message" in payload ? payload.message : payload;
       if (newMsg?.conversationId === conversationId) {
         upsertMessageInCache(newMsg);
+        
+        // When a system message arrives (e.g. alias change), refresh aliases for all participants
+        if (newMsg.type === "SYSTEM") {
+          queryClient.invalidateQueries({
+            queryKey: ["conversation-aliases", conversationId],
+          });
+        }
+      }
+    };
+
+    const handleMessageUpdated = (payload: unknown) => {
+      const updatedMsg = isMessageItem(payload)
+        ? payload
+        : typeof payload === "object" && payload !== null
+          ? isMessageItem((payload as { message?: unknown }).message)
+            ? (payload as { message: MessageItem }).message
+            : isMessageItem((payload as { data?: unknown }).data)
+              ? (payload as { data: MessageItem }).data
+              : undefined
+          : undefined;
+
+      if (updatedMsg?.conversationId === conversationId) {
+        upsertMessageInCache(updatedMsg);
       }
     };
 
@@ -332,6 +477,7 @@ export function useMessages(conversationId?: string) {
         return;
       }
 
+      clearConversationListCache();
       setTypingUsersByConversation((prev) => {
         if (!prev[conversationId]) {
           return prev;
@@ -345,14 +491,50 @@ export function useMessages(conversationId?: string) {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
+    const handleConversationUpdated = (payload: ConversationUpdatedPayload) => {
+      const { conversationId: updatedConversationId, reason } =
+        extractConversationUpdate(payload);
+      if (!updatedConversationId || updatedConversationId !== conversationId) {
+        return;
+      }
+
+      clearConversationListCache();
+      if (reason === "conversation.history.cleared") {
+        queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(
+          messageQueryKey,
+          (oldData) =>
+            oldData
+              ? {
+                  ...oldData,
+                  pages: oldData.pages.map((page) => ({
+                    ...page,
+                    items: [],
+                  })),
+                }
+              : oldData,
+        );
+      }
+
+      scheduleMessageRefresh();
+      scheduleConversationsRefresh();
+    };
+
     socketClient.socket?.on(
       CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
       handleMessageCreated,
+    );
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
+      handleMessageUpdated,
     );
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
     socketClient.socket?.on(
       CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
       handleConversationRemoved,
+    );
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
+      handleConversationUpdated,
     );
 
     return () => {
@@ -366,6 +548,10 @@ export function useMessages(conversationId?: string) {
         handleMessageCreated,
       );
       socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
+        handleMessageUpdated,
+      );
+      socketClient.socket?.off(
         CHAT_SOCKET_EVENTS.TYPING_STATE,
         handleTypingState,
       );
@@ -373,8 +559,19 @@ export function useMessages(conversationId?: string) {
         CHAT_SOCKET_EVENTS.CONVERSATION_REMOVED,
         handleConversationRemoved,
       );
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.CONVERSATION_UPDATED,
+        handleConversationUpdated,
+      );
     };
-  }, [conversationId, messageQueryKey, queryClient, upsertMessageInCache]);
+  }, [
+    conversationId,
+    messageQueryKey,
+    queryClient,
+    scheduleConversationsRefresh,
+    scheduleMessageRefresh,
+    upsertMessageInCache,
+  ]);
 
   const sendTyping = useCallback(
     async (isTyping: boolean) => {

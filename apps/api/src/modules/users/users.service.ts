@@ -1934,95 +1934,7 @@ export class UsersService {
     };
   }
 
-  async setContactAlias(
-    actor: AuthenticatedUser,
-    targetUserId: string,
-    payload: unknown,
-  ): Promise<UserContactAlias> {
-    await this.getActiveByIdOrThrow(actor.id);
-    const target = await this.getActiveByIdOrThrow(targetUserId);
 
-    if (actor.id === target.userId) {
-      throw new BadRequestException('Cannot set an alias for yourself.');
-    }
-
-    const body = ensureObject(payload);
-    const alias = requiredString(body, 'alias', {
-      minLength: 1,
-      maxLength: 100,
-    });
-    const existingAlias = await this.getContactAlias(actor.id, target.userId);
-    const directSummary = await this.getDirectConversationSummary(
-      actor.id,
-      target.userId,
-    );
-    const friends = await this.areFriends(actor.id, target.userId);
-
-    if (!friends && !directSummary) {
-      throw new ForbiddenException(
-        'You can only set an alias for friends or existing direct conversations.',
-      );
-    }
-
-    const occurredAt = nowIso();
-    const nextAlias: StoredUserContactAlias = {
-      PK: makeUserPk(actor.id),
-      SK: makeUserContactAliasSk(target.userId),
-      entityType: 'USER_CONTACT_ALIAS',
-      ownerUserId: actor.id,
-      targetUserId: target.userId,
-      alias,
-      createdAt: existingAlias?.createdAt ?? occurredAt,
-      updatedAt: occurredAt,
-    };
-
-    await this.repository.put(this.config.dynamodbUsersTableName, nextAlias);
-    await this.syncDirectConversationAlias(
-      actor.id,
-      target.userId,
-      alias,
-      target.fullName,
-      occurredAt,
-    );
-
-    return {
-      userId: target.userId,
-      alias,
-      updatedAt: occurredAt,
-    };
-  }
-
-  async clearContactAlias(
-    actor: AuthenticatedUser,
-    targetUserId: string,
-  ): Promise<{ userId: string; clearedAt: string }> {
-    await this.getActiveByIdOrThrow(actor.id);
-    const existingAlias = await this.getContactAlias(actor.id, targetUserId);
-
-    if (!existingAlias) {
-      throw new NotFoundException('Contact alias not found.');
-    }
-
-    const clearedAt = nowIso();
-    const target = await this.findById(targetUserId);
-    await this.repository.delete(
-      this.config.dynamodbUsersTableName,
-      existingAlias.PK,
-      existingAlias.SK,
-    );
-    await this.syncDirectConversationAlias(
-      actor.id,
-      targetUserId,
-      undefined,
-      target?.fullName ?? targetUserId,
-      clearedAt,
-    );
-
-    return {
-      userId: targetUserId,
-      clearedAt,
-    };
-  }
 
   async areFriends(userId: string, otherUserId: string): Promise<boolean> {
     if (userId === otherUserId) {
@@ -2804,55 +2716,7 @@ export class UsersService {
     );
   }
 
-  private async syncDirectConversationAlias(
-    ownerUserId: string,
-    targetUserId: string,
-    contactAlias: string | undefined,
-    fallbackFullName: string,
-    occurredAt: string,
-  ): Promise<void> {
-    const existingConversation = await this.getDirectConversationSummary(
-      ownerUserId,
-      targetUserId,
-    );
 
-    if (!existingConversation) {
-      return;
-    }
-
-    const displayName = contactAlias ?? fallbackFullName;
-
-    if (existingConversation.groupName === displayName) {
-      return;
-    }
-
-    const nextConversation: StoredConversation = {
-      ...existingConversation,
-      groupName: displayName,
-    };
-    const conversationId = makeDmConversationId(ownerUserId, targetUserId);
-    const payload: ChatConversationUpdatedEvent = {
-      eventId: createUlid(),
-      conversationId: `dm:${targetUserId}`,
-      conversationKey: conversationId,
-      summary: {
-        ...toConversationSummary(nextConversation),
-        conversationId: `dm:${targetUserId}`,
-      },
-      reason: 'conversation.metadata.updated',
-      occurredAt,
-    };
-
-    await this.repository.put(
-      this.config.dynamodbConversationsTableName,
-      nextConversation,
-    );
-    this.chatRealtimeService.emitToUser(
-      ownerUserId,
-      'conversation.updated',
-      payload,
-    );
-  }
 
   private async persistUserWithIdentityClaims(input: {
     nextUser: StoredUser;

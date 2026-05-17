@@ -52,6 +52,7 @@ const DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES = [
   'OUTGOING',
 ] as const;
 const USER_DISCOVERY_MODE_VALUES = ['all', 'chat', 'friend'] as const;
+const KNOWLEDGE_DOCUMENT_STATUS_VALUES = ['ACTIVE', 'INACTIVE'] as const;
 const INTEGER_QUERY_PATTERN = /^\d+$/;
 
 export class HealthStatusDto {
@@ -523,6 +524,43 @@ export class UserContactAliasRemovalResultDto {
   clearedAt!: string;
 }
 
+export class SetConversationAliasRequestDto {
+  @ApiProperty({
+    example: 'Anh Hai',
+    description:
+      'Private alias for a participant inside this conversation only. Maximum 100 characters.',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  alias!: string;
+}
+
+export class ConversationAliasDto {
+  @ApiProperty({ example: 'dm:01JPCY0000CITIZENB00000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: 'Anh Hai' })
+  alias!: string;
+
+  @ApiProperty({ example: '2026-03-20T06:00:00.000Z' })
+  updatedAt!: string;
+}
+
+export class ConversationAliasRemovalResultDto {
+  @ApiProperty({ example: 'dm:01JPCY0000CITIZENB00000000' })
+  conversationId!: string;
+
+  @ApiProperty({ example: '01JPCY0000CITIZENB00000000' })
+  userId!: string;
+
+  @ApiProperty({ example: '2026-03-20T06:05:00.000Z' })
+  clearedAt!: string;
+}
+
 export class PushDeviceDto {
   @ApiProperty({ example: 'device-admin-web-01' })
   deviceId!: string;
@@ -946,6 +984,20 @@ export class MessageItemDto {
 
   @ApiPropertyOptional({ type: () => MessageReplyReferenceDto })
   replyMessage?: MessageReplyReferenceDto;
+
+  @ApiPropertyOptional({
+    example: '2026-03-17T08:02:00.000Z',
+    nullable: true,
+    description: 'Set when this message is pinned in the conversation.',
+  })
+  pinnedAt?: string | null;
+
+  @ApiPropertyOptional({
+    example: '01JPCY0000CITIZENA00000000',
+    nullable: true,
+    description: 'User id that pinned the message.',
+  })
+  pinnedByUserId?: string | null;
 
   @ApiPropertyOptional({ example: null, nullable: true })
   recalledAt?: string | null;
@@ -2066,6 +2118,18 @@ export class UpdateMessageRequestDto {
   attachmentUrl?: string;
 }
 
+export class PinMessageRequestDto {
+  @ApiPropertyOptional({
+    example: '01JPCY3000GROUPMSG00000001',
+    description:
+      'Required when the conversation already has 3 pinned messages. Must be one of the currently pinned message ids to replace.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  replaceMessageId?: string;
+}
+
 export class RecallMessageRequestDto {
   @ApiProperty({
     enum: MESSAGE_RECALL_SCOPES,
@@ -2535,6 +2599,178 @@ export class ListReportsQueryDto {
   @IsOptional()
   @Matches(INTEGER_QUERY_PATTERN)
   limit?: string;
+}
+
+export class KnowledgeDocumentMetadataDto {
+  @ApiPropertyOptional({ example: 'Land Law 2024' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  lawName?: string;
+
+  @ApiPropertyOptional({ example: 'Chapter I' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  chapter?: string;
+
+  @ApiPropertyOptional({ example: 'Article 3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  section?: string;
+}
+
+export class KnowledgeDocumentDto {
+  @ApiProperty({ example: '01JPCTKNOWLEDGE0000000000' })
+  id!: string;
+
+  @ApiProperty({ example: 'Article 3. Glossary of land terms' })
+  title!: string;
+
+  @ApiProperty({ example: 'Land is owned by the entire people...' })
+  content!: string;
+
+  @ApiProperty({ example: 'land' })
+  category!: string;
+
+  @ApiProperty({ example: 'Land Law 2024 - Article 3' })
+  source!: string;
+
+  @ApiProperty({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES, example: 'ACTIVE' })
+  status!: (typeof KNOWLEDGE_DOCUMENT_STATUS_VALUES)[number];
+
+  @ApiPropertyOptional({ example: '2026-01-01T00:00:00.000Z' })
+  effectiveDate?: string | null;
+
+  @ApiPropertyOptional({ type: () => KnowledgeDocumentMetadataDto })
+  metadata?: KnowledgeDocumentMetadataDto;
+
+  @ApiPropertyOptional({ example: '2026-03-01T00:00:00.000Z' })
+  createdAt?: string;
+
+  @ApiProperty({ example: '2026-03-17T06:15:00.000Z' })
+  updatedAt!: string;
+}
+
+export class CreateKnowledgeDocumentRequestDto {
+  @ApiProperty({ example: 'Article 3. Glossary of land terms' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  title!: string;
+
+  @ApiProperty({ example: 'Land is owned by the entire people...' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  content!: string;
+
+  @ApiProperty({ example: 'land' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(50)
+  category!: string;
+
+  @ApiProperty({ example: 'Land Law 2024 - Article 3' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  source!: string;
+
+  @ApiPropertyOptional({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES })
+  @IsOptional()
+  @IsIn(KNOWLEDGE_DOCUMENT_STATUS_VALUES)
+  status?: string;
+
+  @ApiPropertyOptional({ example: '2026-01-01T00:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  effectiveDate?: string;
+
+  @ApiPropertyOptional({ type: () => KnowledgeDocumentMetadataDto })
+  @IsOptional()
+  metadata?: KnowledgeDocumentMetadataDto;
+}
+
+export class UpdateKnowledgeDocumentRequestDto {
+  @ApiPropertyOptional({ example: 'Article 3. Glossary of land terms' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  title?: string;
+
+  @ApiPropertyOptional({ example: 'Land is owned by the entire people...' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  content?: string;
+
+  @ApiPropertyOptional({ example: 'land' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  category?: string;
+
+  @ApiPropertyOptional({ example: 'Land Law 2024 - Article 3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  source?: string;
+
+  @ApiPropertyOptional({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES })
+  @IsOptional()
+  @IsIn(KNOWLEDGE_DOCUMENT_STATUS_VALUES)
+  status?: string;
+
+  @ApiPropertyOptional({ example: '2026-01-01T00:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  effectiveDate?: string | null;
+
+  @ApiPropertyOptional({ type: () => KnowledgeDocumentMetadataDto })
+  @IsOptional()
+  metadata?: KnowledgeDocumentMetadataDto | null;
+}
+
+export class ListKnowledgeDocumentsQueryDto {
+  @ApiPropertyOptional({ example: 'land' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  category?: string;
+
+  @ApiPropertyOptional({ example: 'Article 3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({ enum: KNOWLEDGE_DOCUMENT_STATUS_VALUES })
+  @IsOptional()
+  @IsIn(KNOWLEDGE_DOCUMENT_STATUS_VALUES)
+  status?: string;
+
+  @ApiPropertyOptional({ type: Number, example: 20 })
+  @IsOptional()
+  @Matches(INTEGER_QUERY_PATTERN)
+  limit?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'eyJzb3J0VmFsdWUiOiIyMDI2LTAzLTE4VDEwOjAwOjAwLjAwMFoiLCJpZCI6IjAxSlBDWS4uLiJ9',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  cursor?: string;
+}
+
+export class DeleteKnowledgeDocumentResultDto {
+  @ApiProperty({ example: '01JPCTKNOWLEDGE0000000000' })
+  id!: string;
 }
 
 export class UploadedAssetDto {

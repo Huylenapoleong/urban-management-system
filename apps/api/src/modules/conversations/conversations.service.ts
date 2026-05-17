@@ -21,6 +21,8 @@ import type {
   AuditEventItem,
   AuthenticatedUser,
   CallEventInfo,
+  ConversationAlias,
+  ConversationAliasRemovalResult,
   ConversationHistoryClearedResult,
   ConversationSummary,
   MediaAsset,
@@ -46,14 +48,22 @@ import {
   buildPaginatedResponse,
   paginateSortedItems,
 } from '../../common/pagination';
+import {
+  ConversationStateService,
+  type MessageDeliveryContext,
+  type SupportedMessageType,
+} from '../../common/services/conversation-state.service';
 import type {
   StoredChatOutboxEvent,
   StoredConversation,
+  StoredConversationMemberAlias,
   StoredConversationAuditEvent,
   StoredDirectMessageRequest,
   StoredMessage,
   StoredMessageDedup,
+  StoredMessagePin,
   StoredMessageRef,
+  StoredMessageSearchRecord,
   StoredPushOutboxEvent,
 } from '../../common/storage-records';
 import {
@@ -69,23 +79,18 @@ import {
   requiredString,
 } from '../../common/validation';
 import { AuditTrailService } from '../../infrastructure/audit/audit-trail.service';
-import {
-  ConversationStateService,
-  type MessageDeliveryContext,
-  type SupportedMessageType,
-} from '../../common/services/conversation-state.service';
 import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { UrbanTableRepository } from '../../infrastructure/dynamodb/urban-table.repository';
 import { PushNotificationService } from '../../infrastructure/notifications/push-notification.service';
 import { MediaAssetService } from '../../infrastructure/storage/media-asset.service';
 import { S3StorageService } from '../../infrastructure/storage/s3-storage.service';
-import { ChatRateLimitService } from './chat-rate-limit.service';
-import { ConversationDispatchService } from './conversation-dispatch.service';
-import { ChatOutboxService } from './chat-outbox.service';
-import { ConversationSummaryService } from './conversation-summary.service';
-import { ChatRealtimeService } from './chat-realtime.service';
 import { GroupsService } from '../groups/groups.service';
 import { UsersService } from '../users/users.service';
+import { ChatOutboxService } from './chat-outbox.service';
+import { ChatRateLimitService } from './chat-rate-limit.service';
+import { ChatRealtimeService } from './chat-realtime.service';
+import { ConversationDispatchService } from './conversation-dispatch.service';
+import { ConversationSummaryService } from './conversation-summary.service';
 
 export interface ResolvedConversationAccess {
   conversationId: string;
@@ -117,6 +122,35 @@ const DIRECT_MESSAGE_REQUEST_STATUS_VALUES: DirectMessageRequestStatus[] = [
 ];
 const DIRECT_MESSAGE_REQUEST_DIRECTION_VALUES: DirectMessageRequestDirection[] =
   ['INCOMING', 'OUTGOING'];
+const MAX_PINNED_MESSAGES_PER_CONVERSATION = 3;
+const MAX_SEARCH_TOKENS_PER_MESSAGE = 16;
+const MAX_MESSAGE_SEARCH_QUERY_TOKENS = 5;
+const MESSAGE_SEARCH_INDEX_PAGE_SIZE = 75;
+const MESSAGE_SEARCH_INDEX_MAX_PAGES = 4;
+const CONVERSATION_ALIAS_SK_PREFIX = 'ALIAS#';
+
+interface MessageSearchCursorPayload {
+  kind: 'messageSearch';
+  token: string;
+  pk: string;
+  sk: string;
+}
+
+interface MessageSearchListOptions {
+  after?: string;
+  before?: string;
+  cursor: unknown;
+  existingConversation?: StoredConversation;
+  fromUserId?: string;
+  limit: number;
+  searchTokens: string[];
+  type?: SupportedMessageType;
+}
+
+interface MessageStateUpdate {
+  message: StoredMessage;
+  outboxRecord: StoredChatOutboxEvent;
+}
 
 @Injectable()
 export class ConversationsService {
@@ -169,6 +203,12 @@ export class ConversationsService {
       }
     }
     const deduplicatedItems = Array.from(uniqueItemsMap.values());
+    const aliasByConversationTargetForSearch = keyword
+      ? await this.getConversationAliasMapForSummaries(
+          actor.id,
+          deduplicatedItems,
+        )
+      : new Map<string, StoredConversationMemberAlias>();
 
     const filtered = deduplicatedItems.filter((item) => {
       if (item.deletedAt) {
@@ -194,8 +234,22 @@ export class ConversationsService {
       if (!keyword) {
         return true;
       }
+      const counterpartId = this.getDmCounterpartId(actor.id, item);
+      const alias = counterpartId
+        ? aliasByConversationTargetForSearch.get(
+            this.makeConversationAliasLookupKey(
+              item.conversationId,
+              counterpartId,
+            ),
+          )?.alias
+        : undefined;
 
-      return [item.groupName, item.lastMessagePreview, item.lastSenderName]
+      return [
+        alias,
+        item.groupName,
+        item.lastMessagePreview,
+        item.lastSenderName,
+      ]
         .join(' ')
         .toLowerCase()
         .includes(keyword);
@@ -207,10 +261,19 @@ export class ConversationsService {
       (item) => `${item.isPinned ? '1' : '0'}|${item.updatedAt}`,
       (item) => item.conversationId,
     );
+    const aliasByConversationTarget = keyword
+      ? aliasByConversationTargetForSearch
+      : await this.getConversationAliasMapForSummaries(actor.id, page.items);
 
     return buildPaginatedResponse(
-      page.items.map((item) =>
-        this.serializeConversationSummary(actor.id, item),
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeConversationSummary(
+            actor.id,
+            item,
+            aliasByConversationTarget,
+          ),
+        ),
       ),
       page.nextCursor,
     );
@@ -261,10 +324,18 @@ export class ConversationsService {
       (item) => item.updatedAt,
       (item) => item.conversationId,
     );
+    const aliasByConversationTarget =
+      await this.getConversationAliasMapForSummaries(actor.id, page.items);
 
     return buildPaginatedResponse(
-      page.items.map((item) =>
-        this.serializeConversationSummary(actor.id, item),
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeConversationSummary(
+            actor.id,
+            item,
+            aliasByConversationTarget,
+          ),
+        ),
       ),
       page.nextCursor,
     );
@@ -376,6 +447,116 @@ export class ConversationsService {
 
     return this.serializeConversationSummary(actor.id, nextConversation);
   }
+
+  async listConversationAliases(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ConversationAlias[]> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const participants = new Set(access.participants);
+    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
+    const aliasMap = await this.getConversationAliasMap(
+      ownerId,
+      access.conversationKey,
+    );
+
+    return Array.from(aliasMap.values())
+      .filter((alias) => participants.has(alias.targetUserId))
+      .sort((left, right) =>
+        left.targetUserId.localeCompare(right.targetUserId),
+      )
+      .map((alias) => this.toConversationAlias(access.conversationId, alias));
+  }
+
+  async setConversationAlias(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    targetUserId: string,
+    payload: unknown,
+  ): Promise<ConversationAlias> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const target = await this.usersService.getByIdOrThrow(targetUserId);
+
+    this.ensureConversationAliasTarget(access, target.userId);
+
+    const body = ensureObject(payload);
+    const alias = requiredString(body, 'alias', {
+      minLength: 1,
+      maxLength: 100,
+    });
+    const occurredAt = nowIso();
+    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
+    const existingAlias = await this.getConversationAlias(
+      ownerId,
+      access.conversationKey,
+      target.userId,
+    );
+    const nextAlias: StoredConversationMemberAlias = {
+      PK: makeConversationPk(access.conversationKey),
+      SK: this.makeConversationAliasSk(ownerId, target.userId),
+      entityType: 'CONVERSATION_MEMBER_ALIAS',
+      conversationId: access.conversationKey,
+      ownerUserId: ownerId,
+      targetUserId: target.userId,
+      alias,
+      createdAt: existingAlias?.createdAt ?? occurredAt,
+      updatedAt: occurredAt,
+    };
+
+    await this.repository.put(
+      this.config.dynamodbConversationsTableName,
+      nextAlias,
+    );
+
+    await this.sendConversationSystemMessage(
+      actor,
+      access,
+      `${actor.fullName} đã đổi biệt danh của ${target.fullName} thành ${alias}`,
+    );
+
+    return this.toConversationAlias(access.conversationId, nextAlias);
+  }
+
+  async clearConversationAlias(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    targetUserId: string,
+  ): Promise<ConversationAliasRemovalResult> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+
+    this.ensureConversationAliasTarget(access, targetUserId);
+
+    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
+
+    const existingAlias = await this.getConversationAlias(
+      ownerId,
+      access.conversationKey,
+      targetUserId,
+    );
+    const clearedAt = nowIso();
+
+    if (existingAlias) {
+      await this.repository.delete(
+        this.config.dynamodbConversationsTableName,
+        existingAlias.PK,
+        existingAlias.SK,
+      );
+
+      const target = await this.usersService.getByIdOrThrow(targetUserId);
+      await this.sendConversationSystemMessage(
+        actor,
+        access,
+        `${actor.fullName} đã xóa biệt danh của ${target.fullName}`,
+      );
+    }
+
+    return {
+      conversationId: access.conversationId,
+      userId: targetUserId,
+      clearedAt,
+    };
+  }
+
   async resolveConversationAccess(
     actor: AuthenticatedUser,
     conversationId: string,
@@ -410,12 +591,33 @@ export class ConversationsService {
         actor.id,
         access.conversationKey,
       );
-    const keyword = optionalQueryString(query.q, 'q')?.toLowerCase();
+    const keyword = optionalQueryString(query.q, 'q');
+    const normalizedKeyword = keyword
+      ? this.normalizeSearchText(keyword)
+      : undefined;
+    const searchTokens = this.extractSearchTokens(
+      keyword ?? '',
+      MAX_MESSAGE_SEARCH_QUERY_TOKENS,
+    );
     const type = parseEnumQuery(query.type, 'type', MESSAGE_TYPES);
     const fromUserId = optionalQueryString(query.fromUserId, 'fromUserId');
     const before = parseIsoDateQuery(query.before, 'before');
     const after = parseIsoDateQuery(query.after, 'after');
     const limit = parseLimit(query.limit);
+
+    if (searchTokens.length > 0) {
+      return this.listMessagesBySearchIndex(actor, access, {
+        after,
+        before,
+        cursor: query.cursor,
+        existingConversation,
+        fromUserId,
+        limit,
+        searchTokens,
+        type,
+      });
+    }
+
     const items = await this.repository.queryByPk<StoredMessage>(
       this.config.dynamodbMessagesTableName,
       makeConversationPk(access.conversationKey),
@@ -452,19 +654,18 @@ export class ConversationsService {
         return false;
       }
 
-      if (!keyword) {
+      if (!normalizedKeyword) {
         return true;
       }
 
-      return [
-        item.senderName,
-        this.buildPreview(item),
-        item.attachmentAsset?.key ?? '',
-        item.attachmentUrl ?? '',
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(keyword);
+      return this.normalizeSearchText(
+        [
+          item.senderName,
+          this.buildPreview(item),
+          item.attachmentAsset?.key ?? '',
+          item.attachmentUrl ?? '',
+        ].join(' '),
+      ).includes(normalizedKeyword);
     });
     const page = paginateSortedItems(
       filtered,
@@ -477,15 +678,390 @@ export class ConversationsService {
       access.participants,
       access.conversationKey,
     );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
 
     return buildPaginatedResponse(
       await Promise.all(
         page.items.map((item) =>
-          this.serializeMessage(actor.id, item, deliveryContext),
+          this.serializeMessage(actor.id, item, deliveryContext, aliasByUserId),
         ),
       ),
       page.nextCursor,
     );
+  }
+
+  async listPinnedMessages(
+    actor: AuthenticatedUser,
+    conversationId: string,
+  ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const existingConversation =
+      await this.conversationSummaryService.getConversationSummary(
+        actor.id,
+        access.conversationKey,
+      );
+    const pinRecords = await this.listMessagePinRecords(access.conversationKey);
+    const messages = await Promise.all(
+      pinRecords.map((record) =>
+        this.repository.get<StoredMessage>(
+          this.config.dynamodbMessagesTableName,
+          record.PK,
+          record.messageSk,
+        ),
+      ),
+    );
+    const visiblePinnedMessages = messages
+      .filter((message): message is StoredMessage => Boolean(message))
+      .map((message) =>
+        this.applyPinRecordToMessage(
+          message,
+          pinRecords.find((record) => record.messageId === message.messageId),
+        ),
+      )
+      .filter((message) =>
+        this.conversationStateService.isMessageVisibleToUser(
+          message,
+          actor.id,
+          existingConversation?.historyClearedAt ?? null,
+        ),
+      )
+      .sort((left, right) =>
+        (right.pinnedAt ?? '').localeCompare(left.pinnedAt ?? ''),
+      );
+    const deliveryContext = await this.buildMessageDeliveryContext(
+      access.participants,
+      access.conversationKey,
+    );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
+    const data = await Promise.all(
+      visiblePinnedMessages.map((message) =>
+        this.serializeMessage(
+          actor.id,
+          message,
+          deliveryContext,
+          aliasByUserId,
+        ),
+      ),
+    );
+
+    return buildPaginatedResponse(data);
+  }
+
+  async pinMessage(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    messageId: string,
+    payload: unknown,
+  ): Promise<MessageItem> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    await this.ensureCanMutateConversationMessage(
+      actor,
+      access.conversationKey,
+      'pin',
+    );
+    const message = await this.getMessageOrThrow(
+      access.conversationKey,
+      messageId,
+    );
+    await this.ensureMessageCanBePinned(actor.id, access, message);
+
+    if (message.pinnedAt) {
+      return this.serializeMessage(actor.id, message);
+    }
+
+    const body = ensureObject(payload ?? {});
+    const replaceMessageId = optionalString(body, 'replaceMessageId', {
+      maxLength: 50,
+    });
+    const pinRecords = await this.listMessagePinRecords(access.conversationKey);
+    const existingPinRecord = pinRecords.find(
+      (record) => record.messageId === message.messageId,
+    );
+
+    if (existingPinRecord) {
+      return this.serializeMessage(
+        actor.id,
+        this.applyPinRecordToMessage(message, existingPinRecord),
+      );
+    }
+
+    let replacePinRecord: StoredMessagePin | undefined;
+    let replaceMessage: StoredMessage | undefined;
+
+    if (pinRecords.length >= MAX_PINNED_MESSAGES_PER_CONVERSATION) {
+      if (!replaceMessageId) {
+        throw new ConflictException(
+          'Pinned message limit reached. Provide replaceMessageId to replace one of the current pinned messages.',
+        );
+      }
+
+      if (replaceMessageId === message.messageId) {
+        throw new BadRequestException(
+          'replaceMessageId must be different from messageId.',
+        );
+      }
+
+      replacePinRecord = pinRecords.find(
+        (record) => record.messageId === replaceMessageId,
+      );
+
+      if (!replacePinRecord) {
+        throw new BadRequestException(
+          'replaceMessageId must be one of the current pinned messages.',
+        );
+      }
+
+      replaceMessage = await this.repository.get<StoredMessage>(
+        this.config.dynamodbMessagesTableName,
+        replacePinRecord.PK,
+        replacePinRecord.messageSk,
+      );
+
+      if (!replaceMessage) {
+        throw new ConflictException(
+          'Pinned message changed. Please refresh pinned messages and retry.',
+        );
+      }
+    }
+
+    const pinnedAt = nowIso();
+    const pinRecord = this.buildMessagePinRecord(
+      access.conversationKey,
+      message,
+      actor.id,
+      pinnedAt,
+    );
+    const nextMessage: StoredMessage = {
+      ...message,
+      pinnedAt,
+      pinnedByUserId: actor.id,
+      pinRecordSk: pinRecord.SK,
+      updatedAt: pinnedAt,
+    };
+    const replacedMessage = replaceMessage
+      ? this.clearPinnedMessage(replaceMessage, pinnedAt)
+      : undefined;
+    const replaceMessageExpectedUpdatedAt = replaceMessage?.updatedAt;
+    const outboxRecords = [
+      this.chatOutboxService.buildChatOutboxEvent({
+        actorUserId: actor.id,
+        conversationId: access.conversationKey,
+        eventName: 'message.updated',
+        messageId: message.messageId,
+        occurredAt: pinnedAt,
+      }),
+    ];
+
+    if (replacedMessage) {
+      outboxRecords.push(
+        this.chatOutboxService.buildChatOutboxEvent({
+          actorUserId: actor.id,
+          conversationId: access.conversationKey,
+          eventName: 'message.updated',
+          messageId: replacedMessage.messageId,
+          occurredAt: pinnedAt,
+        }),
+      );
+    }
+
+    const auditRecord = this.auditTrailService.buildConversationEvent({
+      action: 'MESSAGE_PINNED',
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      messageId: message.messageId,
+      occurredAt: pinnedAt,
+      summary: `${actor.fullName} pinned a message.`,
+      metadata: {
+        replacedMessageId: replacedMessage?.messageId ?? '',
+      },
+    });
+
+    try {
+      await this.repository.transactWrite([
+        {
+          kind: 'put' as const,
+          tableName: this.config.dynamodbMessagesTableName,
+          item: nextMessage,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': message.updatedAt,
+            ':expectedDeletedAt': message.deletedAt,
+          },
+        },
+        {
+          kind: 'put' as const,
+          tableName: this.config.dynamodbMessagesTableName,
+          item: pinRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+        ...(replacedMessage && replacePinRecord
+          ? [
+              {
+                kind: 'put' as const,
+                tableName: this.config.dynamodbMessagesTableName,
+                item: replacedMessage,
+                conditionExpression:
+                  'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+                expressionAttributeValues: {
+                  ':expectedUpdatedAt': replaceMessageExpectedUpdatedAt,
+                },
+              },
+              {
+                kind: 'delete' as const,
+                tableName: this.config.dynamodbMessagesTableName,
+                key: {
+                  PK: replacePinRecord.PK,
+                  SK: replacePinRecord.SK,
+                },
+                conditionExpression:
+                  'attribute_exists(PK) AND attribute_exists(SK)',
+              },
+            ]
+          : []),
+        ...outboxRecords.map((outboxRecord) => ({
+          kind: 'put' as const,
+          tableName: this.config.dynamodbConversationsTableName,
+          item: outboxRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        })),
+        {
+          kind: 'put' as const,
+          tableName: this.config.dynamodbConversationsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Pinned messages changed. Please retry.');
+      }
+
+      throw error;
+    }
+
+    await this.emitMessageStateUpdates(actor, access, [
+      { message: nextMessage, outboxRecord: outboxRecords[0] },
+      ...(replacedMessage
+        ? [{ message: replacedMessage, outboxRecord: outboxRecords[1] }]
+        : []),
+    ]);
+
+    return this.serializeMessage(actor.id, nextMessage, {
+      participantIds: access.participants,
+      summariesByUser: new Map<string, StoredConversation>(),
+    });
+  }
+
+  async unpinMessage(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    messageId: string,
+  ): Promise<MessageItem> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    await this.ensureCanMutateConversationMessage(
+      actor,
+      access.conversationKey,
+      'unpin',
+    );
+    const message = await this.getMessageOrThrow(
+      access.conversationKey,
+      messageId,
+    );
+    const pinRecord = await this.findMessagePinRecord(
+      access.conversationKey,
+      message,
+    );
+
+    if (!message.pinnedAt && !pinRecord) {
+      return this.serializeMessage(actor.id, message);
+    }
+
+    const unpinnedAt = nowIso();
+    const nextMessage = this.clearPinnedMessage(message, unpinnedAt);
+    const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      eventName: 'message.updated',
+      messageId: message.messageId,
+      occurredAt: unpinnedAt,
+    });
+    const auditRecord = this.auditTrailService.buildConversationEvent({
+      action: 'MESSAGE_UNPINNED',
+      actorUserId: actor.id,
+      conversationId: access.conversationKey,
+      messageId: message.messageId,
+      occurredAt: unpinnedAt,
+      summary: `${actor.fullName} unpinned a message.`,
+      metadata: {},
+    });
+
+    try {
+      await this.repository.transactWrite([
+        {
+          kind: 'put' as const,
+          tableName: this.config.dynamodbMessagesTableName,
+          item: nextMessage,
+          conditionExpression:
+            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt',
+          expressionAttributeValues: {
+            ':expectedUpdatedAt': message.updatedAt,
+          },
+        },
+        ...(pinRecord
+          ? [
+              {
+                kind: 'delete' as const,
+                tableName: this.config.dynamodbMessagesTableName,
+                key: {
+                  PK: pinRecord.PK,
+                  SK: pinRecord.SK,
+                },
+                conditionExpression:
+                  'attribute_exists(PK) AND attribute_exists(SK)',
+              },
+            ]
+          : []),
+        {
+          kind: 'put' as const,
+          tableName: this.config.dynamodbConversationsTableName,
+          item: outboxRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+        {
+          kind: 'put' as const,
+          tableName: this.config.dynamodbConversationsTableName,
+          item: auditRecord,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        throw new ConflictException('Pinned messages changed. Please retry.');
+      }
+
+      throw error;
+    }
+
+    await this.emitMessageStateUpdates(actor, access, [
+      { message: nextMessage, outboxRecord },
+    ]);
+
+    return this.serializeMessage(actor.id, nextMessage, {
+      participantIds: access.participants,
+      summariesByUser: new Map<string, StoredConversation>(),
+    });
   }
 
   async sendMessage(
@@ -689,7 +1265,12 @@ export class ConversationsService {
       sentAt,
       updatedAt: sentAt,
     };
+    message.searchTokens = this.extractMessageSearchTokens(message);
     const messageRefRecord = this.buildMessageReferenceRecord(
+      conversationId,
+      message,
+    );
+    const searchRecords = this.buildMessageSearchRecords(
       conversationId,
       message,
     );
@@ -713,6 +1294,7 @@ export class ConversationsService {
       item:
         | StoredMessage
         | StoredMessageRef
+        | StoredMessageSearchRecord
         | StoredMessageDedup
         | StoredDirectMessageRequest;
       conditionExpression: string;
@@ -745,6 +1327,15 @@ export class ConversationsService {
           'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       });
     }
+
+    transactionItems.push(
+      ...searchRecords.map((item) => ({
+        tableName: this.config.dynamodbMessagesTableName,
+        item,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      })),
+    );
 
     try {
       await this.repository.transactPut(transactionItems);
@@ -961,11 +1552,11 @@ export class ConversationsService {
     const removedAt = nowIso();
 
     if (current && !current.deletedAt) {
-      await this.repository.delete(
-        this.config.dynamodbConversationsTableName,
-        current.PK,
-        current.SK,
-      );
+      await this.repository.put(this.config.dynamodbConversationsTableName, {
+        ...current,
+        deletedAt: removedAt,
+        updatedAt: removedAt,
+      } as StoredConversation);
     }
 
     this.chatRealtimeService.leaveConversationForUser(
@@ -1139,6 +1730,18 @@ export class ConversationsService {
       attachmentUrl: nextAttachmentUrl,
       updatedAt: nowIso(),
     };
+    const currentSearchTokens = new Set(
+      message.searchTokens ?? this.extractMessageSearchTokens(message),
+    );
+    nextMessage.searchTokens = this.extractMessageSearchTokens(nextMessage);
+    const addedSearchTokens = nextMessage.searchTokens.filter(
+      (token) => !currentSearchTokens.has(token),
+    );
+    const searchRecords = this.buildMessageSearchRecords(
+      access.conversationKey,
+      nextMessage,
+      addedSearchTokens,
+    );
     const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
       actorUserId: actor.id,
       conversationId: access.conversationKey,
@@ -1180,6 +1783,12 @@ export class ConversationsService {
           conditionExpression:
             'attribute_not_exists(PK) AND attribute_not_exists(SK)',
         },
+        ...searchRecords.map((item) => ({
+          tableName: this.config.dynamodbMessagesTableName,
+          item,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        })),
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
@@ -1247,10 +1856,17 @@ export class ConversationsService {
       return this.serializeMessage(actor.id, message);
     }
 
+    const pinRecord = await this.findMessagePinRecord(
+      access.conversationKey,
+      message,
+    );
     const deletedAt = nowIso();
     const nextMessage: StoredMessage = {
       ...message,
       deletedAt,
+      pinnedAt: null,
+      pinnedByUserId: null,
+      pinRecordSk: null,
       updatedAt: deletedAt,
     };
     const outboxRecord = this.chatOutboxService.buildChatOutboxEvent({
@@ -1271,30 +1887,70 @@ export class ConversationsService {
     });
 
     try {
-      await this.repository.transactPut([
-        {
-          tableName: this.config.dynamodbMessagesTableName,
-          item: nextMessage,
-          conditionExpression:
-            'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
-          expressionAttributeValues: {
-            ':expectedUpdatedAt': message.updatedAt,
-            ':expectedDeletedAt': message.deletedAt,
+      if (pinRecord) {
+        await this.repository.transactWrite([
+          {
+            kind: 'put' as const,
+            tableName: this.config.dynamodbMessagesTableName,
+            item: nextMessage,
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+            expressionAttributeValues: {
+              ':expectedUpdatedAt': message.updatedAt,
+              ':expectedDeletedAt': message.deletedAt,
+            },
           },
-        },
-        {
-          tableName: this.config.dynamodbConversationsTableName,
-          item: outboxRecord,
-          conditionExpression:
-            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-        },
-        {
-          tableName: this.config.dynamodbConversationsTableName,
-          item: auditRecord,
-          conditionExpression:
-            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-        },
-      ]);
+          {
+            kind: 'delete' as const,
+            tableName: this.config.dynamodbMessagesTableName,
+            key: {
+              PK: pinRecord.PK,
+              SK: pinRecord.SK,
+            },
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK)',
+          },
+          {
+            kind: 'put' as const,
+            tableName: this.config.dynamodbConversationsTableName,
+            item: outboxRecord,
+            conditionExpression:
+              'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+          },
+          {
+            kind: 'put' as const,
+            tableName: this.config.dynamodbConversationsTableName,
+            item: auditRecord,
+            conditionExpression:
+              'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+          },
+        ]);
+      } else {
+        await this.repository.transactPut([
+          {
+            tableName: this.config.dynamodbMessagesTableName,
+            item: nextMessage,
+            conditionExpression:
+              'attribute_exists(PK) AND attribute_exists(SK) AND updatedAt = :expectedUpdatedAt AND deletedAt = :expectedDeletedAt',
+            expressionAttributeValues: {
+              ':expectedUpdatedAt': message.updatedAt,
+              ':expectedDeletedAt': message.deletedAt,
+            },
+          },
+          {
+            tableName: this.config.dynamodbConversationsTableName,
+            item: outboxRecord,
+            conditionExpression:
+              'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+          },
+          {
+            tableName: this.config.dynamodbConversationsTableName,
+            item: auditRecord,
+            conditionExpression:
+              'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+          },
+        ]);
+      }
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
         throw new ConflictException('Message changed. Please retry.');
@@ -1588,7 +2244,12 @@ export class ConversationsService {
       sentAt,
       updatedAt: sentAt,
     };
+    message.searchTokens = this.extractMessageSearchTokens(message);
     const messageRefRecord = this.buildMessageReferenceRecord(
+      conversationId,
+      message,
+    );
+    const searchRecords = this.buildMessageSearchRecords(
       conversationId,
       message,
     );
@@ -1635,6 +2296,7 @@ export class ConversationsService {
         | StoredConversationAuditEvent
         | StoredMessage
         | StoredMessageRef
+        | StoredMessageSearchRecord
         | StoredMessageDedup
         | StoredPushOutboxEvent;
       conditionExpression: string;
@@ -1673,6 +2335,15 @@ export class ConversationsService {
           'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       });
     }
+
+    transactionItems.push(
+      ...searchRecords.map((item) => ({
+        tableName: this.config.dynamodbMessagesTableName,
+        item,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      })),
+    );
 
     if (pushRecord) {
       transactionItems.push({
@@ -2306,6 +2977,476 @@ export class ConversationsService {
     };
   }
 
+  private buildMessagePinRecord(
+    conversationId: string,
+    message: StoredMessage,
+    pinnedByUserId: string,
+    pinnedAt: string,
+  ): StoredMessagePin {
+    return {
+      PK: makeConversationPk(conversationId),
+      SK: this.makeMessagePinSk(pinnedAt, message.messageId),
+      entityType: 'MESSAGE_PIN',
+      conversationId,
+      messageId: message.messageId,
+      messageSk: message.SK,
+      pinnedByUserId,
+      pinnedAt,
+      updatedAt: pinnedAt,
+    };
+  }
+
+  private buildMessageSearchRecords(
+    conversationId: string,
+    message: StoredMessage,
+    tokens = message.searchTokens ?? this.extractMessageSearchTokens(message),
+  ): StoredMessageSearchRecord[] {
+    return tokens.map((token) => ({
+      PK: makeConversationPk(conversationId),
+      SK: this.makeMessageSearchSk(token, message.sentAt, message.messageId),
+      entityType: 'MESSAGE_SEARCH',
+      conversationId,
+      messageId: message.messageId,
+      messageSk: message.SK,
+      token,
+      sentAt: message.sentAt,
+      updatedAt: message.updatedAt,
+    }));
+  }
+
+  private async listMessagePinRecords(
+    conversationId: string,
+  ): Promise<StoredMessagePin[]> {
+    return this.repository.queryByPk<StoredMessagePin>(
+      this.config.dynamodbMessagesTableName,
+      makeConversationPk(conversationId),
+      {
+        beginsWith: 'PIN#',
+        limit: MAX_PINNED_MESSAGES_PER_CONVERSATION + 1,
+      },
+    );
+  }
+
+  private async findMessagePinRecord(
+    conversationId: string,
+    message: StoredMessage,
+  ): Promise<StoredMessagePin | undefined> {
+    if (message.pinRecordSk) {
+      const pinRecord = await this.repository.get<StoredMessagePin>(
+        this.config.dynamodbMessagesTableName,
+        makeConversationPk(conversationId),
+        message.pinRecordSk,
+      );
+
+      if (pinRecord) {
+        return pinRecord;
+      }
+    }
+
+    const pinRecords = await this.listMessagePinRecords(conversationId);
+
+    return pinRecords.find((record) => record.messageId === message.messageId);
+  }
+
+  private applyPinRecordToMessage(
+    message: StoredMessage,
+    pinRecord?: StoredMessagePin,
+  ): StoredMessage {
+    if (!pinRecord) {
+      return message;
+    }
+
+    return {
+      ...message,
+      pinnedAt: message.pinnedAt ?? pinRecord.pinnedAt,
+      pinnedByUserId: message.pinnedByUserId ?? pinRecord.pinnedByUserId,
+      pinRecordSk: message.pinRecordSk ?? pinRecord.SK,
+    };
+  }
+
+  private clearPinnedMessage(
+    message: StoredMessage,
+    updatedAt: string,
+  ): StoredMessage {
+    return {
+      ...message,
+      pinnedAt: null,
+      pinnedByUserId: null,
+      pinRecordSk: null,
+      updatedAt,
+    };
+  }
+
+  private async ensureMessageCanBePinned(
+    actorId: string,
+    access: ResolvedConversationAccess,
+    message: StoredMessage,
+  ): Promise<void> {
+    if (message.deletedAt) {
+      throw new BadRequestException('Message has already been deleted.');
+    }
+
+    if (message.recalledAt) {
+      throw new BadRequestException('Recalled messages cannot be pinned.');
+    }
+
+    if (
+      !(await this.isMessageVisibleToActor(
+        actorId,
+        access.conversationKey,
+        message,
+      ))
+    ) {
+      throw new NotFoundException('Message not found.');
+    }
+  }
+
+  private async listMessagesBySearchIndex(
+    actor: AuthenticatedUser,
+    access: ResolvedConversationAccess,
+    options: MessageSearchListOptions,
+  ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
+    const firstToken = options.searchTokens[0];
+    const conversationPk = makeConversationPk(access.conversationKey);
+    let exclusiveStartKey = this.decodeMessageSearchCursor(
+      options.cursor,
+      firstToken,
+    );
+    const matches: Array<{
+      message: StoredMessage;
+      record: StoredMessageSearchRecord;
+    }> = [];
+    const seenMessageIds = new Set<string>();
+    let lastScannedRecord: StoredMessageSearchRecord | undefined;
+    let pageCount = 0;
+
+    while (
+      matches.length <= options.limit &&
+      pageCount < MESSAGE_SEARCH_INDEX_MAX_PAGES
+    ) {
+      const page =
+        await this.repository.queryByPkPage<StoredMessageSearchRecord>(
+          this.config.dynamodbMessagesTableName,
+          conversationPk,
+          {
+            beginsWith: this.makeMessageSearchPrefix(firstToken),
+            exclusiveStartKey,
+            limit: MESSAGE_SEARCH_INDEX_PAGE_SIZE,
+          },
+        );
+
+      pageCount += 1;
+
+      if (page.items.length === 0) {
+        break;
+      }
+
+      lastScannedRecord = page.items.at(-1);
+      const pageEntries = await Promise.all(
+        page.items.map(async (record) => {
+          if (seenMessageIds.has(record.messageId)) {
+            return undefined;
+          }
+
+          seenMessageIds.add(record.messageId);
+          const message = await this.repository.get<StoredMessage>(
+            this.config.dynamodbMessagesTableName,
+            record.PK,
+            record.messageSk,
+          );
+
+          return message ? { message, record } : undefined;
+        }),
+      );
+
+      for (const entry of pageEntries) {
+        if (!entry) {
+          continue;
+        }
+
+        if (
+          this.messageMatchesSearchOptions(actor.id, entry.message, options)
+        ) {
+          matches.push(entry);
+        }
+
+        if (matches.length > options.limit) {
+          break;
+        }
+      }
+
+      if (matches.length > options.limit || !page.lastEvaluatedKey) {
+        break;
+      }
+
+      exclusiveStartKey = page.lastEvaluatedKey;
+    }
+
+    if (matches.length === 0 && !lastScannedRecord) {
+      return this.listMessagesByLegacySearchFallback(actor, access, options);
+    }
+
+    const pageItems = matches.slice(0, options.limit);
+    const nextCursorRecord =
+      matches.length > options.limit
+        ? pageItems.at(-1)?.record
+        : lastScannedRecord && pageCount >= MESSAGE_SEARCH_INDEX_MAX_PAGES
+          ? lastScannedRecord
+          : undefined;
+    const deliveryContext = await this.buildMessageDeliveryContext(
+      access.participants,
+      access.conversationKey,
+    );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
+    const data = await Promise.all(
+      pageItems.map(({ message }) =>
+        this.serializeMessage(
+          actor.id,
+          message,
+          deliveryContext,
+          aliasByUserId,
+        ),
+      ),
+    );
+
+    return buildPaginatedResponse(
+      data,
+      nextCursorRecord
+        ? this.encodeMessageSearchCursor(firstToken, nextCursorRecord)
+        : undefined,
+    );
+  }
+
+  private async listMessagesByLegacySearchFallback(
+    actor: AuthenticatedUser,
+    access: ResolvedConversationAccess,
+    options: MessageSearchListOptions,
+  ): Promise<ApiSuccessResponse<MessageItem[], ApiResponseMeta>> {
+    const items = await this.repository.queryByPk<StoredMessage>(
+      this.config.dynamodbMessagesTableName,
+      makeConversationPk(access.conversationKey),
+      {
+        beginsWith: 'MSG#',
+      },
+    );
+    const filtered = items.filter((message) =>
+      this.messageMatchesSearchOptions(actor.id, message, options),
+    );
+    const page = paginateSortedItems(
+      filtered,
+      options.limit,
+      options.cursor,
+      (item) => item.sentAt,
+      (item) => item.messageId,
+    );
+    const deliveryContext = await this.buildMessageDeliveryContext(
+      access.participants,
+      access.conversationKey,
+    );
+    const aliasByUserId = await this.getConversationAliasMap(
+      actor.id,
+      access.conversationKey,
+    );
+
+    return buildPaginatedResponse(
+      await Promise.all(
+        page.items.map((item) =>
+          this.serializeMessage(actor.id, item, deliveryContext, aliasByUserId),
+        ),
+      ),
+      page.nextCursor,
+    );
+  }
+
+  private messageMatchesSearchOptions(
+    actorId: string,
+    message: StoredMessage,
+    options: MessageSearchListOptions,
+  ): boolean {
+    if (
+      !this.conversationStateService.isMessageVisibleToUser(
+        message,
+        actorId,
+        options.existingConversation?.historyClearedAt ?? null,
+      )
+    ) {
+      return false;
+    }
+
+    if (options.type && message.type !== options.type) {
+      return false;
+    }
+
+    if (options.fromUserId && message.senderId !== options.fromUserId) {
+      return false;
+    }
+
+    if (options.before && message.sentAt >= options.before) {
+      return false;
+    }
+
+    if (options.after && message.sentAt <= options.after) {
+      return false;
+    }
+
+    const searchText = this.normalizeSearchText(
+      this.buildMessageSearchText(message),
+    );
+
+    return options.searchTokens.every((token) => searchText.includes(token));
+  }
+
+  private buildMessageSearchText(message: StoredMessage): string {
+    return [
+      message.senderName,
+      this.buildPreview(message),
+      message.content,
+      message.attachmentAsset?.key ?? '',
+      message.attachmentUrl ?? '',
+      message.forwardedFromSenderName ?? '',
+    ].join(' ');
+  }
+
+  private extractMessageSearchTokens(message: StoredMessage): string[] {
+    return this.extractSearchTokens(
+      this.buildMessageSearchText(message),
+      MAX_SEARCH_TOKENS_PER_MESSAGE,
+    );
+  }
+
+  private extractSearchTokens(value: string, maxTokens: number): string[] {
+    if (!value) {
+      return [];
+    }
+
+    const normalized = this.normalizeSearchText(value);
+    const tokens = normalized
+      .split(' ')
+      .filter((token) => token.length >= 2 && token.length <= 32);
+
+    return Array.from(new Set(tokens)).slice(0, maxTokens);
+  }
+
+  private normalizeSearchText(value: string): string {
+    return value
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  private decodeMessageSearchCursor(
+    value: unknown,
+    token: string,
+  ): Record<string, unknown> | undefined {
+    const raw = optionalQueryString(value, 'cursor');
+
+    if (!raw) {
+      return undefined;
+    }
+
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    } catch {
+      throw new BadRequestException('cursor is invalid.');
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new BadRequestException('cursor is invalid.');
+    }
+
+    const payload = parsed as Partial<MessageSearchCursorPayload>;
+
+    if (payload.kind !== 'messageSearch') {
+      return undefined;
+    }
+
+    if (
+      payload.token !== token ||
+      typeof payload.pk !== 'string' ||
+      typeof payload.sk !== 'string' ||
+      !payload.pk ||
+      !payload.sk
+    ) {
+      throw new BadRequestException('cursor is invalid.');
+    }
+
+    return {
+      PK: payload.pk,
+      SK: payload.sk,
+    };
+  }
+
+  private encodeMessageSearchCursor(
+    token: string,
+    record: StoredMessageSearchRecord,
+  ): string {
+    const payload: MessageSearchCursorPayload = {
+      kind: 'messageSearch',
+      token,
+      pk: record.PK,
+      sk: record.SK,
+    };
+
+    return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  }
+
+  private async emitMessageStateUpdates(
+    actor: AuthenticatedUser,
+    access: ResolvedConversationAccess,
+    updates: MessageStateUpdate[],
+  ): Promise<void> {
+    for (const update of updates) {
+      try {
+        for (const participantId of access.participants) {
+          this.chatRealtimeService.emitToUser(
+            participantId,
+            CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
+            {
+              eventId: update.outboxRecord.eventId,
+              conversationId: this.toPublicConversationId(
+                participantId,
+                access.conversationKey,
+              ),
+              conversationKey: access.conversationKey,
+              message: await this.serializeMessage(
+                participantId,
+                update.message,
+              ),
+              updatedByUserId: actor.id,
+              occurredAt: update.message.updatedAt,
+            },
+          );
+        }
+
+        await this.chatOutboxService
+          .deleteChatOutboxEvent(update.outboxRecord)
+          .catch((error: unknown) => {
+            const message =
+              error instanceof Error ? error.message : 'Unknown error.';
+            this.logger.warn(
+              `Failed to delete chat outbox event ${update.outboxRecord.eventId}: ${message}`,
+            );
+          });
+      } catch (error) {
+        this.logDeferredChatOutboxEvent(
+          update.outboxRecord.eventId,
+          update.outboxRecord.eventName,
+          error,
+        );
+      }
+    }
+  }
+
   private async findMessageById(
     conversationId: string,
     messageId: string,
@@ -2680,7 +3821,7 @@ export class ConversationsService {
   private async ensureCanMutateConversationMessage(
     actor: AuthenticatedUser,
     conversationId: string,
-    action: 'edit' | 'delete' | 'recall',
+    action: 'edit' | 'delete' | 'recall' | 'pin' | 'unpin',
   ): Promise<void> {
     if (
       this.authorizationService.isAdmin(actor) ||
@@ -2861,6 +4002,22 @@ export class ConversationsService {
 
   private makeMessageReferenceSk(messageId: string): string {
     return `MSGREF#${messageId}`;
+  }
+
+  private makeMessagePinSk(pinnedAt: string, messageId: string): string {
+    return `PIN#${pinnedAt}#${messageId}`;
+  }
+
+  private makeMessageSearchPrefix(token: string): string {
+    return `SEARCH#${token}#`;
+  }
+
+  private makeMessageSearchSk(
+    token: string,
+    sentAt: string,
+    messageId: string,
+  ): string {
+    return `${this.makeMessageSearchPrefix(token)}${sentAt}#${messageId}`;
   }
 
   private makeClientMessageDedupSk(
@@ -3189,25 +4346,209 @@ export class ConversationsService {
     );
   }
 
-  private serializeConversationSummary(
+  private makeConversationAliasSk(
+    ownerUserId: string,
+    targetUserId: string,
+  ): string {
+    return `${CONVERSATION_ALIAS_SK_PREFIX}${ownerUserId}#${targetUserId}`;
+  }
+
+  private makeConversationAliasLookupKey(
+    conversationId: string,
+    targetUserId: string,
+  ): string {
+    return `${conversationId}#${targetUserId}`;
+  }
+
+  private getDmCounterpartId(
     actorId: string,
     conversation: StoredConversation,
-  ): ConversationSummary {
-    return this.conversationStateService.serializeConversationSummary(
+  ): string | undefined {
+    if (
+      conversation.isGroup ||
+      !isDmConversationId(conversation.conversationId)
+    ) {
+      return undefined;
+    }
+
+    const participantIds = conversation.conversationId
+      .slice('DM#'.length)
+      .split('#');
+
+    return participantIds.find((participantId) => participantId !== actorId);
+  }
+
+  private async getConversationAlias(
+    ownerUserId: string,
+    conversationId: string,
+    targetUserId: string,
+  ): Promise<StoredConversationMemberAlias | undefined> {
+    const alias = await this.repository.get<StoredConversationMemberAlias>(
+      this.config.dynamodbConversationsTableName,
+      makeConversationPk(conversationId),
+      this.makeConversationAliasSk(ownerUserId, targetUserId),
+    );
+
+    if (!alias || alias.entityType !== 'CONVERSATION_MEMBER_ALIAS') {
+      return undefined;
+    }
+
+    return alias;
+  }
+
+  private async getConversationAliasMap(
+    ownerUserId: string,
+    conversationId: string,
+  ): Promise<Map<string, StoredConversationMemberAlias>> {
+    const aliases =
+      await this.repository.queryByPk<StoredConversationMemberAlias>(
+        this.config.dynamodbConversationsTableName,
+        makeConversationPk(conversationId),
+        {
+          beginsWith: this.makeConversationAliasSk(ownerUserId, ''),
+        },
+      );
+
+    return new Map(
+      aliases
+        .filter(
+          (alias): alias is StoredConversationMemberAlias =>
+            alias.entityType === 'CONVERSATION_MEMBER_ALIAS' &&
+            alias.ownerUserId === ownerUserId,
+        )
+        .map((alias) => [alias.targetUserId, alias]),
+    );
+  }
+
+  private async getConversationAliasMapForSummaries(
+    ownerUserId: string,
+    conversations: StoredConversation[],
+  ): Promise<Map<string, StoredConversationMemberAlias>> {
+    const keysByLookupKey = new Map<
+      string,
+      { PK: string; SK: string; conversationId: string; targetUserId: string }
+    >();
+
+    for (const conversation of conversations) {
+      const targetUserId = this.getDmCounterpartId(ownerUserId, conversation);
+
+      if (!targetUserId) {
+        continue;
+      }
+
+      const lookupKey = this.makeConversationAliasLookupKey(
+        conversation.conversationId,
+        targetUserId,
+      );
+
+      keysByLookupKey.set(lookupKey, {
+        PK: makeConversationPk(conversation.conversationId),
+        SK: this.makeConversationAliasSk(ownerUserId, targetUserId),
+        conversationId: conversation.conversationId,
+        targetUserId,
+      });
+    }
+
+    if (keysByLookupKey.size === 0) {
+      return new Map();
+    }
+
+    const aliases: StoredConversationMemberAlias[] = [];
+    const keys = Array.from(keysByLookupKey.values());
+
+    for (let index = 0; index < keys.length; index += 100) {
+      aliases.push(
+        ...(await this.repository.batchGet<StoredConversationMemberAlias>(
+          this.config.dynamodbConversationsTableName,
+          keys.slice(index, index + 100),
+        )),
+      );
+    }
+
+    return new Map(
+      aliases
+        .filter(
+          (alias): alias is StoredConversationMemberAlias =>
+            alias.entityType === 'CONVERSATION_MEMBER_ALIAS' &&
+            alias.ownerUserId === ownerUserId,
+        )
+        .map((alias) => [
+          this.makeConversationAliasLookupKey(
+            alias.conversationId,
+            alias.targetUserId,
+          ),
+          alias,
+        ]),
+    );
+  }
+
+  private ensureConversationAliasTarget(
+    access: ResolvedConversationAccess,
+    targetUserId: string,
+  ): void {
+    if (!access.participants.includes(targetUserId)) {
+      throw new ForbiddenException(
+        'You can only set aliases for participants in this conversation.',
+      );
+    }
+  }
+
+  private toConversationAlias(
+    publicConversationId: string,
+    alias: StoredConversationMemberAlias,
+  ): ConversationAlias {
+    return {
+      conversationId: publicConversationId,
+      userId: alias.targetUserId,
+      alias: alias.alias,
+      updatedAt: alias.updatedAt,
+    };
+  }
+
+  private async serializeConversationSummary(
+    actorId: string,
+    conversation: StoredConversation,
+    aliasByConversationTarget?: Map<string, StoredConversationMemberAlias>,
+  ): Promise<ConversationSummary> {
+    const summary = this.conversationStateService.serializeConversationSummary(
       actorId,
       conversation,
     );
+    const targetUserId = this.getDmCounterpartId(actorId, conversation);
+
+    if (!targetUserId) {
+      return summary;
+    }
+
+    const alias =
+      aliasByConversationTarget?.get(
+        this.makeConversationAliasLookupKey(
+          conversation.conversationId,
+          targetUserId,
+        ),
+      ) ??
+      (await this.getConversationAlias(
+        actorId,
+        conversation.conversationId,
+        targetUserId,
+      ));
+
+    return alias?.alias ? { ...summary, groupName: alias.alias } : summary;
   }
 
   private async serializeMessage(
     actorId: string,
     message: StoredMessage,
     deliveryContext?: MessageDeliveryContext,
+    aliasByUserId?: Map<string, StoredConversationMemberAlias>,
   ): Promise<MessageItem> {
-    const item = this.conversationStateService.serializeMessage(
-      actorId,
-      message,
-      deliveryContext,
+    const item = this.applyConversationAliasesToMessage(
+      this.conversationStateService.serializeMessage(
+        actorId,
+        message,
+        deliveryContext,
+      ),
+      aliasByUserId,
     );
     const isRecalled = Boolean(item.recalledAt);
     const senderAvatar = await this.mediaAssetService.resolveAssetWithLegacyUrl(
@@ -3229,6 +4570,36 @@ export class ConversationsService {
       attachmentAsset: attachment.asset,
       attachmentUrl: attachment.url,
       replyMessage: isRecalled ? undefined : item.replyMessage,
+    };
+  }
+
+  private applyConversationAliasesToMessage(
+    item: MessageItem,
+    aliasByUserId?: Map<string, StoredConversationMemberAlias>,
+  ): MessageItem {
+    if (!aliasByUserId || aliasByUserId.size === 0) {
+      return item;
+    }
+
+    const senderAlias = aliasByUserId.get(item.senderId)?.alias;
+    const replyAlias = item.replyMessage
+      ? aliasByUserId.get(item.replyMessage.senderId)?.alias
+      : undefined;
+    const forwardedFromAlias = item.forwardedFromSenderId
+      ? aliasByUserId.get(item.forwardedFromSenderId)?.alias
+      : undefined;
+
+    return {
+      ...item,
+      senderName: senderAlias ?? item.senderName,
+      replyMessage: item.replyMessage
+        ? {
+            ...item.replyMessage,
+            senderName: replyAlias ?? item.replyMessage.senderName,
+          }
+        : item.replyMessage,
+      forwardedFromSenderName:
+        forwardedFromAlias ?? item.forwardedFromSenderName,
     };
   }
 

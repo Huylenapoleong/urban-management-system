@@ -5,6 +5,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { GroupsModule } from './modules/groups/groups.module';
+import { KnowledgeBaseModule } from './modules/knowledge-base/knowledge-base.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
@@ -21,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
     ReportsModule,
     UploadsModule,
     ChatbotModule,
+    KnowledgeBaseModule,
   ],
   controllers: [AppController],
 })

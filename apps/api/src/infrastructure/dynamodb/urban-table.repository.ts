@@ -15,8 +15,14 @@ import { DynamoDbService } from './dynamodb.service';
 
 interface QueryOptions {
   beginsWith?: string;
+  exclusiveStartKey?: Record<string, unknown>;
   limit?: number;
   scanForward?: boolean;
+}
+
+interface QueryPageResult<T> {
+  items: T[];
+  lastEvaluatedKey?: Record<string, unknown>;
 }
 
 interface IndexQueryInput {
@@ -243,6 +249,20 @@ export class UrbanTableRepository {
     });
   }
 
+  async queryByPkPage<T>(
+    tableName: string,
+    pk: string,
+    options: QueryOptions = {},
+  ): Promise<QueryPageResult<T>> {
+    return this.runIndexQueryPage<T>({
+      tableName,
+      pkKeyName: 'PK',
+      skKeyName: 'SK',
+      pk,
+      options,
+    });
+  }
+
   async queryByGsi1<T>(
     tableName: string,
     indexName: string,
@@ -323,6 +343,14 @@ export class UrbanTableRepository {
   }
 
   private async runIndexQuery<T>(input: IndexQueryInput): Promise<T[]> {
+    const page = await this.runIndexQueryPage<T>(input);
+
+    return page.items;
+  }
+
+  private async runIndexQueryPage<T>(
+    input: IndexQueryInput,
+  ): Promise<QueryPageResult<T>> {
     const expressionNames: Record<string, string> = {
       '#pk': input.pkKeyName,
     };
@@ -346,13 +374,19 @@ export class UrbanTableRepository {
             KeyConditionExpression: keyConditionExpression,
             ExpressionAttributeNames: expressionNames,
             ExpressionAttributeValues: expressionValues,
+            ExclusiveStartKey: input.options.exclusiveStartKey,
             Limit: input.options.limit,
             ScanIndexForward: input.options.scanForward ?? false,
           }),
         ),
       );
 
-      return (response.Items as T[] | undefined) ?? [];
+      return {
+        items: (response.Items as T[] | undefined) ?? [],
+        lastEvaluatedKey: response.LastEvaluatedKey as
+          | Record<string, unknown>
+          | undefined,
+      };
     } catch (error) {
       throw this.createOperationError('Query', error, {
         tableName: input.tableName,

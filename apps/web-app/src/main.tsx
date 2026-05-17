@@ -47,6 +47,17 @@ const SettingsPage = lazy(() =>
     default: module.SettingsPage,
   })),
 );
+const KnowledgeBasePage = lazy(() =>
+  import("./pages/KnowledgeBasePage").then((module) => ({
+    default: module.KnowledgeBasePage,
+  })),
+);
+
+const JoinGroupPage = lazy(() =>
+  import("./pages/JoinGroupPage").then((module) => ({
+    default: module.default,
+  })),
+);
 
 function RouteFallback() {
   return (
@@ -107,6 +118,8 @@ export default function App() {
                   <Route path="chat" element={<ChatPage />} />
                   <Route path="friends" element={<FriendsPage />} />
                   <Route path="groups" element={<GroupsPage />} />
+                  <Route path="groups/invite/:code" element={<JoinGroupPage />} />
+                  <Route path="knowledge-base" element={<KnowledgeBasePage />} />
                   <Route path="reports" element={<ReportsPage />} />
                   <Route path="reports/new" element={<NewReportPage />} />
                   <Route path="settings" element={<SettingsPage />} />

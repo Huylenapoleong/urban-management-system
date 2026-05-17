@@ -121,6 +121,18 @@ class SocketClient {
     });
   }
 
+  on(event: string, callback: (...args: unknown[]) => void): void {
+    if (this.socket) {
+      this.socket.on(event, callback);
+    }
+  }
+
+  off(event: string, callback: (...args: unknown[]) => void): void {
+    if (this.socket) {
+      this.socket.off(event, callback);
+    }
+  }
+
   // Hàm này giúp khắc phục lỗi "socket not connected"
   // Sẽ tự động kết nối lại nếu chưa connected, thay vì tự lờ đi
   async safeEmitValidated<T = unknown>(

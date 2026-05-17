@@ -1,3 +1,4 @@
+import type { OtpPurpose, SessionScope } from '@urban/shared-constants';
 import type {
   AuditEventItem,
   ConversationSummary,
@@ -12,8 +13,6 @@ import type {
   ReportItem,
   UserProfile,
 } from '@urban/shared-types';
-import type { SessionScope } from '@urban/shared-constants';
-import type { OtpPurpose } from '@urban/shared-constants';
 
 export type StorageEntityType =
   | 'USER_PROFILE'
@@ -39,15 +38,19 @@ export type StorageEntityType =
   | 'GROUP_DELETE_CLEANUP_TASK'
   | 'MESSAGE'
   | 'MESSAGE_REF'
+  | 'MESSAGE_PIN'
+  | 'MESSAGE_SEARCH'
   | 'MESSAGE_DEDUP'
   | 'CONVERSATION'
+  | 'CONVERSATION_MEMBER_ALIAS'
   | 'DIRECT_MESSAGE_REQUEST'
   | 'CHAT_OUTBOX_EVENT'
   | 'CONVERSATION_AUDIT_EVENT'
   | 'GROUP_AUDIT_EVENT'
   | 'REPORT'
   | 'REPORT_AUDIT_EVENT'
-  | 'REPORT_CONVERSATION_LINK';
+  | 'REPORT_CONVERSATION_LINK'
+  | 'KNOWLEDGE_DOCUMENT';
 
 export interface TableItemBase {
   PK: string;
@@ -289,6 +292,10 @@ export interface StoredMessage
   messageId: string;
   conversationId: string;
   replyMessage?: MessageReplyReference;
+  pinnedAt?: string | null;
+  pinnedByUserId?: string | null;
+  pinRecordSk?: string | null;
+  searchTokens?: string[];
   deletedForUserAt?: Record<string, string>;
 }
 
@@ -298,6 +305,26 @@ export interface StoredMessageRef extends TableItemBase {
   messageId: string;
   messageSk: string;
   senderId: string;
+  sentAt: string;
+  updatedAt: string;
+}
+
+export interface StoredMessagePin extends TableItemBase {
+  entityType: 'MESSAGE_PIN';
+  conversationId: string;
+  messageId: string;
+  messageSk: string;
+  pinnedByUserId: string;
+  pinnedAt: string;
+  updatedAt: string;
+}
+
+export interface StoredMessageSearchRecord extends TableItemBase {
+  entityType: 'MESSAGE_SEARCH';
+  conversationId: string;
+  messageId: string;
+  messageSk: string;
+  token: string;
   sentAt: string;
   updatedAt: string;
 }
@@ -319,6 +346,16 @@ export interface StoredConversation
   userId: string;
   conversationId: string;
   lastReadAt?: string | null;
+}
+
+export interface StoredConversationMemberAlias extends TableItemBase {
+  entityType: 'CONVERSATION_MEMBER_ALIAS';
+  conversationId: string;
+  ownerUserId: string;
+  targetUserId: string;
+  alias: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StoredDirectMessageRequest extends TableItemBase {
