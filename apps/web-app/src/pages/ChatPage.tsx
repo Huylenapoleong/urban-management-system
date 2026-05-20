@@ -46,7 +46,7 @@ import {
   type PresenceState,
 } from "@/services/user.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { GroupMemberRole } from "@urban/shared-constants";
+import { CHAT_SOCKET_EVENTS, type GroupMemberRole } from "@urban/shared-constants";
 import type {
   GroupInviteLink,
   MessageItem,
@@ -58,6 +58,9 @@ import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
 import {
   AlertTriangle,
   Ban,
+  Bell,
+  BellOff,
+  ChevronDown,
   BarChart3,
   Copy,
   Download,
@@ -91,6 +94,7 @@ import {
   ShieldAlert,
   Smile,
   SmilePlus,
+  Sticker,
   Trash2,
   UserRound,
   Video,
@@ -491,6 +495,53 @@ const MESSAGE_BLOCK_GAP_MS = 10 * 60 * 1000;
 const USER_ID_PATTERN = /\b[0-9A-Z]{20,32}\b/g;
 const GIPHY_PAGE_SIZE = 20;
 
+const MUTED_CONVERSATIONS_STORAGE_KEY = "web-app-muted-conversations";
+
+let sharedAudioCtx: AudioContext | null = null;
+
+const playTingSound = () => {
+  try {
+    if (!sharedAudioCtx) {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      sharedAudioCtx = new AudioContext();
+    }
+    
+    // Resume context if browser autoplay policy suspended it
+    if (sharedAudioCtx.state === 'suspended') {
+      sharedAudioCtx.resume();
+    }
+
+    const t = sharedAudioCtx.currentTime;
+    
+    // Helper function to play a single soft "plink"
+    const playNote = (freq: number, startTime: number) => {
+      const osc = sharedAudioCtx!.createOscillator();
+      const gain = sharedAudioCtx!.createGain();
+      
+      osc.type = "sine"; // Pure, soft tone
+      osc.frequency.setValueAtTime(freq, startTime);
+      
+      // Soft percussive envelope
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.3, startTime + 0.02); // Quick, gentle attack
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.3); // Smooth fade out
+      
+      osc.connect(gain);
+      gain.connect(sharedAudioCtx!.destination);
+      
+      osc.start(startTime);
+      osc.stop(startTime + 0.3);
+    };
+
+    // Discord-like gentle interval (E5 then A5)
+    playNote(659.25, t);         // Note 1: E5
+    playNote(880.00, t + 0.08);  // Note 2: A5 slightly delayed
+  } catch (err) {
+    console.error("Failed to play notification sound", err);
+  }
+};
+
 function extractGroupIdFromConversationId(
   conversationId?: string | null,
 ): string | undefined {
@@ -761,6 +812,47 @@ export function ChatPage() {
       return {};
     }
   });
+  const [mutedConversations, setMutedConversations] = useState<Record<string, number>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem(MUTED_CONVERSATIONS_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      return parsed as Record<string, number>;
+    } catch {
+      return {};
+    }
+  });
+  const [isMuteDropdownOpen, setIsMuteDropdownOpen] = useState(false);
+
+  const handleSetMute = useCallback((convId: string | null, hours: number | null) => {
+    if (!convId) return;
+    setIsMuteDropdownOpen(false);
+    setMutedConversations((prev) => {
+      const next = { ...prev };
+      if (hours === null) {
+        delete next[convId];
+      } else if (hours === -1) {
+        next[convId] = -1;
+      } else {
+        next[convId] = Date.now() + hours * 60 * 60 * 1000;
+      }
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(MUTED_CONVERSATIONS_STORAGE_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+  }, []);
+
+  const isConversationMuted = useCallback((convId: string | null) => {
+    if (!convId) return false;
+    const expireAt = mutedConversations[convId];
+    if (!expireAt) return false;
+    if (expireAt === -1) return true;
+    return Date.now() < expireAt;
+  }, [mutedConversations]);
+
   const [successModal, setSuccessModal] = useState<{
     title: string;
     message: string;
@@ -809,6 +901,26 @@ export function ChatPage() {
     }
   }, [conversationSearch, navigate]);
 
+  useEffect(() => {
+    const handleNewMessage = (payload: any) => {
+      const msg = "message" in payload ? payload.message : payload;
+      if (!msg || !msg.conversationId || !msg.senderId) return;
+
+      if (user?.sub && msg.senderId !== user.sub) {
+        const expireAt = mutedConversations[msg.conversationId];
+        const isMuted = expireAt === -1 || (expireAt && Date.now() < expireAt);
+        if (!isMuted) {
+          playTingSound();
+        }
+      }
+    };
+
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
+    return () => {
+      socketClient.socket?.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleNewMessage);
+    };
+  }, [user?.sub, mutedConversations]);
+
   // Data fetching
   const { data: conversations = [], isLoading: loadingConversations } =
     useConversations(conversationSearch);
@@ -835,6 +947,7 @@ export function ChatPage() {
   const [showAllPinned, setShowAllPinned] = useState(false);
   const [isPollModalOpen, setIsPollModalOpen] = useState(false);
   const [isGifPickerOpen, setIsGifPickerOpen] = useState(false);
+  const [gifPickerTab, setGifPickerTab] = useState<"gif" | "sticker">("gif");
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState(["", ""]);
   const [gifSearch, setGifSearch] = useState("");
@@ -1021,15 +1134,15 @@ export function ChatPage() {
   };
 
   const fetchGiphyGifs = useCallback(
-    async ({ query, offset }: { query?: string; offset?: number | null }) => {
+    async ({ query, offset, type = "gif" }: { query?: string; offset?: number | null; type?: "gif" | "sticker" }) => {
       const apiKey = import.meta.env.VITE_GIPHY_API_KEY || "";
       if (!apiKey) {
         throw new Error("Missing Giphy API key");
       }
 
       const endpoint = query
-        ? "https://api.giphy.com/v1/gifs/search"
-        : "https://api.giphy.com/v1/gifs/trending";
+        ? `https://api.giphy.com/v1/${type === "sticker" ? "stickers" : "gifs"}/search`
+        : `https://api.giphy.com/v1/${type === "sticker" ? "stickers" : "gifs"}/trending`;
       const params = new URLSearchParams({
         api_key: apiKey,
         limit: String(GIPHY_PAGE_SIZE),
@@ -1108,7 +1221,7 @@ export function ChatPage() {
     const timer = window.setTimeout(async () => {
       setGifLoading(true);
       try {
-        const result = await fetchGiphyGifs({ query, offset: 0 });
+        const result = await fetchGiphyGifs({ query, offset: 0, type: gifPickerTab });
         if (cancelled) return;
         setGifResults(result.items);
         setGifNext(result.next);
@@ -1119,7 +1232,9 @@ export function ChatPage() {
         setGifError(
           error instanceof Error && error.message === "Missing Giphy API key"
             ? "Thiếu VITE_GIPHY_API_KEY"
-            : "Không thể tải GIF",
+            : gifPickerTab === "gif"
+              ? "Không thể tải GIF"
+              : "Không thể tải Sticker",
         );
       } finally {
         if (!cancelled) {
@@ -1132,7 +1247,7 @@ export function ChatPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [fetchGiphyGifs, gifSearch, isGifPickerOpen]);
+  }, [fetchGiphyGifs, gifSearch, isGifPickerOpen, gifPickerTab]);
 
   const handleLoadMoreGifs = async () => {
     if (!gifNext || gifLoading) {
@@ -1144,11 +1259,12 @@ export function ChatPage() {
       const result = await fetchGiphyGifs({
         query: gifSearch.trim(),
         offset: gifNext,
+        type: gifPickerTab,
       });
       setGifResults((prev) => [...prev, ...result.items]);
       setGifNext(result.next);
     } catch {
-      setGifError("Không thể tải thêm GIF");
+      setGifError(gifPickerTab === "gif" ? "Không thể tải thêm GIF" : "Không thể tải thêm Sticker");
     } finally {
       setGifLoading(false);
     }
@@ -2355,6 +2471,44 @@ export function ChatPage() {
       window.clearInterval(intervalId);
     };
   }, [activeDmUserId, friendUserIds]);
+
+  // Real-time presence listeners via socket
+  useEffect(() => {
+    const handlePresenceSnapshot = (payload: any) => {
+      if (!payload?.participants || !Array.isArray(payload.participants)) return;
+      setDmPresenceByUserId((prev) => {
+        const next = { ...prev };
+        payload.participants.forEach((p: PresenceState) => {
+          if (p && p.userId) next[p.userId] = p;
+        });
+        return next;
+      });
+      if (activeDmUserId) {
+        const activePresence = payload.participants.find((p: PresenceState) => p?.userId === activeDmUserId);
+        if (activePresence) setActiveDmPresence(activePresence);
+      }
+    };
+
+    const handlePresenceUpdated = (payload: any) => {
+      if (!payload?.presence || !payload.presence.userId) return;
+      const p: PresenceState = payload.presence;
+      setDmPresenceByUserId((prev) => ({
+        ...prev,
+        [p.userId]: p,
+      }));
+      if (p.userId === activeDmUserId) {
+        setActiveDmPresence(p);
+      }
+    };
+
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
+    socketClient.socket?.on(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
+
+    return () => {
+      socketClient.socket?.off(CHAT_SOCKET_EVENTS.PRESENCE_SNAPSHOT, handlePresenceSnapshot);
+      socketClient.socket?.off(CHAT_SOCKET_EVENTS.PRESENCE_UPDATED, handlePresenceUpdated);
+    };
+  }, [activeDmUserId]);
 
   // Auto scroll to bottom for new messages, preserve position while loading older pages.
   useEffect(() => {
@@ -4688,6 +4842,76 @@ export function ChatPage() {
                     {activeContact?.isGroup ? "Nhóm" : "Trực tiếp"}
                   </p>
                 </div>
+                {activeChat ? (
+                  <div className="rounded-2xl glass-card px-4 py-3.5 shadow-sm relative">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {isConversationMuted(activeChat) ? (
+                          <BellOff size={16} className="text-slate-500" />
+                        ) : (
+                          <Bell size={16} className="text-blue-600" />
+                        )}
+                        <p className="text-sm uppercase tracking-wide font-bold text-slate-500 dark:text-slate-400">
+                          Thông báo
+                        </p>
+                      </div>
+                      {isConversationMuted(activeChat) ? (
+                        <button
+                          onClick={() => handleSetMute(activeChat, null)}
+                          className="text-[10px] font-bold text-blue-600 hover:underline"
+                        >
+                          BẬT LẠI
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setIsMuteDropdownOpen(!isMuteDropdownOpen)}
+                          className="flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-slate-700"
+                        >
+                          TẮT <ChevronDown size={12} />
+                        </button>
+                      )}
+                    </div>
+                    {isMuteDropdownOpen && !isConversationMuted(activeChat) && (
+                      <div className="absolute right-4 top-10 z-10 w-48 rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800 py-1 text-xs">
+                        <button
+                          onClick={() => handleSetMute(activeChat, 1)}
+                          className="w-full text-left px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          Tắt trong 1 tiếng
+                        </button>
+                        <button
+                          onClick={() => handleSetMute(activeChat, 3)}
+                          className="w-full text-left px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          Tắt trong 3 tiếng
+                        </button>
+                        <button
+                          onClick={() => handleSetMute(activeChat, 6)}
+                          className="w-full text-left px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          Tắt trong 6 tiếng
+                        </button>
+                        <button
+                          onClick={() => handleSetMute(activeChat, 12)}
+                          className="w-full text-left px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          Tắt trong 12 tiếng
+                        </button>
+                        <button
+                          onClick={() => handleSetMute(activeChat, -1)}
+                          className="w-full text-left px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-700 text-red-600 font-medium"
+                        >
+                          Tắt đến khi bật lại
+                        </button>
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      {isConversationMuted(activeChat)
+                        ? "Bạn sẽ không nhận được âm thanh thông báo từ cuộc trò chuyện này."
+                        : "Âm thanh thông báo đang được bật."}
+                    </p>
+                  </div>
+                ) : null}
                 {canViewConversationCode ? (
                   <div className="rounded-2xl glass-card px-4 py-3.5 shadow-sm">
                     <p className="text-sm uppercase tracking-wide font-bold text-slate-500 dark:text-slate-400">
@@ -5323,7 +5547,8 @@ export function ChatPage() {
                         : undefined) ||
                       msg.senderName ||
                       "Thành viên";
-                    const shouldShowMessageAvatar = msg.type !== "SYSTEM";
+                    const shouldShowMessageAvatar =
+                      msg.type !== "SYSTEM" && endsSenderBlock;
                     const isEditing = editingMessageId === msg.id;
                     const canEditMessage =
                       msg.type === "TEXT" ||
@@ -5439,29 +5664,69 @@ export function ChatPage() {
                           className={`group relative flex max-w-[70%] ${summaryAlignClass} flex-col py-1 animate-in fade-in zoom-in duration-300`}
                         >
                           <div
-                            className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${summaryBubbleClass}`}
+                            className={`flex items-end gap-2 ${summaryIsOutgoing ? "justify-end" : "justify-start"}`}
                           >
-                            <div className="flex items-start gap-3">
-                              <div
-                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${summaryIconClass}`}
-                              >
-                                {isVideoCall ? (
-                                  <Video size={18} />
-                                ) : (
-                                  <Phone size={18} />
-                                )}
+                            {!summaryIsOutgoing ? (
+                              <div className="relative h-8 w-8 shrink-0">
+                                <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
+                                  {senderAvatarUrl ? (
+                                    <AvatarImage
+                                      src={senderAvatarUrl}
+                                      alt={senderDisplayName}
+                                    />
+                                  ) : null}
+                                  <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
+                                    {(senderDisplayName || "?")
+                                      .charAt(0)
+                                      .toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
                               </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-semibold">
-                                  {titleText}
-                                </p>
-                                <p
-                                  className={`mt-0.5 text-xs ${summaryMetaClass}`}
+                            ) : null}
+
+                            <div
+                              className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${summaryBubbleClass}`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div
+                                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${summaryIconClass}`}
                                 >
-                                  {durationText}
-                                </p>
+                                  {isVideoCall ? (
+                                    <Video size={18} />
+                                  ) : (
+                                    <Phone size={18} />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-semibold">
+                                    {titleText}
+                                  </p>
+                                  <p
+                                    className={`mt-0.5 text-xs ${summaryMetaClass}`}
+                                  >
+                                    {durationText}
+                                  </p>
+                                </div>
                               </div>
                             </div>
+
+                            {summaryIsOutgoing ? (
+                              <div className="relative h-8 w-8 shrink-0">
+                                <Avatar className="h-8 w-8 border border-blue-200 dark:border-blue-800">
+                                  {senderAvatarUrl ? (
+                                    <AvatarImage
+                                      src={senderAvatarUrl}
+                                      alt={senderDisplayName}
+                                    />
+                                  ) : null}
+                                  <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100 text-xs font-semibold">
+                                    {(senderDisplayName || "B")
+                                      .charAt(0)
+                                      .toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       );
@@ -5491,7 +5756,7 @@ export function ChatPage() {
                         ref={(element) => {
                           messageItemRefs.current[msg.id] = element;
                         }}
-                        className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col rounded-2xl transition-all animate-in fade-in slide-in-from-bottom-2 duration-300 ${focusedMessageId === msg.id ? "ring-2 ring-amber-300/80 ring-offset-2 ring-offset-slate-100 dark:ring-amber-400/70 dark:ring-offset-slate-950" : ""}`}
+                        className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col rounded-2xl transition-all animate-in fade-in slide-in-from-bottom-2 duration-300 ${focusedMessageId === msg.id ? "ring-2 ring-amber-300/80 ring-offset-2 ring-offset-slate-100 dark:ring-amber-400/70 dark:ring-offset-slate-950" : ""} ${!startsSenderBlock ? "-mt-2" : ""}`}
                       >
                         {!isEditing ? (
                           <div
@@ -5692,31 +5957,35 @@ export function ChatPage() {
                         <div
                           className={`flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}
                         >
-                        {shouldShowMessageAvatar && !isMe ? (
-                          <div className="relative h-8 w-8 shrink-0">
-                            <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
-                              {senderAvatarUrl ? (
-                                <AvatarImage
-                                  src={senderAvatarUrl}
-                                  alt={senderDisplayName}
-                                />
-                              ) : null}
-                              <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
-                                {(senderDisplayName || "?")
-                                  .charAt(0)
-                                  .toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            {renderGroupRoleKeyBadge(msg.senderId)}
-                          </div>
+                        {!isMe ? (
+                          shouldShowMessageAvatar ? (
+                            <div className="relative h-8 w-8 shrink-0">
+                              <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
+                                {senderAvatarUrl ? (
+                                  <AvatarImage
+                                    src={senderAvatarUrl}
+                                    alt={senderDisplayName}
+                                  />
+                                ) : null}
+                                <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
+                                  {(senderDisplayName || "?")
+                                    .charAt(0)
+                                    .toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              {renderGroupRoleKeyBadge(msg.senderId)}
+                            </div>
+                          ) : (
+                            <div className="h-8 w-8 shrink-0" />
+                          )
                         ) : null}
 
                           <div
                             onClick={(event) => event.stopPropagation()}
                             className={`px-4 py-2 rounded-2xl shadow-sm ${
                               isMe
-                                ? "bg-blue-600 text-white rounded-br-sm"
-                                : "bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 rounded-bl-sm"
+                                ? `bg-blue-600 text-white ${endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl"}`
+                                : `bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 ${endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl"}`
                             }`}
                           >
                             <div className="relative">
@@ -5920,18 +6189,27 @@ export function ChatPage() {
                             </div>
                             {msg.attachmentUrl ? (
                               isImageUrl(msg.attachmentUrl, msg.type) ? (
-                                <a
-                                  href={msg.attachmentUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="mt-2 block"
-                                >
-                                  <img
-                                    src={msg.attachmentUrl}
-                                    alt="Tin nhan dinh kem"
-                                    className="max-h-56 max-w-full rounded-lg border border-black/10 object-cover"
-                                  />
-                                </a>
+                                (() => {
+                                  const isGif = msg.attachmentUrl.toLowerCase().includes(".gif") || msg.attachmentUrl.toLowerCase().includes("gif-");
+                                  return (
+                                    <a
+                                      href={msg.attachmentUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="mt-2 block"
+                                    >
+                                      <img
+                                        src={msg.attachmentUrl}
+                                        alt="Tin nhan dinh kem"
+                                        className={
+                                          isGif
+                                            ? "max-h-56 max-w-full rounded-lg object-contain bg-transparent border-none shadow-none"
+                                            : "max-h-56 max-w-full rounded-lg border border-black/10 object-cover"
+                                        }
+                                      />
+                                    </a>
+                                  );
+                                })()
                               ) : isVideoUrl(msg.attachmentUrl, msg.type) ? (
                                 <video
                                   controls
@@ -6078,28 +6356,32 @@ export function ChatPage() {
                               </a>
                             ) : null}
                           </div>
-                        {shouldShowMessageAvatar && isMe ? (
-                          <div className="relative h-8 w-8 shrink-0">
-                            <Avatar className="h-8 w-8 border border-blue-200 dark:border-blue-800">
-                              {senderAvatarUrl ? (
-                                <AvatarImage
-                                  src={senderAvatarUrl}
-                                  alt={senderDisplayName}
-                                />
-                              ) : null}
-                              <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100 text-xs font-semibold">
-                                {(senderDisplayName || "B")
-                                  .charAt(0)
-                                  .toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            {renderGroupRoleKeyBadge(msg.senderId)}
-                          </div>
+                        {isMe ? (
+                          shouldShowMessageAvatar ? (
+                            <div className="relative h-8 w-8 shrink-0">
+                              <Avatar className="h-8 w-8 border border-blue-200 dark:border-blue-800">
+                                {senderAvatarUrl ? (
+                                  <AvatarImage
+                                    src={senderAvatarUrl}
+                                    alt={senderDisplayName}
+                                  />
+                                ) : null}
+                                <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100 text-xs font-semibold">
+                                  {(senderDisplayName || "B")
+                                    .charAt(0)
+                                    .toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              {renderGroupRoleKeyBadge(msg.senderId)}
+                            </div>
+                          ) : (
+                            <div className="h-8 w-8 shrink-0" />
+                          )
                         ) : null}
                         </div>
                         {reactionSummary.length > 0 ? (
                           <div
-                            className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end pr-10" : "justify-start"} ${!isMe && shouldShowMessageAvatar ? "pl-10" : ""}`}
+                            className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end pr-10" : "justify-start"} ${!isMe ? "pl-10" : ""}`}
                           >
                             {reactionSummary.map(([emoji, count]) => (
                               <button
@@ -6119,7 +6401,7 @@ export function ChatPage() {
                         ) : null}
                         {endsSenderBlock ? (
                           <span
-                            className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right pr-10" : "text-left"} ${!isMe && shouldShowMessageAvatar ? "pl-10" : ""}`}
+                            className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right pr-10" : "text-left"} ${!isMe ? "pl-10" : ""}`}
                           >
                             {format(new Date(msg.sentAt), "HH:mm")}
                           </span>
@@ -6607,11 +6889,56 @@ export function ChatPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsGifPickerOpen((prev) => !prev)}
-                  className={`p-2 rounded-lg transition-all ${isGifPickerOpen ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"}`}
+                  onClick={() => {
+                    if (isGifPickerOpen && gifPickerTab === "gif") {
+                      setIsGifPickerOpen(false);
+                    } else {
+                      setIsGifPickerOpen(true);
+                      setGifPickerTab("gif");
+                    }
+                  }}
+                  className={`p-2 rounded-lg transition-all ${
+                    isGifPickerOpen && gifPickerTab === "gif"
+                      ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
+                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
+                  }`}
                   title="Gửi GIF"
                 >
-                  <Gift size={18} />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.25"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="4" />
+                    <path d="M9 10a1.5 1.5 0 0 0-1.5-1.5h-1A1.5 1.5 0 0 0 5 10v4a1.5 1.5 0 0 0 1.5 1.5h1A1.5 1.5 0 0 0 9 14v-2H7" />
+                    <path d="M12 8.5v7M11 8.5h2M11 15.5h2" />
+                    <path d="M16 15.5v-7h3.5M16 12h2.5" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isGifPickerOpen && gifPickerTab === "sticker") {
+                      setIsGifPickerOpen(false);
+                    } else {
+                      setIsGifPickerOpen(true);
+                      setGifPickerTab("sticker");
+                    }
+                  }}
+                  className={`p-2 rounded-lg transition-all ${
+                    isGifPickerOpen && gifPickerTab === "sticker"
+                      ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
+                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
+                  }`}
+                  title="Gửi Sticker"
+                >
+                  <Sticker size={18} />
                 </button>
                 <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
                 <button
@@ -6649,13 +6976,13 @@ export function ChatPage() {
                   {isGifPickerOpen && (
                     <div className="absolute bottom-full mb-2 left-0 z-50 w-80 animate-in fade-in zoom-in-95 duration-200">
                       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 flex flex-col max-h-[450px]">
-                        <div className="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800">
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                            Chọn GIF
+                        <div className="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 px-1">
+                            {gifPickerTab === "gif" ? "Chọn GIF" : "Chọn Sticker"}
                           </h4>
                           <button
                             onClick={() => setIsGifPickerOpen(false)}
-                            className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
+                            className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all"
                           >
                             <X size={16} />
                           </button>
@@ -6666,7 +6993,7 @@ export function ChatPage() {
                             <input
                               value={gifSearch}
                               onChange={handleGifSearchChange}
-                              placeholder="Tìm GIF..."
+                              placeholder={gifPickerTab === "gif" ? "Tìm GIF..." : "Tìm Sticker..."}
                               className="flex-1 h-9 bg-transparent border-none focus:ring-0 text-sm dark:text-slate-200"
                             />
                             {gifSearch ? (
@@ -6681,14 +7008,14 @@ export function ChatPage() {
                           </div>
                         </div>
                         {hasGifError ? (
-                          <p className="text-xs text-red-500 mb-2">
+                          <p className="text-xs text-red-500 mb-2 px-3">
                             {gifError}
                           </p>
                         ) : null}
-                        <div className="grid grid-cols-2 gap-2 h-64 overflow-y-auto pr-1 hide-scrollbar">
+                        <div className="grid grid-cols-2 gap-2 h-64 overflow-y-auto px-3 pr-1 pb-3 hide-scrollbar">
                           {!hasGifResults && !gifLoading ? (
-                            <div className="col-span-2 text-center text-xs text-slate-500">
-                              Khong co GIF phu hop
+                            <div className="col-span-2 text-center text-xs text-slate-500 py-10">
+                              {gifPickerTab === "gif" ? "Không có GIF phù hợp" : "Không có Sticker phù hợp"}
                             </div>
                           ) : null}
                           {gifResults.map((gif) => (
@@ -6697,18 +7024,24 @@ export function ChatPage() {
                               onClick={() => {
                                 void handleSendGif(gif.url);
                               }}
-                              className="rounded-lg overflow-hidden hover:ring-2 ring-blue-500 transition-all h-28 bg-slate-100 dark:bg-slate-800"
+                              className={`rounded-lg overflow-hidden hover:ring-2 ring-blue-500 transition-all h-28 flex items-center justify-center ${
+                                gifPickerTab === "sticker"
+                                  ? "bg-transparent hover:bg-slate-100 dark:hover:bg-slate-850"
+                                  : "bg-slate-100 dark:bg-slate-800"
+                              }`}
                             >
                               <img
                                 src={gif.previewUrl}
                                 alt="gif"
-                                className="w-full h-full object-cover"
+                                className={`w-full h-full ${
+                                  gifPickerTab === "sticker" ? "object-contain p-1.5" : "object-cover"
+                                }`}
                               />
                             </button>
                           ))}
                           {gifLoading ? (
-                            <div className="col-span-2 text-center text-xs text-slate-500">
-                              Dang tai GIF...
+                            <div className="col-span-2 text-center text-xs text-slate-500 py-4 animate-pulse">
+                              {gifPickerTab === "gif" ? "Đang tải GIF..." : "Đang tải Sticker..."}
                             </div>
                           ) : null}
                         </div>
@@ -6720,7 +7053,7 @@ export function ChatPage() {
                               disabled={gifLoading}
                               className="w-full rounded-xl bg-blue-50 py-2 text-xs font-bold text-blue-600 hover:bg-blue-100 disabled:opacity-60 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 transition-all"
                             >
-                              {gifLoading ? "Đang tải..." : "Tải thêm GIF"}
+                              {gifLoading ? "Đang tải..." : gifPickerTab === "gif" ? "Tải thêm GIF" : "Tải thêm Sticker"}
                             </button>
                           </div>
                         ) : null}
