@@ -28,6 +28,9 @@ class SessionController extends ChangeNotifier {
 
     try {
       _user = await _appServices.authService.getMe();
+      if (_user != null) {
+        _appServices.webRTCService.setLocalUserId(_user!.id);
+      }
       _errorMessage = null;
       _connectSocket();
     } catch (_) {
@@ -50,6 +53,9 @@ class SessionController extends ChangeNotifier {
         otpCode: otpCode,
       );
       _user = session.user;
+      if (_user != null) {
+        _appServices.webRTCService.setLocalUserId(_user!.id);
+      }
       _errorMessage = null;
       _connectSocket();
       notifyListeners();
@@ -74,6 +80,9 @@ class SessionController extends ChangeNotifier {
         otpCode: otpCode,
       );
       _user = session.user;
+      if (_user != null) {
+        _appServices.webRTCService.setLocalUserId(_user!.id);
+      }
       _errorMessage = null;
       _connectSocket();
       notifyListeners();
@@ -152,6 +161,9 @@ class SessionController extends ChangeNotifier {
         phone: phone,
       );
       _user = session.user;
+      if (_user != null) {
+        _appServices.webRTCService.setLocalUserId(_user!.id);
+      }
       _errorMessage = null;
       _connectSocket();
       notifyListeners();
@@ -168,6 +180,9 @@ class SessionController extends ChangeNotifier {
   Future<void> refreshProfile() async {
     try {
       _user = await _appServices.authService.getMe();
+      if (_user != null) {
+        _appServices.webRTCService.setLocalUserId(_user!.id);
+      }
       _errorMessage = null;
       notifyListeners();
     } catch (error) {

@@ -1,21 +1,25 @@
 import "dart:async";
 import "package:flutter/material.dart";
-
+import "package:provider/provider.dart";
 import "package:flutter_webrtc/flutter_webrtc.dart";
 import "../../models/conversation_summary.dart";
 import "../../services/webrtc_service.dart";
+import "../../services/app_services.dart";
 import "../shared/widgets/user_avatar.dart";
+import "chat_detail_screen.dart";
 
 class CallScreen extends StatefulWidget {
   final WebRTCService webRTCService;
   final ConversationSummary conversation;
   final dynamic currentUser;
+  final bool launchedFromChatDetail;
 
   const CallScreen({
     super.key,
     required this.webRTCService,
     required this.conversation,
     required this.currentUser,
+    this.launchedFromChatDetail = false,
   });
 
   @override
@@ -23,397 +27,592 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> {
-  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
-  final Map<String, RTCVideoRenderer> _remoteRenderers = {};
-  StreamSubscription? _remoteStreamsSub;
-  Timer? _timer;
-  int _seconds = 0;
+  double _localX = 20.0;
+  double _localY = 100.0;
+  bool _localCoordinatesInitialized = false;
+
+  String? _loadedGroupName;
+  String? _loadedGroupAvatarUrl;
+  bool _loadingGroupDetails = false;
 
   @override
   void initState() {
     super.initState();
-    _initRenderers();
+    if (widget.currentUser?.id != null) {
+      widget.webRTCService.setLocalUserId(widget.currentUser!.id.toString());
+    }
+    widget.webRTCService.callState.addListener(_handleCallStateChange);
+    _loadGroupDetails();
   }
 
-  Future<void> _initRenderers() async {
-    try {
-      await _localRenderer.initialize();
+  Future<void> _loadGroupDetails() async {
+    final isGroup = widget.conversation.isGroup ||
+        widget.webRTCService.activeConfig?['isGroup'] == true ||
+        widget.webRTCService.currentConversationId?.startsWith("group:") == true ||
+        widget.webRTCService.currentConversationId?.startsWith("group#") == true ||
+        widget.webRTCService.currentConversationId?.startsWith("grp#") == true ||
+        widget.webRTCService.currentConversationId?.startsWith("GRP#") == true;
 
+    if (!isGroup) return;
+
+    setState(() {
+      _loadingGroupDetails = true;
+    });
+
+    try {
+      var groupId = widget.conversation.groupId;
+      if (groupId == null) {
+        final convId = widget.conversation.conversationId.isNotEmpty
+            ? widget.conversation.conversationId
+            : (widget.webRTCService.currentConversationId ?? "");
+        if (convId.startsWith("group:")) {
+          groupId = convId.substring(6);
+        } else if (convId.startsWith("group#")) {
+          groupId = convId.substring(6);
+        } else if (convId.startsWith("grp#")) {
+          groupId = convId.substring(4);
+        } else if (convId.startsWith("GRP#")) {
+          groupId = convId.substring(4);
+        }
+      }
+
+      if (groupId != null && groupId.isNotEmpty) {
+        final services = Provider.of<AppServices>(context, listen: false);
+        final group = await services.groupService.getGroup(groupId);
+        if (mounted) {
+          setState(() {
+            _loadedGroupName = group['name']?.toString();
+            _loadedGroupAvatarUrl = group['avatarUrl']?.toString();
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Failed to load group details in CallScreen: $e");
+    } finally {
       if (mounted) {
         setState(() {
-          _localRenderer.srcObject = widget.webRTCService.localStream;
+          _loadingGroupDetails = false;
         });
       }
-
-      // Restore existings streams if user re-enters the active CallScreen
-      if (widget.webRTCService.remoteStreams.isNotEmpty) {
-        _handleRemoteStreamsUpdate(widget.webRTCService.remoteStreams);
-      }
-
-      _remoteStreamsSub = widget.webRTCService.onRemoteStreamsUpdated.listen((streamsMap) {
-        if (mounted) {
-          _handleRemoteStreamsUpdate(streamsMap);
-        }
-      });
-
-      widget.webRTCService.callState.addListener(_handleCallStateChange);
-    } catch (e) {
-      debugPrint("Error initializing renderers: $e");
-    }
-  }
-
-  Future<void> _handleRemoteStreamsUpdate(Map<String, MediaStream> streamsMap) async {
-    bool hasChanges = false;
-    
-    // Xóa các luồng đã bị ngắt
-    final keysToRemove = _remoteRenderers.keys.where((k) => !streamsMap.containsKey(k)).toList();
-    for (final key in keysToRemove) {
-      final renderer = _remoteRenderers.remove(key);
-      renderer?.dispose();
-      hasChanges = true;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Một thành viên vừa rời cuộc gọi"), duration: Duration(seconds: 2)),
-        );
-      }
-    }
-
-    // Thêm các luồng mới
-    for (final entry in streamsMap.entries) {
-      if (!_remoteRenderers.containsKey(entry.key)) {
-        final renderer = RTCVideoRenderer();
-        await renderer.initialize();
-        renderer.srcObject = entry.value;
-        _remoteRenderers[entry.key] = renderer;
-        hasChanges = true;
-        _startTimer();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Một thành viên kết nối thành công"), duration: Duration(seconds: 2)),
-          );
-        }
-      }
-    }
-
-    if (hasChanges && mounted) {
-      setState(() {});
     }
   }
 
   void _handleCallStateChange() {
-    if (mounted && _localRenderer.srcObject == null) {
-      setState(() {
-        _localRenderer.srcObject = widget.webRTCService.localStream;
-      });
+    if (widget.webRTCService.callState.value == CallState.idle && mounted) {
+      if (widget.launchedFromChatDetail) {
+        final targetRoute = "chat_detail/${widget.conversation.conversationId}";
+        Navigator.of(context).popUntil(
+          (route) => route.settings.name == targetRoute || route.isFirst,
+        );
+      } else {
+        final services = Provider.of<AppServices>(context, listen: false);
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            settings: RouteSettings(
+              name: "chat_detail/${widget.conversation.conversationId}",
+            ),
+            builder: (_) => ChatDetailScreen(
+              conversation: widget.conversation,
+              conversationService: services.conversationService,
+              uploadService: services.uploadService,
+              socketService: services.socketService,
+              userService: services.userService,
+              groupService: services.groupService,
+              webRTCService: services.webRTCService,
+              currentUser: widget.currentUser,
+            ),
+          ),
+        );
+      }
     }
-  }
-
-  void _startTimer() {
-    if (_timer != null) return;
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) setState(() => _seconds++);
-    });
-  }
-
-  String _formatDuration(int seconds) {
-    final m = (seconds ~/ 60).toString().padLeft(2, "0");
-    final s = (seconds % 60).toString().padLeft(2, "0");
-    return "$m:$s";
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
     widget.webRTCService.callState.removeListener(_handleCallStateChange);
-    _remoteStreamsSub?.cancel();
-    _localRenderer.dispose();
-    for (final renderer in _remoteRenderers.values) {
-      renderer.dispose();
-    }
-    _remoteRenderers.clear();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_localCoordinatesInitialized) {
+      final size = MediaQuery.of(context).size;
+      _localX = size.width - 110 - 20;
+      _localY = size.height - 340;
+      _localCoordinatesInitialized = true;
+    }
+
     return ValueListenableBuilder<CallState>(
       valueListenable: widget.webRTCService.callState,
       builder: (context, state, child) {
         if (state == CallState.idle) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) Navigator.of(context).pop();
-          });
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            backgroundColor: Color(0xFF000000),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF7C3AED)),
+            ),
+          );
         }
 
-        return Scaffold(
-          backgroundColor: const Color(0xFF0F172A),
-          body: Stack(
-            children: [
-              // Background / Video
-              if (state == CallState.connected && !widget.webRTCService.isAudioOnly && !widget.webRTCService.isCameraOff)
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop) {
+              Navigator.of(context).pop('minimize');
+            }
+          },
+          child: Scaffold(
+            backgroundColor: const Color(0xFF000000),
+            body: Stack(
+              children: [
+                // Deep OLED Dark background with smooth gradient
                 Positioned.fill(
-                  child: _buildVideoGrid(),
-                )
-              else
-                // Audio-only or Calling/Connecting Background
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF000000), Color(0xFF0F0F23), Color(0xFF1E1B4B)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Main Calling Layouts based on state
                 Positioned.fill(
-                  child: Stack(
-                    children: [
-                      Center(
-                        child: Opacity(
-                          opacity: 0.1,
-                          child: UserAvatar(
-                            userId: null,
-                            initialAvatarUrl: widget.conversation.isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
-                            initialDisplayName: widget.conversation.title,
-                            radius: 200,
-                          ),
+                  child: _buildLayoutForState(state),
+                ),
+
+                // Minimize Button at Top Left (Renders in connecting, connected states)
+                if (state != CallState.ringing)
+                  Positioned(
+                    top: MediaQuery.of(context).padding.top + 8,
+                    left: 16,
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(context).pop('minimize'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withOpacity(0.08)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 16),
+                            SizedBox(width: 6),
+                            Text(
+                              'Thu nhỏ',
+                              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                          ],
                         ),
                       ),
-                      Container(color: Colors.black.withOpacity(0.5)),
-                    ],
+                    ),
                   ),
-                ),
 
-              // UI Info Overlay
-              if (state != CallState.connected || widget.webRTCService.isAudioOnly || widget.webRTCService.isCameraOff)
-                _buildCallingInfo(),
-
-              // Local Video Overlay (Now handled inside _buildVideoGrid if there are multiple remote streams, but fallback kept for 1-1)
-              if (state == CallState.connected && !widget.webRTCService.isAudioOnly && !widget.webRTCService.isCameraOff && _remoteRenderers.length <= 1)
+                // Connected Toggles / Ringing Action Panel at bottom
                 Positioned(
-                  top: 50,
-                  right: 20,
-                  width: 120,
-                  height: 180,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white24, width: 2),
-                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: RTCVideoView(
-                      _localRenderer,
-                      mirror: true,
-                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    ),
-                  ),
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: _buildActionPanelForState(state),
                 ),
-
-              // Controls
-              Positioned(
-                bottom: 50,
-                left: 0,
-                right: 0,
-                child: _buildControls(state),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildVideoGrid() {
-    if (_remoteRenderers.isEmpty) {
-      // Show only local video occupying full screen
-      return RTCVideoView(
-        _localRenderer,
-        mirror: true,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-      );
-    }
-    
-    if (_remoteRenderers.length == 1) {
-      // 1-to-1 call: Remote video takes full screen
-      return RTCVideoView(
-        _remoteRenderers.values.first,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-      );
-    }
+  Widget _buildLayoutForState(CallState state) {
+    if (state == CallState.ringing) {
+      final isVideo = !widget.webRTCService.isAudioOnly;
+      final isGroup = widget.conversation.isGroup ||
+          widget.webRTCService.activeConfig?['isGroup'] == true ||
+          widget.webRTCService.currentConversationId?.startsWith("group:") == true ||
+          widget.webRTCService.currentConversationId?.startsWith("group#") == true ||
+          widget.webRTCService.currentConversationId?.startsWith("grp#") == true ||
+          widget.webRTCService.currentConversationId?.startsWith("GRP#") == true;
 
-    // Grid View cho Group Call (> 2 người)
-    // Bao gồm cả Local (Local sẽ là 1 cell trong Grid thay vì overlay góc phải)
-    final renderers = [
-      _localRenderer,
-      ..._remoteRenderers.values,
-    ];
+      final callerName = widget.webRTCService.activeConfig?['callerName']?.toString() ??
+          widget.conversation.lastSenderName ??
+          "Ai đó";
 
-    int columns = 1;
-    if (renderers.length > 2) columns = 2; // 3-4 -> 2x2 grid
+      final displayAvatarUrl = isGroup
+          ? (_loadedGroupAvatarUrl ?? widget.conversation.groupAvatarUrl)
+          : widget.conversation.getPeerId(widget.currentUser?.id) != null
+              ? (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl)
+              : (widget.webRTCService.activeConfig?['callerAvatarUrl']?.toString() ?? widget.conversation.avatarUrl);
 
-    return GridView.builder(
-      physics: const ClampingScrollPhysics(), // Có thể cuộn nếu >4 người
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: columns,
-        childAspectRatio: columns == 1 ? 9 / 16 /*Chia đôi ngang*/ : 1, // Tuỳ số lượng cắt tỉ lệ khung ảnh
-      ),
-      itemCount: renderers.length,
-      itemBuilder: (context, index) {
-        return Container(
-          margin: const EdgeInsets.all(2),
-          decoration: BoxDecoration(
-            color: Colors.black26,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: RTCVideoView(
-            renderers[index],
-            mirror: renderers[index] == _localRenderer,
-            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-          ),
-        );
-      },
-    );
-  }
+      final displayTitle = isGroup
+          ? (_loadedGroupName ?? widget.conversation.groupName ?? "Cuộc gọi nhóm")
+          : widget.conversation.title;
 
-  Widget _buildCallingInfo() {
-    return Center(
-      child: Column(
+      final displaySub = isGroup
+          ? "$callerName đang gọi nhóm..."
+          : (isVideo ? "Cuộc gọi Video đến..." : "Cuộc gọi Thoại đến...");
+
+      return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              // Pulse effect for audio call
-              if (widget.webRTCService.isAudioOnly)
-                _buildPulseEffect(),
-              UserAvatar(
-                userId: widget.conversation.isGroup ? null : widget.conversation.getPeerId(widget.currentUser?.id), // Fetch from DB!
-                initialAvatarUrl: widget.conversation.isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
-                initialDisplayName: widget.conversation.title,
-                radius: 80,
-              ),
-            ],
+          PulseRippleAnimation(
+            child: UserAvatar(
+              userId: isGroup
+                  ? null
+                  : widget.conversation.getPeerId(widget.currentUser?.id) ??
+                      widget.webRTCService.activeConfig?['callerId']?.toString(),
+              initialAvatarUrl: displayAvatarUrl,
+              initialDisplayName: displayTitle,
+              radius: 70,
+            ),
           ),
           const SizedBox(height: 32),
           Text(
-            widget.conversation.title,
-            style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+            displayTitle,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+            ),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          ValueListenableBuilder<CallState>(
-            valueListenable: widget.webRTCService.callState,
-            builder: (context, state, _) {
-              if (state == CallState.connected) {
-                return Text(
-                  _formatDuration(_seconds),
-                  style: const TextStyle(color: Colors.greenAccent, fontSize: 20, fontWeight: FontWeight.w600, fontFamily: "monospace"),
-                );
-              }
-              String status = "Đang gọi...";
-              if (state == CallState.ringing) status = "Cuộc gọi đến...";
-              if (state == CallState.connecting) status = "Đang kết nối...";
-              return Text(status, style: const TextStyle(color: Colors.white70, fontSize: 16));
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPulseEffect() {
-    return TweenAnimationBuilder(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(seconds: 2),
-      curve: Curves.easeOut,
-      builder: (context, double value, child) {
-        return Container(
-          width: 160 + (80 * value),
-          height: 160 + (80 * value),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white.withOpacity(0.15 * (1 - value)),
-          ),
-        );
-      },
-      onEnd: () {
-        // This is a hack to loop the animation
-        setState(() {});
-      },
-    );
-  }
-
-  Widget _buildControls(CallState state) {
-    if (state == CallState.ringing) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _buildActionButton(
-            icon: Icons.call_end,
-            color: Colors.red,
-            onPressed: () => widget.webRTCService.rejectCall(),
-          ),
-          _buildActionButton(
-            icon: Icons.call,
-            color: Colors.green,
-            onPressed: () => widget.webRTCService.acceptCall(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withOpacity(0.05)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isVideo ? Icons.videocam : Icons.phone,
+                  color: const Color(0xFF7C3AED),
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  displaySub,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       );
     }
 
-    return Column(
+    if (state == CallState.connecting) {
+      final isGroup = widget.conversation.isGroup ||
+          widget.webRTCService.activeConfig?['isGroup'] == true ||
+          widget.webRTCService.currentConversationId?.startsWith("group:") == true ||
+          widget.webRTCService.currentConversationId?.startsWith("group#") == true ||
+          widget.webRTCService.currentConversationId?.startsWith("grp#") == true ||
+          widget.webRTCService.currentConversationId?.startsWith("GRP#") == true;
+
+      final displayAvatarUrl = isGroup
+          ? (_loadedGroupAvatarUrl ?? widget.conversation.groupAvatarUrl)
+          : widget.conversation.getPeerId(widget.currentUser?.id) != null
+              ? (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl)
+              : (widget.webRTCService.activeConfig?['callerAvatarUrl']?.toString() ?? widget.conversation.avatarUrl);
+
+      final displayTitle = isGroup
+          ? (_loadedGroupName ?? widget.conversation.groupName ?? "Cuộc gọi nhóm")
+          : widget.conversation.title;
+
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          UserAvatar(
+            userId: isGroup
+                ? null
+                : widget.conversation.getPeerId(widget.currentUser?.id) ??
+                    widget.webRTCService.activeConfig?['callerId']?.toString(),
+            initialAvatarUrl: displayAvatarUrl,
+            initialDisplayName: displayTitle,
+            radius: 65,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            displayTitle,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "Đang kết nối...",
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 14,
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Connected state
+    return StreamBuilder<Map<String, MediaStream>>(
+      stream: widget.webRTCService.onRemoteStreamsUpdated,
+      initialData: widget.webRTCService.remoteStreams,
+      builder: (context, streamsSnapshot) {
+        final remoteStreams = streamsSnapshot.data ?? {};
+        final localStream = widget.webRTCService.localStream;
+
+        return StreamBuilder<Set<String>>(
+          stream: widget.webRTCService.onSpeakingPeersUpdated,
+          initialData: widget.webRTCService.speakingPeers,
+          builder: (context, speakingSnapshot) {
+            final speakingPeers = speakingSnapshot.data ?? {};
+
+            final isGroup = widget.conversation.isGroup || remoteStreams.length > 1;
+
+            if (!isGroup && remoteStreams.isNotEmpty && localStream != null) {
+              final remoteStream = remoteStreams.values.first;
+              return _build11Layout(localStream, remoteStream, speakingPeers);
+            }
+
+            return _buildGroupLayout(localStream, remoteStreams, speakingPeers);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _build11Layout(
+    MediaStream localStream,
+    MediaStream remoteStream,
+    Set<String> speakingPeers,
+  ) {
+    final remotePeerId = widget.conversation.getPeerId(widget.currentUser?.id) ?? 'Đối phương';
+    final peerName = widget.conversation.title;
+    final isSpeaking = speakingPeers.contains(remotePeerId);
+
+    return Stack(
       children: [
-        Row(
+        // Full screen remote video
+        Positioned.fill(
+          child: PeerVideoWidget(
+            stream: remoteStream,
+            label: peerName,
+            isSpeaking: isSpeaking,
+          ),
+        ),
+
+        // Draggable Local Preview
+        Positioned(
+          left: _localX,
+          top: _localY,
+          child: GestureDetector(
+            onPanUpdate: (details) {
+              setState(() {
+                _localX += details.delta.dx;
+                _localY += details.delta.dy;
+              });
+            },
+            onPanEnd: (details) {
+              final size = MediaQuery.of(context).size;
+              double targetX = _localX;
+              double targetY = _localY.clamp(80.0, size.height - 290.0);
+              if (_localX < size.width / 2 - 55) {
+                targetX = 20.0;
+              } else {
+                targetX = size.width - 110.0 - 20.0;
+              }
+              setState(() {
+                _localX = targetX;
+                _localY = targetY;
+              });
+            },
+            child: Container(
+              width: 110,
+              height: 160,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black54,
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  )
+                ],
+              ),
+              child: PeerVideoWidget(
+                stream: localStream,
+                label: "Tôi",
+                isLocal: true,
+                isCameraOff: widget.webRTCService.isCameraOff,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGroupLayout(
+    MediaStream? localStream,
+    Map<String, MediaStream> remoteStreams,
+    Set<String> speakingPeers,
+  ) {
+    final List<MapEntry<String, MediaStream>> entries = remoteStreams.entries.toList();
+    entries.sort((a, b) {
+      final aSpeaking = speakingPeers.contains(a.key) ? 1 : 0;
+      final bSpeaking = speakingPeers.contains(b.key) ? 1 : 0;
+      return bSpeaking.compareTo(aSpeaking);
+    });
+
+    final allParticipants = <Widget>[];
+    if (localStream != null) {
+      allParticipants.add(
+        PeerVideoWidget(
+          stream: localStream,
+          label: "Tôi",
+          isLocal: true,
+          isCameraOff: widget.webRTCService.isCameraOff,
+        ),
+      );
+    }
+
+    for (final entry in entries) {
+      allParticipants.add(
+        PeerVideoWidget(
+          stream: entry.value,
+          label: "Thành viên ${entry.key.substring(0, entry.key.length.clamp(0, 4))}",
+          isSpeaking: speakingPeers.contains(entry.key),
+        ),
+      );
+    }
+
+    final crossAxisCount = allParticipants.length <= 2 ? 1 : 2;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 90, 16, 160),
+      child: GridView.builder(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: crossAxisCount == 1 ? 1.0 : 0.78,
+        ),
+        itemCount: allParticipants.length,
+        itemBuilder: (context, index) => allParticipants[index],
+      ),
+    );
+  }
+
+  Widget _buildActionPanelForState(CallState state) {
+    if (state == CallState.ringing) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             _buildActionButton(
-              icon: Icons.chat,
-              color: Colors.blueAccent.withValues(alpha: 0.3),
-              onPressed: () {
-                // Nhắn tin: Return to previous screen (Chat Workspace), PiP will take over
-                Navigator.of(context).pop();
-              },
+              icon: Icons.call_end,
+              color: Colors.red,
+              onPressed: () => widget.webRTCService.rejectCall(),
             ),
             _buildActionButton(
-              icon: widget.webRTCService.isMuted ? Icons.mic_off : Icons.mic,
-              color: Colors.white24,
-              onPressed: () {
-                setState(() => widget.webRTCService.toggleMute());
-              },
-            ),
-            if (!widget.webRTCService.isAudioOnly)
-              _buildActionButton(
-                icon: widget.webRTCService.isCameraOff ? Icons.videocam_off : Icons.videocam,
-                color: Colors.white24,
-                onPressed: () {
-                  setState(() => widget.webRTCService.toggleCamera());
-                },
-              ),
-            _buildActionButton(
-              icon: widget.webRTCService.isSpeakerOn ? Icons.volume_up : Icons.volume_down,
-              color: Colors.white24,
-              onPressed: () {
-                setState(() => widget.webRTCService.toggleSpeaker());
-              },
-            ),
-            if (!widget.webRTCService.isAudioOnly)
-              _buildActionButton(
-                icon: Icons.flip_camera_ios,
-                color: Colors.white24,
-                onPressed: () => widget.webRTCService.switchCamera(),
-              ),
-            _buildActionButton(
-              icon: Icons.fullscreen_exit,
-              color: Colors.white24,
-              onPressed: () {
-                // PiP
-                Navigator.of(context).pop();
-              },
+              icon: Icons.call,
+              color: Colors.green,
+              onPressed: () => widget.webRTCService.acceptCall(),
             ),
           ],
         ),
-        const SizedBox(height: 30),
-        _buildActionButton(
-          icon: Icons.call_end,
-          color: Colors.red,
-          onPressed: () => widget.webRTCService.stopCall(),
-          size: 70,
-        ),
-      ],
+      );
+    }
+
+    final svc = widget.webRTCService;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // Mute toggle
+          _buildControlIcon(
+            icon: svc.isMuted ? Icons.mic_off : Icons.mic,
+            color: svc.isMuted ? Colors.redAccent.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+            activeColor: svc.isMuted ? Colors.redAccent : Colors.white,
+            onPressed: () {
+              setState(() {
+                svc.toggleMute();
+              });
+            },
+          ),
+
+          // Camera toggle
+          _buildControlIcon(
+            icon: svc.isCameraOff ? Icons.videocam_off : Icons.videocam,
+            color: svc.isCameraOff ? Colors.redAccent.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+            activeColor: svc.isCameraOff ? Colors.redAccent : Colors.white,
+            onPressed: () {
+              setState(() {
+                svc.toggleCamera();
+              });
+            },
+          ),
+
+          // Speakerphone toggle
+          _buildControlIcon(
+            icon: svc.isSpeakerOn ? Icons.volume_up : Icons.volume_down,
+            color: svc.isSpeakerOn ? const Color(0xFF7C3AED).withOpacity(0.2) : Colors.white.withOpacity(0.05),
+            activeColor: svc.isSpeakerOn ? const Color(0xFF7C3AED) : Colors.white,
+            onPressed: () {
+              setState(() {
+                svc.toggleSpeaker();
+              });
+            },
+          ),
+
+          // Switch camera (front/back)
+          if (!svc.isCameraOff && svc.localStream != null && svc.localStream!.getVideoTracks().isNotEmpty)
+            _buildControlIcon(
+              icon: Icons.flip_camera_ios,
+              color: Colors.white.withOpacity(0.05),
+              activeColor: Colors.white,
+              onPressed: () {
+                svc.switchCamera();
+              },
+            ),
+
+          // Hang up
+          _buildControlIcon(
+            icon: Icons.call_end,
+            color: Colors.red,
+            activeColor: Colors.white,
+            size: 56,
+            onPressed: () => svc.stopCall(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -421,7 +620,38 @@ class _CallScreenState extends State<CallScreen> {
     required IconData icon,
     required Color color,
     required VoidCallback onPressed,
-    double size = 60,
+    double size = 64,
+  }) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.35),
+            blurRadius: 14,
+            spreadRadius: 2,
+          )
+        ],
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: Colors.white, size: 28),
+        onPressed: () {
+          Feedback.forTap(context);
+          onPressed();
+        },
+      ),
+    );
+  }
+
+  Widget _buildControlIcon({
+    required IconData icon,
+    required Color color,
+    required Color activeColor,
+    required VoidCallback onPressed,
+    double size = 48,
   }) {
     return Container(
       width: size,
@@ -431,9 +661,226 @@ class _CallScreenState extends State<CallScreen> {
         shape: BoxShape.circle,
       ),
       child: IconButton(
-        icon: Icon(icon, color: Colors.white),
-        onPressed: onPressed,
+        icon: Icon(icon, color: activeColor, size: size * 0.48),
+        onPressed: () {
+          Feedback.forTap(context);
+          onPressed();
+        },
       ),
+    );
+  }
+}
+
+class PeerVideoWidget extends StatefulWidget {
+  final MediaStream stream;
+  final String label;
+  final bool isLocal;
+  final bool isSpeaking;
+  final bool isCameraOff;
+
+  const PeerVideoWidget({
+    super.key,
+    required this.stream,
+    required this.label,
+    this.isLocal = false,
+    this.isSpeaking = false,
+    this.isCameraOff = false,
+  });
+
+  @override
+  State<PeerVideoWidget> createState() => _PeerVideoWidgetState();
+}
+
+class _PeerVideoWidgetState extends State<PeerVideoWidget> {
+  final _renderer = RTCVideoRenderer();
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initRenderer();
+  }
+
+  Future<void> _initRenderer() async {
+    await _renderer.initialize();
+    if (mounted) {
+      setState(() {
+        _renderer.srcObject = widget.stream;
+        _initialized = true;
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(PeerVideoWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.stream != widget.stream) {
+      _renderer.srcObject = widget.stream;
+    }
+  }
+
+  @override
+  void dispose() {
+    _renderer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showVideo = !widget.isCameraOff && widget.stream.getVideoTracks().isNotEmpty;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F0F1A),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: widget.isSpeaking ? const Color(0xFF10B981) : Colors.white.withOpacity(0.08),
+          width: widget.isSpeaking ? 3.0 : 1.0,
+        ),
+        boxShadow: widget.isSpeaking
+            ? [
+                BoxShadow(
+                  color: const Color(0xFF10B981).withOpacity(0.3),
+                  blurRadius: 14,
+                  spreadRadius: 2,
+                )
+              ]
+            : null,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(19),
+        child: Stack(
+          children: [
+            if (_initialized && showVideo)
+              RTCVideoView(
+                _renderer,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              )
+            else
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        color: widget.isSpeaking
+                            ? const Color(0xFF7C3AED).withOpacity(0.15)
+                            : Colors.white.withOpacity(0.03),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: widget.isSpeaking ? const Color(0xFF7C3AED) : Colors.white.withOpacity(0.05),
+                          width: 2,
+                        ),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          widget.isSpeaking ? Icons.volume_up : Icons.person,
+                          color: widget.isSpeaking ? const Color(0xFF10B981) : Colors.white30,
+                          size: 40,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      widget.label,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Tag status at bottom
+            Positioned(
+              bottom: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.65),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withOpacity(0.05)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.isSpeaking)
+                      const Icon(Icons.mic, color: Color(0xFF10B981), size: 13)
+                    else if (widget.stream.getAudioTracks().isEmpty)
+                      const Icon(Icons.mic_off, color: Colors.redAccent, size: 13)
+                    else
+                      const Icon(Icons.mic, color: Colors.white54, size: 13),
+                    const SizedBox(width: 6),
+                    Text(
+                      widget.label,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class PulseRippleAnimation extends StatefulWidget {
+  final Widget child;
+  const PulseRippleAnimation({super.key, required this.child});
+
+  @override
+  State<PulseRippleAnimation> createState() => _PulseRippleAnimationState();
+}
+
+class _PulseRippleAnimationState extends State<PulseRippleAnimation>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            for (int i = 3; i >= 1; i--)
+              Container(
+                width: 140 + (i * 35 * _controller.value),
+                height: 140 + (i * 35 * _controller.value),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF7C3AED).withOpacity(
+                    ((1.0 - _controller.value).clamp(0.0, 1.0) / (i * 2.2)).clamp(0.0, 1.0),
+                  ),
+                ),
+              ),
+            widget.child,
+          ],
+        );
+      },
     );
   }
 }

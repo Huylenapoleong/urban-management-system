@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 import "package:cached_network_image/cached_network_image.dart";
+import "package:shared_preferences/shared_preferences.dart";
 import "../../../services/user_service.dart";
 import "../../../services/group_service.dart";
 import "../../../core/config/app_config.dart";
@@ -91,6 +92,23 @@ class _UserAvatarState extends State<UserAvatar> {
     
     final id = widget.userId ?? widget.groupId!;
     if (_failedIds.contains(id)) return;
+
+    if (widget.groupId != null) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final localOverride = prefs.getString("group_avatar_override_$id");
+        if (localOverride != null && localOverride.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _avatarUrl = _normalizeUrl(localOverride);
+            });
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint("Error reading group avatar override: $e");
+      }
+    }
 
     if (widget.userId != null && widget.userService != null) {
       setState(() => _loading = true);

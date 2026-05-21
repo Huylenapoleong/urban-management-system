@@ -10,6 +10,9 @@ import '../../../features/chat/models/chat_message.dart';
 import '../../../state/auth_controller.dart';
 import '../../../state/providers.dart';
 import 'chat_providers.dart';
+import 'widgets/create_poll_sheet.dart';
+import 'widgets/gif_picker_sheet.dart';
+import 'widgets/poll_message_bubble.dart';
 
 class SharedChatDetailPage extends ConsumerStatefulWidget {
   const SharedChatDetailPage({
@@ -86,6 +89,29 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
     }
   }
 
+  Future<void> _sendGif(String url) async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    try {
+      await ref.read(chatRepositoryProvider).sendTextMessage(
+            conversationId: widget.conversationId,
+            content: 'GIF Image',
+            type: 'IMAGE',
+            attachmentUrl: url,
+            clientMessageId: '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}',
+          );
+      ref.invalidate(chatMessagesProvider(widget.conversationId));
+      unawaited(_scrollToBottom());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ApiClient.extractError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
   Future<void> _scrollToBottom() async {
     await Future<void>.delayed(const Duration(milliseconds: 150));
     if (!_scrollController.hasClients) return;
@@ -135,7 +161,12 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final msg = items[index];
-                      return _Bubble(key: ValueKey(msg.id), message: msg, isMine: msg.senderId == userId);
+                      return _Bubble(
+                        key: ValueKey(msg.id),
+                        message: msg,
+                        isMine: msg.senderId == userId,
+                        conversationId: widget.conversationId,
+                      );
                     },
                   ),
                 );
@@ -161,7 +192,24 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.gif_box_outlined, color: Color(0xFF7C3AED), size: 28),
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      GifPickerSheet.show(
+                        context,
+                        onGifSelected: _sendGif,
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.poll_outlined, color: Color(0xFF7C3AED), size: 28),
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      CreatePollBottomSheet.show(context, widget.conversationId);
+                    },
+                  ),
+                  const SizedBox(width: 4),
                   FilledButton(
                     onPressed: _sending ? null : _sendMessage,
                     style: FilledButton.styleFrom(shape: const CircleBorder(), padding: const EdgeInsets.all(14)),
@@ -184,13 +232,28 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({super.key, required this.message, required this.isMine});
+  const _Bubble({super.key, required this.message, required this.isMine, required this.conversationId});
 
   final ChatMessage message;
   final bool isMine;
+  final String conversationId;
 
   @override
   Widget build(BuildContext context) {
+    if (message.pollData != null) {
+      return Align(
+        alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: PollMessageBubble(
+            message: message,
+            isMine: isMine,
+            conversationId: conversationId,
+          ),
+        ),
+      );
+    }
+
     final time = DateFormat('HH:mm').format(message.sentAt.toLocal());
 
     return Align(
@@ -217,7 +280,20 @@ class _Bubble extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: Color(0xFF334155)),
                   ),
                 ),
-              Text(message.content, style: TextStyle(color: isMine ? Colors.white : const Color(0xFF0F172A), height: 1.35)),
+              if (message.type == 'IMAGE' && message.attachmentUrl != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      message.attachmentUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
+                    ),
+                  ),
+                )
+              else
+                Text(message.content, style: TextStyle(color: isMine ? Colors.white : const Color(0xFF0F172A), height: 1.35)),
               const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerRight,

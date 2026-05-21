@@ -26,6 +26,8 @@ import "../../services/webrtc_service.dart";
 import "conversation_info_screen.dart";
 import "call_screen.dart";
 import "../shared/widgets/user_avatar.dart";
+import "../../app/shared/chat/widgets/gif_picker_sheet.dart";
+import "../groups/group_settings_screen.dart";
 
 class ChatDetailScreen extends StatefulWidget {
   final ConversationSummary conversation;
@@ -67,11 +69,30 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Map<String, String> _typingUsers = {};
   StreamSubscription? _typingSub;
   String? _conversationKey;
+  Map<String, String> _aliases = {};
+  bool _loadingAliases = false;
+  String? _fetchedGroupName;
+
+  Future<void> _loadGroupName() async {
+    try {
+      final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
+      final group = await widget.groupService.getGroup(groupId);
+      if (mounted && group.containsKey("groupName")) {
+        setState(() {
+          _fetchedGroupName = group["groupName"].toString();
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void initState() {
     super.initState();
     _loadReactions();
+    _loadAliases();
+    if (widget.conversation.isGroup) {
+      _loadGroupName();
+    }
     if (widget.conversation.unreadCount > 0) {
       widget.conversationService
           .markConversationAsRead(widget.conversation.conversationId)
@@ -108,6 +129,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           setState(() {
             _typingUsers.remove(msg.senderId);
           });
+        }
+        if (msg.type == "SYSTEM") {
+          _loadAliases();
         }
       }
     });
@@ -191,6 +215,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     super.dispose();
   }
 
+  Future<void> _loadAliases() async {
+    if (_loadingAliases) return;
+    _loadingAliases = true;
+    try {
+      final aliasList = await widget.conversationService
+          .listConversationAliases(widget.conversation.conversationId);
+      if (mounted) {
+        setState(() {
+          _aliases = {
+            for (var a in aliasList)
+              a['userId'].toString(): a['alias'].toString()
+          };
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading aliases: $e");
+    } finally {
+      _loadingAliases = false;
+    }
+  }
+
   void _handleCallStateChange() {
     if (widget.webRTCService.callState.value != CallState.idle && mounted) {
       // Check if this screen is already showing the call screen
@@ -207,17 +252,40 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     List<String> inviteeUserIds = const [];
 
     if (widget.conversation.isGroup) {
-      final selectedInvitees = await _pickGroupInvitees();
-      if (selectedInvitees == null) {
-        return;
+      var groupId = widget.conversation.groupId;
+      if (groupId == null) {
+        final convId = widget.conversation.conversationId;
+        if (convId.startsWith("group:")) {
+          groupId = convId.substring(6);
+        } else if (convId.startsWith("group#")) {
+          groupId = convId.substring(6);
+        } else if (convId.startsWith("grp#")) {
+          groupId = convId.substring(4);
+        } else if (convId.startsWith("GRP#")) {
+          groupId = convId.substring(4);
+        }
       }
-      inviteeUserIds = selectedInvitees;
+      if (groupId != null) {
+        try {
+          final members = await widget.groupService.listMembers(groupId);
+          final currentUserId = widget.currentUser?.id?.toString();
+          inviteeUserIds = members
+              .map(_InviteCandidate.fromJson)
+              .where((member) =>
+                  member.userId.isNotEmpty && member.userId != currentUserId)
+              .map((member) => member.userId)
+              .toList();
+        } catch (e) {
+          debugPrint("Failed to fetch group members for calling: $e");
+        }
+      }
     }
 
     await widget.webRTCService.startCall(
       widget.conversation.conversationId,
       video: video,
       inviteeUserIds: inviteeUserIds,
+      userId: widget.currentUser.id,
     );
 
     if (!mounted || widget.webRTCService.callState.value == CallState.idle) {
@@ -231,6 +299,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           webRTCService: widget.webRTCService,
           conversation: widget.conversation,
           currentUser: widget.currentUser,
+          launchedFromChatDetail: true,
         ),
       ),
     );
@@ -517,14 +586,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       String? attachmentKey;
 
       if (attachment != null) {
-        final uploadResult = await widget.uploadService.uploadMedia(
-          filePath: attachment.path,
-          fileName: attachment.name,
-          mimeType: attachment.mimeType,
-          target: "MESSAGE",
-        );
-        attachmentUrl = uploadResult.url;
-        attachmentKey = uploadResult.key;
+        if (attachment.path.startsWith("http://") || attachment.path.startsWith("https://")) {
+          attachmentUrl = attachment.path;
+        } else {
+          final uploadResult = await widget.uploadService.uploadMedia(
+            filePath: attachment.path,
+            fileName: attachment.name,
+            mimeType: attachment.mimeType,
+            target: "MESSAGE",
+          );
+          attachmentUrl = uploadResult.url;
+          attachmentKey = uploadResult.key;
+        }
       }
 
       final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
@@ -803,6 +876,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       valueListenable: widget.webRTCService.callState,
       builder: (context, state, _) {
         if (state != CallState.idle &&
+          widget.conversation.isGroup &&
             widget.webRTCService.currentConversationId ==
                 widget.conversation.conversationId) {
           return Container(
@@ -845,6 +919,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           webRTCService: widget.webRTCService,
                           conversation: widget.conversation,
                           currentUser: widget.currentUser,
+                          launchedFromChatDetail: true,
                         ),
                       ),
                     );
@@ -861,7 +936,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildHeader() {
-    final title = widget.conversation.title;
+    final peerId = widget.conversation.getPeerId(widget.currentUser?.id);
+    final resolvedTitle = (!widget.conversation.isGroup && peerId != null && _aliases.containsKey(peerId))
+        ? _aliases[peerId]!
+        : widget.conversation.isGroup
+            ? (_fetchedGroupName ?? widget.conversation.title)
+            : widget.conversation.title;
 
     return Container(
       padding: EdgeInsets.only(
@@ -887,7 +967,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             userId: widget.conversation.isGroup ? null : widget.conversation.getPeerId(widget.currentUser?.id),
             groupId: widget.conversation.isGroup ? widget.conversation.groupId : null,
             initialAvatarUrl: widget.conversation.isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
-            initialDisplayName: title,
+            initialDisplayName: resolvedTitle,
             radius: 20,
             showStatus: !widget.conversation.isGroup,
             isActive: !widget.conversation.isGroup &&
@@ -906,16 +986,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: GestureDetector(
-              onTap: () => Navigator.push(
+              onTap: () async {
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (_) => ConversationInfoScreen(
-                          conversation: widget.conversation,
-                          conversationService: widget.conversationService))),
+                    builder: (_) => ConversationInfoScreen(
+                      conversation: widget.conversation,
+                      conversationService: widget.conversationService,
+                    ),
+                  ),
+                );
+                _loadAliases();
+              },
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
+                  Text(resolvedTitle,
                       style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -937,12 +1023,34 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.more_vert, color: Color(0xFF64748B)),
-            onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
+            onPressed: () {
+              if (widget.conversation.isGroup) {
+                final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => GroupSettingsScreen(
+                      groupId: groupId,
+                      groupName: resolvedTitle,
+                    ),
+                  ),
+                ).then((_) {
+                  _loadGroupName();
+                });
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
                     builder: (_) => ConversationInfoScreen(
-                        conversation: widget.conversation,
-                        conversationService: widget.conversationService))),
+                      conversation: widget.conversation,
+                      conversationService: widget.conversationService,
+                    ),
+                  ),
+                ).then((_) {
+                  _loadAliases();
+                });
+              }
+            },
           ),
         ],
       ),
@@ -969,7 +1077,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text("Đang trả lời ${_replyingTo!.senderName}",
+                Text("Đang trả lời ${_aliases[_replyingTo!.senderId] ?? _replyingTo!.senderName}",
                     style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -1090,9 +1198,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       builderDelegate: PagedChildBuilderDelegate<MessageItem>(
         itemBuilder: (context, message, index) {
           final isMine = message.senderId == widget.currentUser.id;
+          final senderAlias = _aliases[message.senderId];
           return ChatMessageBubble(
             message: message,
             isMine: isMine,
+            senderAlias: senderAlias,
             reactions: _messageReactions[message.id] ?? [],
             userService: widget.userService,
             onLongPress: () => _showMessageActions(message),
@@ -1327,6 +1437,24 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  void _showGifPicker() {
+    GifPickerSheet.show(
+      context,
+      onGifSelected: (gifUrl) {
+        final name = gifUrl.split("/").last;
+        widget.onSend(
+          text: "GIF Image",
+          attachment: _PendingAttachment(
+            path: gifUrl,
+            name: name,
+            type: "IMAGE",
+            mimeType: "image/gif",
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -1368,11 +1496,16 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
             Row(
               children: [
-                if (!_isRecording)
+                if (!_isRecording) ...[
                   IconButton(
                       icon: const Icon(Icons.add_circle_outline,
                           color: Color(0xFF64748B), size: 28),
                       onPressed: widget.sending ? null : _showPicker),
+                  IconButton(
+                      icon: const Icon(Icons.gif_box_outlined,
+                          color: Color(0xFF7C3AED), size: 28),
+                      onPressed: widget.sending ? null : _showGifPicker),
+                ],
                 const SizedBox(width: 4),
                 Expanded(
                   child: _isRecording
@@ -1484,6 +1617,7 @@ class _ChatComposerState extends State<ChatComposer> {
 class ChatMessageBubble extends StatelessWidget {
   final MessageItem message;
   final bool isMine;
+  final String? senderAlias;
   final List<String> reactions;
   final UserService? userService;
   final VoidCallback? onLongPress;
@@ -1492,6 +1626,7 @@ class ChatMessageBubble extends StatelessWidget {
     super.key,
     required this.message,
     required this.isMine,
+    this.senderAlias,
     this.reactions = const [],
     this.userService,
     this.onLongPress,
@@ -1533,7 +1668,7 @@ class ChatMessageBubble extends StatelessWidget {
             UserAvatar(
               userId: message.senderId,
               initialAvatarUrl: message.senderAvatarUrl,
-              initialDisplayName: message.senderName,
+              initialDisplayName: senderAlias ?? message.senderName,
               radius: 14,
               userService: userService,
             ),

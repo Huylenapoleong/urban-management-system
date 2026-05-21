@@ -4,6 +4,7 @@ import "package:flutter_riverpod/flutter_riverpod.dart" show ProviderScope;
 
 import "package:firebase_core/firebase_core.dart";
 import "package:firebase_messaging/firebase_messaging.dart";
+import "package:flutter_dotenv/flutter_dotenv.dart";
 
 import "core/theme/app_theme.dart";
 import "features/auth/login_screen.dart";
@@ -13,6 +14,7 @@ import "state/session_controller.dart";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   
   try {
     await Firebase.initializeApp();

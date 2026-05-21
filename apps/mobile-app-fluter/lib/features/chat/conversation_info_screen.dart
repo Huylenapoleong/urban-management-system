@@ -26,12 +26,31 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
   List<Map<String, dynamic>> _members = [];
   final Map<String, dynamic> _profileCache = {};
   List<dynamic> _friends = [];
+  Map<String, String> _aliases = {};
 
   @override
   void initState() {
     super.initState();
+    _loadAliases();
     if (widget.conversation.isGroup) {
       _loadData();
+    }
+  }
+
+  Future<void> _loadAliases() async {
+    try {
+      final aliasList = await widget.conversationService
+          .listConversationAliases(widget.conversation.conversationId);
+      if (mounted) {
+        setState(() {
+          _aliases = {
+            for (var a in aliasList)
+              a['userId'].toString(): a['alias'].toString()
+          };
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading aliases in info screen: $e");
     }
   }
 
@@ -124,8 +143,11 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.conversation.title;
     final isGroup = widget.conversation.isGroup;
+    final peerId = isGroup ? null : widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id);
+    final resolvedTitle = (!isGroup && peerId != null && _aliases.containsKey(peerId))
+        ? _aliases[peerId]!
+        : widget.conversation.title;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -146,7 +168,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
                     userId: isGroup ? null : widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id),
                     groupId: isGroup ? widget.conversation.groupId : null,
                     initialAvatarUrl: isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
-                    initialDisplayName: title,
+                    initialDisplayName: resolvedTitle,
                     radius: 50,
                     showStatus: !isGroup,
                     isActive: !isGroup && widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id) != null, // Note: We don't have realtime presence here easily without a stream, but we can at least show the status indicator if we had the state.
@@ -154,7 +176,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
                     groupService: ref.read(groupServiceProvider),
                   ),
                   const SizedBox(height: 16),
-                  Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
+                  Text(resolvedTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
                   if (isGroup) ...[
                     const SizedBox(height: 4),
                     Text("${_members.length} thành viên", style: TextStyle(color: Colors.grey[600])),
@@ -295,6 +317,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
   }
 
   Widget _buildActionSection() {
+    final isGroup = widget.conversation.isGroup;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
@@ -319,6 +342,14 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
               onChanged: (v) => _toggleMute(v),
             ),
           ),
+          if (!isGroup) ...[
+            const Divider(height: 1, indent: 56),
+            _buildListTile(
+              Icons.edit_note,
+              "Đặt biệt danh",
+              onTap: () => _showSetAliasDialog(),
+            ),
+          ],
           const Divider(height: 1, indent: 56),
           _buildListTile(Icons.photo_outlined, "Ảnh & Video đã gửi", onTap: () {}),
           const Divider(height: 1, indent: 56),
@@ -421,6 +452,95 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
       title: Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: textColor ?? const Color(0xFF1E1B4B))),
       trailing: trailing ?? const Icon(Icons.chevron_right, size: 20, color: Color(0xFFCBD5E1)),
       onTap: onTap,
+    );
+  }
+
+  void _showSetAliasDialog() {
+    final peerId = widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id);
+    if (peerId == null) return;
+
+    final currentAlias = _aliases[peerId] ?? '';
+    final controller = TextEditingController(text: currentAlias);
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          title: Text('Biệt danh cho ${widget.conversation.title}'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              hintText: 'Nhập biệt danh...',
+              border: OutlineInputBorder(),
+            ),
+            maxLength: 100,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Hủy'),
+            ),
+            if (currentAlias.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogCtx);
+                  setState(() {
+                    _aliases = Map.from(_aliases)..remove(peerId);
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Đã xóa biệt danh')),
+                  );
+                  widget.conversationService.deleteConversationAlias(
+                    conversationId: widget.conversation.conversationId,
+                    userId: peerId,
+                  ).catchError((e) {
+                    debugPrint("Error deleting alias: $e");
+                    _loadAliases();
+                    return <String, dynamic>{};
+                  });
+                },
+                child: const Text('Xóa biệt danh', style: TextStyle(color: Colors.red)),
+              ),
+            FilledButton(
+              onPressed: () {
+                final newAlias = controller.text.trim();
+                Navigator.pop(dialogCtx);
+                setState(() {
+                  if (newAlias.isEmpty) {
+                    _aliases = Map.from(_aliases)..remove(peerId);
+                  } else {
+                    _aliases = Map.from(_aliases)..[peerId] = newAlias;
+                  }
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Đã cập nhật biệt danh')),
+                );
+                if (newAlias.isEmpty) {
+                  widget.conversationService.deleteConversationAlias(
+                    conversationId: widget.conversation.conversationId,
+                    userId: peerId,
+                  ).catchError((e) {
+                    debugPrint("Error deleting alias: $e");
+                    _loadAliases();
+                    return <String, dynamic>{};
+                  });
+                } else {
+                  widget.conversationService.setConversationAlias(
+                    conversationId: widget.conversation.conversationId,
+                    userId: peerId,
+                    alias: newAlias,
+                  ).catchError((e) {
+                    debugPrint("Error setting alias: $e");
+                    _loadAliases();
+                    return <String, dynamic>{};
+                  });
+                }
+              },
+              child: const Text('Lưu'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

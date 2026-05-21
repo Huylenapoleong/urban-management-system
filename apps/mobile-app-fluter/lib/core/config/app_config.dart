@@ -1,14 +1,20 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class AppConfig {
   const AppConfig._();
 
   static const String _apiBaseFromEnv = String.fromEnvironment(
     "API_BASE_URL",
-    defaultValue: "http://localhost:3001",
+    defaultValue: "",
   );
 
   static String get apiBaseUrl {
-    final raw = _apiBaseFromEnv.trim();
-    final base = raw.isEmpty ? "http://localhost:3001" : raw;
+    var raw = _apiBaseFromEnv.trim();
+    if (raw.isEmpty) {
+      raw = dotenv.env['API_BASE_URL'] ?? '';
+    }
+
+    final base = raw.trim().isEmpty ? "http://localhost:3001" : raw.trim();
     final normalized = base.replaceAll(RegExp(r"/+$"), "");
     if (normalized.endsWith("/api")) {
       return normalized;

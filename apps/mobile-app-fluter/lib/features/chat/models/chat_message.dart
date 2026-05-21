@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class ChatMessage {
   const ChatMessage({
     required this.id,
@@ -6,6 +8,7 @@ class ChatMessage {
     required this.content,
     required this.type,
     required this.sentAt,
+    this.attachmentUrl,
     this.isOptimistic = false,
   });
 
@@ -14,6 +17,7 @@ class ChatMessage {
   final String senderName;
   final String content;
   final String type;
+  final String? attachmentUrl;
   final DateTime sentAt;
   final bool isOptimistic;
 
@@ -24,6 +28,7 @@ class ChatMessage {
       senderName: (map['senderName'] ?? 'User').toString(),
       content: (map['content'] ?? '').toString(),
       type: (map['type'] ?? 'TEXT').toString(),
+      attachmentUrl: map['attachmentUrl']?.toString(),
       sentAt: DateTime.tryParse((map['sentAt'] ?? map['createdAt'] ?? '').toString()) ?? DateTime.now(),
       isOptimistic: map['isOptimistic'] == true,
     );
@@ -35,6 +40,7 @@ class ChatMessage {
     String? senderName,
     String? content,
     String? type,
+    String? attachmentUrl,
     DateTime? sentAt,
     bool? isOptimistic,
   }) {
@@ -44,8 +50,20 @@ class ChatMessage {
       senderName: senderName ?? this.senderName,
       content: content ?? this.content,
       type: type ?? this.type,
+      attachmentUrl: attachmentUrl ?? this.attachmentUrl,
       sentAt: sentAt ?? this.sentAt,
       isOptimistic: isOptimistic ?? this.isOptimistic,
     );
+  }
+
+  Map<String, dynamic>? get pollData {
+    if (!content.trim().startsWith('{')) return null;
+    try {
+      final parsed = jsonDecode(content);
+      if (parsed is Map<String, dynamic> && parsed.containsKey('poll')) {
+        return parsed['poll'] as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
   }
 }

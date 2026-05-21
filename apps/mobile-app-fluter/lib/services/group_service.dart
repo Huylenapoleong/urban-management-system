@@ -124,4 +124,97 @@ class GroupService {
     );
     return (raw as Map).cast<String, dynamic>();
   }
+
+  // ─── Ownership Transfer ───
+  Future<Map<String, dynamic>> transferOwnership({
+    required String groupId,
+    required String newOwnerId,
+  }) async {
+    final raw = await _apiClient.post(
+      "/groups/${Uri.encodeComponent(groupId)}/ownership-transfer",
+      data: {"newOwnerId": newOwnerId},
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
+
+  // ─── Ban System ───
+  Future<List<Map<String, dynamic>>> listBans(String groupId) async {
+    final raw = await _apiClient.get(
+      "/groups/${Uri.encodeComponent(groupId)}/bans",
+    );
+    return (raw as List)
+        .map((item) => (item as Map).cast<String, dynamic>())
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> banMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final raw = await _apiClient.post(
+      "/groups/${Uri.encodeComponent(groupId)}/bans/${Uri.encodeComponent(userId)}",
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>> unbanMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final raw = await _apiClient.delete(
+      "/groups/${Uri.encodeComponent(groupId)}/bans/${Uri.encodeComponent(userId)}",
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
+
+  // ─── Invite Links ───
+  Future<List<Map<String, dynamic>>> listInviteLinks(String groupId) async {
+    final raw = await _apiClient.get(
+      "/groups/${Uri.encodeComponent(groupId)}/invite-links",
+    );
+    return (raw as List)
+        .map((item) => (item as Map).cast<String, dynamic>())
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> createInviteLink({
+    required String groupId,
+    int? maxUses,
+    int? expiresInHours,
+  }) async {
+    final raw = await _apiClient.post(
+      "/groups/${Uri.encodeComponent(groupId)}/invite-links",
+      data: {
+        if (maxUses != null) "maxUses": maxUses,
+        if (expiresInHours != null) "expiresInHours": expiresInHours,
+      },
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
+
+  Future<void> revokeInviteLink({
+    required String groupId,
+    required String inviteId,
+  }) async {
+    await _apiClient.delete(
+      "/groups/${Uri.encodeComponent(groupId)}/invite-links/${Uri.encodeComponent(inviteId)}",
+    );
+  }
+
+  Future<Map<String, dynamic>> joinByInviteCode(String code) async {
+    final raw = await _apiClient.post(
+      "/groups/invite-links/${Uri.encodeComponent(code)}/join",
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
+
+  // ─── Audit Logs ───
+  Future<List<Map<String, dynamic>>> getAuditLogs(String groupId) async {
+    final raw = await _apiClient.get(
+      "/groups/${Uri.encodeComponent(groupId)}/audit",
+    );
+    return (raw as List)
+        .map((item) => (item as Map).cast<String, dynamic>())
+        .toList();
+  }
 }

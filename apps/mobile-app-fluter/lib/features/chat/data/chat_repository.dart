@@ -43,14 +43,31 @@ class ChatRepository {
     required String conversationId,
     required String content,
     required String clientMessageId,
+    String type = 'TEXT',
+    String? attachmentUrl,
   }) async {
     final data = await _api.post(
       '/conversations/${Uri.encodeComponent(conversationId)}/messages',
       data: {
         'content': content,
-        'type': 'TEXT',
+        'type': type,
         'clientMessageId': clientMessageId,
+        if (attachmentUrl != null) 'attachmentUrl': attachmentUrl,
       },
+    );
+
+    if (data is! Map<String, dynamic>) return null;
+    return ChatMessage.fromMap(data);
+  }
+
+  Future<ChatMessage?> editMessage({
+    required String conversationId,
+    required String messageId,
+    required String content,
+  }) async {
+    final data = await _api.patch(
+      '/conversations/${Uri.encodeComponent(conversationId)}/messages/${Uri.encodeComponent(messageId)}',
+      data: {'content': content},
     );
 
     if (data is! Map<String, dynamic>) return null;

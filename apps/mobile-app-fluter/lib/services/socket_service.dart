@@ -42,6 +42,8 @@ class SocketService {
       StreamController<Map<String, dynamic>>.broadcast();
   final _webrtcCandidateController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _callHeartbeatController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<void> get onChatReady => _chatReadyController.stream;
   Stream<MessageItem> get onMessageCreated => _messageCreatedController.stream;
@@ -67,6 +69,8 @@ class SocketService {
       _webrtcAnswerController.stream;
   Stream<Map<String, dynamic>> get onWebRTCCandidate =>
       _webrtcCandidateController.stream;
+  Stream<Map<String, dynamic>> get onCallHeartbeat =>
+      _callHeartbeatController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
 
@@ -221,6 +225,11 @@ class SocketService {
       if (data is Map)
         _webrtcCandidateController.add(data.cast<String, dynamic>());
     });
+
+    socket.on("call.heartbeat", (data) {
+      if (data is Map)
+        _callHeartbeatController.add(data.cast<String, dynamic>());
+    });
   }
 
   Future<Map<String, dynamic>?> joinConversation(String conversationId) async {
@@ -261,11 +270,43 @@ class SocketService {
     }
   }
 
+  Future<T?> _emitWithAck<T>(String event, Map<String, dynamic> payload) {
+    if (!isConnected) {
+      return Future.error({
+        "message": "Socket is not connected",
+        "statusCode": 0,
+      });
+    }
+
+    final completer = Completer<T?>();
+    _socket?.emitWithAck(event, payload, ack: (dynamic response) {
+      if (response is Map && response["success"] == true) {
+        completer.complete(response["data"] as T?);
+        return;
+      }
+      if (response is Map && response.containsKey("error")) {
+        completer.completeError(response["error"]);
+        return;
+      }
+      completer.complete(response as T?);
+    });
+
+    return completer.future;
+  }
+
   void emitCallInit(String conversationId, bool isVideo) {
     if (isConnected) {
       _socket?.emit(
           "call.init", {"conversationId": conversationId, "isVideo": isVideo});
     }
+  }
+
+  Future<Map<String, dynamic>?> emitCallInitWithAck(
+      String conversationId, bool isVideo) {
+    return _emitWithAck<Map<String, dynamic>>(
+      "call.init",
+      {"conversationId": conversationId, "isVideo": isVideo},
+    );
   }
 
   void emitCallInvite(
@@ -285,6 +326,13 @@ class SocketService {
     }
   }
 
+  Future<Map<String, dynamic>?> emitCallAcceptWithAck(String conversationId) {
+    return _emitWithAck<Map<String, dynamic>>(
+      "call.accept",
+      {"conversationId": conversationId},
+    );
+  }
+
   void emitCallReject(String conversationId) {
     if (isConnected) {
       _socket?.emit("call.reject", {"conversationId": conversationId});
@@ -294,6 +342,15 @@ class SocketService {
   void emitCallEnd(String conversationId) {
     if (isConnected) {
       _socket?.emit("call.end", {"conversationId": conversationId});
+    }
+  }
+
+  void emitCallHeartbeat(String conversationId, String userId) {
+    if (isConnected) {
+      _socket?.emit("call.heartbeat", {
+        "conversationId": conversationId,
+        "userId": userId,
+      });
     }
   }
 
@@ -349,6 +406,7 @@ class SocketService {
     _webrtcOfferController.close();
     _webrtcAnswerController.close();
     _webrtcCandidateController.close();
+    _callHeartbeatController.close();
     _connectionStatusController.close();
   }
 }

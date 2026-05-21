@@ -293,4 +293,38 @@ class ConversationService {
     );
     return ConversationSummary.fromJson((raw as Map).cast<String, dynamic>());
   }
+
+  Future<List<Map<String, dynamic>>> listConversationAliases(
+    String conversationId,
+  ) async {
+    final raw = await _apiClient.get(
+      "/conversations/${Uri.encodeComponent(conversationId)}/aliases",
+    );
+    return (raw as List)
+        .map((item) => (item as Map).cast<String, dynamic>())
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> setConversationAlias({
+    required String conversationId,
+    required String userId,
+    required String alias,
+  }) async {
+    final raw = await _apiClient.put(
+      "/conversations/${Uri.encodeComponent(conversationId)}/aliases/${Uri.encodeComponent(userId)}",
+      data: {"alias": alias},
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>> deleteConversationAlias({
+    required String conversationId,
+    required String userId,
+  }) async {
+    final raw = await _apiClient.delete(
+      "/conversations/${Uri.encodeComponent(conversationId)}/aliases/${Uri.encodeComponent(userId)}",
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
 }
+

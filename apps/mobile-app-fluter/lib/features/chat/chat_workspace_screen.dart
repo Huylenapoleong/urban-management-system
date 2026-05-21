@@ -475,6 +475,9 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
                       widget.socketService.markAsRead(conversation.conversationId);
                     }
                     await Navigator.of(context).push(MaterialPageRoute(
+                      settings: RouteSettings(
+                        name: "chat_detail/${conversation.conversationId}",
+                      ),
                       builder: (_) => ChatDetailScreen(
                         conversation: conversation,
                         conversationService: widget.conversationService,
@@ -486,7 +489,7 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
                         currentUser: widget.currentUser,
                       ),
                     ));
-                    _refreshConversationLocally(conversation.conversationId);
+                    _pagingController.refresh();
                   },
                 ),
               ),

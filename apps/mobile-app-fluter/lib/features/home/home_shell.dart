@@ -13,7 +13,9 @@ import "../reports/reports_screen.dart";
 import "home_screen.dart";
 import "../../models/conversation_summary.dart";
 import "../chat/call_screen.dart";
+import "../chat/widgets/floating_call_overlay.dart";
 import "../../services/webrtc_service.dart";
+import "../shared/widgets/app_toast.dart";
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -24,6 +26,9 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+  bool _wasInCall = false;
+  late WebRTCService _webRTCService;
+  VoidCallback? _callStateListener;
 
   void _setIndex(int index) {
     setState(() {
@@ -38,6 +43,20 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     final services = context.read<AppServices>();
     final session = context.read<SessionController>();
+    _webRTCService = services.webRTCService;
+    _wasInCall = _webRTCService.callState.value != CallState.idle;
+    _callStateListener = () {
+      final isInCall = _webRTCService.callState.value != CallState.idle;
+      if (_wasInCall && !isInCall && mounted) {
+        AppToast.show(
+          context,
+          message: "Cuoc goi da ket thuc",
+          type: AppToastType.info,
+        );
+      }
+      _wasInCall = isInCall;
+    };
+    _webRTCService.callState.addListener(_callStateListener!);
     _callInitSub = services.socketService.onCallInit.listen((data) {
       _openIncomingCall(context, services.webRTCService, session.user, data);
     });
@@ -48,6 +67,9 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    if (_callStateListener != null) {
+      _webRTCService.callState.removeListener(_callStateListener!);
+    }
     _callInitSub?.cancel();
     _callInviteSub?.cancel();
     super.dispose();
@@ -64,11 +86,16 @@ class _HomeShellState extends State<HomeShell> {
     final conversationId = data["conversationId"] as String? ?? "";
     final callerName = data["callerName"] as String? ?? "Người dùng";
     final callerAvatarUrl = data["callerAvatarUrl"] as String?;
-    final isGroup = data["isGroup"] as bool? ?? false;
+
+    final isGroup = data["isGroup"] as bool? ??
+        conversationId.startsWith("group:") ||
+        conversationId.startsWith("group#") ||
+        conversationId.startsWith("grp#") ||
+        conversationId.startsWith("GRP#");
 
     final summary = ConversationSummary(
       conversationId: conversationId,
-      groupName: callerName,
+      groupName: isGroup ? "Cuộc gọi nhóm" : callerName,
       unreadCount: 0,
       isGroup: isGroup,
       updatedAt: DateTime.now().toIso8601String(),
@@ -194,51 +221,36 @@ class _HomeShellState extends State<HomeShell> {
     return ValueListenableBuilder<CallState>(
       valueListenable: webRTCService.callState,
       builder: (context, state, _) {
-        // Chỉ hiện PiP nếu đang gọi và KHÔNG phải (Giả lập vì CallScreen đang pop ra)
-        // Việc nhận diện chính xác CallScreen có nằm top ở Navigator ko cần RouterObserver
-        // Ta tạm che bằng logic: Nếu có call mới hiện Draggable
         if (state == CallState.idle) return const SizedBox.shrink();
 
-        return Positioned(
-          top: 100,
-          right: 20,
-          child: GestureDetector(
-            onTap: () {
-              // Mở lại CallScreen
-              if (webRTCService.currentConversationId != null) {
-                // Tạo fake summary để mở lại
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => CallScreen(
-                      webRTCService: webRTCService,
-                      conversation: ConversationSummary(
-                        conversationId: webRTCService.currentConversationId!,
-                        groupName: "Đang gọi",
-                        unreadCount: 0,
-                        isGroup: false,
-                        updatedAt: DateTime.now().toIso8601String(),
-                      ),
-                      currentUser: user,
+        return FloatingCallOverlay(
+          webRTCService: webRTCService,
+          onTap: () {
+            if (webRTCService.currentConversationId != null) {
+              final convId = webRTCService.currentConversationId!;
+              final isGroup = convId.startsWith("group:") ||
+                  convId.startsWith("group#") ||
+                  convId.startsWith("grp#") ||
+                  convId.startsWith("GRP#");
+
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CallScreen(
+                    webRTCService: webRTCService,
+                    conversation: ConversationSummary(
+                      conversationId: convId,
+                      groupName: isGroup ? "Cuộc gọi nhóm" : "Đang gọi",
+                      unreadCount: 0,
+                      isGroup: isGroup,
+                      updatedAt: DateTime.now().toIso8601String(),
                     ),
+                    currentUser: user,
                   ),
-                );
-              }
-            },
-            child: Container(
-              width: 80,
-              height: 120,
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black26, blurRadius: 10)
-                ],
-              ),
-              child: const Center(
-                child: Icon(Icons.videocam, color: Colors.green, size: 30),
-              ),
-            ),
-          ),
+                ),
+              );
+            }
+          },
+          onClose: () => webRTCService.stopCall(),
         );
       },
     );

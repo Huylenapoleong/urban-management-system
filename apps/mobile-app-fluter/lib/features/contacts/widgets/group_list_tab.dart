@@ -5,8 +5,10 @@ import "../../../services/group_service.dart";
 import "../../../services/app_services.dart";
 import "../../shared/widgets/user_avatar.dart";
 import "../../chat/chat_detail_screen.dart";
+import "../../groups/group_settings_screen.dart";
 import "../../../models/conversation_summary.dart";
 import "../../../state/session_controller.dart";
+import "../../shared/widgets/app_toast.dart";
 
 class GroupListTab extends StatefulWidget {
   final GroupService groupService;
@@ -54,34 +56,135 @@ class _GroupListTabState extends State<GroupListTab> with AutomaticKeepAliveClie
     }).toList();
   }
 
+  String _extractInviteCode(String input) {
+    final trimmed = input.trim();
+    if (trimmed.contains("/groups/invite/")) {
+      final parts = trimmed.split("/groups/invite/");
+      if (parts.length >= 2) {
+        return parts[1].split("/").first.split("?").first;
+      }
+    }
+    if (trimmed.contains("/join/")) {
+      final parts = trimmed.split("/join/");
+      if (parts.length >= 2) {
+        return parts[1].split("/").first.split("?").first;
+      }
+    }
+    return trimmed; // Fallback to raw code
+  }
+
+  void _showJoinGroupDialog(BuildContext context, GroupService groupService) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          title: const Text("Tham gia nhóm bằng liên kết"),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              hintText: "Nhập liên kết mời hoặc mã mời...",
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.link),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text("Hủy"),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+              onPressed: () async {
+                final input = controller.text.trim();
+                if (input.isEmpty) return;
+                
+                final code = _extractInviteCode(input);
+                Navigator.pop(dialogCtx);
+                
+                // Show loading
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF7C3AED))),
+                );
+                
+                try {
+                  final group = await groupService.joinByInviteCode(code);
+                  if (context.mounted) {
+                    Navigator.pop(context); // Pop loading
+                    AppToast.show(
+                      context,
+                      message: "Đã tham gia nhóm: ${group['groupName'] ?? 'Thành công'}",
+                      type: AppToastType.success,
+                    );
+                    _loadGroups();
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    Navigator.pop(context); // Pop loading
+                    AppToast.show(
+                      context,
+                      message: "Không thể tham gia nhóm. Lỗi: $e",
+                      type: AppToastType.error,
+                    );
+                  }
+                }
+              },
+              child: const Text("Tham gia"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(16),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ],
-            ),
-            child: TextField(
-              onChanged: (v) => setState(() => _searchQuery = v),
-              decoration: const InputDecoration(
-                hintText: "Tìm kiếm nhóm...",
-                prefixIcon: Icon(Icons.search, color: Color(0xFF7C3AED)),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      )
+                    ],
+                  ),
+                  child: TextField(
+                    onChanged: (v) => setState(() => _searchQuery = v),
+                    decoration: const InputDecoration(
+                      hintText: "Tìm kiếm nhóm...",
+                      prefixIcon: Icon(Icons.search, color: Color(0xFF7C3AED)),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: () => _showJoinGroupDialog(context, widget.groupService),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF7C3AED).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(Icons.link, color: Color(0xFF7C3AED), size: 26),
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -175,7 +278,15 @@ class _GroupListTabState extends State<GroupListTab> with AutomaticKeepAliveClie
               ),
           ],
         ),
-        trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+        trailing: IconButton(
+          icon: const Icon(Icons.settings, color: Color(0xFF94A3B8)),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => GroupSettingsScreen(groupId: groupId, groupName: groupName),
+            ),
+          ),
+        ),
         onTap: () => _navigateToChat(group),
       ),
     );

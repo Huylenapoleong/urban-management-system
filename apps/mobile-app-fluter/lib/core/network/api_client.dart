@@ -105,6 +105,25 @@ class ApiClient {
     );
   }
 
+  Future<dynamic> put(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+    CancelToken? cancelToken,
+  }) async {
+    return _execute(
+      () => _dio.put<dynamic>(
+        path,
+        data: data,
+        queryParameters: queryParameters,
+        options: options,
+        cancelToken: cancelToken,
+      ),
+    );
+  }
+
+
   Future<dynamic> patch(
     String path, {
     dynamic data,
