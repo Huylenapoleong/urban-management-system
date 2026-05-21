@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 import "package:flutter_webrtc/flutter_webrtc.dart";
 import "../../models/conversation_summary.dart";
+import "../../models/user_profile.dart";
 import "../../services/webrtc_service.dart";
 import "../../services/app_services.dart";
 import "../shared/widgets/user_avatar.dart";
@@ -34,6 +35,8 @@ class _CallScreenState extends State<CallScreen> {
   String? _loadedGroupName;
   String? _loadedGroupAvatarUrl;
   bool _loadingGroupDetails = false;
+  final Map<String, UserProfile> _profileCache = {};
+  final Set<String> _requestedProfileIds = {};
 
   @override
   void initState() {
@@ -124,6 +127,26 @@ class _CallScreenState extends State<CallScreen> {
           ),
         );
       }
+    }
+  }
+
+  String _resolveAvatarUrl(UserProfile profile) {
+    return profile.avatarUrl ?? profile.avatarAsset?.resolvedUrl ?? "";
+  }
+
+  void _prefetchProfiles(Iterable<String> userIds) {
+    final services = Provider.of<AppServices>(context, listen: false);
+    for (final userId in userIds) {
+      if (userId.trim().isEmpty || _requestedProfileIds.contains(userId)) {
+        continue;
+      }
+      _requestedProfileIds.add(userId);
+      services.userService.getUserById(userId).then((profile) {
+        if (!mounted) return;
+        setState(() {
+          _profileCache[userId] = profile;
+        });
+      }).catchError((_) {});
     }
   }
 
@@ -381,8 +404,13 @@ class _CallScreenState extends State<CallScreen> {
             final isGroup = widget.conversation.isGroup || remoteStreams.length > 1;
 
             if (!isGroup && remoteStreams.isNotEmpty && localStream != null) {
-              final remoteStream = remoteStreams.values.first;
-              return _build11Layout(localStream, remoteStream, speakingPeers);
+              final remoteEntry = remoteStreams.entries.first;
+              return _build11Layout(
+                localStream,
+                remoteEntry.key,
+                remoteEntry.value,
+                speakingPeers,
+              );
             }
 
             return _buildGroupLayout(localStream, remoteStreams, speakingPeers);
@@ -394,11 +422,14 @@ class _CallScreenState extends State<CallScreen> {
 
   Widget _build11Layout(
     MediaStream localStream,
+    String remotePeerId,
     MediaStream remoteStream,
     Set<String> speakingPeers,
   ) {
-    final remotePeerId = widget.conversation.getPeerId(widget.currentUser?.id) ?? 'Đối phương';
-    final peerName = widget.conversation.title;
+    _prefetchProfiles([remotePeerId]);
+    final profile = _profileCache[remotePeerId];
+    final peerName = profile?.fullName ?? widget.conversation.title;
+    final peerAvatarUrl = profile != null ? _resolveAvatarUrl(profile) : null;
     final isSpeaking = speakingPeers.contains(remotePeerId);
 
     return Stack(
@@ -408,6 +439,7 @@ class _CallScreenState extends State<CallScreen> {
           child: PeerVideoWidget(
             stream: remoteStream,
             label: peerName,
+            avatarUrl: peerAvatarUrl,
             isSpeaking: isSpeaking,
           ),
         ),
@@ -455,6 +487,7 @@ class _CallScreenState extends State<CallScreen> {
                 label: "Tôi",
                 isLocal: true,
                 isCameraOff: widget.webRTCService.isCameraOff,
+                avatarUrl: null,
               ),
             ),
           ),
@@ -469,6 +502,7 @@ class _CallScreenState extends State<CallScreen> {
     Set<String> speakingPeers,
   ) {
     final List<MapEntry<String, MediaStream>> entries = remoteStreams.entries.toList();
+    _prefetchProfiles(entries.map((entry) => entry.key));
     entries.sort((a, b) {
       final aSpeaking = speakingPeers.contains(a.key) ? 1 : 0;
       final bSpeaking = speakingPeers.contains(b.key) ? 1 : 0;
@@ -488,10 +522,15 @@ class _CallScreenState extends State<CallScreen> {
     }
 
     for (final entry in entries) {
+      final profile = _profileCache[entry.key];
+      final displayName = profile?.fullName ??
+          "Thành viên ${entry.key.substring(0, entry.key.length.clamp(0, 4))}";
+      final avatarUrl = profile != null ? _resolveAvatarUrl(profile) : null;
       allParticipants.add(
         PeerVideoWidget(
           stream: entry.value,
-          label: "Thành viên ${entry.key.substring(0, entry.key.length.clamp(0, 4))}",
+          label: displayName,
+          avatarUrl: avatarUrl,
           isSpeaking: speakingPeers.contains(entry.key),
         ),
       );
@@ -677,6 +716,7 @@ class PeerVideoWidget extends StatefulWidget {
   final bool isLocal;
   final bool isSpeaking;
   final bool isCameraOff;
+  final String? avatarUrl;
 
   const PeerVideoWidget({
     super.key,
@@ -685,6 +725,7 @@ class PeerVideoWidget extends StatefulWidget {
     this.isLocal = false,
     this.isSpeaking = false,
     this.isCameraOff = false,
+    this.avatarUrl,
   });
 
   @override
@@ -727,7 +768,8 @@ class _PeerVideoWidgetState extends State<PeerVideoWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final showVideo = !widget.isCameraOff && widget.stream.getVideoTracks().isNotEmpty;
+    final showVideo =
+      !widget.isCameraOff && widget.stream.getVideoTracks().isNotEmpty;
 
     return Container(
       decoration: BoxDecoration(
@@ -761,26 +803,11 @@ class _PeerVideoWidgetState extends State<PeerVideoWidget> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(
-                      width: 90,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        color: widget.isSpeaking
-                            ? const Color(0xFF7C3AED).withOpacity(0.15)
-                            : Colors.white.withOpacity(0.03),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: widget.isSpeaking ? const Color(0xFF7C3AED) : Colors.white.withOpacity(0.05),
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: Icon(
-                          widget.isSpeaking ? Icons.volume_up : Icons.person,
-                          color: widget.isSpeaking ? const Color(0xFF10B981) : Colors.white30,
-                          size: 40,
-                        ),
-                      ),
+                    UserAvatar(
+                      userId: null,
+                      initialAvatarUrl: widget.avatarUrl,
+                      initialDisplayName: widget.label,
+                      radius: 42,
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -790,6 +817,7 @@ class _PeerVideoWidgetState extends State<PeerVideoWidget> {
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
                       ),
+                      textAlign: TextAlign.center,
                     ),
                   ],
                 ),
