@@ -56,8 +56,22 @@ class _GroupInviteLinksScreenState extends State<GroupInviteLinksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: Text('Link mời - ${widget.groupName}')),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Text(
+          'Link mời - ${widget.groupName}',
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        elevation: 0,
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _createLink,
         icon: const Icon(Icons.add_link),
@@ -72,7 +86,7 @@ class _GroupInviteLinksScreenState extends State<GroupInviteLinksScreen> {
           child: _isLoading
               ? ListView.builder(itemCount: 3, itemBuilder: (_, __) => const ListTile(leading: Icon(Icons.link), title: Text('Loading...')))
               : _links.isEmpty
-                  ? const Center(child: Text('Chưa có link mời nào', style: TextStyle(color: Colors.grey)))
+                  ? Center(child: Text('Chưa có link mời nào', style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey)))
                   : ListView.builder(
                       padding: const EdgeInsets.all(16),
                       itemCount: _links.length,
@@ -89,13 +103,33 @@ class _GroupInviteLinksScreenState extends State<GroupInviteLinksScreen> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           child: ListTile(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            leading: const Icon(Icons.link, color: Color(0xFF7C3AED)),
-                            title: Text(code, style: const TextStyle(fontWeight: FontWeight.w600, fontFamily: 'monospace')),
+                            leading: Icon(Icons.link, color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+                            title: Text(
+                              code,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontFamily: 'monospace',
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Đã dùng: $uses${maxUses != null ? ' / $maxUses' : ''}', style: const TextStyle(fontSize: 12)),
-                                if (expiresAt != null) Text('Hết hạn: $expiresAt', style: const TextStyle(fontSize: 12, color: Colors.orange)),
+                                Text(
+                                  'Đã dùng: $uses${maxUses != null ? ' / $maxUses' : ''}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? const Color(0xFF94A3B8) : Colors.black54,
+                                  ),
+                                ),
+                                if (expiresAt != null)
+                                  Text(
+                                    'Hết hạn: $expiresAt',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isDark ? Colors.amber.shade300 : Colors.orange,
+                                    ),
+                                  ),
                               ],
                             ),
                             trailing: PopupMenuButton<String>(

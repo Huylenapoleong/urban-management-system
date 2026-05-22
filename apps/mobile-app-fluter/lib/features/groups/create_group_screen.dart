@@ -22,6 +22,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   bool _isCreating = false;
   String _searchQuery = "";
 
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
   final List<Map<String, dynamic>> _types = [
     {"id": "OFFICIAL", "label": "Chính thức", "icon": Icons.verified_user, "desc": "Nhóm thông tin chính thống từ cơ quan"},
     {"id": "TOPIC", "label": "Chủ đề", "icon": Icons.topic, "desc": "Nhóm thảo luận về các vấn đề xã hội"},
@@ -102,17 +104,18 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = _isDark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           "Tạo nhóm mới",
-          style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold),
+          style: TextStyle(color: isDark ? Colors.white : const Color(0xFF1E1B4B), fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
         elevation: 0,
         centerTitle: true,
-        iconTheme: const IconThemeData(color: Color(0xFF1E1B4B)),
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
         actions: [
           if (_isCreating)
             const Padding(
@@ -143,8 +146,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   }
 
   Widget _buildGroupInfoSection() {
+    final isDark = _isDark;
     return Container(
-      color: Colors.white,
+      color: isDark ? const Color(0xFF1E293B) : Colors.white,
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
@@ -156,7 +160,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(colors: [Color(0xFFC084FC), Color(0xFF7C3AED)]),
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: const Color(0xFF7C3AED).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
+                  boxShadow: [BoxShadow(color: const Color(0xFF7C3AED).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4))],
                 ),
                 child: const Icon(Icons.camera_alt, color: Colors.white, size: 28),
               ),
@@ -166,12 +170,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   children: [
                     TextField(
                       controller: _nameController,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                      decoration: const InputDecoration(
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black),
+                      decoration: InputDecoration(
                         hintText: "Tên nhóm (bắt buộc)",
-                        hintStyle: TextStyle(color: Colors.grey, fontSize: 18),
-                        border: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFE2E8F0))),
-                        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF7C3AED), width: 2)),
+                        hintStyle: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey, fontSize: 18),
+                        border: UnderlineInputBorder(borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
+                        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF7C3AED), width: 2)),
                       ),
                     ),
                   ],
@@ -183,11 +188,12 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           TextField(
             controller: _descController,
             maxLines: 3,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
             decoration: InputDecoration(
               hintText: "Mô tả về nhóm...",
-              hintStyle: const TextStyle(color: Colors.grey),
+              hintStyle: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey),
               filled: true,
-              fillColor: const Color(0xFFF1F5F9),
+              fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               contentPadding: const EdgeInsets.all(16),
             ),
@@ -198,12 +204,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   }
 
   Widget _buildTypeSection() {
+    final isDark = _isDark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 24, 20, 12),
-          child: Text("LOẠI NHÓM", style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.2)),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+          child: Text("LOẠI NHÓM", style: TextStyle(color: isDark ? Colors.grey[400] : const Color(0xFF64748B), fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.2)),
         ),
         SizedBox(
           height: 140,
@@ -224,15 +231,15 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                     width: 150,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFF7C3AED) : Colors.white,
+                      color: isSelected ? const Color(0xFF7C3AED) : (isDark ? const Color(0xFF1E293B) : Colors.white),
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         if (isSelected)
-                          BoxShadow(color: const Color(0xFF7C3AED).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))
+                          BoxShadow(color: const Color(0xFF7C3AED).withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))
                         else
-                          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2)),
+                          BoxShadow(color: isDark ? Colors.transparent : Colors.black.withValues(alpha: 0.02), blurRadius: 4, offset: const Offset(0, 2)),
                       ],
-                      border: Border.all(color: isSelected ? Colors.transparent : const Color(0xFFE2E8F0)),
+                      border: Border.all(color: isSelected ? Colors.transparent : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -241,7 +248,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                         const SizedBox(height: 8),
                         Text(
                           type["label"],
-                          style: TextStyle(color: isSelected ? Colors.white : const Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 14),
+                          style: TextStyle(color: isSelected ? Colors.white : (isDark ? Colors.white : const Color(0xFF1E1B4B)), fontWeight: FontWeight.bold, fontSize: 14),
                         ),
                         const SizedBox(height: 4),
                         Expanded(
@@ -250,7 +257,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                             textAlign: TextAlign.center,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: isSelected ? Colors.white70 : Colors.grey, fontSize: 10),
+                            style: TextStyle(color: isSelected ? Colors.white70 : (isDark ? Colors.grey[400] : Colors.grey), fontSize: 10),
                           ),
                         ),
                       ],
@@ -266,6 +273,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   }
 
   Widget _buildMemberSelectionSection() {
+    final isDark = _isDark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -276,7 +284,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             children: [
               Text(
                 "THÊM THÀNH VIÊN (${_selectedUserIds.length})",
-                style: const TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.2),
+                style: TextStyle(color: isDark ? Colors.grey[400] : const Color(0xFF64748B), fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.2),
               ),
               if (_selectedUserIds.isNotEmpty)
                 TextButton(
@@ -289,17 +297,19 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
           ),
           child: TextField(
             onChanged: (v) => setState(() => _searchQuery = v),
-            decoration: const InputDecoration(
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+            decoration: InputDecoration(
               hintText: "Tìm kiếm bạn bè...",
-              prefixIcon: Icon(Icons.search, color: Color(0xFF7C3AED), size: 20),
+              hintStyle: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFF7C3AED), size: 20),
               border: InputBorder.none,
-              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
           ),
         ),
@@ -307,7 +317,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         if (_isLoadingFriends)
           const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
         else if (_friends.isEmpty)
-          const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Bạn chưa có bạn bè nào để thêm", style: TextStyle(color: Colors.grey))))
+          Center(child: Padding(padding: const EdgeInsets.all(40), child: Text("Bạn chưa có bạn bè nào để thêm", style: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey))))
         else
           ListView.builder(
             shrinkWrap: true,
@@ -320,9 +330,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF7C3AED).withOpacity(0.05) : Colors.white,
+                  color: isSelected ? const Color(0x1A7C3AED) : (isDark ? const Color(0xFF1E293B) : Colors.white),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isSelected ? const Color(0xFF7C3AED) : const Color(0xFFE2E8F0)),
+                  border: Border.all(color: isSelected ? const Color(0xFF7C3AED) : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
                 ),
                 child: ListTile(
                   leading: UserAvatar(
@@ -331,10 +341,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                     initialDisplayName: friend.fullName,
                     radius: 20,
                   ),
-                  title: Text(friend.fullName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  title: Text(friend.fullName, style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                   trailing: Icon(
                     isSelected ? Icons.check_circle : Icons.add_circle_outline,
-                    color: isSelected ? const Color(0xFF7C3AED) : const Color(0xFFCBD5E1),
+                    color: isSelected ? const Color(0xFF7C3AED) : (isDark ? Colors.grey[600] : const Color(0xFFCBD5E1)),
                   ),
                   onTap: () {
                     setState(() {

@@ -100,14 +100,31 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
   Future<void> _kickMember(String userId, String name) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Xóa thành viên'),
-        content: Text('Bạn có chắc muốn xóa $name khỏi nhóm?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Xóa')),
-        ],
-      ),
+      builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            'Xóa thành viên',
+            style: TextStyle(color: isDark ? Colors.white : const Color(0xFF1E1B4B), fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            'Bạn có chắc muốn xóa $name khỏi nhóm?',
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: Text('Hủy', style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED))),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('Xóa'),
+            ),
+          ],
+        );
+      },
     );
     if (confirmed != true) return;
     setState(() {
@@ -130,18 +147,31 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
   Future<void> _banMember(String userId, String name) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Cấm thành viên'),
-        content: Text('Cấm $name sẽ xóa họ khỏi nhóm và ngăn tham gia lại. Tiếp tục?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cấm'),
+      builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            'Cấm thành viên',
+            style: TextStyle(color: isDark ? Colors.white : const Color(0xFF1E1B4B), fontWeight: FontWeight.bold),
           ),
-        ],
-      ),
+          content: Text(
+            'Cấm $name sẽ xóa họ khỏi nhóm và ngăn tham gia lại. Tiếp tục?',
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: Text('Hủy', style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED))),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('Cấm'),
+            ),
+          ],
+        );
+      },
     );
     if (confirmed != true) return;
     setState(() {
@@ -164,14 +194,31 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
   Future<void> _transferOwnership(String userId, String name) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Chuyển quyền Trưởng nhóm'),
-        content: Text('Bạn sẽ chuyển quyền Trưởng nhóm cho $name. Hành động này không thể hoàn tác.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Chuyển quyền')),
-        ],
-      ),
+      builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            'Chuyển quyền Trưởng nhóm',
+            style: TextStyle(color: isDark ? Colors.white : const Color(0xFF1E1B4B), fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            'Bạn sẽ chuyển quyền Trưởng nhóm cho $name. Hành động này không thể hoàn tác.',
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: Text('Hủy', style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED))),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('Chuyển quyền'),
+            ),
+          ],
+        );
+      },
     );
     if (confirmed != true) return;
     setState(() {
@@ -215,97 +262,137 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.transparent,
       builder: (_) {
         final services = context.read<AppServices>();
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
-                const SizedBox(height: 16),
-                Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                ListTile(
-                  leading: const Icon(Icons.person_outline, color: Colors.blue),
-                  title: const Text('Xem thông tin'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    final profile = member['profile'] as UserProfile?;
-                    if (profile != null) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ProfileScreen(
-                            user: profile,
-                            userService: services.userService,
-                            uploadService: services.uploadService,
-                          ),
-                        ),
-                      );
-                    }
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.edit_note, color: Colors.blue),
-                  title: const Text('Đặt biệt danh'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showSetAliasDialog(member);
-                  },
-                ),
-                if (!isMe) ...[
-                  if (_myRole == 'OWNER') ...[
-                    ListTile(
-                      leading: const Icon(Icons.swap_horiz, color: Color(0xFF7C3AED)),
-                      title: const Text('Chuyển quyền Trưởng nhóm'),
-                      onTap: () { Navigator.pop(context); _transferOwnership(userId, name); },
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF475569) : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    ListTile(
-                      leading: const Icon(Icons.admin_panel_settings_outlined, color: Colors.orange),
-                      title: Text(role == 'DEPUTY' ? 'Hạ xuống Thành viên' : 'Thăng làm Phó nhóm'),
-                      onTap: () {
-                        Navigator.pop(context);
-                        final newRole = role == 'DEPUTY' ? 'MEMBER' : 'DEPUTY';
-                        setState(() {
-                          _members = _members.map((m) {
-                            if (m['userId']?.toString() == userId) {
-                              return {
-                                ...m,
-                                'roleInGroup': newRole,
-                              };
-                            }
-                            return m;
-                          }).toList();
-                        });
-                        AppToast.show(
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    name,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    leading: Icon(Icons.person_outline, color: isDark ? Colors.blue.shade300 : Colors.blue),
+                    title: Text(
+                      'Xem thông tin',
+                      style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      final profile = member['profile'] as UserProfile?;
+                      if (profile != null) {
+                        Navigator.push(
                           context,
-                          message: newRole == 'DEPUTY' ? 'Đã thăng $name làm Phó nhóm' : 'Đã hạ $name xuống Thành viên',
-                          type: AppToastType.success,
+                          MaterialPageRoute(
+                            builder: (_) => ProfileScreen(
+                              user: profile,
+                              userService: services.userService,
+                              uploadService: services.uploadService,
+                            ),
+                          ),
                         );
-                        widget.groupService.updateMemberRole(groupId: widget.groupId, userId: userId, roleInGroup: newRole).catchError((e) {
-                          debugPrint("Error updating role: $e");
-                          _loadMembers();
-                          return <String, dynamic>{};
-                        });
-                      },
+                      }
+                    },
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.edit_note, color: isDark ? Colors.blue.shade300 : Colors.blue),
+                    title: Text(
+                      'Đặt biệt danh',
+                      style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                     ),
-                  ],
-                  if (_myRole == 'OWNER' || (_myRole == 'DEPUTY' && role == 'MEMBER')) ...[
-                    ListTile(
-                      leading: const Icon(Icons.person_remove_outlined, color: Colors.red),
-                      title: const Text('Xóa khỏi nhóm'),
-                      onTap: () { Navigator.pop(context); _kickMember(userId, name); },
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.block_outlined, color: Colors.red),
-                      title: const Text('Cấm khỏi nhóm'),
-                      onTap: () { Navigator.pop(context); _banMember(userId, name); },
-                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showSetAliasDialog(member);
+                    },
+                  ),
+                  if (!isMe) ...[
+                    if (_myRole == 'OWNER') ...[
+                      ListTile(
+                        leading: const Icon(Icons.swap_horiz, color: Color(0xFF7C3AED)),
+                        title: Text(
+                          'Chuyển quyền Trưởng nhóm',
+                          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                        ),
+                        onTap: () { Navigator.pop(context); _transferOwnership(userId, name); },
+                      ),
+                      ListTile(
+                        leading: Icon(Icons.admin_panel_settings_outlined, color: isDark ? Colors.amber.shade300 : Colors.orange),
+                        title: Text(
+                          role == 'DEPUTY' ? 'Hạ xuống Thành viên' : 'Thăng làm Phó nhóm',
+                          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                        ),
+                        onTap: () {
+                          Navigator.pop(context);
+                          final newRole = role == 'DEPUTY' ? 'MEMBER' : 'DEPUTY';
+                          setState(() {
+                            _members = _members.map((m) {
+                              if (m['userId']?.toString() == userId) {
+                                return {
+                                  ...m,
+                                  'roleInGroup': newRole,
+                                };
+                              }
+                              return m;
+                            }).toList();
+                          });
+                          AppToast.show(
+                            context,
+                            message: newRole == 'DEPUTY' ? 'Đã thăng $name làm Phó nhóm' : 'Đã hạ $name xuống Thành viên',
+                            type: AppToastType.success,
+                          );
+                          widget.groupService.updateMemberRole(groupId: widget.groupId, userId: userId, roleInGroup: newRole).catchError((e) {
+                            debugPrint("Error updating role: $e");
+                            _loadMembers();
+                            return <String, dynamic>{};
+                          });
+                        },
+                      ),
+                    ],
+                    if (_myRole == 'OWNER' || (_myRole == 'DEPUTY' && role == 'MEMBER')) ...[
+                      ListTile(
+                        leading: Icon(Icons.person_remove_outlined, color: isDark ? Colors.red.shade300 : Colors.red),
+                        title: Text(
+                          'Xóa khỏi nhóm',
+                          style: TextStyle(color: isDark ? Colors.red.shade300 : Colors.red),
+                        ),
+                        onTap: () { Navigator.pop(context); _kickMember(userId, name); },
+                      ),
+                      ListTile(
+                        leading: Icon(Icons.block_outlined, color: isDark ? Colors.red.shade300 : Colors.red),
+                        title: Text(
+                          'Cấm khỏi nhóm',
+                          style: TextStyle(color: isDark ? Colors.red.shade300 : Colors.red),
+                        ),
+                        onTap: () { Navigator.pop(context); _banMember(userId, name); },
+                      ),
+                    ],
                   ],
                 ],
-              ],
+              ),
             ),
           ),
         );
@@ -321,18 +408,33 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     }
   }
 
-  Color _roleColor(String? role) {
+  Color _roleColor(BuildContext context, String? role) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (role) {
-      case 'OWNER': return const Color(0xFF7C3AED);
-      case 'DEPUTY': return Colors.orange;
-      default: return const Color(0xFF64748B);
+      case 'OWNER': return isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+      case 'DEPUTY': return isDark ? Colors.amber : Colors.orange;
+      default: return isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: Text('Thành viên - ${widget.groupName}')),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Text(
+          'Thành viên - ${widget.groupName}',
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        elevation: 0,
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
+      ),
       body: RefreshIndicator(
         onRefresh: _loadMembers,
         child: Skeletonizer(
@@ -352,12 +454,37 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                     return ListTile(
                       leading: UserAvatar(userId: userId, initialDisplayName: name, radius: 22),
                       title: Row(children: [
-                        Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                        if (isMe) const Text(' (Bạn)', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        if (isMe)
+                          Text(
+                            ' (Bạn)',
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              fontSize: 12,
+                            ),
+                          ),
                       ]),
-                      subtitle: Text(_roleLabel(role), style: TextStyle(color: _roleColor(role), fontSize: 12, fontWeight: FontWeight.w600)),
+                      subtitle: Text(
+                        _roleLabel(role),
+                        style: TextStyle(
+                          color: _roleColor(context, role),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       onTap: () => _showMemberActions(m),
-                      trailing: const Icon(Icons.more_vert, color: Color(0xFF64748B)),
+                      trailing: Icon(
+                        Icons.more_vert,
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
                     );
                   },
                 ),
@@ -375,20 +502,46 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     showDialog(
       context: context,
       builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
         return AlertDialog(
-          title: Text('Biệt danh cho $fullName'),
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            'Biệt danh cho $fullName',
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           content: TextField(
             controller: controller,
-            decoration: const InputDecoration(
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
               hintText: 'Nhập biệt danh...',
-              border: OutlineInputBorder(),
+              hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 1.5),
+              ),
             ),
             maxLength: 100,
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogCtx),
-              child: const Text('Hủy'),
+              child: Text(
+                'Hủy',
+                style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+              ),
             ),
             if (currentAlias.isNotEmpty)
               TextButton(
@@ -424,6 +577,7 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                 child: const Text('Xóa biệt danh', style: TextStyle(color: Colors.red)),
               ),
             FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
               onPressed: () {
                 final newAlias = controller.text.trim();
                 Navigator.pop(dialogCtx);

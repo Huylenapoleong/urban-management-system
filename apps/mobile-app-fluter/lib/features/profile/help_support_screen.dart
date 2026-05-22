@@ -5,12 +5,20 @@ class HelpSupportScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text("Hỗ trợ & Trợ giúp", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF0F172A),
+        title: Text(
+          "Hỗ trợ & Trợ giúp",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        foregroundColor: isDark ? Colors.white : const Color(0xFF0F172A),
         elevation: 0,
         centerTitle: true,
       ),
@@ -19,11 +27,18 @@ class HelpSupportScreen extends StatelessWidget {
         children: [
           _buildContactCard(),
           const SizedBox(height: 32),
-          const Text("Câu hỏi thường gặp", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            "Câu hỏi thường gặp",
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black,
+            ),
+          ),
           const SizedBox(height: 16),
-          _buildFaqItem("Làm sao để tôi đổi số điện thoại?", "Bạn có thể vào mục Cài đặt tài khoản -> Chỉnh sửa thông tin, sau đó nhập số điện thoại mới và lưu lại."),
-          _buildFaqItem("Tôi quên mật khẩu phải làm sao?", "Ở màn hình đăng nhập, hãy chọn 'Quên mật khẩu' để nhận mã xác thực OTP qua Email hoặc Số điện thoại."),
-          _buildFaqItem("Báo cáo sự cố môi trường như thế nào?", "Tại màn hình chính, chọn tính năng 'Gửi báo cáo', chụp ảnh sự cố và mô tả chi tiết vị trí."),
+          _buildFaqItem(context, "Làm sao để tôi đổi số điện thoại?", "Bạn có thể vào mục Cài đặt tài khoản -> Chỉnh sửa thông tin, sau đó nhập số điện thoại mới và lưu lại."),
+          _buildFaqItem(context, "Tôi quên mật khẩu phải làm sao?", "Ở màn hình đăng nhập, hãy chọn 'Quên mật khẩu' để nhận mã xác thực OTP qua Email hoặc Số điện thoại."),
+          _buildFaqItem(context, "Báo cáo sự cố môi trường như thế nào?", "Tại màn hình chính, chọn tính năng 'Gửi báo cáo', chụp ảnh sự cố và mô tả chi tiết vị trí."),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -67,16 +82,40 @@ class HelpSupportScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFaqItem(String question, String answer) {
+  Widget _buildFaqItem(BuildContext context, String question, String answer) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isDark ? Colors.grey.shade800 : Colors.transparent,
+        ),
+      ),
       elevation: 0,
       child: ExpansionTile(
-        title: Text(question, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+        title: Text(
+          question,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        collapsedTextColor: isDark ? Colors.white : Colors.black87,
+        textColor: isDark ? Colors.white : Colors.black87,
+        iconColor: isDark ? Colors.white : Colors.black87,
+        collapsedIconColor: Colors.grey,
         childrenPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
         children: [
-          Text(answer, style: const TextStyle(color: Color(0xFF64748B), height: 1.5)),
+          Text(
+            answer,
+            style: TextStyle(
+              color: isDark ? Colors.grey.shade300 : const Color(0xFF64748B),
+              height: 1.5,
+            ),
+          ),
         ],
       ),
     );

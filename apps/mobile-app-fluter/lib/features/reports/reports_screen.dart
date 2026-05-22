@@ -82,15 +82,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
         elevation: 0,
         leading: const AppLogoButton(),
-        title: const Text(
+        title: Text(
           "Báo cáo sự cố",
-          style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
         ),
         centerTitle: false,
         actions: [
@@ -121,22 +125,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildSearchBar() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: Colors.white,
+      color: isDark ? const Color(0xFF0F172A) : Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9),
+          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
           borderRadius: BorderRadius.circular(16),
         ),
         child: TextField(
           controller: _searchController,
           onSubmitted: (_) => _loadReports(),
-          decoration: const InputDecoration(
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          decoration: InputDecoration(
             hintText: "Search your reports...",
-            prefixIcon: Icon(Icons.search, color: Colors.grey),
+            hintStyle: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey),
+            prefixIcon: const Icon(Icons.search, color: Colors.grey),
             border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
       ),
@@ -144,11 +151,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildFilters() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final statuses = ["ALL", "NEW", "IN_PROGRESS", "RESOLVED", "CLOSED"];
     return Container(
       height: 50,
       padding: const EdgeInsets.only(bottom: 8),
-      color: Colors.white,
+      color: isDark ? const Color(0xFF0F172A) : Colors.white,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
@@ -166,14 +174,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
             },
             selectedColor: const Color(0xFF7C3AED).withOpacity(0.15),
             labelStyle: TextStyle(
-              color: isSelected ? const Color(0xFF7C3AED) : Colors.grey.shade600,
+              color: isSelected 
+                  ? const Color(0xFF7C3AED) 
+                  : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               fontSize: 12,
             ),
             backgroundColor: Colors.transparent,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
-              side: BorderSide(color: isSelected ? const Color(0xFF7C3AED) : Colors.grey.shade300),
+              side: BorderSide(
+                color: isSelected 
+                    ? const Color(0xFF7C3AED) 
+                    : (isDark ? Colors.grey.shade800 : Colors.grey.shade300),
+              ),
             ),
           );
         },
@@ -193,12 +207,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildEmptyState() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListView(
       children: [
         const SizedBox(height: 120),
-        Icon(Icons.description_outlined, size: 80, color: Colors.grey.shade300),
+        Icon(Icons.description_outlined, size: 80, color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
         const SizedBox(height: 16),
-        const Center(child: Text("No reports found", style: TextStyle(color: Colors.grey, fontSize: 16))),
+        Center(
+          child: Text(
+            "No reports found",
+            style: TextStyle(color: isDark ? Colors.grey.shade500 : Colors.grey, fontSize: 16),
+          ),
+        ),
       ],
     );
   }
@@ -219,9 +239,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   void _showCreateReportSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (context) => DraggableScrollableSheet(
         initialChildSize: 0.7,
@@ -235,24 +257,45 @@ class _ReportsScreenState extends State<ReportsScreen> {
             children: [
               Center(child: Container(width: 40, height: 4, decoration: const BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.all(Radius.circular(2))))),
               const SizedBox(height: 20),
-              const Text("Báo cáo mới", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
+              Text(
+                "Báo cáo mới",
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                ),
+              ),
               const SizedBox(height: 24),
               TextField(
                 controller: _titleController,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: "Chuyện gì đang xảy ra?",
+                  labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
                   hintText: "Tiêu đề ngắn gọn của sự cố",
+                  hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _descriptionController,
                 maxLines: 4,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: "Mô tả chi tiết",
+                  labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
                   hintText: "Cung cấp thêm thông tin...",
+                  hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -260,7 +303,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
               const SizedBox(height: 16),
               _buildDropdowns(),
               const SizedBox(height: 16),
-              const Text("Hình ảnh & Video đính kèm", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              Text(
+                "Hình ảnh & Video đính kèm",
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
               const SizedBox(height: 8),
               _buildMediaPicker(),
               const SizedBox(height: 24),
@@ -286,6 +336,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildMediaPicker() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return SizedBox(
       height: 100,
       child: ListView.builder(
@@ -299,11 +350,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 width: 100,
                 margin: const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300, style: BorderStyle.solid),
+                  border: Border.all(
+                    color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                    style: BorderStyle.solid,
+                  ),
                 ),
-                child: const Icon(Icons.add_a_photo_outlined, color: Colors.grey),
+                child: Icon(Icons.add_a_photo_outlined, color: isDark ? Colors.grey.shade400 : Colors.grey),
               ),
             );
           }
@@ -341,24 +395,38 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Future<void> _pickMedia() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final picker = ImagePicker();
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(leading: const Icon(Icons.camera_alt), title: const Text("Chụp ảnh"), onTap: () => Navigator.pop(context, ImageSource.camera)),
-            ListTile(leading: const Icon(Icons.videocam), title: const Text("Quay video"), onTap: () async {
-              Navigator.pop(context);
-              final video = await picker.pickVideo(source: ImageSource.camera);
-              if (video != null) setState(() => _selectedMedia.add(video));
-            }),
-            ListTile(leading: const Icon(Icons.photo_library), title: const Text("Chọn từ thư viện"), onTap: () async {
-              Navigator.pop(context);
-              final media = await picker.pickMedia();
-              if (media != null) setState(() => _selectedMedia.add(media));
-            }),
+            ListTile(
+              leading: Icon(Icons.camera_alt, color: isDark ? Colors.white : Colors.black87),
+              title: Text("Chụp ảnh", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: Icon(Icons.videocam, color: isDark ? Colors.white : Colors.black87),
+              title: Text("Quay video", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+              onTap: () async {
+                Navigator.pop(context);
+                final video = await picker.pickVideo(source: ImageSource.camera);
+                if (video != null) setState(() => _selectedMedia.add(video));
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.photo_library, color: isDark ? Colors.white : Colors.black87),
+              title: Text("Chọn từ thư viện", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+              onTap: () async {
+                Navigator.pop(context);
+                final media = await picker.pickMedia();
+                if (media != null) setState(() => _selectedMedia.add(media));
+              },
+            ),
           ],
         ),
       ),
@@ -372,16 +440,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildLocationField() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       children: [
         Expanded(
           child: TextField(
             controller: _locationController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               labelText: "Địa chỉ sự cố",
+              labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
               hintText: "Nhập địa chỉ hoặc nhấn định vị bên cạnh",
-              prefixIcon: const Icon(Icons.location_on_outlined),
+              hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
+              prefixIcon: Icon(Icons.location_on_outlined, color: isDark ? Colors.grey.shade400 : Colors.grey),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+              ),
             ),
           ),
         ),
@@ -390,6 +466,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
           onPressed: _detectLocation,
           icon: const Icon(Icons.my_location),
           tooltip: "Định vị vị trí hiện tại",
+          style: IconButton.styleFrom(
+            backgroundColor: isDark ? const Color(0xFF7C3AED).withOpacity(0.2) : null,
+            foregroundColor: isDark ? const Color(0xFFD8B4FE) : null,
+          ),
         ),
       ],
     );
@@ -465,12 +545,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildDropdowns() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       children: [
         Expanded(
           child: DropdownButtonFormField<String>(
             value: _category,
-            decoration: InputDecoration(labelText: "Phân loại", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            decoration: InputDecoration(
+              labelText: "Phân loại",
+              labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+              ),
+            ),
             items: const [
               DropdownMenuItem(value: "INFRASTRUCTURE", child: Text("Hạ tầng")),
               DropdownMenuItem(value: "ENVIRONMENT", child: Text("Môi trường")),
@@ -483,7 +574,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
         Expanded(
           child: DropdownButtonFormField<String>(
             value: _priority,
-            decoration: InputDecoration(labelText: "Ưu tiên", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            decoration: InputDecoration(
+              labelText: "Ưu tiên",
+              labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+              ),
+            ),
             items: const [
               DropdownMenuItem(value: "LOW", child: Text("Thấp")),
               DropdownMenuItem(value: "MEDIUM", child: Text("Trung bình")),
@@ -568,7 +669,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _loadReports();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Gửi báo cáo thành công!")));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: \$e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -581,6 +682,7 @@ class _ReportCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final statusColor = _getStatusColor(report.status);
     final time = DateTime.tryParse(report.updatedAt);
     final formattedTime = time == null ? "" : DateFormat("MMM dd, HH:mm").format(time.toLocal());
@@ -588,9 +690,14 @@ class _ReportCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
+        border: Border.all(
+          color: isDark ? Colors.grey.shade800 : const Color(0xFFF1F5F9),
+        ),
+        boxShadow: isDark 
+            ? null 
+            : [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -603,19 +710,31 @@ class _ReportCard extends StatelessWidget {
                 decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
                 child: Text(report.status.replaceAll("_", " "), style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold)),
               ),
-              Text(formattedTime, style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
+              Text(formattedTime, style: TextStyle(color: isDark ? Colors.grey.shade500 : Colors.grey.shade400, fontSize: 11)),
             ],
           ),
           const SizedBox(height: 12),
-          Text(report.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
+          Text(
+            report.title,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(report.description ?? "Không có mô tả", maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          Text(
+            report.description ?? "Không có mô tả",
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 13),
+          ),
           const SizedBox(height: 16),
           Row(
             children: [
-              Icon(Icons.location_on_outlined, size: 14, color: Colors.grey.shade400),
+              Icon(Icons.location_on_outlined, size: 14, color: isDark ? Colors.grey.shade500 : Colors.grey.shade400),
               const SizedBox(width: 4),
-              Expanded(child: Text(report.locationCode, style: TextStyle(color: Colors.grey.shade500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              Expanded(child: Text(report.locationCode, style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
               const SizedBox(width: 8),
               _buildPriorityBadge(report.priority),
             ],

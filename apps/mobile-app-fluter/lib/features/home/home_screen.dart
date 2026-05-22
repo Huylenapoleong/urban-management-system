@@ -23,7 +23,7 @@ class HomeScreen extends StatelessWidget {
     if (user == null) return const Scaffold();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
           _buildAppBar(context, user),
@@ -35,11 +35,11 @@ class HomeScreen extends StatelessWidget {
                 children: [
                   _buildWelcomeCard(context),
                   const SizedBox(height: 24),
-                  _buildSectionHeader("Quick Actions"),
+                  _buildSectionHeader(context, "Quick Actions"),
                   const SizedBox(height: 12),
                   _buildQuickActions(context),
                   const SizedBox(height: 24),
-                  _buildSectionHeader("System Status"),
+                  _buildSectionHeader(context, "System Status"),
                   const SizedBox(height: 12),
                   _buildStatusCard(context),
                 ],
@@ -55,7 +55,7 @@ class HomeScreen extends StatelessWidget {
             MaterialPageRoute(builder: (_) => const AiAssistantPage()),
           );
         },
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF7C3AED) : const Color(0xFF0F172A),
         icon: const Icon(Icons.auto_awesome, color: Colors.white),
         label: const Text('Trợ lý AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
@@ -67,20 +67,20 @@ class HomeScreen extends StatelessWidget {
     return SliverAppBar(
       floating: false,
       pinned: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F172A) : Colors.white,
       elevation: 0,
       leading: const AppLogoButton(),
-      title: const Text(
+      title: Text(
         "Urban Management",
         style: TextStyle(
           fontWeight: FontWeight.bold, 
           fontSize: 18, 
-          color: Color(0xFF1E1B4B)
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B)
         ),
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.people_outline, color: Color(0xFF1E1B4B)),
+          icon: Icon(Icons.people_outline, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
           onPressed: () {
             Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const ContactsScreen(),
@@ -88,7 +88,7 @@ class HomeScreen extends StatelessWidget {
           },
         ),
         IconButton(
-          icon: const Icon(Icons.notifications_outlined, color: Color(0xFF1E1B4B)),
+          icon: Icon(Icons.notifications_outlined, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
           onPressed: () {
             Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const NotificationsScreen(),
@@ -157,10 +157,10 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionHeader(String title) {
+  Widget _buildSectionHeader(BuildContext context, String title) {
     return Text(
       title,
-      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B)),
+      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B)),
     );
   }
 
@@ -244,31 +244,32 @@ class HomeScreen extends StatelessWidget {
           child: Icon(icon, color: iconColor, size: 28),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E1B4B))),
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B))),
       ],
     ),
   );
 }
 
   Widget _buildStatusCard(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardTheme.color ?? (isDark ? const Color(0xFF1E293B) : Colors.white),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? Colors.grey.shade800 : const Color(0xFFE2E8F0)),
       ),
       child: Row(
         children: [
-          Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 40),
+          const Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 40),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("All Systems Normal", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E1B4B))),
-                SizedBox(height: 4),
-                Text("No major issues reported in your area today.", style: TextStyle(fontSize: 13, color: Colors.grey)),
+                Text("All Systems Normal", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : const Color(0xFF1E1B4B))),
+                const SizedBox(height: 4),
+                Text("No major issues reported in your area today.", style: TextStyle(fontSize: 13, color: isDark ? Colors.grey.shade400 : Colors.grey)),
               ],
             ),
           ),

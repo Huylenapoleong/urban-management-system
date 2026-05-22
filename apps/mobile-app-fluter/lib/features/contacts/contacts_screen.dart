@@ -33,14 +33,14 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F172A) : Colors.white,
         elevation: 0,
         leading: const AppLogoButton(),
-        title: const Text("Bạn bè", style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 22)),
+        title: Text("Bạn bè", style: TextStyle(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 22)),
         centerTitle: false,
-        iconTheme: const IconThemeData(color: Color(0xFF1E1B4B)),
+        iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
         actions: [
           IconButton(
             icon: const Icon(Icons.group_add_outlined, size: 28),
@@ -56,7 +56,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         bottom: TabBar(
           controller: _tabController,
           labelColor: const Color(0xFF7C3AED),
-          unselectedLabelColor: const Color(0xFF64748B),
+          unselectedLabelColor: Theme.of(context).brightness == Brightness.dark ? Colors.white38 : const Color(0xFF64748B),
           indicatorColor: const Color(0xFF7C3AED),
           indicatorWeight: 3,
           indicatorSize: TabBarIndicatorSize.label,

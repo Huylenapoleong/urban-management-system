@@ -165,14 +165,18 @@ class _HomeShellState extends State<HomeShell> {
               decoration: BoxDecoration(
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.transparent
+                        : Colors.black.withOpacity(0.05),
                     blurRadius: 10,
                     offset: const Offset(0, -2),
                   ),
                 ],
               ),
               child: NavigationBar(
-                backgroundColor: Colors.white,
+                backgroundColor: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1E293B)
+                    : Colors.white,
                 indicatorColor: const Color(0xFF7C3AED).withOpacity(0.1),
                 selectedIndex: _index,
                 onDestinationSelected: (value) => setState(() => _index = value),

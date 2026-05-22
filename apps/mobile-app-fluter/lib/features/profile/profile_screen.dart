@@ -96,18 +96,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final displayUser = isMe ? (session.user ?? _profile) : _profile;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC), // Slate 50
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
-          _buildAppBar(),
+          _buildAppBar(context),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  _buildProfileCard(displayUser, isMe),
+                  _buildProfileCard(context, displayUser, isMe),
                   const SizedBox(height: 24),
-                  _buildActionList(displayUser, isMe),
+                  _buildActionList(context, displayUser, isMe),
                 ],
               ),
             ),
@@ -117,16 +117,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildAppBar() {
+  Widget _buildAppBar(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return SliverAppBar(
       pinned: true,
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
       elevation: 0,
       leading: const AppLogoButton(),
-      title: const Text(
+      title: Text(
         "Tài khoản",
         style: TextStyle(
-          color: Color(0xFF1E1B4B),
+          color: isDark ? Colors.white : const Color(0xFF1E1B4B),
           fontWeight: FontWeight.bold,
           fontSize: 20,
         ),
@@ -135,16 +136,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildProfileCard(UserProfile user, bool isMe) {
+  Widget _buildProfileCard(BuildContext context, UserProfile user, bool isMe) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
@@ -179,7 +181,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       decoration: BoxDecoration(
                         color: const Color(0xFF10B981),
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
+                        border: Border.all(color: isDark ? const Color(0xFF1E293B) : Colors.white, width: 2),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withOpacity(0.1),
@@ -197,13 +199,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 20),
           Text(
             user.fullName,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 4),
           Text(
             user.role == 'CITIZEN' ? "Cư dân" : (user.role == 'ADMIN' ? "Quản trị viên" : user.role),
-            style: const TextStyle(color: Color(0xFF64748B), fontSize: 15, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
           ),
           if (user.unit != null)
             Container(
@@ -223,17 +233,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildActionList(UserProfile user, bool isMe) {
+  Widget _buildActionList(BuildContext context, UserProfile user, bool isMe) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       children: [
         if (isMe) ...[
           _buildSectionTitle("Cá nhân"),
           _buildActionItem(
+            context,
             icon: Icons.person_outline,
             title: "Chỉnh sửa thông tin",
             subtitle: "Thay đổi Tên, SĐT, Email",
             iconColor: Colors.blue.shade600,
-            bgColor: Colors.blue.shade50,
+            bgColor: isDark ? Colors.blue.shade900.withOpacity(0.3) : Colors.blue.shade50,
             onTap: () {
               if (widget.userService == null) return;
               Navigator.of(context).push(MaterialPageRoute(
@@ -246,11 +258,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             },
           ),
           _buildActionItem(
+            context,
             icon: Icons.security_outlined,
             title: "Bảo mật tài khoản",
             subtitle: "Đổi mật khẩu, thiết bị",
             iconColor: Colors.orange.shade600,
-            bgColor: Colors.orange.shade50,
+            bgColor: isDark ? Colors.orange.shade900.withOpacity(0.3) : Colors.orange.shade50,
             onTap: () {
               final appServices = context.read<AppServices>();
               Navigator.of(context).push(MaterialPageRoute(
@@ -263,28 +276,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _buildSectionTitle("Hệ thống"),
         if (isMe)
           _buildActionItem(
+            context,
             icon: Icons.settings_outlined,
             title: "Cài đặt ứng dụng",
-            iconColor: Colors.grey.shade700,
-            bgColor: Colors.grey.shade200,
+            iconColor: isDark ? Colors.grey[400]! : Colors.grey.shade700,
+            bgColor: isDark ? Colors.grey.shade800.withOpacity(0.3) : Colors.grey.shade200,
             onTap: () {
               Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
             },
           ),
         _buildActionItem(
+          context,
           icon: Icons.help_outline,
           title: "Hỗ trợ & Trợ giúp",
           iconColor: Colors.teal.shade600,
-          bgColor: Colors.teal.shade50,
+          bgColor: isDark ? Colors.teal.shade900.withOpacity(0.3) : Colors.teal.shade50,
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpSupportScreen()));
           },
         ),
         _buildActionItem(
+          context,
           icon: Icons.info_outline,
           title: "Thông tin ứng dụng",
           iconColor: Colors.indigo.shade600,
-          bgColor: Colors.indigo.shade50,
+          bgColor: isDark ? Colors.indigo.shade900.withOpacity(0.3) : Colors.indigo.shade50,
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutAppScreen()));
           },
@@ -292,10 +308,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(height: 32),
         if (isMe && widget.onLogout != null)
           _buildActionItem(
+            context,
             icon: Icons.logout,
             title: "Đăng xuất",
             iconColor: Colors.red.shade600,
-            bgColor: Colors.red.shade50,
+            bgColor: isDark ? Colors.red.shade900.withOpacity(0.3) : Colors.red.shade50,
             showChevron: false,
             titleColor: Colors.red.shade600,
             onTap: _handleLogout,
@@ -322,7 +339,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildActionItem({
+  Widget _buildActionItem(
+    BuildContext context, {
     required IconData icon,
     required String title,
     String? subtitle,
@@ -332,14 +350,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     bool showChevron = true,
     Color? titleColor,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withOpacity(isDark ? 0.1 : 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -372,16 +391,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: titleColor ?? const Color(0xFF1E293B),
+                          color: titleColor ?? (isDark ? Colors.white : const Color(0xFF1E293B)),
                         ),
                       ),
                       if (subtitle != null) ...[
                         const SizedBox(height: 4),
                         Text(
                           subtitle,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            color: Color(0xFF64748B),
+                            color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                           ),
                         ),
                       ],
@@ -389,7 +408,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 if (showChevron)
-                  const Icon(Icons.chevron_right, color: Color(0xFFCBD5E1), size: 24),
+                  Icon(
+                    Icons.chevron_right,
+                    color: isDark ? Colors.grey[600] : const Color(0xFFCBD5E1),
+                    size: 24,
+                  ),
               ],
             ),
           ),

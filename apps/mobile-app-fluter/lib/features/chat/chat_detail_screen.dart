@@ -27,6 +27,7 @@ import "conversation_info_screen.dart";
 import "call_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "../../app/shared/chat/widgets/gif_picker_sheet.dart";
+import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
 
 class ChatDetailScreen extends StatefulWidget {
@@ -626,13 +627,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _showMessageActions(MessageItem message) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: SafeArea(
           child: Column(
@@ -643,14 +645,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: isDark ? const Color(0xFF334155) : Colors.grey[300],
                       borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 16),
               _buildReactionRow(message),
-              const Divider(),
+              Divider(color: isDark ? const Color(0xFF334155) : null),
               ListTile(
                 leading: const Icon(Icons.reply, color: Color(0xFF7C3AED)),
-                title: const Text("Trả lời"),
+                title: Text("Trả lời", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   setState(() => _replyingTo = message);
@@ -658,7 +660,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.copy, color: Color(0xFF7C3AED)),
-                title: const Text("Sao chép"),
+                title: Text("Sao chép", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   Clipboard.setData(ClipboardData(text: message.contentText));
@@ -669,7 +671,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               ListTile(
                 leading:
                     const Icon(Icons.forward_rounded, color: Color(0xFF7C3AED)),
-                title: const Text("Chuyển tiếp"),
+                title: Text("Chuyển tiếp", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   _showForwardDialog(message);
@@ -724,15 +726,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _showForwardDialog(MessageItem message) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
         height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
         child: Column(
           children: [
             const SizedBox(height: 12),
@@ -740,13 +743,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: isDark ? const Color(0xFF334155) : Colors.grey[300],
                     borderRadius: BorderRadius.circular(2))),
-            const Padding(
-                padding: EdgeInsets.all(16),
+            Padding(
+                padding: const EdgeInsets.all(16),
                 child: Text("Chuyển tiếp đến",
                     style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87))),
             Expanded(
               child: FutureBuilder<PaginatedResult<ConversationSummary>>(
                 future: widget.conversationService.listConversations(limit: 50),
@@ -772,7 +775,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                     ? c.groupAvatarUrl!
                                     : (c.peerAvatarUrl ?? c.avatarUrl)!)
                                 : null),
-                        title: Text(c.title),
+                        title: Text(c.title, style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                         onTap: () {
                           Navigator.pop(context);
                           _forwardMessage(message, c.conversationId);
@@ -849,8 +852,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       body: Column(
         children: [
           _buildHeader(),
@@ -872,6 +876,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildActiveCallBanner() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return ValueListenableBuilder<CallState>(
       valueListenable: widget.webRTCService.callState,
       builder: (context, state, _) {
@@ -880,7 +885,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             widget.webRTCService.currentConversationId ==
                 widget.conversation.conversationId) {
           return Container(
-            color: Colors.green.withOpacity(0.1),
+            color: Colors.green.withValues(alpha: 0.15),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
@@ -897,9 +902,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         style: const TextStyle(
                             fontWeight: FontWeight.bold, color: Colors.green),
                       ),
-                      const Text('Nhấn để xem hoặc tham gia',
+                      Text('Nhấn để xem hoặc tham gia',
                           style:
-                              TextStyle(fontSize: 12, color: Colors.black54)),
+                              TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.black54)),
                     ],
                   ),
                 ),
@@ -936,6 +941,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildHeader() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final peerId = widget.conversation.getPeerId(widget.currentUser?.id);
     final resolvedTitle = (!widget.conversation.isGroup && peerId != null && _aliases.containsKey(peerId))
         ? _aliases[peerId]!
@@ -950,10 +956,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           right: 8,
           bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: isDark ? Colors.transparent : Colors.black.withOpacity(0.05),
               blurRadius: 10,
               offset: const Offset(0, 2))
         ],
@@ -961,7 +967,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       child: Row(
         children: [
           IconButton(
-              icon: const Icon(Icons.arrow_back, color: Color(0xFF1E1B4B)),
+              icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
               onPressed: () => Navigator.pop(context)),
           UserAvatar(
             userId: widget.conversation.isGroup ? null : widget.conversation.getPeerId(widget.currentUser?.id),
@@ -1002,10 +1008,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(resolvedTitle,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E1B4B)),
+                          color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                   _buildStatusText(),
@@ -1058,11 +1064,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildReplyPreview() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Color(0xFFF1F5F9)))),
+      decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          border: Border(top: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)))),
       child: Row(
         children: [
           Container(
@@ -1085,12 +1092,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 Text(_replyingTo!.contentText,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                    style: TextStyle(fontSize: 14, color: isDark ? Colors.grey[300] : Colors.grey[600])),
               ],
             ),
           ),
           IconButton(
-              icon: const Icon(Icons.close, size: 20),
+              icon: Icon(Icons.close, size: 20, color: isDark ? Colors.white : Colors.black),
               onPressed: () => setState(() => _replyingTo = null)),
         ],
       ),
@@ -1390,43 +1397,45 @@ class _ChatComposerState extends State<ChatComposer> {
   }
 
   void _showPicker() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
                 leading: const Icon(Icons.camera_alt, color: Colors.blue),
-                title: const Text("Chụp ảnh"),
+                title: Text("Chụp ảnh", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.camera);
                 }),
             ListTile(
                 leading: const Icon(Icons.videocam, color: Colors.red),
-                title: const Text("Quay Video"),
+                title: Text("Quay Video", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   _pickVideo(ImageSource.camera);
                 }),
             ListTile(
                 leading: const Icon(Icons.image, color: Colors.purple),
-                title: const Text("Thư viện ảnh/Video"),
+                title: Text("Thư viện ảnh/Video", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.gallery);
                 }),
             ListTile(
                 leading: const Icon(Icons.attach_file, color: Colors.orange),
-                title: const Text("Tệp tin"),
+                title: Text("Tệp tin", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   _pickFile();
                 }),
             ListTile(
                 leading: const Icon(Icons.location_on, color: Colors.green),
-                title: const Text("Vị trí"),
+                title: Text("Vị trí", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(context);
                   widget.onLocationRequest();
@@ -1455,18 +1464,42 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  void _showStickerPicker() {
+    StickerPickerSheet.show(
+      context,
+      onStickerSelected: (stickerUrl) {
+        final name = stickerUrl.split("/").last;
+        widget.onSend(
+          text: "",
+          attachment: _PendingAttachment(
+            path: stickerUrl,
+            name: name,
+            type: "IMAGE",
+            mimeType: "image/gif",
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return SafeArea(
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-        decoration: BoxDecoration(color: Colors.white, boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -4))
-        ]),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          boxShadow: [
+            BoxShadow(
+                color: isDark
+                    ? Colors.black.withOpacity(0.2)
+                    : Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, -4))
+          ],
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1475,7 +1508,7 @@ class _ChatComposerState extends State<ChatComposer> {
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
                     borderRadius: BorderRadius.circular(12)),
                 child: Row(
                   children: [
@@ -1487,9 +1520,10 @@ class _ChatComposerState extends State<ChatComposer> {
                     const SizedBox(width: 8),
                     Expanded(
                         child: Text(_attachment!.name,
+                            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                             maxLines: 1, overflow: TextOverflow.ellipsis)),
                     IconButton(
-                        icon: const Icon(Icons.close),
+                        icon: Icon(Icons.close, color: isDark ? Colors.white70 : Colors.black54),
                         onPressed: () => setState(() => _attachment = null)),
                   ],
                 ),
@@ -1505,6 +1539,10 @@ class _ChatComposerState extends State<ChatComposer> {
                       icon: const Icon(Icons.gif_box_outlined,
                           color: Color(0xFF7C3AED), size: 28),
                       onPressed: widget.sending ? null : _showGifPicker),
+                  IconButton(
+                      icon: const Icon(Icons.sticky_note_2_outlined,
+                          color: Color(0xFF7C3AED), size: 28),
+                      onPressed: widget.sending ? null : _showStickerPicker),
                 ],
                 const SizedBox(width: 4),
                 Expanded(
@@ -1539,20 +1577,31 @@ class _ChatComposerState extends State<ChatComposer> {
                         )
                       : Container(
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
+                            color: isDark
+                                ? const Color(0xFF0F172A)
+                                : const Color(0xFFF1F5F9),
                             borderRadius: BorderRadius.circular(28),
-                            border: Border.all(color: Colors.grey.shade200),
+                            border: Border.all(
+                                color: isDark
+                                    ? Colors.grey.shade800
+                                    : Colors.grey.shade200),
                           ),
                           child: TextField(
                             controller: _textController,
                             maxLines: 5,
                             minLines: 1,
-                            style: const TextStyle(fontSize: 16),
+                            style: TextStyle(
+                                fontSize: 16,
+                                color: isDark ? Colors.white : Colors.black87),
                             onChanged: (_) => setState(() {}),
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               hintText: "Nhắn tin...",
+                              hintStyle: TextStyle(
+                                  color: isDark
+                                      ? Colors.grey[500]
+                                      : Colors.grey[600]),
                               border: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(
+                              contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 20, vertical: 12),
                             ),
                           ),
@@ -1635,22 +1684,23 @@ class ChatMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (message.type == "SYSTEM") {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
       return Container(
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
             message.contentText,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: Color(0xFF64748B),
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
             ),
           ),
         ),
@@ -1687,7 +1737,11 @@ class ChatMessageBubble extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: isMine ? const Color(0xFF7C3AED) : Colors.white,
+          color: isMine
+              ? const Color(0xFF7C3AED)
+              : (Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF1E293B)
+                  : Colors.white),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(20),
             topRight: const Radius.circular(20),
@@ -1712,7 +1766,7 @@ class ChatMessageBubble extends StatelessWidget {
                       fontStyle: FontStyle.italic,
                       color: isMine ? Colors.white70 : Colors.grey))
             else ...[
-              if (message.replyTo != null) _buildReplyHeader(),
+              if (message.replyTo != null) _buildReplyHeader(context),
               if (message.contentText.isNotEmpty) _buildContentBody(context),
               if (message.resolvedAttachmentUrl != null)
                 Padding(
@@ -1729,7 +1783,7 @@ class ChatMessageBubble extends StatelessWidget {
                       ? Colors.white.withOpacity(0.7)
                       : Colors.grey[500]),
             ),
-            if (reactions.isNotEmpty) _buildReactionsDisplay(isMine),
+            if (reactions.isNotEmpty) _buildReactionsDisplay(context, isMine),
           ],
         ),
       ),
@@ -1752,7 +1806,11 @@ class ChatMessageBubble extends StatelessWidget {
     return Text(
       text,
       style: TextStyle(
-        color: isMine ? Colors.white : const Color(0xFF1E1B4B),
+        color: isMine
+            ? Colors.white
+            : (Theme.of(context).brightness == Brightness.dark
+                ? Colors.white
+                : const Color(0xFF1E1B4B)),
         fontSize: 15,
         height: 1.4,
       ),
@@ -1779,11 +1837,18 @@ class ChatMessageBubble extends StatelessWidget {
         margin: const EdgeInsets.only(top: 4, bottom: 4),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color:
-              isMine ? Colors.white.withOpacity(0.15) : const Color(0xFFF1F5F9),
+          color: isMine
+              ? Colors.white.withOpacity(0.15)
+              : (Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF1E293B)
+                  : const Color(0xFFF1F5F9)),
           borderRadius: BorderRadius.circular(12),
-          border:
-              Border.all(color: isMine ? Colors.white24 : Colors.grey.shade200),
+          border: Border.all(
+              color: isMine
+                  ? Colors.white24
+                  : (Theme.of(context).brightness == Brightness.dark
+                      ? Colors.grey.shade800
+                      : Colors.grey.shade200)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1798,7 +1863,11 @@ class ChatMessageBubble extends StatelessWidget {
                   "Vị trí đã chia sẻ",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: isMine ? Colors.white : const Color(0xFF1E1B4B),
+                    color: isMine
+                        ? Colors.white
+                        : (Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white
+                            : const Color(0xFF1E1B4B)),
                     fontSize: 14,
                   ),
                 ),
@@ -1808,7 +1877,11 @@ class ChatMessageBubble extends StatelessWidget {
             Text(
               "Nhấn để xem trên bản đồ",
               style: TextStyle(
-                color: isMine ? Colors.white70 : Colors.grey.shade600,
+                color: isMine
+                    ? Colors.white70
+                    : (Theme.of(context).brightness == Brightness.dark
+                        ? Colors.grey[400]
+                        : Colors.grey.shade600),
                 fontSize: 12,
               ),
             ),
@@ -1849,7 +1922,11 @@ class ChatMessageBubble extends StatelessWidget {
             child: Text(
               cleanText,
               style: TextStyle(
-                  color: isMine ? Colors.white : const Color(0xFF1E1B4B),
+                  color: isMine
+                      ? Colors.white
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : const Color(0xFF1E1B4B)),
                   fontSize: 15),
             ),
           ),
@@ -1870,10 +1947,16 @@ class ChatMessageBubble extends StatelessWidget {
             decoration: BoxDecoration(
               color: isMine
                   ? Colors.white.withOpacity(0.15)
-                  : const Color(0xFFF1F5F9),
+                  : (Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF1E293B)
+                      : const Color(0xFFF1F5F9)),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                  color: isMine ? Colors.white24 : Colors.grey.shade200),
+                  color: isMine
+                      ? Colors.white24
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade800
+                          : Colors.grey.shade200)),
             ),
             child: Row(
               children: [
@@ -1888,8 +1971,11 @@ class ChatMessageBubble extends StatelessWidget {
                         "Liên kết",
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color:
-                              isMine ? Colors.white : const Color(0xFF1E1B4B),
+                          color: isMine
+                              ? Colors.white
+                              : (Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.white
+                                  : const Color(0xFF1E1B4B)),
                         ),
                       ),
                       Text(
@@ -1897,7 +1983,11 @@ class ChatMessageBubble extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: isMine ? Colors.white70 : Colors.grey.shade600,
+                          color: isMine
+                              ? Colors.white70
+                              : (Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.grey[400]
+                                  : Colors.grey.shade600),
                           fontSize: 12,
                         ),
                       ),
@@ -1912,7 +2002,8 @@ class ChatMessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildReactionsDisplay(bool isMine) {
+  Widget _buildReactionsDisplay(BuildContext context, bool isMine) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(top: 4),
       child: Wrap(
@@ -1924,32 +2015,49 @@ class ChatMessageBubble extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: isMine
                         ? Colors.white.withOpacity(0.2)
-                        : Colors.grey[100],
+                        : (isDark
+                            ? const Color(0xFF334155)
+                            : Colors.grey[100]),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(emoji, style: const TextStyle(fontSize: 12)),
+                  child: Text(emoji,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white : Colors.black87)),
                 ))
             .toList(),
       ),
     );
   }
 
-  Widget _buildReplyHeader() {
+  Widget _buildReplyHeader(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: isMine ? Colors.white12 : Colors.grey[100],
+        color: isMine
+            ? Colors.white12
+            : (isDark
+                ? const Color(0xFF334155)
+                : Colors.grey[100]),
         borderRadius: BorderRadius.circular(8),
         border: Border(
             left: BorderSide(
                 color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
                 width: 3)),
       ),
-      child: const Text("Đang trả lời...",
+      child: Text("Đang trả lời...",
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+          style: TextStyle(
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
+              color: isMine
+                  ? Colors.white70
+                  : (isDark
+                      ? Colors.grey[300]
+                      : Colors.grey[700]))),
     );
   }
 
@@ -2005,6 +2113,7 @@ class _AttachmentView extends StatelessWidget {
       return _VoicePlayer(url: url, isMine: isMine);
     }
     if (message.isVideo || message.isDocument) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
       return InkWell(
         onTap: () async {
           final uri = Uri.tryParse(url);
@@ -2017,7 +2126,11 @@ class _AttachmentView extends StatelessWidget {
           height: message.isVideo ? 150 : null,
           padding: message.isVideo ? null : const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: message.isVideo ? Colors.black87 : (isMine ? Colors.white24 : Colors.grey[100]),
+            color: message.isVideo
+                ? Colors.black87
+                : (isMine
+                    ? Colors.white24
+                    : (isDark ? const Color(0xFF334155) : Colors.grey[100])),
             borderRadius: BorderRadius.circular(10),
           ),
           child: message.isVideo
@@ -2027,9 +2140,11 @@ class _AttachmentView extends StatelessWidget {
               : Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.insert_drive_file,
-                      color: Colors.white,
+                      color: isMine
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : Colors.black54),
                     ),
                     const SizedBox(width: 8),
                     Flexible(
@@ -2037,7 +2152,10 @@ class _AttachmentView extends StatelessWidget {
                         message.attachmentName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: isMine ? Colors.white : Colors.black87),
+                        style: TextStyle(
+                            color: isMine
+                                ? Colors.white
+                                : (isDark ? Colors.white70 : Colors.black87)),
                       ),
                     ),
                   ],
@@ -2089,11 +2207,14 @@ class _VoicePlayerState extends State<_VoicePlayer> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: 220,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: widget.isMine ? Colors.white.withOpacity(0.2) : const Color(0xFFF1F5F9),
+        color: widget.isMine
+            ? Colors.white.withOpacity(0.2)
+            : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -2122,7 +2243,9 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                         ? _duration.inMilliseconds.toDouble() 
                         : 1.0,
                     activeColor: widget.isMine ? Colors.white : const Color(0xFF7C3AED),
-                    inactiveColor: widget.isMine ? Colors.white38 : Colors.grey[300],
+                    inactiveColor: widget.isMine
+                        ? Colors.white38
+                        : (isDark ? Colors.grey[600] : Colors.grey[300]),
                     onChanged: (val) {
                       _audioPlayer.seek(Duration(milliseconds: val.toInt()));
                     },
@@ -2137,13 +2260,17 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                         _formatDuration(_position),
                         style: TextStyle(
                             fontSize: 10,
-                            color: widget.isMine ? Colors.white70 : Colors.grey),
+                            color: widget.isMine
+                                ? Colors.white70
+                                : (isDark ? Colors.grey[400] : Colors.grey)),
                       ),
                       Text(
                         _formatDuration(_duration),
                         style: TextStyle(
                             fontSize: 10,
-                            color: widget.isMine ? Colors.white70 : Colors.grey),
+                            color: widget.isMine
+                                ? Colors.white70
+                                : (isDark ? Colors.grey[400] : Colors.grey)),
                       ),
                     ],
                   ),

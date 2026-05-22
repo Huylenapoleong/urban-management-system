@@ -57,7 +57,7 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
         Padding(
           padding: const EdgeInsets.all(16),
           child: Container(
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+            decoration: BoxDecoration(color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white), borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.05), blurRadius: 10)]),
             child: TextField(
               onChanged: (v) { _searchQuery = v; _loadUsers(); },
               decoration: const InputDecoration(hintText: "Tìm kiếm cư dân...", prefixIcon: Icon(Icons.search, color: Color(0xFF7C3AED)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
@@ -67,7 +67,7 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
         if (!_isSyncing) Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Material(
-            color: Colors.white,
+            color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white),
             borderRadius: BorderRadius.circular(12),
             child: InkWell(
               onTap: _syncContacts,
@@ -78,8 +78,8 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
                   children: [
                     const Icon(Icons.contact_phone_outlined, color: Color(0xFF7C3AED)),
                     const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text("Tìm bạn từ danh bạ máy", style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF1E1B4B))),
+                    Expanded(
+                      child: Text("Tìm bạn từ danh bạ máy", style: TextStyle(fontWeight: FontWeight.w600, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B))),
                     ),
                     Icon(Icons.chevron_right, color: Colors.grey[400]),
                   ],
@@ -123,7 +123,7 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5)]),
+      decoration: BoxDecoration(color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white), borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.02), blurRadius: 5)]),
       child: Row(
         children: [
           UserAvatar(
@@ -140,7 +140,7 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
               children: [
                 Row(
                   children: [
-                    Text(user.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E1B4B))),
+                    Text(user.fullName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B))),
                     if (isSuggested) Container(
                       margin: const EdgeInsets.only(left: 6),
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

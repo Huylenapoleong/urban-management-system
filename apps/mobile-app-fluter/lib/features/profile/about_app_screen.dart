@@ -5,12 +5,20 @@ class AboutAppScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
       appBar: AppBar(
-        title: const Text("Thông tin ứng dụng", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF0F172A),
+        title: Text(
+          "Thông tin ứng dụng",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        foregroundColor: isDark ? Colors.white : const Color(0xFF0F172A),
         elevation: 0,
         centerTitle: true,
       ),
@@ -29,24 +37,38 @@ class AboutAppScreen extends StatelessWidget {
               child: const Icon(Icons.location_city, size: 50, color: Color(0xFF10B981)),
             ),
             const SizedBox(height: 24),
-            const Text(
+            Text(
               "Urban Management",
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
             ),
             const SizedBox(height: 8),
-            const Text("Phiên bản 1.0.0", style: TextStyle(color: Color(0xFF64748B), fontSize: 15)),
+            Text(
+              "Phiên bản 1.0.0",
+              style: TextStyle(color: isDark ? Colors.grey.shade400 : const Color(0xFF64748B), fontSize: 15),
+            ),
             const SizedBox(height: 48),
-            const Text(
+            Text(
               "Ứng dụng quản lý cư dân và khu đô thị thông minh, mang đến trải nghiệm sống tiện nghi, an toàn và kết nối cho mọi người.",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Color(0xFF475569), fontSize: 15, height: 1.6),
+              style: TextStyle(
+                color: isDark ? Colors.grey.shade300 : const Color(0xFF475569),
+                fontSize: 15,
+                height: 1.6,
+              ),
             ),
             const SizedBox(height: 48),
             _buildLinkItem(context, "Điều khoản sử dụng"),
             _buildLinkItem(context, "Chính sách bảo mật"),
             _buildLinkItem(context, "Giấy phép nguồn mở"),
             const SizedBox(height: 40),
-            const Text("© 2026 Urban Management. All rights reserved.", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+            Text(
+              "© 2026 Urban Management. All rights reserved.",
+              style: TextStyle(color: isDark ? Colors.grey.shade500 : const Color(0xFF94A3B8), fontSize: 13),
+            ),
           ],
         ),
       ),
@@ -54,6 +76,7 @@ class AboutAppScreen extends StatelessWidget {
   }
 
   Widget _buildLinkItem(BuildContext context, String title) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
       onTap: () {
         // Future: navigate to webview or sub screen
@@ -63,7 +86,14 @@ class AboutAppScreen extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
             const Icon(Icons.chevron_right, color: Colors.grey),
           ],
         ),

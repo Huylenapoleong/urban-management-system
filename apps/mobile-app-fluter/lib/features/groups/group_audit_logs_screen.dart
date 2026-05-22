@@ -65,8 +65,22 @@ class _GroupAuditLogsScreenState extends State<GroupAuditLogsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: Text('Nhật ký - ${widget.groupName}')),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Text(
+          'Nhật ký - ${widget.groupName}',
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        elevation: 0,
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
+      ),
       body: RefreshIndicator(
         onRefresh: _loadLogs,
         child: Skeletonizer(
@@ -74,7 +88,7 @@ class _GroupAuditLogsScreenState extends State<GroupAuditLogsScreen> {
           child: _isLoading
               ? ListView.builder(itemCount: 8, itemBuilder: (_, __) => const ListTile(leading: CircleAvatar(radius: 16), title: Text('Loading...'), subtitle: Text('...')))
               : _logs.isEmpty
-                  ? const Center(child: Text('Chưa có hoạt động nào', style: TextStyle(color: Colors.grey)))
+                  ? Center(child: Text('Chưa có hoạt động nào', style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey)))
                   : ListView.builder(
                       padding: const EdgeInsets.all(16),
                       itemCount: _logs.length,
@@ -89,9 +103,9 @@ class _GroupAuditLogsScreenState extends State<GroupAuditLogsScreen> {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: isDark ? const Color(0xFF1E293B) : Colors.white,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFF1F5F9)),
+                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
                           ),
                           child: ListTile(
                             leading: CircleAvatar(
@@ -99,9 +113,14 @@ class _GroupAuditLogsScreenState extends State<GroupAuditLogsScreen> {
                               backgroundColor: _eventColor(action).withOpacity(0.15),
                               child: Icon(_eventIcon(action), size: 20, color: _eventColor(action)),
                             ),
-                            title: Text(summary.isNotEmpty ? summary : action,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                            subtitle: Text(timeStr, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                            title: Text(
+                              summary.isNotEmpty ? summary : action,
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87),
+                            ),
+                            subtitle: Text(
+                              timeStr,
+                              style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF94A3B8)),
+                            ),
                           ),
                         );
                       },

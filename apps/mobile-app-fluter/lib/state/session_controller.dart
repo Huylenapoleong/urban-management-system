@@ -1,4 +1,5 @@
 import "package:flutter/foundation.dart";
+import "package:shared_preferences/shared_preferences.dart";
 
 import "../models/user_profile.dart";
 import "../services/app_services.dart";
@@ -13,18 +14,38 @@ class SessionController extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
   bool _isInitialized = false;
+  bool _isDarkMode = false;
 
   UserProfile? get user => _user;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get isInitialized => _isInitialized;
   bool get isAuthenticated => _user != null;
+  bool get isDarkMode => _isDarkMode;
+
+  Future<void> toggleDarkMode(bool value) async {
+    _isDarkMode = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool("is_dark_mode", value);
+    } catch (e) {
+      debugPrint("Failed to save dark mode pref: $e");
+    }
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) {
       return;
     }
     _setLoading(true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _isDarkMode = prefs.getBool("is_dark_mode") ?? false;
+    } catch (e) {
+      debugPrint("Failed to load dark mode pref: $e");
+    }
 
     try {
       _user = await _appServices.authService.getMe();

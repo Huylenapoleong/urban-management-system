@@ -104,12 +104,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text("Chỉnh sửa thông tin", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF0F172A),
+        title: Text(
+          "Chỉnh sửa thông tin",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        foregroundColor: isDark ? Colors.white : const Color(0xFF0F172A),
         elevation: 0,
         centerTitle: true,
       ),
@@ -118,9 +126,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               "Cập nhật thông tin liên hệ và cá nhân của bạn.",
-              style: TextStyle(color: Color(0xFF64748B), fontSize: 14),
+              style: TextStyle(color: isDark ? Colors.grey.shade400 : const Color(0xFF64748B), fontSize: 14),
             ),
             const SizedBox(height: 32),
             _buildTextField(
@@ -179,6 +187,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required IconData icon,
     TextInputType? keyboardType,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -187,27 +196,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           style: GoogleFonts.inter(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: const Color(0xFF1E293B),
+            color: isDark ? Colors.white : const Color(0xFF1E293B),
           ),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
           keyboardType: keyboardType,
-          style: GoogleFonts.inter(fontSize: 15),
+          style: GoogleFonts.inter(
+            fontSize: 15,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: GoogleFonts.inter(color: Colors.blueGrey.shade300, fontSize: 15),
-            prefixIcon: Icon(icon, color: Colors.blueGrey.shade400, size: 22),
+            hintStyle: GoogleFonts.inter(color: isDark ? Colors.grey.shade500 : Colors.blueGrey.shade300, fontSize: 15),
+            prefixIcon: Icon(icon, color: isDark ? Colors.grey.shade400 : Colors.blueGrey.shade400, size: 22),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.blueGrey.shade100, width: 1),
+              borderSide: BorderSide(color: isDark ? Colors.grey.shade800 : Colors.blueGrey.shade100, width: 1),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),

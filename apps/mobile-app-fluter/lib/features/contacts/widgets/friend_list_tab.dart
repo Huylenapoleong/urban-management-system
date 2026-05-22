@@ -71,9 +71,9 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
           padding: const EdgeInsets.all(16),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white),
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+              boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
             ),
             child: TextField(
               onChanged: (v) => setState(() => _searchQuery = v),
@@ -114,9 +114,9 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2))],
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -134,12 +134,12 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
               right: 2,
               child: Container(
                 width: 12, height: 12,
-                decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle, border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? (Theme.of(context).cardTheme.color ?? const Color(0xFF1E293B)) : Colors.white, width: 2)),
               ),
             ),
           ],
         ),
-        title: Text(friend.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E1B4B))),
+        title: Text(friend.fullName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B))),
         subtitle: Text(friend.email ?? "Citizen", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
         trailing: IconButton(
           icon: const Icon(Icons.more_horiz, color: Color(0xFF64748B)),
@@ -183,13 +183,13 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        decoration: BoxDecoration(color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
         child: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 12),
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Theme.of(context).brightness == Brightness.dark ? Colors.grey.shade700 : Colors.grey[300], borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 16),
               ListTile(
                 leading: const Icon(Icons.chat_bubble_outline, color: Color(0xFF7C3AED)),

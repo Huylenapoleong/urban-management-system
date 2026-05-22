@@ -72,7 +72,6 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
-  Gift,
   History,
   ImagePlus,
   Info,

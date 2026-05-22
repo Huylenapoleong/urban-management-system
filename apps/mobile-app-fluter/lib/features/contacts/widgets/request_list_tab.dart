@@ -56,7 +56,7 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
           padding: const EdgeInsets.all(16),
           child: Container(
             padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)),
             child: Row(
               children: [
                 _buildToggleOption("Đã nhận", !_showSent, () => setState(() => _showSent = false)),
@@ -98,9 +98,9 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
+            color: isSelected ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F172A) : Colors.white) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: isSelected ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))] : [],
+            boxShadow: isSelected ? [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))] : [],
           ),
           child: Center(
             child: Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, color: isSelected ? const Color(0xFF7C3AED) : const Color(0xFF64748B))),
@@ -114,7 +114,7 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5)]),
+      decoration: BoxDecoration(color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white), borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.02), blurRadius: 5)]),
       child: Row(
         children: [
           UserAvatar(
@@ -129,7 +129,7 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(user.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E1B4B))),
+                Text(user.fullName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B))),
                 Text(isIncoming ? "Muốn kết bạn với bạn" : "Chờ phản hồi...", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
               ],
             ),

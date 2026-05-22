@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "package:intl/intl.dart";
 import "package:infinite_scroll_pagination/infinite_scroll_pagination.dart";
 import "package:flutter_slidable/flutter_slidable.dart";
+import "package:skeletonizer/skeletonizer.dart";
 
 import "../../models/conversation_summary.dart";
 import "../../models/message_item.dart";
@@ -392,7 +393,7 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: RefreshIndicator(
         onRefresh: () async {
           _pagingController.refresh();
@@ -404,12 +405,18 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
             SliverAppBar(
             floating: true,
             pinned: false,
-            backgroundColor: Colors.white,
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             elevation: 0,
             leading: const AppLogoButton(),
-            title: const Text(
+            title: Text(
               "Tin nhắn",
-              style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 24),
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : const Color(0xFF1E1B4B),
+                fontWeight: FontWeight.bold,
+                fontSize: 24,
+              ),
             ),
             actions: [
               IconButton(
@@ -426,16 +433,25 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF1E293B)
+                      : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: TextField(
                   controller: _searchController,
                   onSubmitted: (_) => _pagingController.refresh(),
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white
+                        : Colors.black,
+                  ),
                   decoration: const InputDecoration(
                     hintText: "Tìm kiếm hội thoại...",
                     prefixIcon: Icon(Icons.search, color: Color(0xFF64748B)),
                     border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
                     contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   ),
                 ),
@@ -444,7 +460,13 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
           ),
           PagedSliverList<String?, ConversationSummary>.separated(
             pagingController: _pagingController,
-            separatorBuilder: (_, __) => const Divider(height: 1, indent: 84, color: Color(0xFFF1F5F9)),
+            separatorBuilder: (context, __) => Divider(
+              height: 1,
+              indent: 84,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey.shade800
+                  : const Color(0xFFF1F5F9),
+            ),
             builderDelegate: PagedChildBuilderDelegate<ConversationSummary>(
               itemBuilder: (context, conversation, index) => Slidable(
                 key: ValueKey(conversation.conversationId),
@@ -493,7 +515,72 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
                   },
                 ),
               ),
-              firstPageProgressIndicatorBuilder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF7C3AED))),
+              firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
+                enabled: true,
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: 8,
+                  separatorBuilder: (context, __) => Divider(
+                    height: 1,
+                    indent: 84,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.grey.shade800
+                        : const Color(0xFFF1F5F9),
+                  ),
+                  itemBuilder: (context, index) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          const CircleAvatar(
+                            radius: 28,
+                            backgroundColor: Colors.grey,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Container(
+                                      width: 120,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 40,
+                                      height: 12,
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Container(
+                                  width: double.infinity,
+                                  height: 14,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
               noItemsFoundIndicatorBuilder: (_) => Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -570,7 +657,9 @@ class _ConversationCard extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: hasUnread ? FontWeight.bold : FontWeight.w600,
-                                  color: const Color(0xFF1E1B4B),
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.white
+                                      : const Color(0xFF1E1B4B),
                                 ),
                               ),
                             ),
@@ -582,13 +671,13 @@ class _ConversationCard extends StatelessWidget {
                         timeStr,
                         style: TextStyle(
                           fontSize: 12,
-                          color: hasUnread ? const Color(0xFF7C3AED) : Colors.grey[500],
+                          color: hasUnread ? Theme.of(context).primaryColor : Colors.grey[500],
                           fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
                         ),
                       ),
                     ],
                   ),
-                  _buildPresenceStatus(),
+                  _buildPresenceStatus(context),
                   const SizedBox(height: 2),
                   Row(
                     children: [
@@ -599,7 +688,11 @@ class _ConversationCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 14,
-                            color: hasUnread ? const Color(0xFF1E1B4B) : Colors.grey[600],
+                            color: hasUnread
+                                ? (Theme.of(context).brightness == Brightness.dark
+                                    ? Colors.white
+                                    : const Color(0xFF1E1B4B))
+                                : Colors.grey[600],
                             fontWeight: hasUnread ? FontWeight.w500 : FontWeight.normal,
                           ),
                         ),
@@ -614,7 +707,7 @@ class _ConversationCard extends StatelessWidget {
                           margin: const EdgeInsets.only(left: 8),
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF7C3AED),
+                            color: Theme.of(context).primaryColor,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
@@ -633,7 +726,7 @@ class _ConversationCard extends StatelessWidget {
     );
   }
 
-  Widget _buildPresenceStatus() {
+  Widget _buildPresenceStatus(BuildContext context) {
     if (conversation.isGroup) return const SizedBox.shrink();
     final peerId = conversation.getPeerId(currentUser?.id);
     if (peerId == null) return const SizedBox.shrink();

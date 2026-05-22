@@ -225,11 +225,13 @@ class _AvatarBottomSheetState extends State<AvatarBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -242,17 +244,17 @@ class _AvatarBottomSheetState extends State<AvatarBottomSheet> {
               height: 4,
               margin: const EdgeInsets.only(bottom: 24),
               decoration: BoxDecoration(
-                color: Colors.grey.shade300,
+                color: isDark ? const Color(0xFF475569) : Colors.grey.shade300,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
-          const Text(
+          Text(
             "Cập nhật ảnh đại diện",
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1E1B4B),
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
             ),
             textAlign: TextAlign.center,
           ),
@@ -267,35 +269,41 @@ class _AvatarBottomSheetState extends State<AvatarBottomSheet> {
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: isDark ? Colors.blue.withOpacity(0.15) : Colors.blue.shade50,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.photo_library, color: Colors.blue.shade600),
+                child: Icon(Icons.photo_library, color: isDark ? Colors.blue.shade300 : Colors.blue.shade600),
               ),
-              title: const Text("Chọn từ thư viện", style: TextStyle(fontWeight: FontWeight.w500)),
+              title: Text(
+                "Chọn từ thư viện",
+                style: TextStyle(fontWeight: FontWeight.w500, color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () => _pickAndUploadImage(ImageSource.gallery),
             ),
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.purple.shade50,
+                  color: isDark ? Colors.purple.withOpacity(0.15) : Colors.purple.shade50,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.camera_alt, color: Colors.purple.shade600),
+                child: Icon(Icons.camera_alt, color: isDark ? Colors.purple.shade300 : Colors.purple.shade600),
               ),
-              title: const Text("Chụp ảnh mới", style: TextStyle(fontWeight: FontWeight.w500)),
+              title: Text(
+                "Chụp ảnh mới",
+                style: TextStyle(fontWeight: FontWeight.w500, color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () => _pickAndUploadImage(ImageSource.camera),
             ),
             if (_history.isNotEmpty) ...[
-              const Divider(height: 32),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              Divider(height: 32, color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                 child: Text(
                   "Lịch sử ảnh (Chọn để đổi lại)",
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey,
+                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -323,7 +331,10 @@ class _AvatarBottomSheetState extends State<AvatarBottomSheet> {
                         height: 70,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.grey.shade200, width: 2),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+                            width: 2,
+                          ),
                           image: DecorationImage(
                             image: NetworkImage(displayUrl),
                             fit: BoxFit.cover,

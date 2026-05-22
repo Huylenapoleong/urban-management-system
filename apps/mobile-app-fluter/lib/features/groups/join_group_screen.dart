@@ -64,31 +64,84 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: const Text('Tham gia nhóm')),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Text(
+          'Tham gia nhóm',
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        foregroundColor: isDark ? Colors.white : const Color(0xFF1E1B4B),
+        elevation: 0,
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24),
-        child: _result != null ? _buildSuccess() : _buildForm(),
+        child: _result != null ? _buildSuccess(isDark) : _buildForm(isDark),
       ),
     );
   }
 
-  Widget _buildForm() {
+  Widget _buildForm(bool isDark) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.group_add, size: 80, color: Colors.grey[300]),
+        Icon(
+          Icons.group_add,
+          size: 80,
+          color: isDark ? const Color(0xFF334155) : Colors.grey[300],
+        ),
         const SizedBox(height: 24),
-        const Text('Nhập mã mời để tham gia nhóm', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        Text(
+          'Nhập mã mời để tham gia nhóm',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+          ),
+        ),
         const SizedBox(height: 24),
         TextField(
           controller: _codeController,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 18, fontFamily: 'monospace', letterSpacing: 2),
+          style: TextStyle(
+            fontSize: 18,
+            fontFamily: 'monospace',
+            letterSpacing: 2,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
           decoration: InputDecoration(
             hintText: 'ABC123XYZ',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+            hintStyle: TextStyle(
+              color: isDark ? const Color(0xFF64748B) : Colors.grey,
+            ),
+            fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            filled: true,
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: isDark ? const Color(0xFF7C3AED) : const Color(0xFF1E1B4B),
+                width: 2,
+              ),
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             errorText: _error,
+            errorStyle: const TextStyle(
+              color: Colors.redAccent,
+            ),
           ),
         ),
         const SizedBox(height: 24),
@@ -97,19 +150,28 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
           child: FilledButton(
             onPressed: _isJoining ? null : _joinGroup,
             style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF7C3AED),
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             child: _isJoining
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Tham gia', style: TextStyle(fontSize: 16)),
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text('Tham gia', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSuccess() {
+  Widget _buildSuccess(bool isDark) {
     final groupName = _result?['groupName'] ?? 'Nhóm';
     return Center(
       child: Column(
@@ -117,10 +179,23 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
         children: [
           const Icon(Icons.check_circle, size: 80, color: Color(0xFF7C3AED)),
           const SizedBox(height: 16),
-          Text('Đã tham gia $groupName!', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            'Đã tham gia $groupName!',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            ),
+          ),
           const SizedBox(height: 24),
           FilledButton(
             onPressed: () => Navigator.pop(context, _result),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF7C3AED),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
             child: const Text('Quay lại'),
           ),
         ],

@@ -72,28 +72,61 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     final controller = TextEditingController(text: _currentGroupName);
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Đổi tên nhóm'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'Nhập tên nhóm mới...',
-            border: OutlineInputBorder(),
+      builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            'Đổi tên nhóm',
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+              fontWeight: FontWeight.bold,
+            ),
           ),
-          maxLength: 100,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text('Hủy'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                decoration: InputDecoration(
+                  hintText: 'Nhập tên nhóm mới...',
+                  hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+                  filled: true,
+                  fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 1.5),
+                  ),
+                ),
+                maxLength: 100,
+              ),
+            ],
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            child: const Text('Lưu'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: Text(
+                'Hủy',
+                style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('Lưu'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirmed == true) {
@@ -182,29 +215,65 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
   void _showMediaDialog(String title, String message) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Đóng'),
+      builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            title,
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+              fontWeight: FontWeight.bold,
+            ),
           ),
-        ],
-      ),
+          content: Text(
+            message,
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text(
+                'Đóng',
+                style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
   Widget _buildTile(BuildContext context, {required IconData icon, required Color color, required String title, required String subtitle, required VoidCallback onTap}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFF1F5F9))),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+      ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: CircleAvatar(backgroundColor: color.withOpacity(0.12), child: Icon(icon, color: color)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-        trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+        leading: CircleAvatar(
+          backgroundColor: isDark ? color.withOpacity(0.2) : color.withOpacity(0.12),
+          child: Icon(icon, color: isDark ? Color.lerp(color, Colors.white, 0.2) ?? color : color),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(
+            fontSize: 12,
+            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+          ),
+        ),
+        trailing: Icon(Icons.chevron_right, color: isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8)),
         onTap: onTap,
       ),
     );
@@ -216,15 +285,22 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     final session = context.read<SessionController>();
     final groupService = services.groupService;
     final currentUserId = session.user?.id;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text("Cài đặt nhóm", style: TextStyle(color: Color(0xFF1E1B4B), fontWeight: FontWeight.bold)),
+        title: Text(
+          "Cài đặt nhóm",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         centerTitle: true,
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Color(0xFF1E1B4B)),
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF7C3AED)))
@@ -270,10 +346,10 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                       const SizedBox(height: 12),
                       Text(
                         _currentGroupName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E1B4B),
+                          color: isDark ? Colors.white : const Color(0xFF1E1B4B),
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -282,7 +358,9 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                         _isOwner ? "Trưởng nhóm" : "Thành viên",
                         style: TextStyle(
                           fontSize: 14,
-                          color: _isOwner ? const Color(0xFF7C3AED) : const Color(0xFF64748B),
+                          color: _isOwner
+                              ? const Color(0xFF7C3AED)
+                              : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -363,7 +441,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   },
                 ),
 
-                const Divider(height: 32),
+                Divider(height: 32, color: isDark ? const Color(0xFF334155) : null),
                 
                 _buildTile(
                   context,
@@ -374,18 +452,37 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   onTap: () async {
                     final confirmed = await showDialog<bool>(
                       context: context,
-                      builder: (_) => AlertDialog(
-                        title: const Text('Rời nhóm?'),
-                        content: const Text('Bạn có chắc muốn rời nhóm này không?'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')),
-                          FilledButton(
-                            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Rời nhóm'),
+                      builder: (dialogCtx) {
+                        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+                        return AlertDialog(
+                          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                          title: Text(
+                            'Rời nhóm?',
+                            style: TextStyle(
+                              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ],
-                      ),
+                          content: Text(
+                            'Bạn có chắc muốn rời nhóm này không?',
+                            style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialogCtx, false),
+                              child: Text(
+                                'Hủy',
+                                style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+                              ),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                              onPressed: () => Navigator.pop(dialogCtx, true),
+                              child: const Text('Rời nhóm'),
+                            ),
+                          ],
+                        );
+                      },
                     );
                     if (confirmed == true) {
                       try {

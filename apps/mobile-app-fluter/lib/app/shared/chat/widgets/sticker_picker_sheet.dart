@@ -4,12 +4,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import '../../../../../services/giphy_service.dart';
 
-class GifPickerSheet extends StatefulWidget {
-  final Function(String gifUrl) onGifSelected;
+class StickerPickerSheet extends StatefulWidget {
+  final Function(String stickerUrl) onStickerSelected;
 
-  const GifPickerSheet({super.key, required this.onGifSelected});
+  const StickerPickerSheet({super.key, required this.onStickerSelected});
 
-  static Future<void> show(BuildContext context, {required Function(String) onGifSelected}) {
+  static Future<void> show(BuildContext context, {required Function(String) onStickerSelected}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return showModalBottomSheet(
       context: context,
@@ -18,20 +18,20 @@ class GifPickerSheet extends StatefulWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => GifPickerSheet(onGifSelected: onGifSelected),
+      builder: (_) => StickerPickerSheet(onStickerSelected: onStickerSelected),
     );
   }
 
   @override
-  State<GifPickerSheet> createState() => _GifPickerSheetState();
+  State<StickerPickerSheet> createState() => _StickerPickerSheetState();
 }
 
-class _GifPickerSheetState extends State<GifPickerSheet> {
+class _StickerPickerSheetState extends State<StickerPickerSheet> {
   final GiphyService _giphyService = GiphyService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   
-  List<Map<String, dynamic>> _gifs = [];
+  List<Map<String, dynamic>> _stickers = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
   int _offset = 0;
@@ -41,7 +41,7 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
   @override
   void initState() {
     super.initState();
-    _loadGifs();
+    _loadStickers();
     _scrollController.addListener(_onScroll);
   }
 
@@ -55,35 +55,37 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
 
   void _onScroll() {
     if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200 && !_isLoadingMore) {
-      _loadMoreGifs();
+      _loadMoreStickers();
     }
   }
 
-  Future<void> _loadGifs({bool isSearch = false}) async {
+  Future<void> _loadStickers({bool isSearch = false}) async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _offset = 0;
-      if (!isSearch) _gifs.clear();
+      if (!isSearch) _stickers.clear();
     });
 
     final query = _searchController.text.trim();
     List<Map<String, dynamic>> results;
     
     if (query.isEmpty) {
-      results = await _giphyService.fetchTrending(limit: _limit, offset: _offset);
+      results = await _giphyService.fetchTrendingStickers(limit: _limit, offset: _offset);
     } else {
-      results = await _giphyService.searchGifs(query, limit: _limit, offset: _offset);
+      results = await _giphyService.searchStickers(query, limit: _limit, offset: _offset);
     }
 
     if (mounted) {
       setState(() {
-        _gifs = results;
+        _stickers = results;
         _isLoading = false;
       });
     }
   }
 
-  Future<void> _loadMoreGifs() async {
+  Future<void> _loadMoreStickers() async {
+    if (!mounted) return;
     setState(() {
       _isLoadingMore = true;
       _offset += _limit;
@@ -93,14 +95,14 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
     List<Map<String, dynamic>> results;
 
     if (query.isEmpty) {
-      results = await _giphyService.fetchTrending(limit: _limit, offset: _offset);
+      results = await _giphyService.fetchTrendingStickers(limit: _limit, offset: _offset);
     } else {
-      results = await _giphyService.searchGifs(query, limit: _limit, offset: _offset);
+      results = await _giphyService.searchStickers(query, limit: _limit, offset: _offset);
     }
 
     if (mounted) {
       setState(() {
-        _gifs.addAll(results);
+        _stickers.addAll(results);
         _isLoadingMore = false;
       });
     }
@@ -109,7 +111,7 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 500), () {
-      _loadGifs(isSearch: true);
+      _loadStickers(isSearch: true);
     });
   }
 
@@ -141,7 +143,7 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
             onChanged: _onSearchChanged,
             style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
-              hintText: 'Tìm kiếm GIF...',
+              hintText: 'Tìm kiếm Sticker...',
               hintStyle: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey[600]),
               prefixIcon: Icon(Icons.search, color: primaryColor),
               suffixIcon: _searchController.text.isNotEmpty
@@ -149,7 +151,7 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
                       icon: Icon(Icons.clear, color: isDark ? Colors.grey[400] : Colors.grey[600]),
                       onPressed: () {
                         _searchController.clear();
-                        _loadGifs();
+                        _loadStickers();
                       },
                     )
                   : null,
@@ -167,8 +169,13 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
           Expanded(
             child: _isLoading
                 ? _buildShimmerGrid()
-                : _gifs.isEmpty
-                    ? const Center(child: Text("Không tìm thấy kết quả nào", style: TextStyle(color: Colors.grey)))
+                : _stickers.isEmpty
+                    ? Center(
+                        child: Text(
+                          "Không tìm thấy kết quả nào",
+                          style: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey),
+                        ),
+                      )
                     : GridView.builder(
                         controller: _scrollController,
                         physics: const BouncingScrollPhysics(),
@@ -177,32 +184,36 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
                           crossAxisSpacing: 8,
                           mainAxisSpacing: 8,
                         ),
-                        itemCount: _gifs.length + (_isLoadingMore ? 2 : 0),
+                        itemCount: _stickers.length + (_isLoadingMore ? 2 : 0),
                         itemBuilder: (context, index) {
-                          if (index >= _gifs.length) {
+                          if (index >= _stickers.length) {
                             return const Skeletonizer(
                               enabled: true,
                               child: Card(child: SizedBox(height: 150)),
                             );
                           }
-                          final gifData = _gifs[index];
-                          // Lấy URL GIF dung lượng nhẹ để hiển thị nhanh
-                          final String url = gifData['images']['fixed_height']['url'] ?? '';
+                          final stickerData = _stickers[index];
+                          // Lấy URL Sticker dung lượng nhẹ (fixed_height) để hiển thị mượt mà
+                          final String url = stickerData['images']['fixed_height']['url'] ?? '';
                           return GestureDetector(
                             onTap: () {
                               Navigator.pop(context); // Đóng bottom sheet
-                              widget.onGifSelected(url); // Trả về URL
+                              widget.onStickerSelected(url); // Trả về URL
                             },
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(12),
-                              child: CachedNetworkImage(
-                                imageUrl: url,
-                                fit: BoxFit.cover,
-                                placeholder: (context, url) => const Skeletonizer(
-                                  enabled: true,
-                                  child: Card(),
+                              child: Container(
+                                // Nền kẻ ô vuông nhạt (checkerboard) cho sticker trong suốt
+                                color: isDark ? const Color(0xFF1E293B).withOpacity(0.5) : const Color(0xFFF8FAFC),
+                                child: CachedNetworkImage(
+                                  imageUrl: url,
+                                  fit: BoxFit.contain, // Dùng contain để hiển thị nguyên dạng sticker không bị crop
+                                  placeholder: (context, url) => const Skeletonizer(
+                                    enabled: true,
+                                    child: Card(),
+                                  ),
+                                  errorWidget: (context, url, error) => const Icon(Icons.error),
                                 ),
-                                errorWidget: (context, url, error) => const Icon(Icons.error),
                               ),
                             ),
                           );

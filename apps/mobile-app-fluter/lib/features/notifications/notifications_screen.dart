@@ -13,6 +13,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _notifications = [];
 
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
   @override
   void initState() {
     super.initState();
@@ -56,12 +58,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = _isDark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text("Notifications", style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
+        title: Text(
+          "Notifications", 
+          style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF1E1B4B))
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
         elevation: 0,
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
         actions: [
           IconButton(
             icon: const Icon(Icons.done_all, color: Color(0xFF7C3AED)),
@@ -73,6 +80,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: _loadNotifications,
+        color: const Color(0xFF7C3AED),
         child: Skeletonizer(
           enabled: _isLoading,
           child: _notifications.isEmpty && !_isLoading
@@ -93,6 +101,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Widget _buildNotificationItem(Map<String, dynamic> item) {
     final isUnread = item["unread"] as bool;
+    final isDark = _isDark;
     
     IconData iconData;
     Color iconColor;
@@ -114,10 +123,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: isUnread ? const Color(0xFF7C3AED).withOpacity(0.05) : Colors.white,
+        color: isUnread 
+            ? (isDark ? const Color(0x267C3AED) : const Color(0x0D7C3AED)) 
+            : (isDark ? const Color(0xFF1E293B) : Colors.white),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isUnread ? const Color(0xFF7C3AED).withOpacity(0.1) : Colors.transparent,
+          color: isUnread 
+              ? const Color(0x337C3AED) 
+              : (isDark ? const Color(0xFF334155) : Colors.transparent),
         ),
       ),
       child: ListTile(
@@ -126,7 +139,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1),
+            color: iconColor.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
           child: Icon(iconData, color: iconColor, size: 20),
@@ -139,12 +152,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 style: TextStyle(
                   fontWeight: isUnread ? FontWeight.bold : FontWeight.w600,
                   fontSize: 15,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
             ),
             Text(
               item["time"],
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+              style: TextStyle(
+                fontSize: 12, 
+                color: isDark ? Colors.grey[400] : Colors.grey.shade500
+              ),
             ),
           ],
         ),
@@ -153,7 +170,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           child: Text(
             item["body"],
             style: TextStyle(
-              color: isUnread ? Colors.black87 : Colors.grey.shade600,
+              color: isUnread 
+                  ? (isDark ? Colors.grey[200] : Colors.black87) 
+                  : (isDark ? Colors.grey[400] : Colors.grey.shade600),
               fontSize: 13,
             ),
             maxLines: 2,
@@ -165,21 +184,32 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Widget _buildSkeletonItem() {
-    return ListTile(
-      leading: const CircleAvatar(),
-      title: const Bone.text(width: 150),
-      subtitle: const Bone.text(width: 250),
+    return const ListTile(
+      leading: CircleAvatar(),
+      title: Bone.text(width: 150),
+      subtitle: Bone.text(width: 250),
     );
   }
 
   Widget _buildEmptyState() {
+    final isDark = _isDark;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.notifications_none_outlined, size: 64, color: Colors.grey.shade300),
+          Icon(
+            Icons.notifications_none_outlined, 
+            size: 64, 
+            color: isDark ? Colors.grey[600] : Colors.grey.shade300
+          ),
           const SizedBox(height: 16),
-          Text("No notifications yet", style: TextStyle(color: Colors.grey.shade500, fontSize: 16)),
+          Text(
+            "No notifications yet", 
+            style: TextStyle(
+              color: isDark ? Colors.grey[400] : Colors.grey.shade500, 
+              fontSize: 16
+            )
+          ),
         ],
       ),
     );

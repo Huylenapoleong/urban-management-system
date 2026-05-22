@@ -72,20 +72,30 @@ class _SecurityScreenState extends State<SecurityScreen> {
   Future<void> _handleRevokeSession(String sessionId, bool isCurrent) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Đăng xuất thiết bị"),
-        content: Text(isCurrent 
-          ? "Bạn đang đăng xuất khỏi chính thiết bị này. Tiếp tục?" 
-          : "Thiết bị này sẽ không còn quyền truy cập vào tài khoản của bạn. Tiếp tục?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Hủy")),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text("Đăng xuất"),
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            "Đăng xuất thiết bị",
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold),
           ),
-        ],
-      ),
+          content: Text(
+            isCurrent 
+              ? "Bạn đang đăng xuất khỏi chính thiết bị này. Tiếp tục?" 
+              : "Thiết bị này sẽ không còn quyền truy cập vào tài khoản của bạn. Tiếp tục?",
+            style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.black87),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Hủy")),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text("Đăng xuất"),
+            ),
+          ],
+        );
+      },
     );
 
     if (ok == true) {
@@ -109,18 +119,28 @@ class _SecurityScreenState extends State<SecurityScreen> {
   Future<void> _handleLogoutAll() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Đăng xuất tất cả thiết bị"),
-        content: const Text("Bạn sẽ bị đăng xuất khỏi tất cả các thiết bị hiện tại, bao gồm cả thiết bị này. Tiếp tục?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Hủy")),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text("Đăng xuất tất cả"),
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            "Đăng xuất tất cả thiết bị",
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold),
           ),
-        ],
-      ),
+          content: Text(
+            "Bạn sẽ bị đăng xuất khỏi tất cả các thiết bị hiện tại, bao gồm cả thiết bị này. Tiếp tục?",
+            style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.black87),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Hủy")),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text("Đăng xuất tất cả"),
+            ),
+          ],
+        );
+      },
     );
 
     if (ok == true) {
@@ -141,12 +161,20 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text("Bảo mật tài khoản", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF0F172A),
+        title: Text(
+          "Bảo mật tài khoản",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+        ),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        foregroundColor: isDark ? Colors.white : const Color(0xFF0F172A),
         elevation: 0,
         centerTitle: true,
       ),
@@ -155,9 +183,9 @@ class _SecurityScreenState extends State<SecurityScreen> {
         : ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              const Text(
+              Text(
                 "Quản lý mật khẩu và các thiết bị đăng nhập của bạn.",
-                style: TextStyle(color: Color(0xFF64748B), fontSize: 14),
+                style: TextStyle(color: isDark ? Colors.grey.shade400 : const Color(0xFF64748B), fontSize: 14),
               ),
               const SizedBox(height: 24),
               _buildSecurityItem(
@@ -178,14 +206,14 @@ class _SecurityScreenState extends State<SecurityScreen> {
               const SizedBox(height: 32),
               Row(
                 children: [
-                  const Icon(Icons.history, size: 20, color: Color(0xFF64748B)),
+                  Icon(Icons.history, size: 20, color: isDark ? Colors.grey.shade400 : const Color(0xFF64748B)),
                   const SizedBox(width: 8),
                   Text(
                     "Lịch sử đăng nhập (${_sessions.length})",
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF1E293B),
+                      color: isDark ? Colors.white : const Color(0xFF1E293B),
                     ),
                   ),
                 ],
@@ -206,6 +234,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   Widget _buildSessionItem(Map<String, dynamic> session) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final metadata = session['metadata'] ?? {};
     final device = metadata['device'] ?? {};
     final String deviceName = device['model'] ?? device['type'] ?? "Thiết bị không xác định";
@@ -218,9 +247,13 @@ class _SecurityScreenState extends State<SecurityScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isCurrent ? Colors.blue.shade100 : Colors.grey.shade100),
+        border: Border.all(
+          color: isCurrent 
+              ? (isDark ? Colors.blue.shade800 : Colors.blue.shade100) 
+              : (isDark ? Colors.grey.shade800 : Colors.grey.shade100),
+        ),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -240,7 +273,11 @@ class _SecurityScreenState extends State<SecurityScreen> {
             Expanded(
               child: Text(
                 deviceName,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold, 
+                  fontSize: 15,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -261,15 +298,18 @@ class _SecurityScreenState extends State<SecurityScreen> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("${os != "" ? '$os • ' : ''}$ip", style: const TextStyle(fontSize: 12)),
+            Text(
+              "${os != "" ? '$os • ' : ''}$ip", 
+              style: TextStyle(fontSize: 12, color: isDark ? Colors.grey.shade300 : Colors.black87),
+            ),
             Text(
               "Hoạt động: ${_formatTime(lastUsed)}",
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+              style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade500 : Colors.grey),
             ),
           ],
         ),
         trailing: IconButton(
-          icon: const Icon(Icons.logout, size: 20, color: Colors.grey),
+          icon: Icon(Icons.logout, size: 20, color: isDark ? Colors.grey.shade400 : Colors.grey),
           onPressed: () => _handleRevokeSession(sessionId, isCurrent),
           tooltip: "Đăng xuất thiết bị này",
         ),
@@ -301,11 +341,12 @@ class _SecurityScreenState extends State<SecurityScreen> {
     required Color iconColor,
     required VoidCallback onTap,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade100),
+        border: Border.all(color: isDark ? Colors.grey.shade800 : Colors.grey.shade100),
       ),
       child: ListTile(
         onTap: onTap,
@@ -318,8 +359,21 @@ class _SecurityScreenState extends State<SecurityScreen> {
           ),
           child: Icon(icon, color: iconColor),
         ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        subtitle: Text(subtitle, style: const TextStyle(fontSize: 13)),
+        title: Text(
+          title, 
+          style: TextStyle(
+            fontWeight: FontWeight.bold, 
+            fontSize: 16,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        subtitle: Text(
+          subtitle, 
+          style: TextStyle(
+            fontSize: 13,
+            color: isDark ? Colors.grey.shade400 : Colors.black54,
+          ),
+        ),
         trailing: const Icon(Icons.chevron_right, color: Colors.grey),
       ),
     );
@@ -372,8 +426,13 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AlertDialog(
-      title: const Text("Nhập OTP & Đổi Mật Khẩu", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      title: Text(
+        "Nhập OTP & Đổi Mật Khẩu", 
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -382,35 +441,58 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
               Container(
                 padding: const EdgeInsets.all(8),
                 margin: const EdgeInsets.only(bottom: 16),
-                color: Colors.red.shade50,
-                child: Text(_error!, style: TextStyle(color: Colors.red.shade800, fontSize: 13)),
+                color: isDark ? Colors.red.shade900.withOpacity(0.2) : Colors.red.shade50,
+                child: Text(
+                  _error!, 
+                  style: TextStyle(color: isDark ? Colors.red.shade200 : Colors.red.shade800, fontSize: 13),
+                ),
               ),
             TextField(
               controller: _otpController,
-              decoration: const InputDecoration(labelText: "Mã OTP (Đã gửi qua Email/SĐT)"),
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                labelText: "Mã OTP (Đã gửi qua Email/SĐT)",
+                labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+              ),
               keyboardType: TextInputType.number,
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _currentPasswordController,
-              decoration: const InputDecoration(labelText: "Mật khẩu hiện tại"),
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                labelText: "Mật khẩu hiện tại",
+                labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+              ),
               obscureText: true,
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _newPasswordController,
-              decoration: const InputDecoration(labelText: "Mật khẩu mới (>= 10 ký tự)"),
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                labelText: "Mật khẩu mới (>= 10 ký tự)",
+                labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+              ),
               obscureText: true,
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: _isLoading ? null : () => Navigator.pop(context, false), child: const Text("Hủy")),
+        TextButton(
+          onPressed: _isLoading ? null : () => Navigator.pop(context, false), 
+          child: const Text("Hủy"),
+        ),
         ElevatedButton(
           onPressed: _isLoading ? null : _submit,
-          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white),
-          child: _isLoading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text("Xác nhận"),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF10B981), 
+            foregroundColor: Colors.white,
+          ),
+          child: _isLoading 
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+              : const Text("Xác nhận"),
         ),
       ],
     );

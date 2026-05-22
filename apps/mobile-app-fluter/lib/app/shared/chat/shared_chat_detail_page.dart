@@ -12,6 +12,7 @@ import '../../../state/providers.dart';
 import 'chat_providers.dart';
 import 'widgets/create_poll_sheet.dart';
 import 'widgets/gif_picker_sheet.dart';
+import 'widgets/sticker_picker_sheet.dart';
 import 'widgets/poll_message_bubble.dart';
 
 class SharedChatDetailPage extends ConsumerStatefulWidget {
@@ -96,6 +97,29 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
       await ref.read(chatRepositoryProvider).sendTextMessage(
             conversationId: widget.conversationId,
             content: 'GIF Image',
+            type: 'IMAGE',
+            attachmentUrl: url,
+            clientMessageId: '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}',
+          );
+      ref.invalidate(chatMessagesProvider(widget.conversationId));
+      unawaited(_scrollToBottom());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ApiClient.extractError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _sendSticker(String url) async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    try {
+      await ref.read(chatRepositoryProvider).sendTextMessage(
+            conversationId: widget.conversationId,
+            content: 'Sticker Image',
             type: 'IMAGE',
             attachmentUrl: url,
             clientMessageId: '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}',
@@ -203,6 +227,16 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
                     },
                   ),
                   IconButton(
+                    icon: const Icon(Icons.sticky_note_2_outlined, color: Color(0xFF7C3AED), size: 28),
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      StickerPickerSheet.show(
+                        context,
+                        onStickerSelected: _sendSticker,
+                      );
+                    },
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.poll_outlined, color: Color(0xFF7C3AED), size: 28),
                     onPressed: () {
                       FocusScope.of(context).unfocus();
@@ -264,9 +298,18 @@ class _Bubble extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           constraints: const BoxConstraints(maxWidth: 310),
           decoration: BoxDecoration(
-            color: isMine ? const Color(0xFF1F3E68) : Colors.white,
+            color: isMine
+                ? const Color(0xFF1F3E68)
+                : (Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1E293B)
+                    : Colors.white),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: isMine ? const Color(0xFF1F3E68) : const Color(0xFFDCE4EF)),
+            border: Border.all(
+                color: isMine
+                    ? const Color(0xFF1F3E68)
+                    : (Theme.of(context).brightness == Brightness.dark
+                        ? Colors.grey.shade800
+                        : const Color(0xFFDCE4EF))),
             boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2))],
           ),
           child: Column(
@@ -277,7 +320,12 @@ class _Bubble extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(
                     message.senderName,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: Color(0xFF334155)),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.grey[300]
+                            : const Color(0xFF334155)),
                   ),
                 ),
               if (message.type == 'IMAGE' && message.attachmentUrl != null)
@@ -293,13 +341,26 @@ class _Bubble extends StatelessWidget {
                   ),
                 )
               else
-                Text(message.content, style: TextStyle(color: isMine ? Colors.white : const Color(0xFF0F172A), height: 1.35)),
+                Text(message.content,
+                    style: TextStyle(
+                        color: isMine
+                            ? Colors.white
+                            : (Theme.of(context).brightness == Brightness.dark
+                                ? Colors.white
+                                : const Color(0xFF0F172A)),
+                        height: 1.35)),
               const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerRight,
                 child: Text(
                   time,
-                  style: TextStyle(fontSize: 11, color: isMine ? const Color(0xB3FFFFFF) : const Color(0xFF64748B)),
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: isMine
+                          ? const Color(0xB3FFFFFF)
+                          : (Theme.of(context).brightness == Brightness.dark
+                              ? Colors.grey[400]
+                              : const Color(0xFF64748B))),
                 ),
               ),
             ],

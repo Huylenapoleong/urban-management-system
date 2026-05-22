@@ -46,23 +46,21 @@ class UrbanManagementApp extends StatelessWidget {
               SessionController(appServices: services)..initialize(),
         ),
       ],
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: "Urban Management",
-        theme: AppTheme.light(),
-        home: Consumer<SessionController>(
-          builder: (context, session, _) {
-            if (!session.isInitialized) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
-            if (!session.isAuthenticated) {
-              return const LoginScreen();
-            }
-            return const HomeShell();
-          },
-        ),
+      child: Consumer<SessionController>(
+        builder: (context, session, _) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: "Urban Management",
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
+            themeMode: session.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+            home: !session.isInitialized
+                ? const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  )
+                : (!session.isAuthenticated ? const LoginScreen() : const HomeShell()),
+          );
+        },
       ),
     );
   }
