@@ -179,6 +179,22 @@ class UserService {
     await _apiClient.delete("/users/me/friends/${Uri.encodeComponent(userId)}");
   }
 
+  Future<void> blockUser(String userId) async {
+    await _apiClient.post("/users/me/blocks/${Uri.encodeComponent(userId)}");
+  }
+
+  Future<void> unblockUser(String userId) async {
+    await _apiClient.delete("/users/me/blocks/${Uri.encodeComponent(userId)}");
+  }
+
+  Future<List<Map<String, dynamic>>> listBlockedUsers() async {
+    final raw = await _apiClient.get("/users/me/blocks");
+    final List list = (raw is Map && raw.containsKey("data")) ? raw["data"] : (raw as List);
+    return list
+        .map((item) => (item as Map).cast<String, dynamic>())
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> listPushDevices() async {
     final raw = await _apiClient.get("/users/me/push-devices");
     return (raw as List)

@@ -203,6 +203,40 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: Row(
                 children: [
+                  IconButton(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.gif_box_outlined, color: Color(0xFF7C3AED), size: 24),
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      GifPickerSheet.show(
+                        context,
+                        onGifSelected: _sendGif,
+                      );
+                    },
+                  ),
+                  IconButton(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.sticky_note_2_outlined, color: Color(0xFF7C3AED), size: 24),
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      StickerPickerSheet.show(
+                        context,
+                        onStickerSelected: _sendSticker,
+                      );
+                    },
+                  ),
+                  IconButton(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.poll_outlined, color: Color(0xFF7C3AED), size: 24),
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      CreatePollBottomSheet.show(context, widget.conversationId);
+                    },
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
                       controller: _controller,
@@ -216,44 +250,17 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
                       ),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.gif_box_outlined, color: Color(0xFF7C3AED), size: 28),
-                    onPressed: () {
-                      FocusScope.of(context).unfocus();
-                      GifPickerSheet.show(
-                        context,
-                        onGifSelected: _sendGif,
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.sticky_note_2_outlined, color: Color(0xFF7C3AED), size: 28),
-                    onPressed: () {
-                      FocusScope.of(context).unfocus();
-                      StickerPickerSheet.show(
-                        context,
-                        onStickerSelected: _sendSticker,
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.poll_outlined, color: Color(0xFF7C3AED), size: 28),
-                    onPressed: () {
-                      FocusScope.of(context).unfocus();
-                      CreatePollBottomSheet.show(context, widget.conversationId);
-                    },
-                  ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 8),
                   FilledButton(
                     onPressed: _sending ? null : _sendMessage,
-                    style: FilledButton.styleFrom(shape: const CircleBorder(), padding: const EdgeInsets.all(14)),
+                    style: FilledButton.styleFrom(shape: const CircleBorder(), padding: const EdgeInsets.all(12)),
                     child: _sending
                         ? const SizedBox(
                             height: 18,
                             width: 18,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
-                        : const Icon(Icons.send_rounded),
+                        : const Icon(Icons.send_rounded, size: 20),
                   ),
                 ],
               ),

@@ -37,14 +37,21 @@ class _CallScreenState extends State<CallScreen> {
   bool _loadingGroupDetails = false;
   final Map<String, UserProfile> _profileCache = {};
   final Set<String> _requestedProfileIds = {};
+  StreamSubscription? _participantLeftSub;
 
   @override
   void initState() {
     super.initState();
+    widget.webRTCService.isCallMinimized.value = false;
     if (widget.currentUser?.id != null) {
       widget.webRTCService.setLocalUserId(widget.currentUser!.id.toString());
     }
     widget.webRTCService.callState.addListener(_handleCallStateChange);
+    _participantLeftSub = widget.webRTCService.onParticipantLeft.listen((userId) {
+      if (mounted) {
+        _showParticipantLeftToast(userId);
+      }
+    });
     _loadGroupDetails();
   }
 
@@ -150,9 +157,35 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  void _showParticipantLeftToast(String userId) {
+    final profile = _profileCache[userId];
+    final displayName = profile?.fullName ?? "Thành viên";
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          "$displayName đã rời cuộc gọi",
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        backgroundColor: const Color(0xFF1E293B),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        duration: const Duration(seconds: 3),
+        margin: const EdgeInsets.fromLTRB(24, 0, 24, 150),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     widget.webRTCService.callState.removeListener(_handleCallStateChange);
+    _participantLeftSub?.cancel();
     super.dispose();
   }
 
@@ -181,6 +214,7 @@ class _CallScreenState extends State<CallScreen> {
           canPop: false,
           onPopInvokedWithResult: (didPop, result) {
             if (!didPop) {
+              widget.webRTCService.isCallMinimized.value = true;
               Navigator.of(context).pop('minimize');
             }
           },
@@ -212,7 +246,10 @@ class _CallScreenState extends State<CallScreen> {
                     top: MediaQuery.of(context).padding.top + 8,
                     left: 16,
                     child: GestureDetector(
-                      onTap: () => Navigator.of(context).pop('minimize'),
+                      onTap: () {
+                        widget.webRTCService.isCallMinimized.value = true;
+                        Navigator.of(context).pop('minimize');
+                      },
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(

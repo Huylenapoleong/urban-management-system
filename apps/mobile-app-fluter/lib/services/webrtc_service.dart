@@ -21,8 +21,13 @@ class WebRTCService {
   final _remoteStreamsController = StreamController<Map<String, MediaStream>>.broadcast();
   Stream<Map<String, MediaStream>> get onRemoteStreamsUpdated => _remoteStreamsController.stream;
 
+  final _participantLeftController = StreamController<String>.broadcast();
+  Stream<String> get onParticipantLeft => _participantLeftController.stream;
+
   final _callStateNotifier = ValueNotifier<CallState>(CallState.idle);
   ValueNotifier<CallState> get callState => _callStateNotifier;
+
+  final isCallMinimized = ValueNotifier<bool>(false);
 
   String? _currentConversationId;
   String? get currentConversationId => _currentConversationId;
@@ -604,6 +609,7 @@ class WebRTCService {
 
     if (isGroup) {
       if (endedByUserId == null || endedByUserId == _localUserId?.toString()) return;
+      _participantLeftController.add(endedByUserId);
       final pc = _peerConnections.remove(endedByUserId);
       pc?.close();
       _remoteStreams.remove(endedByUserId);
@@ -898,12 +904,14 @@ class WebRTCService {
     _isMuted = false;
     _isCameraOff = false;
     _isSpeakerOn = false;
+    isCallMinimized.value = false;
   }
 
   void dispose() {
     _cleanup();
     _remoteStreamsController.close();
     _speakingPeersController.close();
+    _participantLeftController.close();
     _callStateNotifier.dispose();
   }
 }

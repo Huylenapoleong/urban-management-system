@@ -8,6 +8,7 @@ import '../../models/user_profile.dart';
 import '../shared/widgets/user_avatar.dart';
 import '../shared/widgets/app_toast.dart';
 import '../profile/profile_screen.dart';
+import '../../core/utils/translation_helper.dart';
 
 class GroupMembersScreen extends StatefulWidget {
   final GroupService groupService;
@@ -140,6 +141,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     widget.groupService.removeMember(groupId: widget.groupId, userId: userId).catchError((e) {
       debugPrint("Error kicking member: $e");
       _loadMembers();
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: translateGroupError(e, fallback: 'Không thể xóa thành viên khỏi nhóm'),
+          type: AppToastType.error,
+        );
+      }
       return <String, dynamic>{};
     });
   }
@@ -187,6 +195,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     widget.groupService.banMember(groupId: widget.groupId, userId: userId).catchError((e) {
       debugPrint("Error banning member: $e");
       _loadMembers();
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: translateGroupError(e, fallback: 'Không thể cấm thành viên khỏi nhóm'),
+          type: AppToastType.error,
+        );
+      }
       return <String, dynamic>{};
     });
   }
@@ -249,6 +264,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
     widget.groupService.transferOwnership(groupId: widget.groupId, newOwnerId: userId).catchError((e) {
       debugPrint("Error transferring ownership: $e");
       _loadMembers();
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: translateGroupError(e, fallback: 'Không thể chuyển quyền Trưởng nhóm'),
+          type: AppToastType.error,
+        );
+      }
       return <String, dynamic>{};
     });
   }
@@ -367,6 +389,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                           widget.groupService.updateMemberRole(groupId: widget.groupId, userId: userId, roleInGroup: newRole).catchError((e) {
                             debugPrint("Error updating role: $e");
                             _loadMembers();
+                            if (mounted) {
+                              AppToast.show(
+                                context,
+                                message: translateGroupError(e, fallback: 'Không thể cập nhật chức vụ thành viên'),
+                                type: AppToastType.error,
+                              );
+                            }
                             return <String, dynamic>{};
                           });
                         },
@@ -571,6 +600,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                   ).catchError((e) {
                     debugPrint("Error deleting alias: $e");
                     _loadMembers();
+                    if (mounted) {
+                      AppToast.show(
+                        context,
+                        message: translateGroupError(e, fallback: 'Không thể xóa biệt danh'),
+                        type: AppToastType.error,
+                      );
+                    }
                     return <String, dynamic>{};
                   });
                 },
@@ -606,6 +642,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                   ).catchError((e) {
                     debugPrint("Error deleting alias: $e");
                     _loadMembers();
+                    if (mounted) {
+                      AppToast.show(
+                        context,
+                        message: translateGroupError(e, fallback: 'Không thể xóa biệt danh'),
+                        type: AppToastType.error,
+                      );
+                    }
                     return <String, dynamic>{};
                   });
                 } else {
@@ -616,6 +659,13 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                   ).catchError((e) {
                     debugPrint("Error setting alias: $e");
                     _loadMembers();
+                    if (mounted) {
+                      AppToast.show(
+                        context,
+                        message: translateGroupError(e, fallback: 'Không thể đặt biệt danh'),
+                        type: AppToastType.error,
+                      );
+                    }
                     return <String, dynamic>{};
                   });
                 }

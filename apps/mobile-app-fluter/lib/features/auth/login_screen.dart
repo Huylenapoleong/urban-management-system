@@ -5,6 +5,7 @@ import "package:google_fonts/google_fonts.dart";
 import "../../state/session_controller.dart";
 import "../../services/app_services.dart";
 import "../../services/location_service.dart";
+import "../../core/theme/app_theme.dart";
 import "../shared/widgets/location_picker_widget.dart";
 import "forgot_password_screen.dart";
 
@@ -164,80 +165,82 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final locationService = LocationService(apiClient: appServices.apiClient);
 
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF0F172A), // Slate 900
-              Color(0xFF1E293B), // Slate 800
-              Color(0xFF0F172A), // Slate 900
-            ],
+    return Theme(
+      data: AppTheme.light(),
+      child: Scaffold(
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFFF8FAFC), // Slate 50
+                Color(0xFFF1F5F9), // Slate 100
+                Color(0xFFE2E8F0), // Slate 200
+              ],
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 40.0),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // App Logo
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withOpacity(0.1),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: const Color(0xFF10B981).withOpacity(0.3),
-                          width: 2,
+          child: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 40.0),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // App Logo
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withOpacity(0.1),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: const Color(0xFF10B981).withOpacity(0.3),
+                            width: 2,
+                          ),
+                        ),
+                        child: Image.asset(
+                          'assets/images/app_logo.png',
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.contain,
                         ),
                       ),
-                      child: Image.asset(
-                        'assets/images/app_logo.png',
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.contain,
+                      const SizedBox(height: 24),
+                      Text(
+                        "Urban Management",
+                        style: GoogleFonts.poppins(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF0F172A),
+                          letterSpacing: -0.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      "Urban Management",
-                      style: GoogleFonts.poppins(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: -0.5,
+                      const SizedBox(height: 8),
+                      Text(
+                        "Cổng thông tin quản lý cư dân",
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          color: const Color(0xFF475569),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      "Cổng thông tin quản lý cư dân",
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        color: Colors.blueGrey.shade400,
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-
-                    // Login Card
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 24,
-                            offset: const Offset(0, 12),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(32),
+                      const SizedBox(height: 40),
+  
+                      // Login Card
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF0F172A).withOpacity(0.06),
+                              blurRadius: 24,
+                              offset: const Offset(0, 12),
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.all(32),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -454,8 +457,9 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildTextField({
     required TextEditingController controller,

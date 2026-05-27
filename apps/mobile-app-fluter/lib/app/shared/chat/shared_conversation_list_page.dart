@@ -6,6 +6,7 @@ import '../../../core/network/api_client.dart';
 import '../../../features/chat/models/conversation.dart';
 import '../../../state/auth_controller.dart';
 import 'chat_providers.dart';
+import '../../../core/utils/translation_helper.dart';
 
 class SharedConversationListPage extends ConsumerWidget {
   const SharedConversationListPage({
@@ -177,7 +178,7 @@ class _ConversationTile extends StatelessWidget {
                     Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                     const SizedBox(height: 4),
                     Text(
-                      item.lastMessagePreview.isEmpty ? 'Chua co tin nhan moi' : item.lastMessagePreview,
+                      item.lastMessagePreview.isEmpty ? 'Chua co tin nhan moi' : item.lastMessagePreview.translatedSystemMessage,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: Color(0xFF64748B)),

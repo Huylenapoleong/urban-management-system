@@ -6,6 +6,9 @@ import "../shared/widgets/user_avatar.dart";
 import "package:flutter_riverpod/flutter_riverpod.dart";
 import "../../state/providers.dart";
 import "../../state/auth_controller.dart";
+import "../groups/group_shared_media_screen.dart";
+import "../shared/widgets/app_toast.dart";
+import "../../core/utils/translation_helper.dart";
 
 class ConversationInfoScreen extends ConsumerStatefulWidget {
   final ConversationSummary conversation;
@@ -27,13 +30,33 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
   final Map<String, dynamic> _profileCache = {};
   List<dynamic> _friends = [];
   Map<String, String> _aliases = {};
+  bool _isPeerBlocked = false;
 
   @override
   void initState() {
     super.initState();
     _loadAliases();
+    _checkBlockStatus();
     if (widget.conversation.isGroup) {
       _loadData();
+    }
+  }
+
+  Future<void> _checkBlockStatus() async {
+    if (widget.conversation.isGroup) return;
+    final peerId = widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id);
+    if (peerId == null) return;
+    try {
+      final userService = ref.read(userServiceProvider);
+      final blockedList = await userService.listBlockedUsers();
+      final isBlocked = blockedList.any((item) => item['userId']?.toString() == peerId);
+      if (mounted) {
+        setState(() {
+          _isPeerBlocked = isBlocked;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error checking block status in info screen: $e");
     }
   }
 
@@ -148,61 +171,89 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
     final resolvedTitle = (!isGroup && peerId != null && _aliases.containsKey(peerId))
         ? _aliases[peerId]!
         : widget.conversation.title;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: Text(isGroup ? "Thông tin nhóm" : "Thông tin hội thoại", style: const TextStyle(color: Color(0xFF1E1B4B))),
-        backgroundColor: Colors.white,
+        title: Text(
+          isGroup ? "Thông tin nhóm" : "Thông tin hội thoại",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Color(0xFF1E1B4B)),
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            const SizedBox(height: 24),
-            Center(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF7C3AED)))
+          : SingleChildScrollView(
               child: Column(
                 children: [
-                  UserAvatar(
-                    userId: isGroup ? null : widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id),
-                    groupId: isGroup ? widget.conversation.groupId : null,
-                    initialAvatarUrl: isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
-                    initialDisplayName: resolvedTitle,
-                    radius: 50,
-                    showStatus: !isGroup,
-                    isActive: !isGroup && widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id) != null, // Note: We don't have realtime presence here easily without a stream, but we can at least show the status indicator if we had the state.
-                    userService: ref.read(userServiceProvider),
-                    groupService: ref.read(groupServiceProvider),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: Column(
+                      children: [
+                        UserAvatar(
+                          userId: isGroup ? null : widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id),
+                          groupId: isGroup ? widget.conversation.groupId : null,
+                          initialAvatarUrl: isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
+                          initialDisplayName: resolvedTitle,
+                          radius: 50,
+                          showStatus: !isGroup,
+                          isActive: !isGroup && widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id) != null,
+                          userService: ref.read(userServiceProvider),
+                          groupService: ref.read(groupServiceProvider),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          resolvedTitle,
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        if (isGroup) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            "${_members.length} thành viên",
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFF94A3B8) : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  Text(resolvedTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
+                  const SizedBox(height: 32),
                   if (isGroup) ...[
-                    const SizedBox(height: 4),
-                    Text("${_members.length} thành viên", style: TextStyle(color: Colors.grey[600])),
+                    _buildGroupSection(),
+                    const SizedBox(height: 24),
                   ],
+                  _buildActionSection(resolvedTitle),
+                  const SizedBox(height: 24),
+                  _buildDangerZone(),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
-            if (isGroup) ...[
-              _buildGroupSection(),
-              const SizedBox(height: 24),
-            ],
-            _buildActionSection(),
-            const SizedBox(height: 24),
-            _buildDangerZone(),
-            const SizedBox(height: 40),
-          ],
-        ),
-      ),
     );
   }
 
   Widget _buildGroupSection() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+      ),
       child: Column(
         children: [
           _buildListTile(
@@ -210,7 +261,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
             "Xem thành viên",
             onTap: () => _showMembersSheet(),
           ),
-          const Divider(height: 1, indent: 56),
+          Divider(height: 1, indent: 56, color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
           _buildListTile(
             Icons.person_add_outlined,
             "Thêm thành viên",
@@ -222,9 +273,11 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
   }
 
   void _showMembersSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return DraggableScrollableSheet(
@@ -235,16 +288,18 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
           builder: (context, scrollController) {
             return StatefulBuilder(
               builder: (context, setSheetState) {
-                // We'll use a trick: whenever the parent state changes, 
-                // we might need to sync. But here we can just pass 
-                // the setSheetState to our fetch method if we wanted to.
-                // However, simpler is to just rebuild when the sheet is open.
-                
                 return Container(
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
-                      const Text("Thành viên nhóm", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(
+                        "Thành viên nhóm",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       Expanded(
                         child: ListView.builder(
@@ -254,7 +309,6 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
                             final m = _members[index];
                             final userId = m["userId"];
                             
-                            // If profile not in cache, fetch it and refresh sheet
                             if (userId != null && !_profileCache.containsKey(userId)) {
                               _fetchProfile(userId).then((_) {
                                 if (context.mounted) setSheetState(() {});
@@ -263,7 +317,6 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
 
                             final UserProfile? profile = _profileCache[userId];
                             
-                            // Fallback logic
                             String? fallbackName;
                             String? fallbackAvatar;
                             UserProfile? friend;
@@ -293,8 +346,14 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
                                 initialDisplayName: fullName,
                                 radius: 18,
                               ),
-                              title: Text(fullName),
-                              subtitle: Text(m["roleInGroup"] ?? "MEMBER"),
+                              title: Text(
+                                fullName,
+                                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                              ),
+                              subtitle: Text(
+                                m["roleInGroup"] ?? "MEMBER",
+                                style: TextStyle(color: isDark ? Colors.white60 : Colors.black54),
+                              ),
                             );
                           },
                         ),
@@ -311,16 +370,23 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
   }
 
   void _showAddMemberSheet() {
-    // For now, just a placeholder or navigate back to create group? 
-    // Ideally a friend picker.
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Tính năng đang phát triển")));
+    AppToast.show(
+      context,
+      message: "Tính năng đang phát triển",
+      type: AppToastType.info,
+    );
   }
 
-  Widget _buildActionSection() {
+  Widget _buildActionSection(String resolvedTitle) {
     final isGroup = widget.conversation.isGroup;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+      ),
       child: Column(
         children: [
           _buildListTile(
@@ -332,7 +398,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
               onChanged: (v) => _togglePin(v),
             ),
           ),
-          const Divider(height: 1, indent: 56),
+          Divider(height: 1, indent: 56, color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
           _buildListTile(
             Icons.notifications_off_outlined,
             "Tắt thông báo",
@@ -343,17 +409,49 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
             ),
           ),
           if (!isGroup) ...[
-            const Divider(height: 1, indent: 56),
+            Divider(height: 1, indent: 56, color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
             _buildListTile(
               Icons.edit_note,
               "Đặt biệt danh",
               onTap: () => _showSetAliasDialog(),
             ),
           ],
-          const Divider(height: 1, indent: 56),
-          _buildListTile(Icons.photo_outlined, "Ảnh & Video đã gửi", onTap: () {}),
-          const Divider(height: 1, indent: 56),
-          _buildListTile(Icons.link, "Link đã chia sẻ", onTap: () {}),
+          Divider(height: 1, indent: 56, color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+          _buildListTile(
+            Icons.photo_outlined,
+            "Ảnh & Video đã gửi",
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => GroupSharedMediaScreen(
+                    conversationId: widget.conversation.conversationId,
+                    groupName: resolvedTitle,
+                    conversationService: widget.conversationService,
+                    initialTabIndex: 0,
+                  ),
+                ),
+              );
+            },
+          ),
+          Divider(height: 1, indent: 56, color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+          _buildListTile(
+            Icons.link,
+            "Link đã chia sẻ",
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => GroupSharedMediaScreen(
+                    conversationId: widget.conversation.conversationId,
+                    groupName: resolvedTitle,
+                    conversationService: widget.conversationService,
+                    initialTabIndex: 1,
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -368,11 +466,19 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
       );
       if (mounted) {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(pinned ? "Đã ghim" : "Đã bỏ ghim")));
+        AppToast.show(
+          context,
+          message: pinned ? "Đã ghim hội thoại" : "Đã bỏ ghim hội thoại",
+          type: AppToastType.success,
+        );
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      AppToast.show(
+        context,
+        message: "Lỗi: $e",
+        type: AppToastType.error,
+      );
     }
   }
 
@@ -386,46 +492,350 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
       );
       if (mounted) {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mute ? "Đã tắt thông báo" : "Đã bật thông báo")));
+        AppToast.show(
+          context,
+          message: mute ? "Đã tắt thông báo" : "Đã bật thông báo",
+          type: AppToastType.success,
+        );
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      AppToast.show(
+        context,
+        message: "Lỗi: $e",
+        type: AppToastType.error,
+      );
     }
   }
 
   Widget _buildDangerZone() {
     final isGroup = widget.conversation.isGroup;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+      ),
       child: Column(
         children: [
           if (!isGroup) ...[
-            _buildListTile(Icons.block, "Chặn người dùng", textColor: Colors.red, iconColor: Colors.red, onTap: () {}),
-            const Divider(height: 1, indent: 56),
+            _buildListTile(
+              _isPeerBlocked ? Icons.check_circle_outline : Icons.block,
+              _isPeerBlocked ? "Bỏ chặn người dùng" : "Chặn người dùng",
+              textColor: _isPeerBlocked ? const Color(0xFF7C3AED) : Colors.red,
+              iconColor: _isPeerBlocked ? const Color(0xFF7C3AED) : Colors.red,
+              onTap: () => _isPeerBlocked ? _unblockUser() : _blockUser(),
+            ),
+            Divider(height: 1, indent: 56, color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
           ],
-          _buildListTile(Icons.delete_outline, "Xóa lịch sử trò chuyện", textColor: Colors.red, iconColor: Colors.red, onTap: () {}),
-          const Divider(height: 1, indent: 56),
+          _buildListTile(
+            Icons.delete_outline,
+            "Xóa lịch sử trò chuyện",
+            textColor: Colors.red,
+            iconColor: Colors.red,
+            onTap: () => _clearHistory(),
+          ),
+          Divider(height: 1, indent: 56, color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
           if (!isGroup)
-            _buildListTile(Icons.person_remove_outlined, "Hủy kết bạn", textColor: Colors.red, iconColor: Colors.red, onTap: () {})
+            _buildListTile(
+              Icons.person_remove_outlined,
+              "Hủy kết bạn",
+              textColor: Colors.red,
+              iconColor: Colors.red,
+              onTap: () => _removeFriend(),
+            )
           else
-            _buildListTile(Icons.logout, "Rời khỏi nhóm", textColor: Colors.red, iconColor: Colors.red, onTap: () => _leaveGroup()),
+            _buildListTile(
+              Icons.logout,
+              "Rời khỏi nhóm",
+              textColor: Colors.red,
+              iconColor: Colors.red,
+              onTap: () => _leaveGroup(),
+            ),
         ],
       ),
     );
   }
 
-  Future<void> _leaveGroup() async {
-    final groupService = ref.read(groupServiceProvider);
+  Future<void> _blockUser() async {
+    final peerId = widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id);
+    if (peerId == null) return;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Rời khỏi nhóm?"),
-        content: const Text("Bạn sẽ không thể xem tin nhắn mới trong nhóm này."),
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Text(
+          "Chặn người dùng?",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          "Bạn sẽ không nhận được tin nhắn và cuộc gọi từ người này nữa.",
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Hủy")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Rời nhóm", style: TextStyle(color: Colors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Hủy",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Chặn"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _loading = true);
+      try {
+        final userService = ref.read(userServiceProvider);
+        await userService.blockUser(peerId);
+        if (mounted) {
+          setState(() {
+            _isPeerBlocked = true;
+            _loading = false;
+          });
+          AppToast.show(
+            context,
+            message: "Đã chặn người dùng thành công",
+            type: AppToastType.success,
+          );
+        }
+      } catch (e) {
+        if (mounted) setState(() => _loading = false);
+        AppToast.show(
+          context,
+          message: translateGroupError(e, fallback: "Không thể chặn người dùng"),
+          type: AppToastType.error,
+        );
+      }
+    }
+  }
+
+  Future<void> _unblockUser() async {
+    final peerId = widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id);
+    if (peerId == null) return;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Text(
+          "Bỏ chặn người dùng?",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          "Người này sẽ có thể gửi tin nhắn và gọi điện cho bạn trở lại.",
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Hủy",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Bỏ chặn"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _loading = true);
+      try {
+        final userService = ref.read(userServiceProvider);
+        await userService.unblockUser(peerId);
+        if (mounted) {
+          setState(() {
+            _isPeerBlocked = false;
+            _loading = false;
+          });
+          AppToast.show(
+            context,
+            message: "Đã bỏ chặn người dùng thành công",
+            type: AppToastType.success,
+          );
+        }
+      } catch (e) {
+        if (mounted) setState(() => _loading = false);
+        AppToast.show(
+          context,
+          message: translateGroupError(e, fallback: "Không thể bỏ chặn người dùng"),
+          type: AppToastType.error,
+        );
+      }
+    }
+  }
+
+  Future<void> _clearHistory() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Text(
+          "Xóa lịch sử trò chuyện?",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          "Toàn bộ tin nhắn trong cuộc trò chuyện này sẽ bị xóa vĩnh viễn và không thể khôi phục.",
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Hủy",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Xóa"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _loading = true);
+      try {
+        await widget.conversationService.clearConversationHistory(widget.conversation.conversationId);
+        if (mounted) {
+          setState(() => _loading = false);
+          AppToast.show(
+            context,
+            message: "Đã xóa lịch sử trò chuyện thành công",
+            type: AppToastType.success,
+          );
+        }
+      } catch (e) {
+        if (mounted) setState(() => _loading = false);
+        AppToast.show(
+          context,
+          message: "Lỗi: $e",
+          type: AppToastType.error,
+        );
+      }
+    }
+  }
+
+  Future<void> _removeFriend() async {
+    final peerId = widget.conversation.getPeerId(ref.read(authControllerProvider).user?.id);
+    if (peerId == null) return;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Text(
+          "Hủy kết bạn?",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          "Bạn có chắc chắn muốn hủy kết bạn với người này?",
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Hủy",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Hủy kết bạn"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _loading = true);
+      try {
+        final userService = ref.read(userServiceProvider);
+        await userService.removeFriend(peerId);
+        if (mounted) {
+          setState(() => _loading = false);
+          AppToast.show(
+            context,
+            message: "Đã hủy kết bạn thành công",
+            type: AppToastType.success,
+          );
+        }
+      } catch (e) {
+        if (mounted) setState(() => _loading = false);
+        AppToast.show(
+          context,
+          message: "Lỗi: $e",
+          type: AppToastType.error,
+        );
+      }
+    }
+  }
+
+  Future<void> _leaveGroup() async {
+    final groupService = ref.read(groupServiceProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Text(
+          "Rời khỏi nhóm?",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          "Bạn sẽ không thể xem tin nhắn mới trong nhóm này.",
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Hủy",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Rời nhóm", style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -441,16 +851,28 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
         }
       } catch (e) {
         if (mounted) setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+        AppToast.show(
+          context,
+          message: "Lỗi: $e",
+          type: AppToastType.error,
+        );
       }
     }
   }
 
   Widget _buildListTile(IconData icon, String title, {Color? textColor, Color? iconColor, Widget? trailing, VoidCallback? onTap}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
-      leading: Icon(icon, color: iconColor ?? const Color(0xFF64748B)),
-      title: Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: textColor ?? const Color(0xFF1E1B4B))),
-      trailing: trailing ?? const Icon(Icons.chevron_right, size: 20, color: Color(0xFFCBD5E1)),
+      leading: Icon(icon, color: iconColor ?? (isDark ? Colors.white70 : const Color(0xFF64748B))),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: textColor ?? (isDark ? Colors.white : const Color(0xFF1E1B4B)),
+        ),
+      ),
+      trailing: trailing ?? Icon(Icons.chevron_right, size: 20, color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1)),
       onTap: onTap,
     );
   }
@@ -465,20 +887,46 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
     showDialog(
       context: context,
       builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
         return AlertDialog(
-          title: Text('Biệt danh cho ${widget.conversation.title}'),
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text(
+            'Biệt danh cho ${widget.conversation.title}',
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           content: TextField(
             controller: controller,
-            decoration: const InputDecoration(
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
               hintText: 'Nhập biệt danh...',
-              border: OutlineInputBorder(),
+              hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 1.5),
+              ),
             ),
             maxLength: 100,
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogCtx),
-              child: const Text('Hủy'),
+              child: Text(
+                'Hủy',
+                style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+              ),
             ),
             if (currentAlias.isNotEmpty)
               TextButton(
@@ -487,8 +935,10 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
                   setState(() {
                     _aliases = Map.from(_aliases)..remove(peerId);
                   });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Đã xóa biệt danh')),
+                  AppToast.show(
+                    context,
+                    message: 'Đã xóa biệt danh',
+                    type: AppToastType.success,
                   );
                   widget.conversationService.deleteConversationAlias(
                     conversationId: widget.conversation.conversationId,
@@ -502,6 +952,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
                 child: const Text('Xóa biệt danh', style: TextStyle(color: Colors.red)),
               ),
             FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
               onPressed: () {
                 final newAlias = controller.text.trim();
                 Navigator.pop(dialogCtx);
@@ -512,8 +963,10 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
                     _aliases = Map.from(_aliases)..[peerId] = newAlias;
                   }
                 });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Đã cập nhật biệt danh')),
+                AppToast.show(
+                  context,
+                  message: 'Đã cập nhật biệt danh',
+                  type: AppToastType.success,
                 );
                 if (newAlias.isEmpty) {
                   widget.conversationService.deleteConversationAlias(

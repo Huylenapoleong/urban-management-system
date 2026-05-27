@@ -5,11 +5,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/group_service.dart';
 import '../../services/app_services.dart';
 import '../../state/session_controller.dart';
+import '../../core/utils/translation_helper.dart';
 import '../shared/widgets/user_avatar.dart';
 import '../shared/widgets/app_toast.dart';
 import 'group_members_screen.dart';
 import 'group_invite_links_screen.dart';
 import 'group_audit_logs_screen.dart';
+import '../../app/shared/chat/widgets/create_poll_sheet.dart';
+import 'group_shared_media_screen.dart';
 
 class GroupSettingsScreen extends StatefulWidget {
   final String groupId;
@@ -153,7 +156,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
           setState(() => _isLoading = false);
           AppToast.show(
             context,
-            message: 'Không thể đổi tên nhóm. Lỗi: $e',
+            message: translateGroupError(e, fallback: 'Không thể đổi tên nhóm'),
             type: AppToastType.error,
           );
         }
@@ -205,7 +208,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
         setState(() => _isLoading = false);
         AppToast.show(
           context,
-          message: 'Lỗi tải ảnh đại diện: $e',
+          message: translateGroupError(e, fallback: 'Lỗi tải ảnh đại diện'),
           type: AppToastType.error,
         );
       }
@@ -421,12 +424,33 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
 
                 _buildTile(
                   context,
+                  icon: Icons.poll_outlined,
+                  color: const Color(0xFF7C3AED),
+                  title: 'Tạo bình chọn',
+                  subtitle: 'Tạo khảo sát, biểu quyết cho nhóm',
+                  onTap: () {
+                    CreatePollBottomSheet.show(context, "group:${widget.groupId}");
+                  },
+                ),
+
+                _buildTile(
+                  context,
                   icon: Icons.photo_library_outlined,
                   color: Colors.pink,
                   title: 'Ảnh, video đã gửi',
                   subtitle: 'Xem lại các phương tiện đã chia sẻ',
                   onTap: () {
-                    _showMediaDialog("Ảnh & Video", "Chưa chia sẻ ảnh hoặc video nào trong nhóm này.");
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => GroupSharedMediaScreen(
+                          groupId: widget.groupId,
+                          groupName: _currentGroupName,
+                          conversationService: services.conversationService,
+                          initialTabIndex: 0,
+                        ),
+                      ),
+                    );
                   },
                 ),
 
@@ -437,7 +461,17 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   title: 'Link đã chia sẻ',
                   subtitle: 'Xem lại các liên kết đã chia sẻ',
                   onTap: () {
-                    _showMediaDialog("Liên kết chia sẻ", "Chưa chia sẻ liên kết nào trong nhóm này.");
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => GroupSharedMediaScreen(
+                          groupId: widget.groupId,
+                          groupName: _currentGroupName,
+                          conversationService: services.conversationService,
+                          initialTabIndex: 1,
+                        ),
+                      ),
+                    );
                   },
                 ),
 
@@ -499,7 +533,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                         if (context.mounted) {
                           AppToast.show(
                             context,
-                            message: 'Không thể rời nhóm. Lỗi: $e',
+                            message: translateGroupError(e, fallback: 'Không thể rời nhóm'),
                             type: AppToastType.error,
                           );
                         }

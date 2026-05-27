@@ -191,6 +191,17 @@ class MessageItem {
 
   bool get isDeleted => deletedAt != null || recalledAt != null;
 
+  Map<String, dynamic>? get pollData {
+    if (!content.trim().startsWith('{')) return null;
+    try {
+      final parsed = jsonDecode(content);
+      if (parsed is Map<String, dynamic> && parsed.containsKey('poll')) {
+        return parsed['poll'] as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   DateTime? get sentAtDate => DateTime.tryParse(sentAt);
 
   bool get isImage {

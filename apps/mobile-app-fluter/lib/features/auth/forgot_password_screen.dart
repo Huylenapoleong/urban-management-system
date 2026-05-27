@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
 import "../../state/session_controller.dart";
+import "../../core/theme/app_theme.dart";
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -87,13 +88,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final session = context.watch<SessionController>();
     final loading = session.isLoading;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Reset Password"),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      backgroundColor: const Color(0xFFFAF5FF), // Background color from UI/UX Pro Max
+    return Theme(
+      data: AppTheme.light(),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text("Reset Password"),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+        ),
+        backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -227,6 +230,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../features/chat/data/chat_repository.dart';
 import '../../../../state/providers.dart';
 import '../chat_providers.dart';
 
@@ -12,10 +11,11 @@ class CreatePollBottomSheet extends ConsumerStatefulWidget {
   const CreatePollBottomSheet({super.key, required this.conversationId});
 
   static Future<void> show(BuildContext context, String conversationId) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -110,77 +110,130 @@ class _CreatePollBottomSheetState extends ConsumerState<CreatePollBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final hintColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
     return Container(
-      padding: const EdgeInsets.all(20),
-      height: MediaQuery.of(context).size.height * 0.7,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 40, height: 5,
-              decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)),
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Text('Tạo Bình Chọn', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _questionController,
-            decoration: InputDecoration(
-              labelText: 'Câu hỏi',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _optionControllers.length,
-              itemBuilder: (context, index) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _optionControllers[index],
-                          decoration: InputDecoration(
-                            hintText: 'Lựa chọn ${index + 1}',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 5,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.grey[700] : Colors.grey[300],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Tạo Bình Chọn',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _questionController,
+                style: TextStyle(color: textColor),
+                decoration: InputDecoration(
+                  labelText: 'Câu hỏi',
+                  labelStyle: TextStyle(color: hintColor),
+                  hintStyle: TextStyle(color: hintColor),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _optionControllers.length,
+                itemBuilder: (context, index) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _optionControllers[index],
+                            style: TextStyle(color: textColor),
+                            decoration: InputDecoration(
+                              hintText: 'Lựa chọn ${index + 1}',
+                              hintStyle: TextStyle(color: hintColor),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 2),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                      if (_optionControllers.length > 2)
-                        IconButton(
-                          icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                          onPressed: () => _removeOption(index),
-                        )
-                    ],
+                        if (_optionControllers.length > 2)
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                            onPressed: () => _removeOption(index),
+                          )
+                      ],
+                    ),
+                  );
+                },
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _optionControllers.length < 10 ? _addOption : null,
+                  icon: Icon(Icons.add, color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+                  label: Text(
+                    'Thêm lựa chọn',
+                    style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
                   ),
-                );
-              },
-            ),
+                ),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('Cho phép chọn nhiều', style: TextStyle(color: textColor)),
+                value: _isMultipleChoice,
+                activeThumbColor: const Color(0xFF7C3AED),
+                onChanged: (v) => setState(() => _isMultipleChoice = v),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: _isSending ? null : _submitPoll,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: _isSending
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : const Text('Tạo Bình Chọn', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
           ),
-          TextButton.icon(
-            onPressed: _optionControllers.length < 10 ? _addOption : null,
-            icon: const Icon(Icons.add),
-            label: const Text('Thêm lựa chọn'),
-          ),
-          SwitchListTile(
-            title: const Text('Cho phép chọn nhiều'),
-            value: _isMultipleChoice,
-            onChanged: (v) => setState(() => _isMultipleChoice = v),
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _isSending ? null : _submitPoll,
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: _isSending ? const CircularProgressIndicator(color: Colors.white) : const Text('Tạo Bình Chọn'),
-          ),
-        ],
+        ),
       ),
     );
   }

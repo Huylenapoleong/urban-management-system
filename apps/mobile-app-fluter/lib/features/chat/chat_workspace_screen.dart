@@ -17,6 +17,7 @@ import "chat_detail_screen.dart";
 import "../contacts/contacts_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "../shared/widgets/app_logo_button.dart";
+import "../../core/utils/translation_helper.dart";
 
 class ChatWorkspaceScreen extends StatefulWidget {
   final ConversationService conversationService;
@@ -683,7 +684,7 @@ class _ConversationCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          conversation.lastMessagePreview ?? "Chưa có tin nhắn",
+                          (conversation.lastMessagePreview ?? "Chưa có tin nhắn").translatedSystemMessage,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(

@@ -214,49 +214,7 @@ class _HomeShellState extends State<HomeShell> {
             ),
           ),
         ),
-        // Mini PiP (Picture-in-Picture)
-        _buildMiniPiP(context, services.webRTCService, session.user),
       ],
-    );
-  }
-
-  Widget _buildMiniPiP(
-      BuildContext context, WebRTCService webRTCService, dynamic user) {
-    return ValueListenableBuilder<CallState>(
-      valueListenable: webRTCService.callState,
-      builder: (context, state, _) {
-        if (state == CallState.idle) return const SizedBox.shrink();
-
-        return FloatingCallOverlay(
-          webRTCService: webRTCService,
-          onTap: () {
-            if (webRTCService.currentConversationId != null) {
-              final convId = webRTCService.currentConversationId!;
-              final isGroup = convId.startsWith("group:") ||
-                  convId.startsWith("group#") ||
-                  convId.startsWith("grp#") ||
-                  convId.startsWith("GRP#");
-
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => CallScreen(
-                    webRTCService: webRTCService,
-                    conversation: ConversationSummary(
-                      conversationId: convId,
-                      groupName: isGroup ? "Cuộc gọi nhóm" : "Đang gọi",
-                      unreadCount: 0,
-                      isGroup: isGroup,
-                      updatedAt: DateTime.now().toIso8601String(),
-                    ),
-                    currentUser: user,
-                  ),
-                ),
-              );
-            }
-          },
-          onClose: () => webRTCService.stopCall(),
-        );
-      },
     );
   }
 }

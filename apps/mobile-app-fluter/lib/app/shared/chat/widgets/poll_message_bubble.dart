@@ -95,13 +95,15 @@ class PollMessageBubble extends ConsumerWidget {
       }
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       width: 280,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
         boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2))],
       ),
       child: Column(
@@ -114,7 +116,11 @@ class PollMessageBubble extends ConsumerWidget {
               Expanded(
                 child: Text(
                   question.toString(),
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A)),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700, 
+                    fontSize: 14, 
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
                 ),
               ),
             ],
@@ -136,9 +142,15 @@ class PollMessageBubble extends ConsumerWidget {
                     Container(
                       height: 36,
                       decoration: BoxDecoration(
-                        color: hasVoted ? const Color(0xFFF3E8FF) : const Color(0xFFF8FAFC),
+                        color: hasVoted 
+                            ? (isDark ? const Color(0xFF6B21A8).withValues(alpha: 0.25) : const Color(0xFFF3E8FF)) 
+                            : (isDark ? const Color(0xFF334155).withValues(alpha: 0.3) : const Color(0xFFF8FAFC)),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: hasVoted ? const Color(0xFF7C3AED) : const Color(0xFFE2E8F0)),
+                        border: Border.all(
+                          color: hasVoted 
+                              ? (isDark ? const Color(0xFFC084FC) : const Color(0xFF7C3AED)) 
+                              : (isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0)),
+                        ),
                       ),
                       alignment: Alignment.centerLeft,
                     ),
@@ -147,7 +159,9 @@ class PollMessageBubble extends ConsumerWidget {
                       child: Container(
                         height: 36,
                         decoration: BoxDecoration(
-                          color: hasVoted ? const Color(0xFFD8B4FE).withOpacity(0.4) : const Color(0xFFE2E8F0).withOpacity(0.5),
+                          color: hasVoted 
+                              ? (isDark ? const Color(0xFFC084FC).withValues(alpha: 0.2) : const Color(0xFFD8B4FE).withValues(alpha: 0.4)) 
+                              : (isDark ? const Color(0xFF475569).withValues(alpha: 0.25) : const Color(0xFFE2E8F0).withValues(alpha: 0.5)),
                           borderRadius: BorderRadius.circular(6),
                         ),
                       ),
@@ -163,7 +177,9 @@ class PollMessageBubble extends ConsumerWidget {
                                 text,
                                 style: TextStyle(
                                   fontWeight: hasVoted ? FontWeight.w600 : FontWeight.w400,
-                                  color: hasVoted ? const Color(0xFF5B21B6) : const Color(0xFF334155),
+                                  color: hasVoted 
+                                      ? (isDark ? const Color(0xFFF3E8FF) : const Color(0xFF5B21B6)) 
+                                      : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -173,7 +189,9 @@ class PollMessageBubble extends ConsumerWidget {
                               '$voteCount',
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
-                                color: hasVoted ? const Color(0xFF5B21B6) : const Color(0xFF64748B),
+                                color: hasVoted 
+                                    ? (isDark ? const Color(0xFFF3E8FF) : const Color(0xFF5B21B6)) 
+                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                               ),
                             ),
                           ],
@@ -188,7 +206,10 @@ class PollMessageBubble extends ConsumerWidget {
           const SizedBox(height: 4),
           Text(
             '$totalVotes phiếu bầu • ${isMultipleChoice ? 'Chọn nhiều' : 'Chọn một'}',
-            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+            style: TextStyle(
+              fontSize: 11, 
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+            ),
           ),
         ],
       ),

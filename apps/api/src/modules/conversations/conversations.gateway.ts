@@ -90,8 +90,7 @@ type AuthenticatedSocket = Socket<
 })
 @Injectable()
 export class ConversationsGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
-{
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ConversationsGateway.name);
   private readonly socketAuthCacheWindowMs = 30_000;
 
@@ -105,7 +104,7 @@ export class ConversationsGateway
     private readonly conversationsService: ConversationsService,
     private readonly chatCallSessionService: ChatCallSessionService,
     private readonly observabilityService: ObservabilityService,
-  ) {}
+  ) { }
 
   afterInit(server: Server): void {
     this.chatRealtimeService.bindServer(server);
@@ -697,10 +696,10 @@ export class ConversationsGateway
         );
         const callEvent = result.session
           ? this.buildCallEventInfo(
-              result.session,
-              callStillActive ? 'PARTICIPANT_LEFT' : 'ENDED',
-              user.id,
-            )
+            result.session,
+            callStillActive ? 'PARTICIPANT_LEFT' : 'ENDED',
+            user.id,
+          )
           : undefined;
         const signalPayload = this.buildCallEndPayload(
           access.conversationKey,
@@ -940,9 +939,9 @@ export class ConversationsGateway
     conversationId: string,
     session:
       | {
-          createdAt: string;
-          isVideo: boolean;
-        }
+        createdAt: string;
+        isVideo: boolean;
+      }
       | undefined,
     user: AuthenticatedUser,
     clientCallerName?: string,
@@ -966,8 +965,8 @@ export class ConversationsGateway
     conversationId: string,
     session:
       | {
-          acceptedAt: string | null;
-        }
+        acceptedAt: string | null;
+      }
       | undefined,
     user: AuthenticatedUser,
   ): ChatCallAcceptPayload {
@@ -1086,8 +1085,8 @@ export class ConversationsGateway
     const fallbackRecipients = includeActor
       ? [...access.participants]
       : access.participants.filter(
-          (participantId) => participantId !== actorUserId,
-        );
+        (participantId) => participantId !== actorUserId,
+      );
     const recipients = recipientUserIds ?? fallbackRecipients;
 
     if (recipients.length === 0) {

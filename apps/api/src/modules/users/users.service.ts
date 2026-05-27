@@ -1821,20 +1821,19 @@ export class UsersService {
       throw new BadRequestException('Cannot block yourself.');
     }
 
-    const existingBlock = await this.getBlockEdge(
-      blocker.userId,
-      target.userId,
-      'OUTGOING',
-    );
+    const [existingBlock, existingIncomingBlock] = await Promise.all([
+      this.getBlockEdge(blocker.userId, target.userId, 'OUTGOING'),
+      this.getBlockEdge(target.userId, blocker.userId, 'INCOMING'),
+    ]);
 
-    if (existingBlock) {
+    if (existingBlock && existingIncomingBlock) {
       return {
         userId: target.userId,
         blockedAt: existingBlock.createdAt,
       };
     }
 
-    const occurredAt = nowIso();
+    const occurredAt = existingBlock?.createdAt ?? existingIncomingBlock?.createdAt ?? nowIso();
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
     >[0] = [
@@ -1847,8 +1846,6 @@ export class UsersService {
           'OUTGOING',
           occurredAt,
         ),
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       },
       {
         kind: 'put',
@@ -1859,8 +1856,6 @@ export class UsersService {
           'INCOMING',
           occurredAt,
         ),
-        conditionExpression:
-          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       },
     ];
 
@@ -1887,33 +1882,29 @@ export class UsersService {
     await this.getActiveByIdOrThrow(actor.id);
     await this.getByIdOrThrow(targetUserId);
 
-    const outgoingBlock = await this.getBlockEdge(
-      actor.id,
-      targetUserId,
-      'OUTGOING',
-    );
+    const [outgoingBlock, incomingBlock] = await Promise.all([
+      this.getBlockEdge(actor.id, targetUserId, 'OUTGOING'),
+      this.getBlockEdge(targetUserId, actor.id, 'INCOMING'),
+    ]);
 
-    if (!outgoingBlock) {
+    if (!outgoingBlock && !incomingBlock) {
       throw new NotFoundException('Blocked user not found.');
     }
 
-    const incomingBlock = await this.getBlockEdge(
-      actor.id,
-      targetUserId,
-      'INCOMING',
-    );
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
-    >[0] = [
-      {
+    >[0] = [];
+
+    if (outgoingBlock) {
+      transactionItems.push({
         kind: 'delete',
         tableName: this.config.dynamodbUsersTableName,
         key: {
           PK: outgoingBlock.PK,
           SK: outgoingBlock.SK,
         },
-      },
-    ];
+      });
+    }
 
     if (incomingBlock) {
       transactionItems.push({

@@ -7,6 +7,7 @@ import '../../../core/network/api_client.dart';
 import '../../../features/chat/models/conversation.dart';
 import '../../../state/auth_controller.dart';
 import '../../shared/chat/chat_providers.dart';
+import '../../../core/utils/translation_helper.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Citizen palette
@@ -364,7 +365,7 @@ class _ConversationCard extends StatelessWidget {
                       Text(
                         item.lastMessagePreview.isEmpty
                             ? 'Bắt đầu cuộc trò chuyện nhé!'
-                            : item.lastMessagePreview,
+                            : item.lastMessagePreview.translatedSystemMessage,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

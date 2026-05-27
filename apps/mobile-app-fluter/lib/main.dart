@@ -11,6 +11,7 @@ import "features/auth/login_screen.dart";
 import "features/home/home_shell.dart";
 import "services/app_services.dart";
 import "state/session_controller.dart";
+import "features/chat/widgets/global_call_overlay.dart";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +36,7 @@ class UrbanManagementApp extends StatelessWidget {
   const UrbanManagementApp({super.key, required this.services});
 
   final AppServices services;
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +51,7 @@ class UrbanManagementApp extends StatelessWidget {
       child: Consumer<SessionController>(
         builder: (context, session, _) {
           return MaterialApp(
+            navigatorKey: UrbanManagementApp.navigatorKey,
             debugShowCheckedModeBanner: false,
             title: "Urban Management",
             theme: AppTheme.light(),
@@ -59,6 +62,14 @@ class UrbanManagementApp extends StatelessWidget {
                     body: Center(child: CircularProgressIndicator()),
                   )
                 : (!session.isAuthenticated ? const LoginScreen() : const HomeShell()),
+            builder: (context, child) {
+              return Stack(
+                children: [
+                  if (child != null) child,
+                  GlobalCallOverlay(services: services),
+                ],
+              );
+            },
           );
         },
       ),

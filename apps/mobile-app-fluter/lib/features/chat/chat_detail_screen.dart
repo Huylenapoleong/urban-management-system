@@ -26,9 +26,13 @@ import "../../services/webrtc_service.dart";
 import "conversation_info_screen.dart";
 import "call_screen.dart";
 import "../shared/widgets/user_avatar.dart";
+import "../shared/widgets/app_toast.dart";
 import "../../app/shared/chat/widgets/gif_picker_sheet.dart";
 import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
+import "../../core/utils/translation_helper.dart";
+import "../../app/shared/chat/widgets/poll_message_bubble.dart";
+import "models/chat_message.dart";
 
 class ChatDetailScreen extends StatefulWidget {
   final ConversationSummary conversation;
@@ -73,6 +77,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Map<String, String> _aliases = {};
   bool _loadingAliases = false;
   String? _fetchedGroupName;
+  bool _isPeerBlocked = false;
 
   Future<void> _loadGroupName() async {
     try {
@@ -91,6 +96,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     super.initState();
     _loadReactions();
     _loadAliases();
+    _checkBlockStatus();
     if (widget.conversation.isGroup) {
       _loadGroupName();
     }
@@ -116,6 +122,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     _msgSub = widget.socketService.onMessageCreated.listen((msg) {
       if (mounted && msg.conversationId == widget.conversation.conversationId) {
+        if (msg.type == "SYSTEM" && msg.contentText.contains("left the call")) {
+          return;
+        }
         final items = _pagingController.itemList;
         if (items != null) {
           final exists = items.any((m) => m.id == msg.id);
@@ -234,6 +243,87 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       debugPrint("Error loading aliases: $e");
     } finally {
       _loadingAliases = false;
+    }
+  }
+
+  Future<void> _checkBlockStatus() async {
+    if (widget.conversation.isGroup) return;
+    final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+    if (peerId == null) return;
+    try {
+      final blockedList = await widget.userService.listBlockedUsers();
+      final isBlocked = blockedList.any((item) => item['userId']?.toString() == peerId);
+      if (mounted) {
+        setState(() {
+          _isPeerBlocked = isBlocked;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error checking block status: $e");
+    }
+  }
+
+  Future<void> _unblockUserDirectly() async {
+    if (widget.conversation.isGroup) return;
+    final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+    if (peerId == null) return;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Text(
+          "Bỏ chặn người dùng?",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          "Người này sẽ có thể gửi tin nhắn và gọi điện cho bạn trở lại.",
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Hủy",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Bỏ chặn"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _sending = true);
+      try {
+        await widget.userService.unblockUser(peerId);
+        if (mounted) {
+          setState(() {
+            _isPeerBlocked = false;
+            _sending = false;
+          });
+          AppToast.show(
+            context,
+            message: "Đã bỏ chặn người dùng thành công",
+            type: AppToastType.success,
+          );
+        }
+      } catch (e) {
+        if (mounted) setState(() => _sending = false);
+        AppToast.show(
+          context,
+          message: translateGroupError(e, fallback: "Không thể bỏ chặn người dùng"),
+          type: AppToastType.error,
+        );
+      }
     }
   }
 
@@ -507,10 +597,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         cursor: pageKey,
         limit: 30,
       );
+      final filteredItems = result.items.where((msg) {
+        return !(msg.type == "SYSTEM" && msg.contentText.contains("left the call"));
+      }).toList();
       if (result.hasNextPage) {
-        _pagingController.appendPage(result.items, result.cursor);
+        _pagingController.appendPage(filteredItems, result.cursor);
       } else {
-        _pagingController.appendLastPage(result.items);
+        _pagingController.appendLastPage(filteredItems);
       }
     } catch (error) {
       _pagingController.error = error;
@@ -862,14 +955,52 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Expanded(child: _buildMessageList()),
           _buildTypingIndicator(),
           if (_replyingTo != null) _buildReplyPreview(),
-          ChatComposer(
-            onSend: _sendMessage,
-            onLocationRequest: _sendLocation,
-            uploadService: widget.uploadService,
-            socketService: widget.socketService,
-            conversationId: widget.conversation.conversationId,
-            sending: _sending,
-          ),
+          if (_isPeerBlocked)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.block, color: Colors.orange.shade400, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Bạn đã chặn người dùng này.",
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _unblockUserDirectly(),
+                      child: const Text(
+                        "Bỏ chặn",
+                        style: TextStyle(
+                          color: Color(0xFF7C3AED),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ChatComposer(
+              onSend: _sendMessage,
+              onLocationRequest: _sendLocation,
+              uploadService: widget.uploadService,
+              socketService: widget.socketService,
+              groupService: widget.groupService,
+              userService: widget.userService,
+              conversationId: widget.conversation.conversationId,
+              sending: _sending,
+              isGroup: widget.conversation.isGroup,
+            ),
         ],
       ),
     );
@@ -1003,6 +1134,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                 );
                 _loadAliases();
+                _checkBlockStatus();
               },
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1054,6 +1186,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                 ).then((_) {
                   _loadAliases();
+                  _checkBlockStatus();
                 });
               }
             },
@@ -1213,6 +1346,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             reactions: _messageReactions[message.id] ?? [],
             userService: widget.userService,
             onLongPress: () => _showMessageActions(message),
+            currentUserName: widget.currentUser.fullName,
           );
         },
         firstPageProgressIndicatorBuilder: (_) => const Center(
@@ -1231,8 +1365,11 @@ class ChatComposer extends StatefulWidget {
   final VoidCallback onLocationRequest;
   final UploadService uploadService;
   final SocketService socketService;
+  final GroupService groupService;
+  final UserService userService;
   final String conversationId;
   final bool sending;
+  final bool isGroup;
 
   const ChatComposer(
       {super.key,
@@ -1240,8 +1377,11 @@ class ChatComposer extends StatefulWidget {
       required this.onLocationRequest,
       required this.uploadService,
       required this.socketService,
+      required this.groupService,
+      required this.userService,
       required this.conversationId,
-      required this.sending});
+      required this.sending,
+      required this.isGroup});
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -1256,6 +1396,8 @@ class _ChatComposerState extends State<ChatComposer> {
   Timer? _timer;
   Timer? _typingTimer;
   bool _isTypingSent = false;
+  List<_InviteCandidate> _groupMembers = [];
+  bool _loadingMembers = false;
 
   @override
   void initState() {
@@ -1266,6 +1408,179 @@ class _ChatComposerState extends State<ChatComposer> {
         _handleTyping();
       }
     });
+    if (widget.isGroup) {
+      _loadGroupMembers();
+    }
+  }
+
+  Future<void> _loadGroupMembers() async {
+    setState(() => _loadingMembers = true);
+    try {
+      var groupId = widget.conversationId;
+      if (groupId.startsWith("group:")) {
+        groupId = groupId.substring(6);
+      } else if (groupId.startsWith("group#")) {
+        groupId = groupId.substring(6);
+      } else if (groupId.startsWith("grp#")) {
+        groupId = groupId.substring(4);
+      } else if (groupId.startsWith("GRP#")) {
+        groupId = groupId.substring(4);
+      }
+      final membersRaw = await widget.groupService.listMembers(groupId);
+      
+      // Hydrate profiles in parallel to resolve names and avatars
+      final populatedMembers = await Future.wait(membersRaw.map((m) async {
+        final userId = m['userId']?.toString();
+        if (userId == null) return m;
+        try {
+          final profile = await widget.userService.getUserById(userId);
+          return {
+            ...m,
+            'fullName': profile.fullName,
+            'displayName': profile.fullName,
+            'avatarUrl': profile.avatarUrl,
+          };
+        } catch (_) {
+          return m;
+        }
+      }));
+
+      if (mounted) {
+        setState(() {
+          _groupMembers = populatedMembers.map(_InviteCandidate.fromJson).toList();
+          _loadingMembers = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading members for mentions: $e");
+      if (mounted) {
+        setState(() => _loadingMembers = false);
+      }
+    }
+  }
+
+  String? _getMentionQuery() {
+    final text = _textController.text;
+    final selection = _textController.selection;
+    if (!selection.isValid || selection.baseOffset <= 0) return null;
+    
+    final cursorPosition = selection.baseOffset;
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    
+    final lastAtSignIndex = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSignIndex == -1) return null;
+    
+    if (lastAtSignIndex > 0) {
+      final charBeforeAt = textBeforeCursor[lastAtSignIndex - 1];
+      if (charBeforeAt != ' ' && charBeforeAt != '\n') {
+        return null;
+      }
+    }
+    
+    final textFromAtToCursor = textBeforeCursor.substring(lastAtSignIndex + 1);
+    if (textFromAtToCursor.contains(' ') || textFromAtToCursor.contains('\n')) {
+      return null;
+    }
+    
+    return textFromAtToCursor;
+  }
+
+  void _applyMention(_InviteCandidate member) {
+    final text = _textController.text;
+    final selection = _textController.selection;
+    if (!selection.isValid) return;
+
+    final cursorPosition = selection.baseOffset;
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    final textAfterCursor = text.substring(cursorPosition);
+
+    final lastAtSignIndex = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSignIndex == -1) return;
+
+    final newMention = "@${member.displayName} ";
+    final newTextBeforeCursor = textBeforeCursor.replaceRange(
+      lastAtSignIndex,
+      cursorPosition,
+      newMention,
+    );
+
+    final newText = newTextBeforeCursor + textAfterCursor;
+    final newCursorPosition = lastAtSignIndex + newMention.length;
+
+    _textController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newCursorPosition),
+    );
+  }
+
+  Widget _buildMentionSuggestions() {
+    final query = _getMentionQuery() ?? "";
+    final filtered = _groupMembers.where((member) {
+      final name = member.displayName.toLowerCase();
+      return name.contains(query.toLowerCase());
+    }).toList();
+
+    if (filtered.isEmpty) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 200),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, -2),
+          )
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          itemCount: filtered.length,
+          separatorBuilder: (_, __) => Divider(
+            height: 1,
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
+          ),
+          itemBuilder: (context, index) {
+            final member = filtered[index];
+            return ListTile(
+              dense: true,
+              leading: UserAvatar(
+                userId: member.userId,
+                initialAvatarUrl: member.avatarUrl,
+                initialDisplayName: member.displayName,
+                radius: 14,
+              ),
+              title: Text(
+                member.displayName,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              subtitle: Text(
+                member.roleLabel,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+              ),
+              onTap: () => _applyMention(member),
+            );
+          },
+        ),
+      ),
+    );
   }
 
   void _handleTyping() {
@@ -1482,6 +1797,20 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  Widget _buildComposerButton({
+    required Widget icon,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+        child: icon,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1503,6 +1832,8 @@ class _ChatComposerState extends State<ChatComposer> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (widget.isGroup && _getMentionQuery() != null)
+              _buildMentionSuggestions(),
             if (_attachment != null)
               Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -1531,20 +1862,23 @@ class _ChatComposerState extends State<ChatComposer> {
             Row(
               children: [
                 if (!_isRecording) ...[
-                  IconButton(
-                      icon: const Icon(Icons.add_circle_outline,
-                          color: Color(0xFF64748B), size: 28),
-                      onPressed: widget.sending ? null : _showPicker),
-                  IconButton(
-                      icon: const Icon(Icons.gif_box_outlined,
-                          color: Color(0xFF7C3AED), size: 28),
-                      onPressed: widget.sending ? null : _showGifPicker),
-                  IconButton(
-                      icon: const Icon(Icons.sticky_note_2_outlined,
-                          color: Color(0xFF7C3AED), size: 28),
-                      onPressed: widget.sending ? null : _showStickerPicker),
+                  _buildComposerButton(
+                    icon: const Icon(Icons.add_circle_outline,
+                        color: Color(0xFF64748B), size: 28),
+                    onTap: widget.sending ? null : _showPicker,
+                  ),
+                  _buildComposerButton(
+                    icon: const Icon(Icons.gif_box_outlined,
+                        color: Color(0xFF7C3AED), size: 28),
+                    onTap: widget.sending ? null : _showGifPicker,
+                  ),
+                  _buildComposerButton(
+                    icon: const Icon(Icons.sticky_note_2_outlined,
+                        color: Color(0xFF7C3AED), size: 28),
+                    onTap: widget.sending ? null : _showStickerPicker,
+                  ),
                 ],
-                const SizedBox(width: 4),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _isRecording
                       ? Container(
@@ -1614,37 +1948,33 @@ class _ChatComposerState extends State<ChatComposer> {
                       height: 24,
                       child: CircularProgressIndicator(strokeWidth: 2))
                 else ...[
-                  // Logic: If recording -> show Check
-                  // If NOT recording:
-                  //    If text is EMPTY -> show Mic AND Like
-                  //    If text is NOT empty -> show Send
                   if (_isRecording)
-                    IconButton(
+                    _buildComposerButton(
                       icon: const Icon(Icons.check_circle,
                           color: Color(0xFF7C3AED), size: 28),
-                      onPressed: _stopRecording,
+                      onTap: _stopRecording,
                     )
                   else if (_textController.text.trim().isEmpty &&
                       _attachment == null) ...[
-                    IconButton(
+                    _buildComposerButton(
                       icon: const Icon(Icons.mic_none_outlined,
                           color: Color(0xFF7C3AED), size: 28),
-                      onPressed: () {
+                      onTap: () {
                         print("DEBUG: Mic button pressed");
                         _startRecording();
                       },
                     ),
-                    IconButton(
+                    _buildComposerButton(
                       icon: const Icon(Icons.thumb_up_rounded,
                           color: Color(0xFF7C3AED), size: 28),
-                      onPressed: () =>
+                      onTap: () =>
                           widget.onSend(text: "👍", attachment: null),
                     ),
                   ] else
-                    IconButton(
+                    _buildComposerButton(
                       icon: const Icon(Icons.send_rounded,
                           color: Color(0xFF7C3AED), size: 28),
-                      onPressed: () {
+                      onTap: () {
                         final text = _textController.text.trim();
                         if (text.isNotEmpty || _attachment != null) {
                           widget.onSend(text: text, attachment: _attachment);
@@ -1670,6 +2000,7 @@ class ChatMessageBubble extends StatelessWidget {
   final List<String> reactions;
   final UserService? userService;
   final VoidCallback? onLongPress;
+  final String? currentUserName;
 
   const ChatMessageBubble({
     super.key,
@@ -1679,6 +2010,7 @@ class ChatMessageBubble extends StatelessWidget {
     this.reactions = const [],
     this.userService,
     this.onLongPress,
+    this.currentUserName,
   });
 
   @override
@@ -1695,7 +2027,7 @@ class ChatMessageBubble extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
-            message.contentText,
+            message.contentText.translatedSystemMessage,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,
@@ -1731,6 +2063,24 @@ class ChatMessageBubble extends StatelessWidget {
   }
 
   Widget _buildBubble(BuildContext context) {
+    final pollData = message.pollData;
+    if (pollData != null) {
+      final chatMsg = ChatMessage(
+        id: message.id,
+        senderId: message.senderId,
+        senderName: message.senderName,
+        content: message.content,
+        type: message.type,
+        sentAt: message.sentAtDate ?? DateTime.now(),
+        attachmentUrl: message.attachmentUrl,
+      );
+      return PollMessageBubble(
+        message: chatMsg,
+        isMine: isMine,
+        conversationId: message.conversationId,
+      );
+    }
+
     return ConstrainedBox(
       constraints:
           BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
@@ -1790,6 +2140,63 @@ class ChatMessageBubble extends StatelessWidget {
     );
   }
 
+  List<InlineSpan> _buildTextSpans(BuildContext context, String text) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final defaultStyle = TextStyle(
+      color: isMine
+          ? Colors.white
+          : (isDark ? Colors.white : const Color(0xFF1E1B4B)),
+      fontSize: 15,
+      height: 1.4,
+    );
+
+    if (text.isEmpty) return [TextSpan(text: text, style: defaultStyle)];
+
+    final List<InlineSpan> spans = [];
+    final RegExp tagRegex = RegExp(r'(@[\p{L}0-9_]+(?:\s+[\p{L}0-9_]+)*)', unicode: true);
+    
+    int lastIndex = 0;
+    final matches = tagRegex.allMatches(text);
+
+    for (final match in matches) {
+      if (match.start > lastIndex) {
+        spans.add(TextSpan(
+          text: text.substring(lastIndex, match.start),
+          style: defaultStyle,
+        ));
+      }
+
+      final tagText = match.group(0)!;
+      final tagName = tagText.substring(1).trim();
+
+      final bool isCurrentUserTagged = currentUserName != null &&
+          (currentUserName!.toLowerCase() == tagName.toLowerCase() ||
+           tagName.toLowerCase().contains(currentUserName!.toLowerCase()) ||
+           currentUserName!.toLowerCase().contains(tagName.toLowerCase()));
+
+      spans.add(TextSpan(
+        text: tagText,
+        style: defaultStyle.copyWith(
+          fontWeight: FontWeight.bold,
+          color: isCurrentUserTagged
+              ? (isMine ? Colors.amber.shade200 : Colors.red.shade400)
+              : (isMine ? Colors.white.withOpacity(0.95) : const Color(0xFF7C3AED)),
+        ),
+      ));
+
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastIndex),
+        style: defaultStyle,
+      ));
+    }
+
+    return spans;
+  }
+
   Widget _buildContentBody(BuildContext context) {
     final text = message.contentText;
     final isGps = text.contains("google.com/maps");
@@ -1803,16 +2210,9 @@ class ChatMessageBubble extends StatelessWidget {
       return _buildLinkCard(context, text);
     }
 
-    return Text(
-      text,
-      style: TextStyle(
-        color: isMine
-            ? Colors.white
-            : (Theme.of(context).brightness == Brightness.dark
-                ? Colors.white
-                : const Color(0xFF1E1B4B)),
-        fontSize: 15,
-        height: 1.4,
+    return RichText(
+      text: TextSpan(
+        children: _buildTextSpans(context, text),
       ),
     );
   }
