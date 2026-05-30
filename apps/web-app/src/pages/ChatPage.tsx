@@ -8084,7 +8084,12 @@ export function ChatPage() {
                           </div>
 
                           {/* Admin Management Section */}
-                          {activeGroupId && canManageGroupMembers && !isMe && targetUserMembership?.roleInGroup !== "OWNER" && (
+                          {activeGroupId &&
+                            canManageGroupMembers &&
+                            !isMe &&
+                            targetUserMembership?.roleInGroup !== "OWNER" &&
+                            (isCurrentUserOwner ||
+                              targetUserMembership?.roleInGroup === "MEMBER") && (
                             <div className="w-full mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-800/50 space-y-2">
                               <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
                                 Quản lý nhóm
