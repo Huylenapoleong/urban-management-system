@@ -70,7 +70,7 @@ export function Sidebar({
     refetchOnReconnect: true,
   });
 
-  const isOfficial = user?.role === "OFFICIAL" || user?.role === "ADMIN";
+  const isOfficial = user?.role === "WARD_OFFICER" || user?.role === "PROVINCE_OFFICER" || user?.role === "ADMIN";
   const unreadMessageCount = useMemo(
     () => conversations.reduce((sum, item) => sum + (item.unreadCount ?? 0), 0),
     [conversations],

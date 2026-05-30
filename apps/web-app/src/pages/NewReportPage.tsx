@@ -59,7 +59,7 @@ export default function NewReportPage() {
           setLocationError(
             error instanceof Error
               ? error.message
-              : "Khong the tai thong tin dia ban hien tai.",
+              : "Không thể tải thông tin địa bàn hiện tại.",
           );
         }
       }
@@ -88,7 +88,7 @@ export default function NewReportPage() {
 
   const onSubmit = (data: FormValues) => {
     if (!accountLocationCode) {
-      toast.error("Tai khoan cua ban chua co dia ban hop le.");
+      toast.error("Tài khoản của bạn chưa có địa bàn hợp lệ.");
       return;
     }
 
@@ -115,11 +115,11 @@ export default function NewReportPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
               <AlertTriangle className="w-6 h-6 text-red-600" />
-              Gui bao cao su co
+              Gửi báo cáo sự cố
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Thong tin cua ban se duoc gui den co quan quan ly theo dia ban tai
-              khoan.
+              Thông tin của bạn sẽ được gửi đến cơ quan quản lý theo địa bàn tài
+              khoản.
             </p>
           </div>
         </div>
@@ -131,12 +131,12 @@ export default function NewReportPage() {
       >
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Tieu de *
+            Tiêu đề *
           </label>
           <input
-            {...register("title", { required: "Vui long nhap tieu de" })}
+            {...register("title", { required: "Vui lòng nhập tiêu đề" })}
             className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Vi du: Cay do chan ngang duong"
+            placeholder="Ví dụ: Cây đổ chắn ngang đường"
           />
           {errors.title && (
             <p className="text-red-500 text-xs mt-1">{errors.title.message}</p>
@@ -145,12 +145,12 @@ export default function NewReportPage() {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Mo ta *
+            Mô tả *
           </label>
           <textarea
-            {...register("description", { required: "Vui long nhap mo ta" })}
+            {...register("description", { required: "Vui lòng nhập mô tả" })}
             className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]"
-            placeholder="Mo ta chi tiet su co..."
+            placeholder="Mô tả chi tiết sự cố..."
           />
           {errors.description && (
             <p className="text-red-500 text-xs mt-1">
@@ -162,19 +162,16 @@ export default function NewReportPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Danh muc *
+              Danh mục *
             </label>
             <select
-              {...register("category", { required: "Vui long chon danh muc" })}
+              {...register("category", { required: "Vui lòng chọn danh mục" })}
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Chon danh muc</option>
-              <option value="INFRASTRUCTURE">Ha tang</option>
-              <option value="ENVIRONMENT">Moi truong</option>
+              <option value="">Chọn danh mục</option>
+              <option value="INFRASTRUCTURE">Hạ tầng</option>
+              <option value="ENVIRONMENT">Môi trường</option>
               <option value="SECURITY">An ninh</option>
-              <option value="PUBLIC_ORDER">Trat tu cong cong</option>
-              <option value="PUBLIC_SERVICES">Dich vu cong</option>
-              <option value="TRAFFIC">Giao thong</option>
             </select>
             {errors.category && (
               <p className="text-red-500 text-xs mt-1">
@@ -185,18 +182,18 @@ export default function NewReportPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Muc do uu tien *
+              Mức độ ưu tiên *
             </label>
             <select
               {...register("priority", {
-                required: "Vui long chon muc do uu tien",
+                required: "Vui lòng chọn mức độ ưu tiên",
               })}
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="LOW">Thap</option>
-              <option value="MEDIUM">Trung binh</option>
+              <option value="LOW">Thấp</option>
+              <option value="MEDIUM">Trung bình</option>
               <option value="HIGH">Cao</option>
-              <option value="URGENT">Khan cap</option>
+              <option value="URGENT">Khẩn cấp</option>
             </select>
             {errors.priority && (
               <p className="text-red-500 text-xs mt-1">
@@ -209,17 +206,22 @@ export default function NewReportPage() {
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4 space-y-2">
           <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
             <MapPinned className="w-4 h-4" />
-            <p className="text-sm font-medium">Dia ban gui bao cao</p>
+            <p className="text-sm font-medium">Địa bàn gửi báo cáo</p>
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-300">
             {accountLocationCode
-              ? locationLabel || "Dia ban dang duoc cap nhat"
-              : "Chua xac dinh"}
+              ? locationLabel || normalizeLocationCode(accountLocationCode)
+              : "Chưa xác định"}
           </p>
+          {accountLocationCode && !locationError && (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">
+              Tự động lấy theo địa bàn của tài khoản.
+            </p>
+          )}
           {(locationError || !accountLocationCode) && (
             <p className="text-xs text-amber-600">
               {locationError ||
-                "Tai khoan cua ban chua co thong tin dia ban de gui bao cao."}
+                "Tài khoản của bạn chưa có thông tin địa bàn để gửi báo cáo."}
             </p>
           )}
         </div>
@@ -230,7 +232,7 @@ export default function NewReportPage() {
             onClick={() => navigate(-1)}
             className="px-6 py-2 rounded-lg font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 transition-colors"
           >
-            Huy
+            Hủy
           </button>
           <button
             type="submit"
@@ -238,7 +240,7 @@ export default function NewReportPage() {
             className="px-6 py-2 rounded-lg font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-            {isSubmitting ? "Dang gui..." : "Gui bao cao"}
+            {isSubmitting ? "Đang gửi..." : "Gửi báo cáo"}
           </button>
         </div>
       </form>

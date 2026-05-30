@@ -20,6 +20,10 @@ import {
   listMyFriendRequests,
   listMyFriends,
   sendFriendRequest,
+  blockUser,
+  unblockUser,
+  listMyBlockedUsers,
+  acceptFriendRequest,
 } from "@/services/friends.api";
 import {
   addGroupMember,
@@ -52,6 +56,9 @@ import type {
   MessageItem,
   MessageReplyReference,
   UserProfile,
+  UserFriendItem,
+  UserBlockedItem,
+  UserFriendRequestItem,
 } from "@urban/shared-types";
 import { format } from "date-fns";
 import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
@@ -98,6 +105,8 @@ import {
   UserRound,
   Video,
   X,
+  Loader2,
+
 } from "lucide-react";
 import React, {
   Fragment,
@@ -246,12 +255,12 @@ const MANAGE_GROUP_TABS: Array<{
   label: string;
   icon: typeof UserRound;
 }> = [
-  { id: "members", label: "Thành viên", icon: UserRound },
-  { id: "bans", label: "Danh sách cấm", icon: Ban },
-  { id: "links", label: "Link tham gia", icon: Link2 },
-  { id: "audit", label: "Nhật ký hoạt động", icon: History },
-  { id: "settings", label: "Cài đặt", icon: ShieldAlert },
-];
+    { id: "members", label: "Thành viên", icon: UserRound },
+    { id: "bans", label: "Danh sách cấm", icon: Ban },
+    { id: "links", label: "Link tham gia", icon: Link2 },
+    { id: "audit", label: "Nhật ký hoạt động", icon: History },
+    { id: "settings", label: "Cài đặt", icon: ShieldAlert },
+  ];
 
 type RecallScope = "SELF" | "EVERYONE";
 
@@ -501,34 +510,35 @@ let sharedAudioCtx: AudioContext | null = null;
 const playTingSound = () => {
   try {
     if (!sharedAudioCtx) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContext) return;
       sharedAudioCtx = new AudioContext();
     }
-    
+
     // Resume context if browser autoplay policy suspended it
     if (sharedAudioCtx.state === 'suspended') {
       sharedAudioCtx.resume();
     }
 
     const t = sharedAudioCtx.currentTime;
-    
+
     // Helper function to play a single soft "plink"
     const playNote = (freq: number, startTime: number) => {
       const osc = sharedAudioCtx!.createOscillator();
       const gain = sharedAudioCtx!.createGain();
-      
+
       osc.type = "sine"; // Pure, soft tone
       osc.frequency.setValueAtTime(freq, startTime);
-      
+
       // Soft percussive envelope
       gain.gain.setValueAtTime(0, startTime);
       gain.gain.linearRampToValueAtTime(0.3, startTime + 0.02); // Quick, gentle attack
       gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.3); // Smooth fade out
-      
+
       osc.connect(gain);
       gain.connect(sharedAudioCtx!.destination);
-      
+
       osc.start(startTime);
       osc.stop(startTime + 0.3);
     };
@@ -880,6 +890,99 @@ export function ChatPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  const [mentionModalUserId, setMentionModalUserId] = useState<string | null>(null);
+  const [highlightComposer, setHighlightComposer] = useState(false);
+
+  const { data: blockedUsers = [], refetch: refetchBlockedUsers } = useQuery({
+    queryKey: ["blocked-users"],
+    queryFn: () => listMyBlockedUsers({ limit: 200 }),
+    staleTime: 30 * 1000,
+    enabled: Boolean(user?.sub),
+  });
+
+  const { data: friendsList = [], refetch: refetchFriends } = useQuery({
+    queryKey: ["friends"],
+    queryFn: () => listMyFriends({ limit: 200 }),
+    staleTime: 30 * 1000,
+    enabled: Boolean(user?.sub),
+  });
+
+  const { data: incomingRequests = [], refetch: refetchIncomingRequests } = useQuery({
+    queryKey: ["incoming-friend-requests"],
+    queryFn: () => listMyFriendRequests({ direction: "INCOMING", limit: 200 }),
+    staleTime: 30 * 1000,
+    enabled: Boolean(user?.sub),
+  });
+
+  const { data: outgoingRequests = [], refetch: refetchOutgoingRequests } = useQuery({
+    queryKey: ["outgoing-friend-requests"],
+    queryFn: () => listMyFriendRequests({ direction: "OUTGOING", limit: 200 }),
+    staleTime: 30 * 1000,
+    enabled: Boolean(user?.sub),
+  });
+
+  const { data: mentionUserProfile, isLoading: isLoadingMentionProfile } = useQuery({
+    queryKey: ["user-profile", mentionModalUserId],
+    queryFn: () => getUserById(mentionModalUserId!),
+    enabled: Boolean(mentionModalUserId),
+    staleTime: 60 * 1000,
+  });
+
+  const blockUserMutation = useMutation({
+    mutationFn: (targetUserId: string) => blockUser(targetUserId),
+    onSuccess: () => {
+      void refetchBlockedUsers();
+      toast.success("Đã chặn người dùng");
+    },
+    onError: (error: { message?: string }) => {
+      toast.error(error?.message || "Không thể chặn người dùng lúc này.");
+    },
+  });
+
+  const unblockUserMutation = useMutation({
+    mutationFn: (targetUserId: string) => unblockUser(targetUserId),
+    onSuccess: () => {
+      void refetchBlockedUsers();
+      toast.success("Đã bỏ chặn người dùng");
+    },
+    onError: (error: { message?: string }) => {
+      toast.error(error?.message || "Không thể bỏ chặn người dùng lúc này.");
+    },
+  });
+
+  const acceptFriendRequestMutation = useMutation({
+    mutationFn: (targetUserId: string) => acceptFriendRequest(targetUserId),
+    onSuccess: () => {
+      void refetchIncomingRequests();
+      void refetchFriends();
+      toast.success("Đã chấp nhận kết bạn");
+    },
+    onError: (error: { message?: string }) => {
+      toast.error(error?.message || "Không thể chấp nhận kết bạn lúc này.");
+    },
+  });
+
+  const sendFriendRequestMutation = useMutation({
+    mutationFn: (targetUserId: string) => sendFriendRequest(targetUserId),
+    onMutate: (targetUserId) => {
+      setSendingFriendRequestUserId(targetUserId);
+      setMemberActionError("");
+    },
+    onSuccess: () => {
+      void refetchOutgoingRequests();
+      void queryClient.invalidateQueries({ queryKey: ["friends"] });
+      toast.success("Đã gửi lời mời kết bạn");
+    },
+    onError: (error: { message?: string }) => {
+      const message = error?.message || "Không thể gửi lời mời kết bạn lúc này.";
+      setMemberActionError(message);
+      toast.error(message);
+    },
+    onSettled: () => {
+      setSendingFriendRequestUserId(null);
+    },
+  });
+
   useEffect(() => {
     const trimmed = conversationSearch.trim();
     if (!trimmed) return;
@@ -901,6 +1004,7 @@ export function ChatPage() {
   }, [conversationSearch, navigate]);
 
   useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleNewMessage = (payload: any) => {
       const msg = "message" in payload ? payload.message : payload;
       if (!msg || !msg.conversationId || !msg.senderId) return;
@@ -1273,15 +1377,15 @@ export function ChatPage() {
     () =>
       chatState.conversationId
         ? {
-            conversationId: chatState.conversationId,
-            groupName: chatState.displayName || "Đang tải...",
-            avatarUrl: chatState.avatarUrl,
-            updatedAt: new Date().toISOString(),
-            unreadCount: 0,
-            lastMessagePreview: "Bạn đã tham gia nhóm",
-            lastSenderName: "",
-            isGroup: chatState.conversationId.includes("group:"),
-          }
+          conversationId: chatState.conversationId,
+          groupName: chatState.displayName || "Đang tải...",
+          avatarUrl: chatState.avatarUrl,
+          updatedAt: new Date().toISOString(),
+          unreadCount: 0,
+          lastMessagePreview: "Bạn đã tham gia nhóm",
+          lastSenderName: "",
+          isGroup: chatState.conversationId.includes("group:"),
+        }
         : null,
     [chatState.avatarUrl, chatState.conversationId, chatState.displayName],
   );
@@ -1290,13 +1394,13 @@ export function ChatPage() {
     () =>
       syntheticConversation
         ? [
-            syntheticConversation,
-            ...conversations.filter(
-              (conversation) =>
-                conversation.conversationId !==
-                syntheticConversation.conversationId,
-            ),
-          ]
+          syntheticConversation,
+          ...conversations.filter(
+            (conversation) =>
+              conversation.conversationId !==
+              syntheticConversation.conversationId,
+          ),
+        ]
         : conversations,
     [conversations, syntheticConversation],
   );
@@ -1304,19 +1408,19 @@ export function ChatPage() {
   const normalizedSearch = conversationSearch.trim().toLowerCase();
   const renderedConversations = normalizedSearch
     ? mergedConversations.filter((conversation) => {
-        const alias = conversationAliases[conversation.conversationId];
-        const haystack = [
-          alias,
-          conversation.groupName,
-          conversation.lastMessagePreview,
-          conversation.lastSenderName,
-          conversation.conversationId,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(normalizedSearch);
-      })
+      const alias = conversationAliases[conversation.conversationId];
+      const haystack = [
+        alias,
+        conversation.groupName,
+        conversation.lastMessagePreview,
+        conversation.lastSenderName,
+        conversation.conversationId,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedSearch);
+    })
     : mergedConversations;
 
   const activeContact = renderedConversations.find(
@@ -1484,13 +1588,13 @@ export function ChatPage() {
   const activeContactBaseAvatarUrl =
     (
       activeContact as
-        | { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }
-        | undefined
+      | { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }
+      | undefined
     )?.avatarAsset?.resolvedUrl ||
     (
       activeContact as
-        | { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }
-        | undefined
+      | { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }
+      | undefined
     )?.avatarUrl;
   const activeContactAvatarUrl =
     (activeGroupId ? groupAvatarOverrides[activeGroupId] : undefined) ||
@@ -1719,8 +1823,8 @@ export function ChatPage() {
       map.set(
         user.sub,
         conversationAliasByUserId.get(user.sub) ||
-          cachedProfile?.fullName ||
-          "Bạn",
+        cachedProfile?.fullName ||
+        "Bạn",
       );
     }
 
@@ -1771,8 +1875,8 @@ export function ChatPage() {
       map.set(
         user.sub,
         conversationAliasByUserId.get(user.sub) ||
-          cachedProfile?.fullName ||
-          "Bạn",
+        cachedProfile?.fullName ||
+        "Bạn",
       );
     }
 
@@ -1891,8 +1995,8 @@ export function ChatPage() {
 
     const filtered = keyword
       ? candidates.filter((candidate) =>
-          `${candidate.displayName}`.toLowerCase().includes(keyword),
-        )
+        `${candidate.displayName}`.toLowerCase().includes(keyword),
+      )
       : candidates;
 
     return filtered.slice(0, 6);
@@ -2130,25 +2234,7 @@ export function ChatPage() {
       toast.error(error?.message || "Không thể giải tán nhóm.");
     },
   });
-  const sendFriendRequestMutation = useMutation({
-    mutationFn: (targetUserId: string) => sendFriendRequest(targetUserId),
-    onMutate: (targetUserId) => {
-      setSendingFriendRequestUserId(targetUserId);
-      setMemberActionError("");
-    },
-    onSuccess: () => {
-      toast.success("Đã gửi lời mời kết bạn");
-      queryClient.invalidateQueries({ queryKey: ["friends"] });
-    },
-    onError: (error: { message?: string }) => {
-      const message = error?.message || "Không thể gửi lời mời kết bạn.";
-      setMemberActionError(message);
-      toast.error(message);
-    },
-    onSettled: () => {
-      setSendingFriendRequestUserId(null);
-    },
-  });
+
   const leaveGroupMutation = useMutation({
     mutationFn: ({
       groupId,
@@ -2473,6 +2559,7 @@ export function ChatPage() {
 
   // Real-time presence listeners via socket
   useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handlePresenceSnapshot = (payload: any) => {
       if (!payload?.participants || !Array.isArray(payload.participants)) return;
       setDmPresenceByUserId((prev) => {
@@ -2488,6 +2575,7 @@ export function ChatPage() {
       }
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handlePresenceUpdated = (payload: any) => {
       if (!payload?.presence || !payload.presence.userId) return;
       const p: PresenceState = payload.presence;
@@ -3241,7 +3329,7 @@ export function ChatPage() {
     };
   }, [activeMessageMenuId]);
 
-  const handleStartCall = (isVideo: boolean, isJoining = false) => {
+  const handleStartCall = (isVideo: boolean) => {
     if (!activeContact) return;
 
     const participantNames = Object.fromEntries(displayNameByUserId.entries());
@@ -3268,7 +3356,7 @@ export function ChatPage() {
       participantNames,
       participantAvatarUrls,
     };
-    startCall(config);  
+    startCall(config);
   };
 
   const resolveMessageType = (file?: File | null): ChatMessageType => {
@@ -3313,86 +3401,55 @@ export function ChatPage() {
 
   const replaceMentionIdsWithNames = useCallback(
     (text: string, mentionPayload: unknown): string => {
-    if (
-      !text ||
-      !Array.isArray(mentionPayload) ||
-      mentionPayload.length === 0
-    ) {
-      return text;
-    }
-
-    const mentionIds = mentionPayload
-      .map((entry) => {
-        if (typeof entry === "string") {
-          return entry;
-        }
-
-        if (!entry || typeof entry !== "object") {
-          return undefined;
-        }
-
-        const record = entry as Record<string, unknown>;
-        if (typeof record.userId === "string") {
-          return record.userId;
-        }
-
-        if (typeof record.id === "string") {
-          return record.id;
-        }
-
-        return undefined;
-      })
-      .filter((value): value is string => Boolean(value?.trim()));
-
-    let nextText = text;
-    mentionIds.forEach((userId) => {
-      const displayName = mentionNameByUserId.get(userId);
-      if (!displayName) {
-        return;
+      if (
+        !text ||
+        !Array.isArray(mentionPayload) ||
+        mentionPayload.length === 0
+      ) {
+        return text;
       }
 
-      const escapedUserId = escapeRegExp(userId);
-      const mentionPattern = new RegExp(`@${escapedUserId}(?=\\b|\\s|$)`, "g");
-      nextText = nextText.replace(mentionPattern, `@${displayName}`);
-    });
+      const mentionIds = mentionPayload
+        .map((entry) => {
+          if (typeof entry === "string") {
+            return entry;
+          }
 
-    return nextText;
+          if (!entry || typeof entry !== "object") {
+            return undefined;
+          }
+
+          const record = entry as Record<string, unknown>;
+          if (typeof record.userId === "string") {
+            return record.userId;
+          }
+
+          if (typeof record.id === "string") {
+            return record.id;
+          }
+
+          return undefined;
+        })
+        .filter((value): value is string => Boolean(value?.trim()));
+
+      let nextText = text;
+      mentionIds.forEach((userId) => {
+        const displayName = mentionNameByUserId.get(userId);
+        if (!displayName) {
+          return;
+        }
+
+        const escapedUserId = escapeRegExp(userId);
+        const mentionPattern = new RegExp(`@${escapedUserId}(?=\\b|\\s|$)`, "g");
+        nextText = nextText.replace(mentionPattern, `@${displayName}`);
+      });
+
+      return nextText;
     },
     [mentionNameByUserId],
   );
 
-  const extractMentionDisplayNames = (mentionPayload: unknown): string[] => {
-    if (!Array.isArray(mentionPayload)) {
-      return [];
-    }
 
-    const uniqueNames = new Set<string>();
-    mentionPayload.forEach((entry) => {
-      let userId: string | undefined;
-
-      if (typeof entry === "string") {
-        userId = entry;
-      } else if (entry && typeof entry === "object") {
-        const record = entry as Record<string, unknown>;
-        if (typeof record.userId === "string") {
-          userId = record.userId;
-        } else if (typeof record.id === "string") {
-          userId = record.id;
-        }
-      }
-
-      if (!userId) {
-        return;
-      }
-
-      const displayName = mentionNameByUserId.get(userId);
-      if (displayName) {
-        uniqueNames.add(displayName);
-      }
-    });
-
-    return Array.from(uniqueNames);
-  };
 
   const renderMessageTextWithLinks = (
     text: string,
@@ -3476,31 +3533,96 @@ export function ChatPage() {
       textValue,
       parsedMentionPayload,
     );
-    const mentionTokens = extractMentionDisplayNames(parsedMentionPayload)
-      .map((name) => `@${name}`)
+
+    const mentionNameToUserId = new Map<string, string>();
+
+    // 1. Pre-populate map with active group members
+    activeGroupMembers.forEach((member) => {
+      const displayName = mentionNameByUserId.get(member.userId);
+      if (displayName) {
+        mentionNameToUserId.set(`@${displayName}`, member.userId);
+      }
+    });
+
+    // 2. Pre-populate map with friends
+    myFriends.forEach((friend) => {
+      if (friend.userId && friend.fullName?.trim()) {
+        mentionNameToUserId.set(`@${friend.fullName.trim()}`, friend.userId);
+      }
+    });
+
+    // 3. Pre-populate map with current user
+    if (user?.sub) {
+      const myName = mentionNameByUserId.get(user.sub);
+      if (myName) {
+        mentionNameToUserId.set(`@${myName}`, user.sub);
+      }
+    }
+
+    // 4. Process rich mention payload if available
+    if (Array.isArray(parsedMentionPayload)) {
+      parsedMentionPayload.forEach((entry) => {
+        let userId: string | undefined;
+        let displayNameFallback: string | undefined;
+
+        if (typeof entry === "string") {
+          userId = entry;
+        } else if (entry && typeof entry === "object") {
+          const record = entry as Record<string, unknown>;
+          if (typeof record.userId === "string") {
+            userId = record.userId;
+          } else if (typeof record.id === "string") {
+            userId = record.id;
+          }
+          if (typeof record.displayName === "string") {
+            displayNameFallback = record.displayName;
+          } else if (typeof record.fullName === "string") {
+            displayNameFallback = record.fullName;
+          } else if (typeof record.name === "string") {
+            displayNameFallback = record.name;
+          }
+        }
+
+        if (userId) {
+          const displayName = mentionNameByUserId.get(userId) || displayNameFallback;
+          if (displayName) {
+            mentionNameToUserId.set(`@${displayName}`, userId);
+          }
+        }
+      });
+    }
+
+    // 5. Scan the text to find which tokens are actually present
+    const allTokens = Array.from(mentionNameToUserId.keys())
+      .filter((token) => normalizedText.includes(token))
       .sort((left, right) => right.length - left.length);
 
-    if (mentionTokens.length === 0) {
+    if (allTokens.length === 0) {
       return renderMessageTextWithLinks(normalizedText, isMe, "no-mention");
     }
 
     const mentionPattern = new RegExp(
-      `(${mentionTokens.map((token) => escapeRegExp(token)).join("|")})`,
+      `(${allTokens.map((token) => escapeRegExp(token)).join("|")})`,
       "g",
     );
     const parts = normalizedText.split(mentionPattern).filter(Boolean);
-    const mentionTokenSet = new Set(mentionTokens);
+    const mentionTokenSet = new Set(allTokens);
 
     return parts.map((part, index) => {
       if (mentionTokenSet.has(part)) {
+        const targetUserId = mentionNameToUserId.get(part);
         return (
           <span
             key={`mention-${index}`}
-            className={
-              isMe
-                ? "font-bold text-blue-100"
-                : "font-bold text-blue-600 dark:text-blue-400"
-            }
+            onClick={(e) => {
+              if (targetUserId) {
+                e.stopPropagation();
+                setMentionModalUserId(targetUserId);
+              }
+            }}
+            className={`cursor-pointer font-bold hover:underline ${
+              isMe ? "text-blue-100" : "text-blue-600 dark:text-blue-400"
+            }`}
           >
             {part}
           </span>
@@ -4244,9 +4366,9 @@ export function ChatPage() {
               const chatDmUserId = chat.isGroup
                 ? undefined
                 : extractDirectPeerUserId(
-                    chat as ConversationAvatarLike,
-                    user?.sub,
-                  );
+                  chat as ConversationAvatarLike,
+                  user?.sub,
+                );
               const chatPresence = chatDmUserId
                 ? dmPresenceByUserId[chatDmUserId]
                 : undefined;
@@ -4289,11 +4411,10 @@ export function ChatPage() {
                   onContextMenu={(e) =>
                     handleConvContextMenu(e, chat.conversationId)
                   }
-                  className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-lg cursor-pointer transition-all duration-300 hover:scale-[1.02] active:scale-95 animate-in fade-in ${
-                    activeChat === chat.conversationId
+                  className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-lg cursor-pointer transition-all duration-300 hover:scale-[1.02] active:scale-95 animate-in fade-in ${activeChat === chat.conversationId
                       ? "bg-blue-50 dark:bg-blue-950/40 shadow-sm"
                       : "hover:bg-gray-50 dark:hover:bg-slate-800"
-                  }`}
+                    }`}
                 >
                   <div className="relative">
                     <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
@@ -4492,7 +4613,7 @@ export function ChatPage() {
               const sortedPinned = [...pinnedMessages].sort(
                 (a, b) => new Date(b.pinnedAt || b.sentAt || 0).getTime() - new Date(a.pinnedAt || a.sentAt || 0).getTime()
               );
-              
+
               const displayedPinned = showAllPinned ? sortedPinned : [sortedPinned[0]];
               const hasMorePinned = sortedPinned.length > 1;
 
@@ -4544,7 +4665,7 @@ export function ChatPage() {
                         </button>
                       </div>
                     ))}
-                    
+
                     {hasMorePinned && (
                       <div className="px-2.5 pt-0.5">
                         <button
@@ -4604,11 +4725,10 @@ export function ChatPage() {
                     <button
                       key={filter.value}
                       onClick={() => setMessageTypeFilter(filter.value)}
-                      className={`px-3 py-1 rounded-full text-[10px] font-medium transition ${
-                        messageTypeFilter === filter.value
+                      className={`px-3 py-1 rounded-full text-[10px] font-medium transition ${messageTypeFilter === filter.value
                           ? "bg-blue-600 text-white shadow-sm"
                           : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
-                      }`}
+                        }`}
                     >
                       {filter.label}
                     </button>
@@ -5038,8 +5158,8 @@ export function ChatPage() {
                                               : ""}
                                           </p>
                                           {member.userId === user?.sub &&
-                                          activeChat &&
-                                          activeContact?.isGroup ? (
+                                            activeChat &&
+                                            activeContact?.isGroup ? (
                                             <button
                                               type="button"
                                               onClick={() => {
@@ -5084,7 +5204,7 @@ export function ChatPage() {
                                       </button>
 
                                       {activeMemberActionUserId ===
-                                      member.userId ? (
+                                        member.userId ? (
                                         <div
                                           className="absolute right-0 top-7 z-20 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
                                           onClick={(event) =>
@@ -5170,7 +5290,7 @@ export function ChatPage() {
                                             onClick={() => {
                                               const profile =
                                                 memberProfilesById[
-                                                  member.userId
+                                                member.userId
                                                 ];
                                               const currentAlias =
                                                 conversationAliasByUserId.get(
@@ -5206,14 +5326,14 @@ export function ChatPage() {
                                         Bạn bè
                                       </span>
                                     ) : outgoingFriendRequestUserIds.has(
-                                        member.userId,
-                                      ) ? (
+                                      member.userId,
+                                    ) ? (
                                       <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
                                         Đã gửi lời mời
                                       </span>
                                     ) : incomingFriendRequestUserIds.has(
-                                        member.userId,
-                                      ) ? (
+                                      member.userId,
+                                    ) ? (
                                       <span className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
                                         Đã nhận lời mời
                                       </span>
@@ -5228,12 +5348,12 @@ export function ChatPage() {
                                         disabled={
                                           sendFriendRequestMutation.isPending &&
                                           sendingFriendRequestUserId ===
-                                            member.userId
+                                          member.userId
                                         }
                                         className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         {sendFriendRequestMutation.isPending &&
-                                        sendingFriendRequestUserId ===
+                                          sendingFriendRequestUserId ===
                                           member.userId
                                           ? "Đang gửi..."
                                           : "Kết bạn"}
@@ -5553,7 +5673,7 @@ export function ChatPage() {
                     const replyPreview = msg.replyMessage;
                     const replySenderDisplayName = replyPreview?.senderId
                       ? displayNameByUserId.get(replyPreview.senderId) ||
-                        replyPreview.senderName
+                      replyPreview.senderName
                       : replyPreview?.senderName;
                     const isForwardedMessage = Boolean(
                       msg.forwardedFromMessageId,
@@ -5755,11 +5875,10 @@ export function ChatPage() {
                       >
                         {!isEditing ? (
                           <div
-                            className={`absolute ${isMe ? "-left-24" : "-right-24"} bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${
-                              activeMessageMenuId === msg.id
+                            className={`absolute ${isMe ? "-left-24" : "-right-24"} bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${activeMessageMenuId === msg.id
                                 ? "opacity-100"
                                 : "opacity-0 group-hover:opacity-100"
-                            }`}
+                              }`}
                           >
                             <button
                               type="button"
@@ -5952,36 +6071,35 @@ export function ChatPage() {
                         <div
                           className={`flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}
                         >
-                        {!isMe ? (
-                          shouldShowMessageAvatar ? (
-                            <div className="relative h-8 w-8 shrink-0">
-                              <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
-                                {senderAvatarUrl ? (
-                                  <AvatarImage
-                                    src={senderAvatarUrl}
-                                    alt={senderDisplayName}
-                                  />
-                                ) : null}
-                                <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
-                                  {(senderDisplayName || "?")
-                                    .charAt(0)
-                                    .toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              {renderGroupRoleKeyBadge(msg.senderId)}
-                            </div>
-                          ) : (
-                            <div className="h-8 w-8 shrink-0" />
-                          )
-                        ) : null}
+                          {!isMe ? (
+                            shouldShowMessageAvatar ? (
+                              <div className="relative h-8 w-8 shrink-0">
+                                <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
+                                  {senderAvatarUrl ? (
+                                    <AvatarImage
+                                      src={senderAvatarUrl}
+                                      alt={senderDisplayName}
+                                    />
+                                  ) : null}
+                                  <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
+                                    {(senderDisplayName || "?")
+                                      .charAt(0)
+                                      .toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                {renderGroupRoleKeyBadge(msg.senderId)}
+                              </div>
+                            ) : (
+                              <div className="h-8 w-8 shrink-0" />
+                            )
+                          ) : null}
 
                           <div
                             onClick={(event) => event.stopPropagation()}
-                            className={`px-4 py-2 rounded-2xl shadow-sm ${
-                              isMe
+                            className={`px-4 py-2 rounded-2xl shadow-sm ${isMe
                                 ? `bg-blue-600 text-white ${endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl"}`
                                 : `bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 ${endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl"}`
-                            }`}
+                              }`}
                           >
                             <div className="relative">
                               {isForwardedMessage ? (
@@ -6099,10 +6217,10 @@ export function ChatPage() {
                                                 const percentage =
                                                   totalVotes > 0
                                                     ? Math.round(
-                                                        (votes.length /
-                                                          totalVotes) *
-                                                          100,
-                                                      )
+                                                      (votes.length /
+                                                        totalVotes) *
+                                                      100,
+                                                    )
                                                     : 0;
                                                 const hasVoted = voterId
                                                   ? votes.includes(voterId)
@@ -6117,24 +6235,22 @@ export function ChatPage() {
                                                     className="w-full text-left group relative"
                                                   >
                                                     <div
-                                                      className={`relative z-10 flex items-center justify-between px-3 py-2 rounded-lg border transition-all ${
-                                                        hasVoted
+                                                      className={`relative z-10 flex items-center justify-between px-3 py-2 rounded-lg border transition-all ${hasVoted
                                                           ? isMe
                                                             ? "bg-white/30 border-white"
                                                             : "bg-blue-50 border-blue-400 dark:bg-blue-900/40 dark:border-blue-500"
                                                           : isMe
                                                             ? "border-white/10 hover:bg-white/5"
                                                             : "border-slate-200 dark:border-slate-700 hover:border-blue-300"
-                                                      }`}
+                                                        }`}
                                                     >
                                                       <span
-                                                        className={`text-xs font-medium truncate pr-4 ${
-                                                          isMe
+                                                        className={`text-xs font-medium truncate pr-4 ${isMe
                                                             ? "text-white"
                                                             : hasVoted
                                                               ? "text-blue-700 dark:text-blue-300"
                                                               : "text-slate-600 dark:text-slate-300"
-                                                        }`}
+                                                          }`}
                                                       >
                                                         {option.text}
                                                       </span>
@@ -6214,18 +6330,16 @@ export function ChatPage() {
                                 />
                               ) : (
                                 <div
-                                  className={`mt-2 flex w-full max-w-[320px] items-center gap-3 rounded-xl border p-3 transition-all ${
-                                    isMe
+                                  className={`mt-2 flex w-full max-w-[320px] items-center gap-3 rounded-xl border p-3 transition-all ${isMe
                                       ? "border-white/20 bg-white/10 text-white"
                                       : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm"
-                                  }`}
+                                    }`}
                                 >
                                   <div
-                                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg ${
-                                      isMe
+                                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg ${isMe
                                         ? "bg-white/20"
                                         : "bg-slate-100 dark:bg-slate-800"
-                                    }`}
+                                      }`}
                                   >
                                     {getFileIcon(
                                       (() => {
@@ -6304,11 +6418,10 @@ export function ChatPage() {
                                       href={msg.attachmentUrl}
                                       target="_blank"
                                       rel="noreferrer"
-                                      className={`p-2 rounded-lg transition-colors ${
-                                        isMe
+                                      className={`p-2 rounded-lg transition-colors ${isMe
                                           ? "hover:bg-white/20"
                                           : "hover:bg-slate-100 dark:hover:bg-slate-800"
-                                      }`}
+                                        }`}
                                       title="Tải về"
                                       download
                                     >
@@ -6323,11 +6436,10 @@ export function ChatPage() {
                                 href={linkPreview.href}
                                 target="_blank"
                                 rel="noreferrer"
-                                className={`mt-2 block rounded-xl border px-3 py-2 text-left transition ${
-                                  isMe
+                                className={`mt-2 block rounded-xl border px-3 py-2 text-left transition ${isMe
                                     ? "border-white/25 bg-white/10 hover:bg-white/15"
                                     : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
-                                }`}
+                                  }`}
                               >
                                 <div className="flex items-start gap-2">
                                   <img
@@ -6351,28 +6463,28 @@ export function ChatPage() {
                               </a>
                             ) : null}
                           </div>
-                        {isMe ? (
-                          shouldShowMessageAvatar ? (
-                            <div className="relative h-8 w-8 shrink-0">
-                              <Avatar className="h-8 w-8 border border-blue-200 dark:border-blue-800">
-                                {senderAvatarUrl ? (
-                                  <AvatarImage
-                                    src={senderAvatarUrl}
-                                    alt={senderDisplayName}
-                                  />
-                                ) : null}
-                                <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100 text-xs font-semibold">
-                                  {(senderDisplayName || "B")
-                                    .charAt(0)
-                                    .toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              {renderGroupRoleKeyBadge(msg.senderId)}
-                            </div>
-                          ) : (
-                            <div className="h-8 w-8 shrink-0" />
-                          )
-                        ) : null}
+                          {isMe ? (
+                            shouldShowMessageAvatar ? (
+                              <div className="relative h-8 w-8 shrink-0">
+                                <Avatar className="h-8 w-8 border border-blue-200 dark:border-blue-800">
+                                  {senderAvatarUrl ? (
+                                    <AvatarImage
+                                      src={senderAvatarUrl}
+                                      alt={senderDisplayName}
+                                    />
+                                  ) : null}
+                                  <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100 text-xs font-semibold">
+                                    {(senderDisplayName || "B")
+                                      .charAt(0)
+                                      .toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                {renderGroupRoleKeyBadge(msg.senderId)}
+                              </div>
+                            ) : (
+                              <div className="h-8 w-8 shrink-0" />
+                            )
+                          ) : null}
                         </div>
                         {reactionSummary.length > 0 ? (
                           <div
@@ -6402,8 +6514,8 @@ export function ChatPage() {
                           </span>
                         ) : null}
                         {messageActionError &&
-                        (editingMessageId === msg.id ||
-                          activeMessageMenuId === msg.id) ? (
+                          (editingMessageId === msg.id ||
+                            activeMessageMenuId === msg.id) ? (
                           <span className="mt-1 text-[11px] text-red-500">
                             {messageActionError}
                           </span>
@@ -6418,16 +6530,16 @@ export function ChatPage() {
                   })}
 
                 {activeContact?.isGroup &&
-                activeChat &&
-                (rtc.activeGroupCalls.has(activeChat) ||
-                  (rtc.callState !== "IDLE" &&
-                    rtc.activeConfig?.conversationId === activeChat)) ? (
+                  activeChat &&
+                  (rtc.activeGroupCalls.has(activeChat) ||
+                    (rtc.callState !== "IDLE" &&
+                      rtc.activeConfig?.conversationId === activeChat)) ? (
                   <div className="flex w-full justify-center py-3">
                     <div className="flex flex-col items-center gap-2 rounded-xl bg-blue-50/80 border border-blue-200 px-5 py-3 shadow-sm dark:bg-blue-900/20 dark:border-blue-800 animate-in fade-in zoom-in duration-300">
                       <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-blue-950 shadow-sm relative">
                           {rtc.activeConfig?.conversationId === activeChat &&
-                          rtc.activeConfig.isVideo ? (
+                            rtc.activeConfig.isVideo ? (
                             <Video size={14} className="text-blue-500" />
                           ) : (
                             <Phone size={14} className="text-blue-500" />
@@ -6445,14 +6557,14 @@ export function ChatPage() {
                         <div className="mt-1 flex w-full gap-2">
                           <button
                             type="button"
-                            onClick={() => handleStartCall(false, true)}
+                            onClick={() => handleStartCall(false)}
                             className="flex-1 rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-slate-300 transition dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
                           >
                             Tham gia thoại
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleStartCall(true, true)}
+                            onClick={() => handleStartCall(true)}
                             className="flex-1 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700 transition"
                           >
                             Tham gia video
@@ -6849,11 +6961,10 @@ export function ChatPage() {
                       </div>
                       <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
                         <div
-                          className={`h-1.5 rounded-full transition-all ${
-                            item.status === "failed"
+                          className={`h-1.5 rounded-full transition-all ${item.status === "failed"
                               ? "bg-red-500"
                               : "bg-blue-500"
-                          }`}
+                            }`}
                           style={{
                             width: `${item.status === "failed" ? 100 : item.progress}%`,
                           }}
@@ -6892,11 +7003,10 @@ export function ChatPage() {
                       setGifPickerTab("gif");
                     }
                   }}
-                  className={`p-2 rounded-lg transition-all ${
-                    isGifPickerOpen && gifPickerTab === "gif"
+                  className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "gif"
                       ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
                       : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
-                  }`}
+                    }`}
                   title="Gửi GIF"
                 >
                   <svg
@@ -6926,11 +7036,10 @@ export function ChatPage() {
                       setGifPickerTab("sticker");
                     }
                   }}
-                  className={`p-2 rounded-lg transition-all ${
-                    isGifPickerOpen && gifPickerTab === "sticker"
+                  className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "sticker"
                       ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
                       : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
-                  }`}
+                    }`}
                   title="Gửi Sticker"
                 >
                   <Sticker size={18} />
@@ -7019,18 +7128,16 @@ export function ChatPage() {
                               onClick={() => {
                                 void handleSendGif(gif.url);
                               }}
-                              className={`rounded-lg overflow-hidden hover:ring-2 ring-blue-500 transition-all h-28 flex items-center justify-center ${
-                                gifPickerTab === "sticker"
+                              className={`rounded-lg overflow-hidden hover:ring-2 ring-blue-500 transition-all h-28 flex items-center justify-center ${gifPickerTab === "sticker"
                                   ? "bg-transparent hover:bg-slate-100 dark:hover:bg-slate-850"
                                   : "bg-slate-100 dark:bg-slate-800"
-                              }`}
+                                }`}
                             >
                               <img
                                 src={gif.previewUrl}
                                 alt="gif"
-                                className={`w-full h-full ${
-                                  gifPickerTab === "sticker" ? "object-contain p-1.5" : "object-cover"
-                                }`}
+                                className={`w-full h-full ${gifPickerTab === "sticker" ? "object-contain p-1.5" : "object-cover"
+                                  }`}
                               />
                             </button>
                           ))}
@@ -7068,7 +7175,7 @@ export function ChatPage() {
                     placeholder={
                       activeGroupId ? "Nhập tin nhắn..." : "Nhập tin nhắn..."
                     }
-                    className="w-full bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-10 sm:h-11"
+                    className={`w-full bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-10 sm:h-11 ${highlightComposer ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950" : ""}`}
                     ref={composerInputRef}
                     value={inputText}
                     onChange={(e) => {
@@ -7238,11 +7345,10 @@ export function ChatPage() {
                         <button
                           key={tab.id}
                           onClick={() => setManageGroupActiveTab(tab.id)}
-                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-all ${
-                            manageGroupActiveTab === tab.id
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-all ${manageGroupActiveTab === tab.id
                               ? "bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none"
                               : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-                          }`}
+                            }`}
                         >
                           <tab.icon size={16} />
                           {tab.label}
@@ -7729,7 +7835,7 @@ export function ChatPage() {
                         isConfirming ||
                         (confirmDialog.requireInput &&
                           confirmInput.trim() !==
-                            confirmDialog.requireInput.expectedValue)
+                          confirmDialog.requireInput.expectedValue)
                       }
                       className={`rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60 ${confirmDialog.intent === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
                     >
@@ -7811,6 +7917,261 @@ export function ChatPage() {
                   <p className="text-sm text-slate-500 text-center max-w-[200px]">
                     {successModal.message}
                   </p>
+                </div>
+              </div>
+            )}
+            {mentionModalUserId && (
+              <div
+                className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 backdrop-blur-xs p-4"
+                onClick={() => setMentionModalUserId(null)}
+              >
+                <div
+                  className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white/90 dark:bg-slate-900/90 shadow-2xl backdrop-blur-md border border-slate-200/50 dark:border-slate-800/50 text-slate-800 dark:text-slate-100 animate-in zoom-in-95 fade-in duration-200"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Close button */}
+                  <button
+                    type="button"
+                    onClick={() => setMentionModalUserId(null)}
+                    className="absolute right-4 top-4 z-10 rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+
+                  {/* Header background decoration */}
+                  <div className="h-20 bg-gradient-to-r from-blue-600/20 to-purple-600/20 dark:from-blue-600/40 dark:to-purple-600/40" />
+
+                  {isLoadingMentionProfile ? (
+                    <div className="flex flex-col items-center justify-center p-8 space-y-3">
+                      <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                      <p className="text-sm text-slate-500">Đang tải hồ sơ...</p>
+                    </div>
+                  ) : mentionUserProfile ? (
+                    (() => {
+                      const isMe = mentionModalUserId === user?.sub;
+                      const isFriend = friendsList.some((f: UserFriendItem) => f.userId === mentionModalUserId);
+                      const isBlocked = blockedUsers.some((b: UserBlockedItem) => b.userId === mentionModalUserId);
+                      const outgoingRequest = outgoingRequests.find((r: UserFriendRequestItem) => r.userId === mentionModalUserId);
+                      const incomingRequest = incomingRequests.find((r: UserFriendRequestItem) => r.userId === mentionModalUserId);
+
+                      const targetUserMembership = activeGroupMembers.find((m) => m.userId === mentionModalUserId);
+
+                      return (
+                        <div className="p-6 pt-0 -mt-10 flex flex-col items-center">
+                          {/* Avatar */}
+                          <Avatar className="w-20 h-20 border-4 border-white dark:border-slate-900 shadow-xl mb-3">
+                            {mentionUserProfile.avatarUrl ? (
+                              <AvatarImage src={mentionUserProfile.avatarUrl} alt={mentionUserProfile.fullName} />
+                            ) : null}
+                            <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold text-xl">
+                              {(mentionUserProfile.fullName || "?").charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+
+                          {/* Names */}
+                          <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                            {mentionUserProfile.fullName}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isFriend) {
+                                return;
+                              }
+
+                              setHighlightComposer(true);
+                              requestAnimationFrame(() => {
+                                composerInputRef.current?.focus();
+                              });
+                              window.setTimeout(() => {
+                                setHighlightComposer(false);
+                              }, 1200);
+                            }}
+                            className="mb-2 text-xs text-slate-500 transition-colors hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
+                          >
+                            @{mentionUserProfile.phone || mentionUserProfile.email || "user"}
+                          </button>
+
+                          {/* Badges */}
+                          <div className="flex flex-wrap gap-1.5 justify-center mb-4">
+                            {targetUserMembership?.roleInGroup === "OWNER" && (
+                              <span className="rounded-full bg-amber-100 dark:bg-amber-900/30 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                                Trưởng nhóm
+                              </span>
+                            )}
+                            {targetUserMembership?.roleInGroup === "DEPUTY" && (
+                              <span className="rounded-full bg-indigo-100 dark:bg-indigo-900/30 px-2.5 py-0.5 text-[10px] font-bold text-indigo-800 dark:text-indigo-300">
+                                Phó nhóm
+                              </span>
+                            )}
+                            {targetUserMembership?.roleInGroup === "MEMBER" && (
+                              <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                                Thành viên
+                              </span>
+                            )}
+                            <span className="rounded-full bg-blue-50 dark:bg-blue-900/20 px-2.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                              {mentionUserProfile.role === "CITIZEN" ? "Người dân" : "Cán bộ"}
+                            </span>
+                          </div>
+
+                          {/* Location details */}
+                          <div className="w-full flex items-center justify-center gap-1.5 text-xs text-slate-500 mb-6 bg-slate-50 dark:bg-slate-800/40 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                            <span className="font-medium">Địa bàn:</span>
+                            <span>{mentionUserProfile.locationCode || "Chưa xác định"}</span>
+                          </div>
+
+                          {/* Core Chat/Friend/Block Actions */}
+                          <div className="w-full space-y-2">
+                            {!isMe && (
+                              <div className="flex gap-2">
+                                {isFriend ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveChat(`dm:${mentionModalUserId}`);
+                                      setMentionModalUserId(null);
+                                    }}
+                                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-blue-600 font-bold text-sm text-white hover:bg-blue-700 shadow-lg shadow-blue-500/20 transition-all active:scale-[0.98]"
+                                  >
+                                    Nhắn tin
+                                  </button>
+                                ) : incomingRequest ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => acceptFriendRequestMutation.mutate(mentionModalUserId)}
+                                    disabled={acceptFriendRequestMutation.isPending}
+                                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 font-bold text-sm text-white hover:bg-emerald-700 shadow-lg shadow-emerald-500/20 transition-all active:scale-[0.98] disabled:opacity-50"
+                                  >
+                                    {acceptFriendRequestMutation.isPending ? "Đang chấp nhận..." : "Đồng ý"}
+                                  </button>
+                                ) : outgoingRequest ? (
+                                  <button
+                                    type="button"
+                                    disabled
+                                    className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 font-bold text-sm text-slate-500 dark:text-slate-400 border border-slate-200/10 opacity-75"
+                                  >
+                                    Đã gửi yêu cầu
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => sendFriendRequestMutation.mutate(mentionModalUserId)}
+                                    disabled={sendFriendRequestMutation.isPending}
+                                    className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 font-bold text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                                  >
+                                    {sendFriendRequestMutation.isPending ? "Đang gửi..." : "Kết bạn"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {!isMe && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isBlocked) {
+                                    unblockUserMutation.mutate(mentionModalUserId);
+                                  } else {
+                                    blockUserMutation.mutate(mentionModalUserId);
+                                  }
+                                }}
+                                disabled={blockUserMutation.isPending || unblockUserMutation.isPending}
+                                className="w-full py-2.5 rounded-xl font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 text-red-600 dark:text-red-400"
+                              >
+                                {isBlocked ? "Bỏ chặn người dùng" : "Chặn người dùng"}
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Admin Management Section */}
+                          {activeGroupId && canManageGroupMembers && !isMe && targetUserMembership?.roleInGroup !== "OWNER" && (
+                            <div className="w-full mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-800/50 space-y-2">
+                              <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                Quản lý nhóm
+                              </h5>
+
+                              {isCurrentUserOwner && (
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextRole = targetUserMembership?.roleInGroup === "DEPUTY" ? "MEMBER" : "DEPUTY";
+                                      manageGroupMemberMutation.mutate({
+                                        groupId: activeGroupId!,
+                                        userId: mentionModalUserId,
+                                        action: "update",
+                                        roleInGroup: nextRole,
+                                      });
+                                    }}
+                                    disabled={manageGroupMemberMutation.isPending}
+                                    className="flex-1 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold transition-colors disabled:opacity-50"
+                                  >
+                                    {targetUserMembership?.roleInGroup === "DEPUTY" ? "Bãi nhiệm Phó nhóm" : "Bổ nhiệm Phó nhóm"}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (confirm("Xác nhận chuyển quyền trưởng nhóm? Bạn sẽ mất quyền kiểm soát tối cao.")) {
+                                        manageGroupMemberMutation.mutate({
+                                          groupId: activeGroupId!,
+                                          userId: mentionModalUserId,
+                                          action: "transfer",
+                                        });
+                                      }
+                                    }}
+                                    disabled={manageGroupMemberMutation.isPending}
+                                    className="flex-1 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold text-amber-600 dark:text-amber-400 transition-colors disabled:opacity-50"
+                                  >
+                                    Chuyển Trưởng nhóm
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Kick and Ban */}
+                              {/* If current viewer is Deputy, they can only kick/ban standard Members */}
+                              {(isCurrentUserOwner || targetUserMembership?.roleInGroup === "MEMBER") && (
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (confirm(`Xác nhận mời ${mentionUserProfile.fullName} ra khỏi nhóm?`)) {
+                                        manageGroupMemberMutation.mutate({
+                                          groupId: activeGroupId!,
+                                          userId: mentionModalUserId,
+                                          action: "remove",
+                                        });
+                                      }
+                                    }}
+                                    disabled={manageGroupMemberMutation.isPending}
+                                    className="flex-1 py-2 rounded-lg bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-xs font-bold text-red-600 dark:text-red-400 transition-colors disabled:opacity-50"
+                                  >
+                                    Mời ra khỏi nhóm
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const reason = prompt("Lý do cấm (không bắt buộc):") || undefined;
+                                      banUserMutation.mutate({ userId: mentionModalUserId, reason });
+                                    }}
+                                    disabled={banUserMutation.isPending}
+                                    className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-md shadow-red-500/20 transition-all disabled:opacity-50 active:scale-[0.98]"
+                                  >
+                                    Cấm khỏi nhóm
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-8">
+                      <p className="text-sm text-slate-500">Không tìm thấy hồ sơ người dùng.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
