@@ -19,6 +19,7 @@ class MessageItem {
     this.attachmentUrl,
     this.attachmentKey,
     this.attachmentAsset,
+    this.clientMessageId,
     this.isPending = false,
   });
 
@@ -39,6 +40,7 @@ class MessageItem {
     MediaAsset? attachmentAsset,
     String? senderAvatarUrl,
     bool? isPending,
+    String? clientMessageId,
     // Add these purely for local UI override since contentText/resolvedAttachmentUrl use getters
     String? contentText,
     String? resolvedAttachmentUrl,
@@ -73,6 +75,7 @@ class MessageItem {
       attachmentUrl: attachmentUrl ?? this.attachmentUrl,
       attachmentKey: attachmentKey ?? this.attachmentKey,
       attachmentAsset: attachmentAsset ?? this.attachmentAsset,
+      clientMessageId: clientMessageId ?? this.clientMessageId,
       isPending: isPending ?? this.isPending,
     );
   }
@@ -92,6 +95,7 @@ class MessageItem {
   final String? attachmentUrl;
   final String? attachmentKey;
   final MediaAsset? attachmentAsset;
+  final String? clientMessageId;
   final bool isPending;
 
   factory MessageItem.fromJson(Map<String, dynamic> json) {
@@ -111,6 +115,7 @@ class MessageItem {
       recalledAt: json["recalledAt"]?.toString(),
       attachmentUrl: json["attachmentUrl"]?.toString(),
       attachmentKey: json["attachmentKey"]?.toString(),
+      clientMessageId: json["clientMessageId"]?.toString(),
       attachmentAsset: assetRaw is Map<String, dynamic>
           ? MediaAsset.fromJson(assetRaw)
           : null,
@@ -133,6 +138,7 @@ class MessageItem {
       "recalledAt": recalledAt,
       "attachmentUrl": attachmentUrl,
       "attachmentKey": attachmentKey,
+      "clientMessageId": clientMessageId,
       // "attachmentAsset": attachmentAsset?.toJson(),
     };
   }

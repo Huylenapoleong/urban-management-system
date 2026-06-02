@@ -1,0 +1,120 @@
+name: Deploy API to Amazon ECS
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'apps/api/**'
+      - 'libs/**'
+      - '.github/workflows/deploy-aws.yml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: urban-chat-api-repo
+  ECS_CLUSTER: urban-chat-api-cluster
+  ECS_SERVICE: urban-chat-api-task-service
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.5.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Lint
+        run: pnpm --filter api lint
+
+      - name: Run Tests
+        run: pnpm --filter api test
+
+  deploy:
+    name: Build & Deploy
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push image to Amazon ECR
+      id: build-image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: apps/api/Dockerfile
+        push: true
+        tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Set output image
+      id: set-output-image
+      run: |
+        echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+    - name: Download current ECS task definition and extract container name
+      id: get-task-def
+      run: |
+        # Lấy ARN của Task Definition đang chạy trong Service
+        TASK_DEF_ARN=$(aws ecs describe-services --cluster ${{ env.ECS_CLUSTER }} --services ${{ env.ECS_SERVICE }} --query "services[0].taskDefinition" --output text)
+        
+        # Tải Task Definition đó về file JSON
+        aws ecs describe-task-definition --task-definition $TASK_DEF_ARN --query taskDefinition > task-definition.json
+        
+        # Xoá các field không cần thiết do AWS tự generate (nếu không xoá sẽ bị lỗi khi register revision mới)
+        jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' task-definition.json > clean-task-def.json
+        
+        # Trích xuất linh động tên Container (vì chúng ta không biết chính xác tên bạn đặt trên UI)
+        CONTAINER_NAME=$(jq -r '.containerDefinitions[0].name' clean-task-def.json)
+        echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: clean-task-def.json
+        container-name: ${{ steps.get-task-def.outputs.container_name }}
+        image: ${{ steps.set-output-image.outputs.image }}
+
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true

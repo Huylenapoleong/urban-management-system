@@ -1024,8 +1024,6 @@ describe('UsersService', () => {
     );
   });
 
-
-
   it('rejects an incoming friend request and deletes both pending request records', async () => {
     repository.get.mockImplementation(
       (tableName: string, pk: string, sk: string) => {

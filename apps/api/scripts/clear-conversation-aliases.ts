@@ -20,7 +20,7 @@ async function main() {
           ':entityType': 'CONVERSATION_MEMBER_ALIAS',
         },
         ExclusiveStartKey: exclusiveStartKey,
-      })
+      }),
     );
 
     const items = scanResponse.Items ?? [];
@@ -35,7 +35,7 @@ async function main() {
         new DeleteCommand({
           TableName: tableName,
           Key: { PK, SK },
-        })
+        }),
       );
       totalDeleted++;
     }
@@ -43,7 +43,9 @@ async function main() {
     exclusiveStartKey = scanResponse.LastEvaluatedKey;
   } while (exclusiveStartKey);
 
-  console.log(`Successfully completed! Scanned: ${totalScanned}, Deleted: ${totalDeleted}`);
+  console.log(
+    `Successfully completed! Scanned: ${totalScanned}, Deleted: ${totalDeleted}`,
+  );
 }
 
 main().catch((err) => {

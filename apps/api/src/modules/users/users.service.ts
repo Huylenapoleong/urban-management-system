@@ -10,11 +10,9 @@ import type {
   ApiResponseMeta,
   ApiSuccessResponse,
   AuthenticatedUser,
-  ChatConversationUpdatedEvent,
   MediaAsset,
   PushDevice,
   UserBlockedItem,
-  UserContactAlias,
   UserDirectoryItem,
   UserFriendItem,
   UserFriendRequestItem,
@@ -34,7 +32,6 @@ import {
 } from '@urban/shared-utils';
 import { AuthorizationService } from '../../common/authorization.service';
 import {
-  toConversationSummary,
   toUserBlockedItem,
   toUserFriendItem,
   toUserFriendRequestItem,
@@ -676,7 +673,7 @@ export class UsersService {
     const targetUserIds = usersFound.map((u) => u.userId);
 
     // 2. Resolve relations
-    const [edges, requests, outgoingBlocks] = await Promise.all([
+    const [edges, requests] = await Promise.all([
       this.repository.queryByPk<StoredUserFriendEdge>(
         this.config.dynamodbUsersTableName,
         makeUserPk(actor.id),
@@ -689,13 +686,6 @@ export class UsersService {
         makeUserPk(actor.id),
         {
           beginsWith: 'FRIEND_REQUEST#',
-        },
-      ),
-      this.repository.queryByPk<StoredUserBlockEdge>(
-        this.config.dynamodbUsersTableName,
-        makeUserPk(actor.id),
-        {
-          beginsWith: 'BLOCK#',
         },
       ),
     ]);
@@ -1833,7 +1823,8 @@ export class UsersService {
       };
     }
 
-    const occurredAt = existingBlock?.createdAt ?? existingIncomingBlock?.createdAt ?? nowIso();
+    const occurredAt =
+      existingBlock?.createdAt ?? existingIncomingBlock?.createdAt ?? nowIso();
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
     >[0] = [
@@ -1924,8 +1915,6 @@ export class UsersService {
       unblockedAt: nowIso(),
     };
   }
-
-
 
   async areFriends(userId: string, otherUserId: string): Promise<boolean> {
     if (userId === otherUserId) {
@@ -2706,8 +2695,6 @@ export class UsersService {
       (summary) => summary.entityType === 'CONVERSATION' && !summary.deletedAt,
     );
   }
-
-
 
   private async persistUserWithIdentityClaims(input: {
     nextUser: StoredUser;

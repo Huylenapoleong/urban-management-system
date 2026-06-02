@@ -6,7 +6,6 @@ import {
   Param,
   Patch,
   Post,
-  Put,
   Query,
 } from '@nestjs/common';
 import {
@@ -515,7 +514,8 @@ export class UsersController {
   @Post('sync-contacts')
   @ApiOperation({
     summary: 'Sync local contacts with registered users',
-    description: 'Accepts an array of phone numbers and returns matching registered users.',
+    description:
+      'Accepts an array of phone numbers and returns matching registered users.',
   })
   @ApiBody({
     schema: {

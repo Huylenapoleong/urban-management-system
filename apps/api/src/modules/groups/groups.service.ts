@@ -252,7 +252,11 @@ export class GroupsService {
       `${actor.fullName} đã tạo nhóm.`,
     );
 
-    for (const userId of userIds) {
+    for (
+      let remainingMembers = userIds.length;
+      remainingMembers > 0;
+      remainingMembers -= 1
+    ) {
       await this.emitGroupLifecycleSystemMessage(
         actor,
         groupId,
@@ -741,8 +745,8 @@ export class GroupsService {
         : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       membershipExpressionAttributeValues: existingMembership
         ? {
-          ':expectedDeletedAt': existingMembership.deletedAt,
-        }
+            ':expectedDeletedAt': existingMembership.deletedAt,
+          }
         : undefined,
       auditRecord,
     });
@@ -1172,12 +1176,12 @@ export class GroupsService {
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
     >[0] = [
-        {
-          kind: 'put',
-          tableName: this.config.dynamodbMembershipsTableName,
-          item: nextBan,
-        },
-      ];
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbMembershipsTableName,
+        item: nextBan,
+      },
+    ];
 
     if (targetMembership && !targetMembership.deletedAt) {
       const nextMembership: StoredMembership = {
@@ -1567,8 +1571,8 @@ export class GroupsService {
             : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
           expressionAttributeValues: existingMembership
             ? {
-              ':expectedDeletedAt': existingMembership.deletedAt,
-            }
+                ':expectedDeletedAt': existingMembership.deletedAt,
+              }
             : undefined,
         },
         {
@@ -1832,8 +1836,8 @@ export class GroupsService {
         : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       membershipExpressionAttributeValues: existingMembership
         ? {
-          ':expectedDeletedAt': existingMembership.deletedAt,
-        }
+            ':expectedDeletedAt': existingMembership.deletedAt,
+          }
         : undefined,
       auditRecord,
     });
@@ -2009,14 +2013,14 @@ export class GroupsService {
 
   private translateRole(role?: string): string {
     switch (role) {
-      case "OWNER":
-        return "Trưởng nhóm";
-      case "DEPUTY":
-        return "Phó nhóm";
-      case "MEMBER":
-        return "Thành viên";
+      case 'OWNER':
+        return 'Trưởng nhóm';
+      case 'DEPUTY':
+        return 'Phó nhóm';
+      case 'MEMBER':
+        return 'Thành viên';
       default:
-        return role ?? "Thành viên";
+        return role ?? 'Thành viên';
     }
   }
 
@@ -2070,14 +2074,14 @@ export class GroupsService {
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
     >[0] = [
-        {
-          kind: 'put',
-          tableName: this.config.dynamodbMembershipsTableName,
-          item: input.membership,
-          conditionExpression: input.membershipConditionExpression,
-          expressionAttributeValues: input.membershipExpressionAttributeValues,
-        },
-      ];
+      {
+        kind: 'put',
+        tableName: this.config.dynamodbMembershipsTableName,
+        item: input.membership,
+        conditionExpression: input.membershipConditionExpression,
+        expressionAttributeValues: input.membershipExpressionAttributeValues,
+      },
+    ];
 
     if (input.nextGroup) {
       transactionItems.push({
@@ -2132,9 +2136,9 @@ export class GroupsService {
 
       const name =
         typeof sourceError === 'object' &&
-          sourceError !== null &&
-          'name' in sourceError &&
-          typeof (sourceError as { name?: unknown }).name === 'string'
+        sourceError !== null &&
+        'name' in sourceError &&
+        typeof (sourceError as { name?: unknown }).name === 'string'
           ? (sourceError as { name: string }).name
           : '';
       const message =

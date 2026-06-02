@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
-
 export class LocationProvinceDto {
   @ApiProperty({ example: '79' })
   code!: string;

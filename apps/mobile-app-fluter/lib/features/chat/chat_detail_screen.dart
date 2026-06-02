@@ -36,6 +36,9 @@ import "../groups/group_settings_screen.dart";
 import "../../core/utils/translation_helper.dart";
 import "../../app/shared/chat/widgets/poll_message_bubble.dart";
 import "models/chat_message.dart";
+import "../../services/local_cache_service.dart";
+import "package:cached_network_image/cached_network_image.dart";
+import "package:skeletonizer/skeletonizer.dart";
 
 class ChatDetailScreen extends StatefulWidget {
   final ConversationSummary conversation;
@@ -64,6 +67,8 @@ class ChatDetailScreen extends StatefulWidget {
 }
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
+  static final Map<String, List<MessageItem>> _conversationMessagesCache = {};
+
   final PagingController<String?, MessageItem> _pagingController =
       PagingController(firstPageKey: null);
   final ScrollController _scrollController = ScrollController();
@@ -212,9 +217,45 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     } catch (_) {}
   }
 
+  Future<void> _loadCachedMessages() async {
+    try {
+      final cached = await LocalCacheService.instance.getMessages(widget.conversation.conversationId);
+      if (cached.isNotEmpty && mounted) {
+        final cachedMessages = cached.map((e) => MessageItem.fromJson(e)).toList();
+        
+        // Save to static in-memory cache
+        _conversationMessagesCache[widget.conversation.conversationId] = cachedMessages;
+        
+        if (_pagingController.itemList == null || _pagingController.itemList!.isEmpty) {
+          setState(() {
+            _pagingController.value = PagingState<String?, MessageItem>(
+              nextPageKey: null,
+              error: null,
+              itemList: cachedMessages,
+            );
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading cached messages: $e");
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    
+    // Check synchronous in-memory cache first
+    final memCached = _conversationMessagesCache[widget.conversation.conversationId];
+    if (memCached != null && memCached.isNotEmpty) {
+      _pagingController.value = PagingState<String?, MessageItem>(
+        nextPageKey: null,
+        error: null,
+        itemList: memCached,
+      );
+    }
+    
+    _loadCachedMessages();
     _loadReactions();
     _loadAliases();
     _checkBlockStatus();
@@ -248,14 +289,82 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (msg.type == "SYSTEM" && msg.contentText.contains("left the call")) {
           return;
         }
+
+        // Save socket message to local cache
+        LocalCacheService.instance.saveMessages(
+          widget.conversation.conversationId,
+          [msg.toJson()],
+        ).catchError((e) {
+          debugPrint("Error caching socket message: $e");
+        });
+
         final items = _pagingController.itemList;
         if (items != null) {
-          final exists = items.any((m) => m.id == msg.id);
-          if (!exists) {
-            final newList = List<MessageItem>.from(items);
-            newList.insert(0, msg);
-            _pagingController.itemList = newList;
+          final newList = List<MessageItem>.from(items);
+          
+          // 1. Check if the real message already exists by ID
+          final existingIdx = newList.indexWhere((m) => m.id == msg.id && !m.isPending);
+          
+          if (existingIdx != -1) {
+            // Real message already exists! Clean up any duplicate pending message that might match
+            if (msg.clientMessageId != null && msg.clientMessageId!.isNotEmpty) {
+              final initialLen = newList.length;
+              newList.removeWhere((m) => m.isPending && (m.clientMessageId == msg.clientMessageId || m.id == msg.clientMessageId));
+              if (newList.length != initialLen) {
+                _pagingController.itemList = newList;
+              }
+            }
+            return;
           }
+
+          // 2. Find if there is a pending optimistic message that matches this message
+          final pendingIdx = newList.indexWhere((m) {
+            if (!m.isPending) return false;
+            
+            // Match by clientMessageId if available
+            if (msg.clientMessageId != null && msg.clientMessageId!.isNotEmpty) {
+              if (m.clientMessageId == msg.clientMessageId || m.id == msg.clientMessageId) {
+                return true;
+              }
+            }
+            
+            // Fallback match by content, attachment URL and sender
+            if (m.senderId == msg.senderId && m.type == msg.type) {
+              if (m.resolvedAttachmentUrl != null && msg.resolvedAttachmentUrl != null) {
+                if (m.resolvedAttachmentUrl == msg.resolvedAttachmentUrl) return true;
+              }
+              final mText = m.contentText.trim().toLowerCase();
+              final msgText = msg.contentText.trim().toLowerCase();
+              if (mText == msgText && mText.isNotEmpty) return true;
+              
+              final mTime = DateTime.tryParse(m.sentAt);
+              final msgTime = DateTime.tryParse(msg.sentAt);
+              if (mTime != null && msgTime != null) {
+                if (msgTime.difference(mTime).inSeconds.abs() < 15) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          });
+
+          if (pendingIdx != -1) {
+            // Replace the optimistic pending message with the real one from Socket
+            newList[pendingIdx] = msg;
+            _pagingController.itemList = newList;
+          } else {
+            // Check if it already exists by clientMessageId (even if not pending, to prevent double receipt)
+            final duplicateByClientMsgId = msg.clientMessageId != null && 
+                newList.any((m) => m.clientMessageId == msg.clientMessageId);
+            
+            if (!duplicateByClientMsgId) {
+              // Insert as a new message at the top
+              newList.insert(0, msg);
+              _pagingController.itemList = newList;
+            }
+          }
+        } else {
+          _pagingController.itemList = [msg];
         }
         // Remove from typing if message arrived
         if (msg.senderId != widget.currentUser.id) {
@@ -729,10 +838,32 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       final filteredItems = result.items.where((msg) {
         return !(msg.type == "SYSTEM" && msg.contentText.contains("left the call"));
       }).toList();
-      if (result.hasNextPage) {
-        _pagingController.appendPage(filteredItems, result.cursor);
+
+      if (pageKey == null) {
+        // Cache the first page messages locally
+        final messagesJson = filteredItems.map((m) => m.toJson()).toList();
+        LocalCacheService.instance.saveMessages(
+          widget.conversation.conversationId,
+          messagesJson,
+        ).catchError((e) {
+          debugPrint("Error caching messages locally: $e");
+        });
+
+        // Update in-memory static cache
+        _conversationMessagesCache[widget.conversation.conversationId] = filteredItems;
+
+        // Atomic update of the first page to replace cached/existing items without triggering recursive loops
+        _pagingController.value = PagingState<String?, MessageItem>(
+          nextPageKey: result.hasNextPage ? result.cursor : null,
+          error: null,
+          itemList: filteredItems,
+        );
       } else {
-        _pagingController.appendLastPage(filteredItems);
+        if (result.hasNextPage) {
+          _pagingController.appendPage(filteredItems, result.cursor);
+        } else {
+          _pagingController.appendLastPage(filteredItems);
+        }
       }
     } catch (error) {
       _pagingController.error = error;
@@ -802,59 +933,190 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       {required String text, List<_PendingAttachment> attachments = const []}) async {
     if (text.isEmpty && attachments.isEmpty) return;
 
-    setState(() => _sending = true);
+    // Reset replying state locally
+    setState(() => _replyingTo = null);
 
     try {
+      // 1. Send TEXT-only messages optimistically
       if (text.isNotEmpty && attachments.isEmpty) {
         final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
-        await widget.conversationService.sendMessage(
+        
+        final optimisticMsg = MessageItem(
+          id: clientMsgId,
+          conversationId: widget.conversation.conversationId,
+          senderId: widget.currentUser.id,
+          senderName: widget.currentUser.fullName ?? "Tôi",
+          senderAvatarUrl: widget.currentUser.avatarUrl,
+          type: "TEXT",
+          content: text,
+          sentAt: DateTime.now().toUtc().toIso8601String(),
+          clientMessageId: clientMsgId,
+          isPending: true,
+        );
+
+        if (mounted) {
+          setState(() {
+            final currentItems = _pagingController.itemList ?? [];
+            _pagingController.itemList = [optimisticMsg, ...currentItems];
+          });
+          _scrollToBottom();
+        }
+
+        widget.conversationService.sendMessage(
           widget.conversation.conversationId,
           content: text,
           clientMessageId: clientMsgId,
           type: "TEXT",
           replyTo: _replyingTo?.id,
-        );
+        ).then((actualMsg) {
+          if (mounted) {
+            final items = _pagingController.itemList;
+            if (items != null) {
+              final newList = List<MessageItem>.from(items);
+              final idx = newList.indexWhere((m) => m.id == clientMsgId);
+              if (idx != -1) {
+                newList[idx] = actualMsg.copyWith(clientMessageId: clientMsgId);
+                setState(() {
+                  _pagingController.itemList = newList;
+                });
+              }
+            }
+          }
+        }).catchError((e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Lỗi gửi tin nhắn: $e"))
+            );
+            final items = _pagingController.itemList;
+            if (items != null) {
+              final newList = List<MessageItem>.from(items);
+              newList.removeWhere((m) => m.id == clientMsgId);
+              setState(() {
+                _pagingController.itemList = newList;
+              });
+            }
+          }
+        });
       }
 
+      // 2. Send attachments (URL-based like stickers/gifs sent optimistically, local files uploaded normally)
       for (final attachment in attachments) {
-        String? attachmentUrl;
-        String? attachmentKey;
-
-        if (attachment.path.startsWith("http://") || attachment.path.startsWith("https://")) {
-          attachmentUrl = attachment.path;
-        } else {
-          final uploadResult = await widget.uploadService.uploadMedia(
-            filePath: attachment.path,
-            fileName: attachment.name,
-            mimeType: attachment.mimeType,
-            target: "MESSAGE",
-          );
-          attachmentUrl = uploadResult.url;
-          attachmentKey = uploadResult.key;
-        }
-
         final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
         final isFirst = attachments.indexOf(attachment) == 0;
         final messageContent = (isFirst && text.isNotEmpty) ? text : "";
+        final isUrl = attachment.path.startsWith("http://") || attachment.path.startsWith("https://");
 
-        await widget.conversationService.sendMessage(
-          widget.conversation.conversationId,
-          content: messageContent,
-          clientMessageId: clientMsgId,
-          type: attachment.type,
-          attachmentUrl: attachmentUrl,
-          attachmentKey: attachmentKey,
-          replyTo: isFirst ? _replyingTo?.id : null,
-        );
+        if (isUrl) {
+          // Stickers and GIFs (pre-existing web URLs) can be optimistically sent immediately!
+          final optimisticAttachmentMsg = MessageItem(
+            id: clientMsgId,
+            conversationId: widget.conversation.conversationId,
+            senderId: widget.currentUser.id,
+            senderName: widget.currentUser.fullName ?? "Tôi",
+            senderAvatarUrl: widget.currentUser.avatarUrl,
+            type: attachment.type,
+            content: messageContent,
+            attachmentUrl: attachment.path,
+            sentAt: DateTime.now().toUtc().toIso8601String(),
+            clientMessageId: clientMsgId,
+            isPending: true,
+          );
+
+          if (mounted) {
+            setState(() {
+              final currentItems = _pagingController.itemList ?? [];
+              _pagingController.itemList = [optimisticAttachmentMsg, ...currentItems];
+            });
+            _scrollToBottom();
+          }
+
+          widget.conversationService.sendMessage(
+            widget.conversation.conversationId,
+            content: messageContent,
+            clientMessageId: clientMsgId,
+            type: attachment.type,
+            attachmentUrl: attachment.path,
+            replyTo: isFirst ? _replyingTo?.id : null,
+          ).then((actualMsg) {
+            if (mounted) {
+              final items = _pagingController.itemList;
+              if (items != null) {
+                final newList = List<MessageItem>.from(items);
+                final idx = newList.indexWhere((m) => m.id == clientMsgId);
+                if (idx != -1) {
+                  newList[idx] = actualMsg.copyWith(clientMessageId: clientMsgId);
+                  setState(() {
+                    _pagingController.itemList = newList;
+                  });
+                }
+              }
+            }
+          }).catchError((e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("Lỗi gửi tệp tin: $e"))
+              );
+              final items = _pagingController.itemList;
+              if (items != null) {
+                final newList = List<MessageItem>.from(items);
+                newList.removeWhere((m) => m.id == clientMsgId);
+                setState(() {
+                  _pagingController.itemList = newList;
+                });
+              }
+            }
+          });
+        } else {
+          // Local files (require uploading step first)
+          if (mounted) setState(() => _sending = true);
+          try {
+            final uploadResult = await widget.uploadService.uploadMedia(
+              filePath: attachment.path,
+              fileName: attachment.name,
+              mimeType: attachment.mimeType,
+              target: "MESSAGE",
+            );
+
+            final actualMsg = await widget.conversationService.sendMessage(
+              widget.conversation.conversationId,
+              content: messageContent,
+              clientMessageId: clientMsgId,
+              type: attachment.type,
+              attachmentUrl: uploadResult.url,
+              attachmentKey: uploadResult.key,
+              replyTo: isFirst ? _replyingTo?.id : null,
+            );
+
+            if (mounted) {
+              final items = _pagingController.itemList;
+              if (items != null) {
+                final newList = List<MessageItem>.from(items);
+                final finalMsg = actualMsg.copyWith(clientMessageId: clientMsgId);
+                final exists = newList.any((m) => m.id == finalMsg.id || 
+                    (finalMsg.clientMessageId != null && m.clientMessageId == finalMsg.clientMessageId));
+                if (!exists) {
+                  newList.insert(0, finalMsg);
+                  setState(() {
+                    _pagingController.itemList = newList;
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("Lỗi tải lên tệp: $e"))
+              );
+            }
+          } finally {
+            if (mounted) setState(() => _sending = false);
+          }
+        }
       }
-
-      setState(() => _replyingTo = null);
       _scrollToBottom();
     } catch (e) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Error: $e")));
-    } finally {
-      setState(() => _sending = false);
+          .showSnackBar(SnackBar(content: Text("Lỗi hệ thống: $e")));
     }
   }
 
@@ -1049,8 +1311,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               child: FutureBuilder<PaginatedResult<ConversationSummary>>(
                 future: widget.conversationService.listConversations(limit: 50),
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData)
-                    return const Center(child: CircularProgressIndicator());
+                  if (!snapshot.hasData) {
+                    return Skeletonizer(
+                      enabled: true,
+                      child: ListView.builder(
+                        itemCount: 5,
+                        itemBuilder: (context, idx) => ListTile(
+                          leading: const CircleAvatar(radius: 20),
+                          title: Container(
+                            width: 150,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              color: Colors.grey,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
                   final convs = snapshot.data!.items
                       .where((c) =>
                           c.conversationId !=
@@ -1937,13 +2216,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.5,
-              color: Color(0xFF7C3AED),
-            ),
+          const Icon(
+            Icons.more_horiz,
+            size: 16,
+            color: Color(0xFF7C3AED),
           ),
           const SizedBox(width: 8),
           Text(
@@ -1988,8 +2264,34 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             currentUserName: widget.currentUser.fullName,
           );
         },
-        firstPageProgressIndicatorBuilder: (_) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFF7C3AED))),
+        firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
+          enabled: true,
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: 6,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final isMine = index % 2 == 0;
+              return Align(
+                alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isMine ? const Color(0xFF7C3AED) : Colors.grey[300],
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(20),
+                      topRight: const Radius.circular(20),
+                      bottomLeft: Radius.circular(isMine ? 20 : 4),
+                      bottomRight: Radius.circular(isMine ? 4 : 20),
+                    ),
+                  ),
+                  child: const Text("Đây là nội dung tin nhắn giả lập để hiển thị skeleton"),
+                ),
+              );
+            },
+          ),
+        ),
         noItemsFoundIndicatorBuilder: (_) => const Center(
             child: Text("Chưa có tin nhắn nào",
                 style: TextStyle(color: Colors.grey))),
@@ -2668,7 +2970,7 @@ class _ChatComposerState extends State<ChatComposer> {
                   const SizedBox(
                       width: 24,
                       height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: Icon(Icons.access_time_rounded, size: 24, color: Color(0xFF7C3AED)))
                 else ...[
                   if (_isRecording)
                     _buildComposerButton(
@@ -3283,7 +3585,14 @@ class _AttachmentView extends StatelessWidget {
                 children: [
                   Center(
                     child: InteractiveViewer(
-                      child: Image.network(url, fit: BoxFit.contain),
+                      child: CachedNetworkImage(
+                        imageUrl: url,
+                        fit: BoxFit.contain,
+                        placeholder: (context, url) => const Center(
+                          child: Icon(Icons.image_outlined, color: Colors.white30, size: 48),
+                        ),
+                        errorWidget: (context, url, error) => const Icon(Icons.broken_image_outlined, color: Colors.white54, size: 64),
+                      ),
                     ),
                   ),
                   Positioned(
@@ -3311,7 +3620,26 @@ class _AttachmentView extends StatelessWidget {
         },
         child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
-          child: Image.network(url, width: 200, height: 150, fit: BoxFit.cover),
+          child: CachedNetworkImage(
+            imageUrl: url,
+            width: 200,
+            height: 150,
+            fit: BoxFit.cover,
+            placeholder: (context, url) => Container(
+              width: 200,
+              height: 150,
+              color: Colors.grey.shade200,
+              child: const Center(
+                child: Icon(Icons.image_outlined, color: Colors.grey, size: 36),
+              ),
+            ),
+            errorWidget: (context, url, error) => Container(
+              width: 200,
+              height: 150,
+              color: Colors.grey.shade200,
+              child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+            ),
+          ),
         ),
       );
     }

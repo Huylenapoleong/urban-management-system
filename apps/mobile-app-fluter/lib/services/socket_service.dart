@@ -135,8 +135,11 @@ class SocketService {
         try {
           // If message is nested in "message" key, use it, otherwise use root data
           final messageData = data["message"] != null ? data["message"] : data;
-          final msg = MessageItem.fromJson(
-              (messageData as Map).cast<String, dynamic>());
+          final Map<String, dynamic> messageMap = Map<String, dynamic>.from(messageData as Map);
+          if (data["clientMessageId"] != null) {
+            messageMap["clientMessageId"] = data["clientMessageId"];
+          }
+          final msg = MessageItem.fromJson(messageMap);
           _messageCreatedController.add(msg);
         } catch (e) {
           _logger.e("Error parsing message.created: $e");

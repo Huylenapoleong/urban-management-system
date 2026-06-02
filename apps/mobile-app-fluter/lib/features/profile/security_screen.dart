@@ -395,6 +395,14 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
   bool _isLoading = false;
   String? _error;
 
+  @override
+  void dispose() {
+    _otpController.dispose();
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    super.dispose();
+  }
+
   Future<void> _submit() async {
     final otp = _otpController.text.trim();
     final current = _currentPasswordController.text;
