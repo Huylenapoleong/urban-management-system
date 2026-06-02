@@ -25,6 +25,9 @@ class OfficialLayout extends StatelessWidget {
               context.go('/official/chats');
               break;
             case 2:
+              context.go('/official/contacts');
+              break;
+            case 3:
               context.go('/official/profile');
               break;
           }
@@ -41,6 +44,11 @@ class OfficialLayout extends StatelessWidget {
             label: 'Tin nhắn',
           ),
           NavigationDestination(
+            icon: Icon(Icons.people_outline),
+            selectedIcon: Icon(Icons.people),
+            label: 'Bạn bè',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: 'Cá nhân',
@@ -53,7 +61,8 @@ class OfficialLayout extends StatelessWidget {
   int _calculateSelectedIndex(String location) {
     if (location.startsWith('/official/reports')) return 0;
     if (location.startsWith('/official/chats')) return 1;
-    if (location.startsWith('/official/profile')) return 2;
+    if (location.startsWith('/official/contacts')) return 2;
+    if (location.startsWith('/official/profile')) return 3;
     return 1; // Default is chats for official based on initial config
   }
 }

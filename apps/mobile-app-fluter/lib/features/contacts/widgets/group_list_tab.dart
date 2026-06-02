@@ -280,8 +280,7 @@ class _GroupListTabState extends State<GroupListTab> with AutomaticKeepAliveClie
         ),
         trailing: IconButton(
           icon: const Icon(Icons.settings, color: Color(0xFF94A3B8)),
-          onPressed: () => Navigator.push(
-            context,
+          onPressed: () => Navigator.of(context, rootNavigator: true).push(
             MaterialPageRoute(
               builder: (_) => GroupSettingsScreen(groupId: groupId, groupName: groupName),
             ),
@@ -305,8 +304,7 @@ class _GroupListTabState extends State<GroupListTab> with AutomaticKeepAliveClie
     final services = context.read<AppServices>();
     final session = context.read<SessionController>();
 
-    Navigator.push(
-      context,
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (context) => ChatDetailScreen(
           conversation: conversation,

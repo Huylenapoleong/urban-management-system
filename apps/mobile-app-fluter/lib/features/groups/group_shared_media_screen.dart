@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/conversation_service.dart';
 import '../../models/message_item.dart';
 import '../shared/widgets/app_toast.dart';
@@ -266,26 +267,23 @@ class _GroupSharedMediaScreenState extends State<GroupSharedMediaScreen> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.network(
-                      url,
+                    CachedNetworkImage(
+                      imageUrl: url,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Container(
+                      errorWidget: (context, url, error) => Container(
                         color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
                         child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
                       ),
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                          child: const Center(
-                            child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF7C3AED)),
-                            ),
+                      placeholder: (context, url) => Container(
+                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                        child: const Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF7C3AED)),
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     ),
                     if (msg.isVideo)
                       Container(
@@ -317,10 +315,13 @@ class _GroupSharedMediaScreenState extends State<GroupSharedMediaScreen> {
           children: [
             Center(
               child: InteractiveViewer(
-                child: Image.network(
-                  url,
+                child: CachedNetworkImage(
+                  imageUrl: url,
                   fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image_outlined, color: Colors.white54, size: 64),
+                  errorWidget: (context, url, error) => const Icon(Icons.broken_image_outlined, color: Colors.white54, size: 64),
+                  placeholder: (context, url) => const Center(
+                    child: CircularProgressIndicator(color: Color(0xFF7C3AED)),
+                  ),
                 ),
               ),
             ),

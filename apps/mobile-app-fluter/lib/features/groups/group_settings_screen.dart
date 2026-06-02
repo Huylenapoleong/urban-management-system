@@ -379,7 +379,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   color: const Color(0xFF7C3AED),
                   title: 'Thành viên',
                   subtitle: 'Xem, xóa, cấm, chuyển quyền',
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                  onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
                     builder: (_) => GroupMembersScreen(
                       groupService: groupService,
                       userService: services.userService,
@@ -406,7 +406,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   color: Colors.blue,
                   title: 'Liên kết mời',
                   subtitle: 'Tạo, sao chép, thu hồi link mời',
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                  onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
                     builder: (_) => GroupInviteLinksScreen(groupService: groupService, groupId: widget.groupId, groupName: _currentGroupName),
                   )),
                 ),
@@ -417,7 +417,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   color: Colors.orange,
                   title: 'Nhật ký hoạt động',
                   subtitle: 'Xem lịch sử thao tác của nhóm',
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                  onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
                     builder: (_) => GroupAuditLogsScreen(groupService: groupService, groupId: widget.groupId, groupName: _currentGroupName),
                   )),
                 ),
@@ -440,8 +440,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   title: 'Ảnh, video đã gửi',
                   subtitle: 'Xem lại các phương tiện đã chia sẻ',
                   onTap: () {
-                    Navigator.push(
-                      context,
+                    Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => GroupSharedMediaScreen(
                           groupId: widget.groupId,
@@ -461,8 +460,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   title: 'Link đã chia sẻ',
                   subtitle: 'Xem lại các liên kết đã chia sẻ',
                   onTap: () {
-                    Navigator.push(
-                      context,
+                    Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => GroupSharedMediaScreen(
                           groupId: widget.groupId,

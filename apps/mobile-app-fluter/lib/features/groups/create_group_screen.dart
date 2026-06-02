@@ -32,6 +32,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   ];
 
   @override
+  void dispose() {
+    _nameController.dispose();
+    _descController.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _loadFriends();

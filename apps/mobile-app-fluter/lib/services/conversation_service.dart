@@ -326,5 +326,38 @@ class ConversationService {
     );
     return (raw as Map).cast<String, dynamic>();
   }
+
+  Future<List<MessageItem>> listPinnedMessages(String conversationId) async {
+    final raw = await _apiClient.get(
+      "/conversations/${Uri.encodeComponent(conversationId)}/messages/pinned",
+    );
+    return (raw as List)
+        .map((item) => MessageItem.fromJson((item as Map).cast<String, dynamic>()))
+        .toList();
+  }
+
+  Future<MessageItem> pinMessage(
+    String conversationId,
+    String messageId, {
+    String? replaceMessageId,
+  }) async {
+    final raw = await _apiClient.post(
+      "/conversations/${Uri.encodeComponent(conversationId)}/messages/${Uri.encodeComponent(messageId)}/pin",
+      data: {
+        if (replaceMessageId != null) "replaceMessageId": replaceMessageId,
+      },
+    );
+    return MessageItem.fromJson((raw as Map).cast<String, dynamic>());
+  }
+
+  Future<MessageItem> unpinMessage(
+    String conversationId,
+    String messageId,
+  ) async {
+    final raw = await _apiClient.delete(
+      "/conversations/${Uri.encodeComponent(conversationId)}/messages/${Uri.encodeComponent(messageId)}/pin",
+    );
+    return MessageItem.fromJson((raw as Map).cast<String, dynamic>());
+  }
 }
 

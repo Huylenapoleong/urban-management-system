@@ -7,6 +7,7 @@ import '../features/chat/data/chat_repository.dart';
 import '../services/location_service.dart';
 import '../services/upload_service.dart';
 import '../services/chatbot_service.dart';
+import '../services/knowledge_service.dart';
 import '../services/report_service.dart';
 import '../services/socket_service.dart';
 import '../services/webrtc_service.dart';
@@ -48,7 +49,8 @@ final uploadServiceProvider = Provider<UploadService>((ref) {
 
 final chatbotServiceProvider = Provider<ChatbotService>((ref) {
   final api = ref.watch(apiClientProvider);
-  return ChatbotService(apiClient: api);
+  final tokenStore = ref.watch(tokenStoreProvider);
+  return ChatbotService(apiClient: api, tokenStore: tokenStore);
 });
 
 final reportServiceProvider = Provider<ReportService>((ref) {
@@ -69,6 +71,11 @@ final groupServiceProvider = Provider<GroupService>((ref) {
 final conversationServiceProvider = Provider<ConversationService>((ref) {
   final api = ref.watch(apiClientProvider);
   return ConversationService(apiClient: api);
+});
+
+final knowledgeServiceProvider = Provider<KnowledgeService>((ref) {
+  final api = ref.watch(apiClientProvider);
+  return KnowledgeService(apiClient: api);
 });
 
 final socketServiceProvider = Provider<SocketService>((ref) {

@@ -23,6 +23,7 @@ class PollMessageBubble extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authControllerProvider);
     final userId = auth.user?.id ?? '';
+    final userName = auth.user?.fullName ?? 'Người dùng';
     final pollDataRaw = message.pollData;
     if (pollDataRaw == null) return const SizedBox.shrink();
 
@@ -48,19 +49,19 @@ class PollMessageBubble extends ConsumerWidget {
 
       final newOptions = options.map((opt) {
         final votes = List<String>.from(opt['votes'] as List);
-        final hasVoted = votes.contains(userId);
+        final hasVoted = votes.any((v) => v.startsWith('$userId|') || v == userId);
 
         if (opt['id'] == optionId) {
           if (hasVoted) {
-            votes.remove(userId);
+            votes.removeWhere((v) => v.startsWith('$userId|') || v == userId);
           } else {
-            votes.add(userId);
+            votes.add('$userId|$userName');
           }
           return {...opt, 'votes': votes};
         }
 
         if (!isMultipleChoice) {
-          votes.remove(userId);
+          votes.removeWhere((v) => v.startsWith('$userId|') || v == userId);
           return {...opt, 'votes': votes};
         }
 
@@ -129,75 +130,97 @@ class PollMessageBubble extends ConsumerWidget {
           ...options.map((opt) {
             final text = opt['text'] as String;
             final votes = opt['votes'] as List<String>;
-            final hasVoted = votes.contains(userId);
+            final hasVoted = votes.any((v) => v.startsWith('$userId|') || v == userId);
             final voteCount = votes.length;
             final percentage = totalVotes > 0 ? (voteCount / totalVotes) : 0.0;
+
+            final voterNames = votes.map((v) {
+              final parts = v.split('|');
+              return parts.length > 1 ? parts[1] : "Người dùng";
+            }).toList();
 
             return GestureDetector(
               onTap: () => handleVote(opt['id'] as String),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                child: Stack(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: hasVoted 
-                            ? (isDark ? const Color(0xFF6B21A8).withValues(alpha: 0.25) : const Color(0xFFF3E8FF)) 
-                            : (isDark ? const Color(0xFF334155).withValues(alpha: 0.3) : const Color(0xFFF8FAFC)),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: hasVoted 
-                              ? (isDark ? const Color(0xFFC084FC) : const Color(0xFF7C3AED)) 
-                              : (isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0)),
+                    Stack(
+                      children: [
+                        Container(
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: hasVoted 
+                                ? (isDark ? const Color(0xFF6B21A8).withValues(alpha: 0.25) : const Color(0xFFF3E8FF)) 
+                                : (isDark ? const Color(0xFF334155).withValues(alpha: 0.3) : const Color(0xFFF8FAFC)),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: hasVoted 
+                                  ? (isDark ? const Color(0xFFC084FC) : const Color(0xFF7C3AED)) 
+                                  : (isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0)),
+                            ),
+                          ),
+                          alignment: Alignment.centerLeft,
                         ),
-                      ),
-                      alignment: Alignment.centerLeft,
-                    ),
-                    FractionallySizedBox(
-                      widthFactor: percentage,
-                      child: Container(
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: hasVoted 
-                              ? (isDark ? const Color(0xFFC084FC).withValues(alpha: 0.2) : const Color(0xFFD8B4FE).withValues(alpha: 0.4)) 
-                              : (isDark ? const Color(0xFF475569).withValues(alpha: 0.25) : const Color(0xFFE2E8F0).withValues(alpha: 0.5)),
-                          borderRadius: BorderRadius.circular(6),
+                        FractionallySizedBox(
+                          widthFactor: percentage,
+                          child: Container(
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: hasVoted 
+                                  ? (isDark ? const Color(0xFFC084FC).withValues(alpha: 0.2) : const Color(0xFFD8B4FE).withValues(alpha: 0.4)) 
+                                  : (isDark ? const Color(0xFF475569).withValues(alpha: 0.25) : const Color(0xFFE2E8F0).withValues(alpha: 0.5)),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                    Positioned.fill(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                text,
-                                style: TextStyle(
-                                  fontWeight: hasVoted ? FontWeight.w600 : FontWeight.w400,
-                                  color: hasVoted 
-                                      ? (isDark ? const Color(0xFFF3E8FF) : const Color(0xFF5B21B6)) 
-                                      : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
+                        Positioned.fill(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    text,
+                                    style: TextStyle(
+                                      fontWeight: hasVoted ? FontWeight.w600 : FontWeight.w400,
+                                      color: hasVoted 
+                                          ? (isDark ? const Color(0xFFF3E8FF) : const Color(0xFF5B21B6)) 
+                                          : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                                Text(
+                                  '$voteCount',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: hasVoted 
+                                        ? (isDark ? const Color(0xFFF3E8FF) : const Color(0xFF5B21B6)) 
+                                        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                  ),
+                                ),
+                              ],
                             ),
-                            Text(
-                              '$voteCount',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: hasVoted 
-                                    ? (isDark ? const Color(0xFFF3E8FF) : const Color(0xFF5B21B6)) 
-                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
-                              ),
-                            ),
-                          ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (voterNames.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
+                        child: Text(
+                          'Người chọn: ${voterNames.join(', ')}',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            fontStyle: FontStyle.italic,
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),

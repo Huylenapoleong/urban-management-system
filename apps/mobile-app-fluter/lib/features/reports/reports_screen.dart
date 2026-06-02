@@ -4,19 +4,28 @@ import "package:geolocator/geolocator.dart";
 import "package:image_picker/image_picker.dart";
 import "package:geocoding/geocoding.dart";
 import "package:provider/provider.dart";
+import "package:cached_network_image/cached_network_image.dart";
 import "dart:io";
 
 import "../../models/report_item.dart";
 import "../../services/report_service.dart";
 import "../../services/upload_service.dart";
+import "../../services/location_service.dart";
 import "../../state/session_controller.dart";
 import "../shared/widgets/app_logo_button.dart";
+import "../shared/widgets/app_toast.dart";
 
 class ReportsScreen extends StatefulWidget {
-  const ReportsScreen({super.key, required this.reportService, this.uploadService});
+  const ReportsScreen({
+    super.key,
+    required this.reportService,
+    this.uploadService,
+    this.locationService,
+  });
 
   final ReportService reportService;
   final UploadService? uploadService;
+  final LocationService? locationService;
 
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
@@ -240,6 +249,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   void _showCreateReportSheet() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final session = context.read<SessionController>();
+    _locationController.text = session.user?.unit ?? "";
+
+    if (widget.locationService != null &&
+        session.user?.locationCode != null &&
+        session.user!.locationCode.isNotEmpty) {
+      widget.locationService!
+          .resolveLocationCode(session.user!.locationCode)
+          .then((resolved) {
+        if (mounted) {
+          setState(() {
+            final displayName = resolved.displayName;
+            final unit = session.user?.unit ?? "";
+            if (unit.trim().isNotEmpty) {
+              _locationController.text = "$displayName, $unit";
+            } else {
+              _locationController.text = displayName;
+            }
+          });
+        }
+      }).catchError((_) {});
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -249,93 +281,95 @@ class _ReportsScreenState extends State<ReportsScreen> {
         initialChildSize: 0.7,
         maxChildSize: 0.9,
         expand: false,
-        builder: (context, scrollController) => SingleChildScrollView(
-          controller: scrollController,
-          padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(child: Container(width: 40, height: 4, decoration: const BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.all(Radius.circular(2))))),
-              const SizedBox(height: 20),
-              Text(
-                "Báo cáo mới",
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : const Color(0xFF1E1B4B),
-                ),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _titleController,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                decoration: InputDecoration(
-                  labelText: "Chuyện gì đang xảy ra?",
-                  labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
-                  hintText: "Tiêu đề ngắn gọn của sự cố",
-                  hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+        builder: (context, scrollController) => StatefulBuilder(
+          builder: (context, setModalState) => SingleChildScrollView(
+            controller: scrollController,
+            padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Container(width: 40, height: 4, decoration: const BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.all(Radius.circular(2))))),
+                const SizedBox(height: 20),
+                Text(
+                  "Báo cáo mới",
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : const Color(0xFF1E1B4B),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _descriptionController,
-                maxLines: 4,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                decoration: InputDecoration(
-                  labelText: "Mô tả chi tiết",
-                  labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
-                  hintText: "Cung cấp thêm thông tin...",
-                  hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: _titleController,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  decoration: InputDecoration(
+                    labelText: "Chuyện gì đang xảy ra?",
+                    labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+                    hintText: "Tiêu đề ngắn gọn của sự cố",
+                    hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              _buildLocationField(),
-              const SizedBox(height: 16),
-              _buildDropdowns(),
-              const SizedBox(height: 16),
-              Text(
-                "Hình ảnh & Video đính kèm",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildMediaPicker(),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 54,
-                child: FilledButton(
-                  onPressed: _submitting ? null : _submitReport,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF7C3AED),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _descriptionController,
+                  maxLines: 4,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  decoration: InputDecoration(
+                    labelText: "Mô tả chi tiết",
+                    labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+                    hintText: "Cung cấp thêm thông tin...",
+                    hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                    ),
                   ),
-                  child: _submitting 
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text("Gửi báo cáo", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                _buildLocationField(),
+                const SizedBox(height: 16),
+                _buildDropdowns(),
+                const SizedBox(height: 16),
+                Text(
+                  "Hình ảnh & Video đính kèm",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildMediaPicker(setModalState),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton(
+                    onPressed: _submitting ? null : () => _submitReport(setModalState),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF7C3AED),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: _submitting 
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text("Gửi báo cáo", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildMediaPicker() {
+  Widget _buildMediaPicker([StateSetter? setModalState]) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return SizedBox(
       height: 100,
@@ -345,56 +379,71 @@ class _ReportsScreenState extends State<ReportsScreen> {
         itemBuilder: (context, index) {
           if (index == _selectedMedia.length) {
             return GestureDetector(
-              onTap: _pickMedia,
-              child: Container(
-                width: 100,
-                margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
-                    style: BorderStyle.solid,
+              onTap: () => _pickMedia(setModalState),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8, top: 6),
+                child: Container(
+                  width: 90,
+                  height: 90,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                      style: BorderStyle.solid,
+                    ),
                   ),
+                  child: Icon(Icons.add_a_photo_outlined, color: isDark ? Colors.grey.shade400 : Colors.grey),
                 ),
-                child: Icon(Icons.add_a_photo_outlined, color: isDark ? Colors.grey.shade400 : Colors.grey),
               ),
             );
           }
           final file = _selectedMedia[index];
           final isVideo = file.path.endsWith(".mp4") || file.path.endsWith(".mov");
-          return Stack(
-            children: [
-              Container(
-                width: 100,
-                margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  image: isVideo ? null : DecorationImage(image: FileImage(File(file.path)), fit: BoxFit.cover),
-                  color: isVideo ? Colors.black87 : null,
+          return Padding(
+            padding: const EdgeInsets.only(right: 8, top: 6),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 90,
+                  height: 90,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    image: isVideo ? null : DecorationImage(image: FileImage(File(file.path)), fit: BoxFit.cover),
+                    color: isVideo ? Colors.black87 : null,
+                  ),
+                  child: isVideo ? const Center(child: Icon(Icons.videocam, color: Colors.white)) : null,
                 ),
-                child: isVideo ? const Center(child: Icon(Icons.videocam, color: Colors.white)) : null,
-              ),
-              Positioned(
-                top: 4,
-                right: 12,
-                child: GestureDetector(
-                  onTap: () => setState(() => _selectedMedia.removeAt(index)),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                    child: const Icon(Icons.close, size: 16, color: Colors.white),
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      if (setModalState != null) {
+                        setModalState(() => _selectedMedia.removeAt(index));
+                      } else {
+                        _selectedMedia.removeAt(index);
+                      }
+                      setState(() {});
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                      child: const Icon(Icons.close, size: 14, color: Colors.white),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
     );
   }
 
-  Future<void> _pickMedia() async {
+  Future<void> _pickMedia([StateSetter? setModalState]) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final picker = ImagePicker();
     final source = await showModalBottomSheet<ImageSource>(
@@ -415,7 +464,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
               onTap: () async {
                 Navigator.pop(context);
                 final video = await picker.pickVideo(source: ImageSource.camera);
-                if (video != null) setState(() => _selectedMedia.add(video));
+                if (video != null) {
+                  if (setModalState != null) {
+                    setModalState(() => _selectedMedia.add(video));
+                  } else {
+                    _selectedMedia.add(video);
+                  }
+                  setState(() {});
+                }
               },
             ),
             ListTile(
@@ -423,8 +479,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
               title: Text("Chọn từ thư viện", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
               onTap: () async {
                 Navigator.pop(context);
-                final media = await picker.pickMedia();
-                if (media != null) setState(() => _selectedMedia.add(media));
+                final media = await picker.pickMultipleMedia();
+                if (media.isNotEmpty) {
+                  if (setModalState != null) {
+                    setModalState(() => _selectedMedia.addAll(media));
+                  } else {
+                    _selectedMedia.addAll(media);
+                  }
+                  setState(() {});
+                }
               },
             ),
           ],
@@ -435,113 +498,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
     
     final xFile = await picker.pickImage(source: source);
     if (xFile != null) {
-      setState(() => _selectedMedia.add(xFile));
+      if (setModalState != null) {
+        setModalState(() => _selectedMedia.add(xFile));
+      } else {
+        _selectedMedia.add(xFile);
+      }
+      setState(() {});
     }
   }
 
   Widget _buildLocationField() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _locationController,
-            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-            decoration: InputDecoration(
-              labelText: "Địa chỉ sự cố",
-              labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
-              hintText: "Nhập địa chỉ hoặc nhấn định vị bên cạnh",
-              hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
-              prefixIcon: Icon(Icons.location_on_outlined, color: isDark ? Colors.grey.shade400 : Colors.grey),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
-              ),
-            ),
-          ),
+    return TextField(
+      controller: _locationController,
+      style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+      decoration: InputDecoration(
+        labelText: "Địa chỉ sự cố",
+        labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+        hintText: "Nhập địa chỉ hoặc căn hộ của bạn",
+        hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : null),
+        prefixIcon: Icon(Icons.location_on_outlined, color: isDark ? Colors.grey.shade400 : Colors.grey),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
         ),
-        const SizedBox(width: 8),
-        IconButton.filledTonal(
-          onPressed: _detectLocation,
-          icon: const Icon(Icons.my_location),
-          tooltip: "Định vị vị trí hiện tại",
-          style: IconButton.styleFrom(
-            backgroundColor: isDark ? const Color(0xFF7C3AED).withOpacity(0.2) : null,
-            foregroundColor: isDark ? const Color(0xFFD8B4FE) : null,
-          ),
-        ),
-      ],
+      ),
     );
-  }
-
-  Future<void> _detectLocation() async {
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Location services are disabled.")));
-      }
-      return;
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Location permissions are denied.")));
-        }
-        return;
-      }
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Detecting location..."), duration: Duration(seconds: 1)));
-    }
-
-    try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
-      
-      if (mounted) {
-        String address = "${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}";
-        
-        try {
-          List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
-          if (placemarks.isNotEmpty) {
-            final p = placemarks.first;
-            // Format: Street, Ward, District, City
-            final parts = [
-              if (p.street != null && p.street!.isNotEmpty) p.street,
-              if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
-              if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-              if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty) p.administrativeArea,
-            ];
-            if (parts.isNotEmpty) {
-              address = parts.join(", ");
-            }
-          }
-        } catch (e) {
-          print("Reverse geocoding failed: $e");
-          // Keep coordinates as fallback
-        }
-
-        setState(() {
-          _locationController.text = address;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Đã xác định vị trí thành công!"))
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi định vị: $e")));
-      }
-    }
   }
 
   Widget _buildDropdowns() {
@@ -566,6 +549,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               DropdownMenuItem(value: "INFRASTRUCTURE", child: Text("Hạ tầng")),
               DropdownMenuItem(value: "ENVIRONMENT", child: Text("Môi trường")),
               DropdownMenuItem(value: "SECURITY", child: Text("An ninh")),
+              DropdownMenuItem(value: "ADMIN", child: Text("Hành chính")),
             ],
             onChanged: (val) => setState(() => _category = val!),
           ),
@@ -589,6 +573,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               DropdownMenuItem(value: "LOW", child: Text("Thấp")),
               DropdownMenuItem(value: "MEDIUM", child: Text("Trung bình")),
               DropdownMenuItem(value: "HIGH", child: Text("Cao")),
+              DropdownMenuItem(value: "URGENT", child: Text("Khẩn cấp")),
             ],
             onChanged: (val) => setState(() => _priority = val!),
           ),
@@ -613,12 +598,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return "VN-79";
   }
 
-  Future<void> _submitReport() async {
+  Future<void> _submitReport([StateSetter? setModalState]) async {
     if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vui lòng nhập tiêu đề")));
+      AppToast.show(context, message: "Vui lòng nhập tiêu đề", type: AppToastType.warning);
       return;
     }
 
+    if (setModalState != null) {
+      setModalState(() => _submitting = true);
+    }
     setState(() => _submitting = true);
     try {
       final List<String> mediaKeys = [];
@@ -648,9 +636,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
         finalDescription = "Địa chỉ: $inputLocation\n\n$finalDescription";
       }
 
-      // We MUST send a location code that matches the user's scope to avoid 403,
-      // and it MUST be in V2 format to avoid 400.
-      final apiLocationCode = _normalizeLocationCode(userLocationCode);
+      // We MUST send the exact location code that matches the user's scope in JWT/DB to avoid a 403.
+      // Do not normalize/modify userLocationCode since the profile location code is already in database-valid format.
+      final apiLocationCode = userLocationCode;
 
       await widget.reportService.createReport(
         title: _titleController.text.trim(),
@@ -667,11 +655,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _descriptionController.clear();
       _selectedMedia.clear();
       _loadReports();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Gửi báo cáo thành công!")));
+      AppToast.show(context, message: "Gửi báo cáo thành công!", type: AppToastType.success);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      if (mounted) AppToast.show(context, message: "Lỗi: $e", type: AppToastType.error);
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        if (setModalState != null) {
+          setModalState(() => _submitting = false);
+        }
+        setState(() => _submitting = false);
+      }
     }
   }
 }
@@ -729,6 +722,7 @@ class _ReportCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 13),
           ),
+          _buildMediaGallery(context, isDark),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -744,17 +738,104 @@ class _ReportCard extends StatelessWidget {
     );
   }
 
+  Widget _buildMediaGallery(BuildContext context, bool isDark) {
+    final List<String> imageUrls = [];
+    if (report.mediaUrls.isNotEmpty) {
+      imageUrls.addAll(report.mediaUrls);
+    } else if (report.mediaAssets.isNotEmpty) {
+      for (final asset in report.mediaAssets) {
+        if (asset.resolvedUrl != null && asset.resolvedUrl!.isNotEmpty) {
+          imageUrls.add(asset.resolvedUrl!);
+        }
+      }
+    }
+    final displayUrls = imageUrls.where((url) {
+      final lower = url.toLowerCase();
+      return !lower.endsWith(".mp4") && !lower.endsWith(".mov");
+    }).toList();
+
+    if (displayUrls.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: SizedBox(
+        height: 100,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: displayUrls.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            final url = displayUrls[index];
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: CachedNetworkImage(
+                imageUrl: url,
+                width: 100,
+                height: 100,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Container(
+                  width: 100,
+                  height: 100,
+                  color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                  child: const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ),
+                errorWidget: (context, url, error) {
+                  return Container(
+                    width: 100,
+                    height: 100,
+                    color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildPriorityBadge(String priority) {
     Color color;
+    String label;
     switch (priority.toUpperCase()) {
-      case "HIGH": color = Colors.red; break;
-      case "MEDIUM": color = Colors.orange; break;
-      default: color = Colors.blue;
+      case "URGENT":
+        color = Colors.red.shade900;
+        label = "KHẨN CẤP";
+        break;
+      case "HIGH":
+        color = Colors.red;
+        label = "CAO";
+        break;
+      case "MEDIUM":
+        color = Colors.orange;
+        label = "TRUNG BÌNH";
+        break;
+      case "LOW":
+      default:
+        color = Colors.blue;
+        label = "THẤP";
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(border: Border.all(color: color.withOpacity(0.3)), borderRadius: BorderRadius.circular(6)),
-      child: Text(priority, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        border: Border.all(color: color.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
+      ),
     );
   }
 

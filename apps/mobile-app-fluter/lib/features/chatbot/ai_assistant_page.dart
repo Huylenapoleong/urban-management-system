@@ -20,6 +20,13 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
   bool _isTyping = false;
 
   @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _messages.add(AiMessage(
@@ -88,156 +95,203 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      extendBodyBehindAppBar: true,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    
+    final bgColor = isDark ? const Color(0xFF0B0720) : const Color(0xFFF5F3FF);
+    final cardBgColor = isDark ? const Color(0xFF161233) : Colors.white;
+    final textMain = isDark ? Colors.white : const Color(0xFF1E1B4B);
+    final textSec = isDark ? Colors.white60 : const Color(0xFF6D28D9);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(28),
+            topRight: Radius.circular(28),
+          ),
+          border: Border.all(
+            color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 30,
+              offset: const Offset(0, -5),
+            ),
+          ],
+        ),
         child: ClipRRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: AppBar(
-              backgroundColor: Colors.white.withOpacity(0.1),
-              elevation: 0,
-              centerTitle: false,
-              title: Row(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(26),
+            topRight: Radius.circular(26),
+          ),
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: PreferredSize(
+              preferredSize: const Size.fromHeight(kToolbarHeight + 10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Top Drag Handle Indicator
                   Container(
-                    padding: const EdgeInsets.all(2),
+                    margin: const EdgeInsets.only(top: 10, bottom: 2),
+                    width: 36,
+                    height: 4,
                     decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF10B981), Color(0xFF3B82F6)],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF10B981).withOpacity(0.5),
-                          blurRadius: 8,
-                          spreadRadius: 1,
+                      color: isDark ? Colors.white30 : Colors.black26,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  AppBar(
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    centerTitle: false,
+                    automaticallyImplyLeading: false,
+                    title: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF8B5CF6), Color(0xFFEC4899)],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                                blurRadius: 8,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: const CircleAvatar(
+                            radius: 16,
+                            backgroundColor: Color(0xFF0B0720),
+                            child: Icon(Icons.auto_awesome, color: Colors.white, size: 18),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Trợ lý AI Đô thị',
+                              style: GoogleFonts.outfit(
+                                color: textMain,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
+                            Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF8B5CF6),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Trực tuyến',
+                                  style: GoogleFonts.inter(
+                                    color: textSec.withOpacity(0.7),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    child: const CircleAvatar(
-                      radius: 16,
-                      backgroundColor: Color(0xFF1E293B),
-                      child: Icon(Icons.auto_awesome, color: Colors.white, size: 18),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Trợ lý AI Đô thị',
-                        style: GoogleFonts.outfit(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
+                    actions: [
+                      IconButton(
+                        icon: Icon(Icons.delete_sweep_rounded, color: isDark ? Colors.white70 : const Color(0xFF4C1D95)),
+                        onPressed: () {
+                          setState(() {
+                            _messages.clear();
+                            _messages.add(AiMessage(
+                              text: "Xin chào! Tôi là **Trợ lý Đô thị AI**. Tôi có thể giúp bạn tìm hiểu về quy định pháp luật, thủ tục hành chính hoặc tóm tắt các vấn đề đô thị. Bạn muốn hỏi gì không?",
+                              isUser: false,
+                            ));
+                          });
+                        },
                       ),
-                      Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF10B981),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Trực tuyến',
-                            style: GoogleFonts.inter(
-                              color: Colors.white.withOpacity(0.6),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
+                      IconButton(
+                        icon: Icon(Icons.close_rounded, color: isDark ? Colors.white70 : const Color(0xFF4C1D95)),
+                        onPressed: () => Navigator.of(context).pop(),
                       ),
+                      const SizedBox(width: 8),
                     ],
                   ),
                 ],
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white70),
-                  onPressed: () {
-                    setState(() {
-                      _messages.clear();
-                      _messages.add(AiMessage(
-                        text: "Xin chào! Tôi là **Trợ lý Đô thị AI**. Tôi có thể giúp bạn tìm hiểu về quy định pháp luật, thủ tục hành chính hoặc tóm tắt các vấn đề đô thị. Bạn muốn hỏi gì không?",
-                        isUser: false,
-                      ));
-                    });
-                  },
+            ),
+            body: Stack(
+              children: [
+                // Beautiful Decorative Background Blobs
+                Positioned(
+                  top: -80,
+                  right: -40,
+                  child: Container(
+                    width: 240,
+                    height: 240,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF8B5CF6).withOpacity(0.08),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 8),
+                Positioned(
+                  bottom: 80,
+                  left: -80,
+                  child: Container(
+                    width: 300,
+                    height: 300,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFFEC4899).withOpacity(0.04),
+                    ),
+                  ),
+                ),
+                
+                Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        itemCount: _messages.length + (_messages.length == 1 ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index == 1 && _messages.length == 1) {
+                            return _buildSuggestions(isDark, textSec);
+                          }
+                          final msg = _messages[index];
+                          return _MessageBubble(message: msg);
+                        },
+                      ),
+                    ),
+                    _buildInputArea(isDark, bgColor, textMain, cardBgColor),
+                  ],
+                ),
               ],
             ),
           ),
         ),
       ),
-      body: Stack(
-        children: [
-          // Background Blobs
-          Positioned(
-            top: -100,
-            right: -50,
-            child: Container(
-              width: 300,
-              height: 300,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFF10B981).withOpacity(0.1),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 100,
-            left: -100,
-            child: Container(
-              width: 400,
-              height: 400,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFF3B82F6).withOpacity(0.05),
-              ),
-            ),
-          ),
-          
-          Column(
-            children: [
-              Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: EdgeInsets.fromLTRB(
-                    16, 
-                    MediaQuery.of(context).padding.top + kToolbarHeight + 16, 
-                    16, 
-                    16
-                  ),
-                  itemCount: _messages.length + (_messages.length == 1 ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index == 1 && _messages.length == 1) {
-                      return _buildSuggestions();
-                    }
-                    final msg = _messages[index];
-                    return _MessageBubble(message: msg);
-                  },
-                ),
-              ),
-              _buildInputArea(),
-            ],
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildSuggestions() {
+  Widget _buildSuggestions(bool isDark, Color textSec) {
     final suggestions = [
       "Thủ tục cấp phép xây dựng?",
       "Quy định về tiếng ồn?",
@@ -247,10 +301,10 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
 
     return TweenAnimationBuilder<double>(
       duration: const Duration(milliseconds: 800),
-      tween: Tween(begin: 0, end: 1),
+      tween: Tween<double>(begin: 0.0, end: 1.0),
       builder: (context, value, child) {
         return Opacity(
-          opacity: value,
+          opacity: value.clamp(0.0, 1.0),
           child: Transform.translate(
             offset: Offset(0, 20 * (1 - value)),
             child: child,
@@ -269,7 +323,7 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
                 style: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white.withOpacity(0.4),
+                  color: textSec.withOpacity(0.6),
                   letterSpacing: 1.2,
                 ),
               ),
@@ -288,14 +342,23 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
+                      color: isDark ? Colors.white.withOpacity(0.04) : Colors.white,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
+                      border: Border.all(
+                        color: isDark ? Colors.white.withOpacity(0.08) : const Color(0xFFDDD6FE),
+                      ),
+                      boxShadow: isDark ? null : [
+                        BoxShadow(
+                          color: const Color(0xFF7C3AED).withOpacity(0.04),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        )
+                      ],
                     ),
                     child: Text(
                       s,
                       style: GoogleFonts.inter(
-                        color: Colors.white.withOpacity(0.8),
+                        color: isDark ? Colors.white.withOpacity(0.85) : const Color(0xFF5B21B6),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -310,15 +373,19 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
     );
   }
 
-  Widget _buildInputArea() {
+  Widget _buildInputArea(bool isDark, Color bgColor, Color textMain, Color cardBgColor) {
     return Container(
       padding: EdgeInsets.fromLTRB(
-        16, 8, 16, 
+        16, 10, 16, 
         MediaQuery.of(context).padding.bottom + 16
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A).withOpacity(0.8),
-        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.05))),
+        color: bgColor,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFDDD6FE).withOpacity(0.5),
+          ),
+        ),
       ),
       child: Row(
         children: [
@@ -330,16 +397,18 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
+                    color: isDark ? Colors.white.withOpacity(0.04) : cardBgColor,
                     borderRadius: BorderRadius.circular(28),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(
+                      color: isDark ? Colors.white.withOpacity(0.08) : const Color(0xFFDDD6FE),
+                    ),
                   ),
                   child: TextField(
                     controller: _controller,
                     maxLines: 4,
                     minLines: 1,
-                    cursorColor: const Color(0xFF10B981),
-                    style: GoogleFonts.inter(color: Colors.white, fontSize: 15),
+                    cursorColor: const Color(0xFF7C3AED),
+                    style: GoogleFonts.inter(color: textMain, fontSize: 15),
                     decoration: InputDecoration(
                       hintText: 'Hỏi AI bất cứ điều gì...',
                       border: InputBorder.none,
@@ -350,7 +419,7 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(vertical: 12),
                       hintStyle: GoogleFonts.inter(
-                        color: Colors.white.withOpacity(0.3),
+                        color: isDark ? Colors.white.withOpacity(0.3) : const Color(0xFF7C3AED).withOpacity(0.4),
                         fontSize: 15,
                       ),
                     ),
@@ -369,13 +438,13 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF10B981), Color(0xFF059669)],
+                  colors: [Color(0xFF7C3AED), Color(0xFF6366F1)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF10B981).withOpacity(0.3),
+                    color: const Color(0xFF7C3AED).withOpacity(0.3),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -413,13 +482,15 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return TweenAnimationBuilder<double>(
       duration: const Duration(milliseconds: 400),
-      tween: Tween(begin: 0, end: 1),
+      tween: Tween<double>(begin: 0.0, end: 1.0),
       curve: Curves.easeOutBack,
       builder: (context, value, child) {
         return Opacity(
-          opacity: value,
+          opacity: value.clamp(0.0, 1.0),
           child: Transform.scale(
             scale: 0.8 + (0.2 * value),
             alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -436,24 +507,36 @@ class _MessageBubble extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: message.isUser 
               ? const LinearGradient(
-                  colors: [Color(0xFF10B981), Color(0xFF059669)],
+                  colors: [Color(0xFF7C3AED), Color(0xFF6366F1)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 )
               : null,
-            color: message.isUser ? null : Colors.white.withOpacity(0.08),
+            color: message.isUser 
+                ? null 
+                : (isDark ? Colors.white.withOpacity(0.06) : Colors.white),
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(24),
               topRight: const Radius.circular(24),
               bottomLeft: Radius.circular(message.isUser ? 24 : 4),
               bottomRight: Radius.circular(message.isUser ? 4 : 24),
             ),
-            border: message.isUser ? null : Border.all(color: Colors.white.withOpacity(0.1)),
+            border: message.isUser 
+                ? null 
+                : Border.all(
+                    color: isDark ? Colors.white.withOpacity(0.08) : const Color(0xFFDDD6FE),
+                  ),
             boxShadow: [
               if (message.isUser)
                 BoxShadow(
-                  color: const Color(0xFF10B981).withOpacity(0.2),
+                  color: const Color(0xFF7C3AED).withOpacity(0.2),
                   blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              else if (!isDark)
+                BoxShadow(
+                  color: const Color(0xFF7C3AED).withOpacity(0.02),
+                  blurRadius: 8,
                   offset: const Offset(0, 4),
                 ),
             ],
@@ -467,14 +550,14 @@ class _MessageBubble extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF10B981)),
+                      const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF8B5CF6)),
                       const SizedBox(width: 6),
                       Text(
                         'AI ASSISTANT', 
                         style: GoogleFonts.inter(
                           fontSize: 10, 
                           fontWeight: FontWeight.bold, 
-                          color: const Color(0xFF10B981),
+                          color: const Color(0xFF8B5CF6),
                           letterSpacing: 1.0,
                         )
                       ),
@@ -488,23 +571,34 @@ class _MessageBubble extends StatelessWidget {
                   data: message.text,
                   styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
                     p: GoogleFonts.inter(
-                      color: message.isUser ? Colors.white : Colors.white.withOpacity(0.9),
+                      color: message.isUser 
+                          ? Colors.white 
+                          : (isDark ? Colors.white.withOpacity(0.9) : const Color(0xFF1E1B4B)),
                       fontSize: 15,
                       height: 1.6,
                     ),
-                    strong: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    strong: TextStyle(
+                      color: message.isUser ? Colors.white : (isDark ? Colors.white : const Color(0xFF1E1B4B)), 
+                      fontWeight: FontWeight.bold
+                    ),
                     code: GoogleFonts.firaCode(
-                      backgroundColor: Colors.black26,
-                      color: const Color(0xFF10B981),
+                      backgroundColor: isDark ? Colors.black26 : const Color(0xFFF3F0FF),
+                      color: const Color(0xFF7C3AED),
                       fontSize: 13,
                     ),
-                    blockquote: GoogleFonts.inter(color: Colors.white70, fontStyle: FontStyle.italic),
-                    blockquoteDecoration: BoxDecoration(
-                      color: Colors.white12,
-                      borderRadius: BorderRadius.circular(4),
-                      border: const Border(left: BorderSide(color: Color(0xFF10B981), width: 3)),
+                    blockquote: GoogleFonts.inter(
+                      color: isDark ? Colors.white70 : const Color(0xFF4C1D95), 
+                      fontStyle: FontStyle.italic
                     ),
-                    tableBorder: TableBorder.all(color: Colors.white24, width: 1),
+                    blockquoteDecoration: BoxDecoration(
+                      color: isDark ? Colors.white12 : const Color(0xFFF5F3FF),
+                      borderRadius: BorderRadius.circular(4),
+                      border: const Border(left: BorderSide(color: Color(0xFF7C3AED), width: 3)),
+                    ),
+                    tableBorder: TableBorder.all(
+                      color: isDark ? Colors.white24 : const Color(0xFFDDD6FE), 
+                      width: 1
+                    ),
                   ),
                 ),
             ],
@@ -523,7 +617,7 @@ class _MessageBubble extends StatelessWidget {
           height: 6,
           margin: const EdgeInsets.only(right: 4),
           decoration: const BoxDecoration(
-            color: Color(0xFF10B981),
+            color: Color(0xFF8B5CF6),
             shape: BoxShape.circle,
           ),
         );

@@ -1,6 +1,8 @@
 import "dart:async";
+import "dart:io";
 import "package:file_picker/file_picker.dart";
 import "dart:convert";
+
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:intl/intl.dart";
@@ -27,12 +29,16 @@ import "conversation_info_screen.dart";
 import "call_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "../shared/widgets/app_toast.dart";
+import "package:background_downloader/background_downloader.dart";
 import "../../app/shared/chat/widgets/gif_picker_sheet.dart";
 import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
 import "../../core/utils/translation_helper.dart";
 import "../../app/shared/chat/widgets/poll_message_bubble.dart";
 import "models/chat_message.dart";
+import "../../services/local_cache_service.dart";
+import "package:cached_network_image/cached_network_image.dart";
+import "package:skeletonizer/skeletonizer.dart";
 
 class ChatDetailScreen extends StatefulWidget {
   final ConversationSummary conversation;
@@ -61,6 +67,8 @@ class ChatDetailScreen extends StatefulWidget {
 }
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
+  static final Map<String, List<MessageItem>> _conversationMessagesCache = {};
+
   final PagingController<String?, MessageItem> _pagingController =
       PagingController(firstPageKey: null);
   final ScrollController _scrollController = ScrollController();
@@ -79,6 +87,124 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String? _fetchedGroupName;
   bool _isPeerBlocked = false;
 
+  List<MessageItem> _pinnedMessages = [];
+  bool _loadingPinned = false;
+
+  // Search state variables
+  bool _isSearching = false;
+  bool _showSearchPanel = false;
+  final TextEditingController _searchQueryController = TextEditingController();
+  String? _searchType;
+  String? _searchFromUserId;
+  DateTime? _searchAfterDate;
+  DateTime? _searchBeforeDate;
+  List<dynamic> _conversationMembers = [];
+  bool _loadingMembers = false;
+
+  Future<void> _loadConversationMembers() async {
+    if (!mounted) return;
+    setState(() => _loadingMembers = true);
+    try {
+      if (widget.conversation.isGroup) {
+        var groupId = widget.conversation.groupId;
+        if (groupId == null) {
+          final convId = widget.conversation.conversationId;
+          if (convId.startsWith("group:")) {
+            groupId = convId.substring(6);
+          } else if (convId.startsWith("group#")) {
+            groupId = convId.substring(6);
+          } else if (convId.startsWith("grp#")) {
+            groupId = convId.substring(4);
+          } else if (convId.startsWith("GRP#")) {
+            groupId = convId.substring(4);
+          }
+        }
+        if (groupId != null) {
+          final membersRaw = await widget.groupService.listMembers(groupId);
+          final populatedMembers = await Future.wait(membersRaw.map((m) async {
+            final userId = m['userId']?.toString();
+            if (userId == null) return m;
+            try {
+              final profile = await widget.userService.getUserById(userId);
+              return {
+                ...m,
+                'fullName': profile.fullName,
+                'displayName': profile.fullName,
+                'avatarUrl': profile.avatarUrl,
+              };
+            } catch (_) {
+              return m;
+            }
+          }));
+          if (mounted) {
+            setState(() {
+              _conversationMembers = populatedMembers;
+            });
+          }
+        }
+      } else {
+        // DM members: Me & Peer
+        final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+        final List<Map<String, dynamic>> dmMembers = [
+          {
+            "userId": widget.currentUser.id,
+            "displayName": widget.currentUser.fullName ?? "Tôi",
+            "avatarUrl": widget.currentUser.avatarUrl,
+            "role": "MEMBER",
+          }
+        ];
+        if (peerId != null) {
+          try {
+            final peerProfile = await widget.userService.getUserById(peerId);
+            dmMembers.add({
+              "userId": peerId,
+              "displayName": peerProfile.fullName ?? widget.conversation.title,
+              "avatarUrl": peerProfile.avatarUrl ?? widget.conversation.avatarUrl,
+              "role": "MEMBER",
+            });
+          } catch (_) {
+            dmMembers.add({
+              "userId": peerId,
+              "displayName": widget.conversation.title,
+              "avatarUrl": widget.conversation.avatarUrl,
+              "role": "MEMBER",
+            });
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _conversationMembers = dmMembers;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading members for search: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _loadingMembers = false);
+      }
+    }
+  }
+
+  Future<void> _loadPinnedMessages() async {
+    if (!mounted) return;
+    setState(() => _loadingPinned = true);
+    try {
+      final list = await widget.conversationService.listPinnedMessages(widget.conversation.conversationId);
+      if (mounted) {
+        setState(() {
+          _pinnedMessages = list;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading pinned messages: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _loadingPinned = false);
+      }
+    }
+  }
+
   Future<void> _loadGroupName() async {
     try {
       final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
@@ -91,9 +217,45 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     } catch (_) {}
   }
 
+  Future<void> _loadCachedMessages() async {
+    try {
+      final cached = await LocalCacheService.instance.getMessages(widget.conversation.conversationId);
+      if (cached.isNotEmpty && mounted) {
+        final cachedMessages = cached.map((e) => MessageItem.fromJson(e)).toList();
+        
+        // Save to static in-memory cache
+        _conversationMessagesCache[widget.conversation.conversationId] = cachedMessages;
+        
+        if (_pagingController.itemList == null || _pagingController.itemList!.isEmpty) {
+          setState(() {
+            _pagingController.value = PagingState<String?, MessageItem>(
+              nextPageKey: null,
+              error: null,
+              itemList: cachedMessages,
+            );
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading cached messages: $e");
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    
+    // Check synchronous in-memory cache first
+    final memCached = _conversationMessagesCache[widget.conversation.conversationId];
+    if (memCached != null && memCached.isNotEmpty) {
+      _pagingController.value = PagingState<String?, MessageItem>(
+        nextPageKey: null,
+        error: null,
+        itemList: memCached,
+      );
+    }
+    
+    _loadCachedMessages();
     _loadReactions();
     _loadAliases();
     _checkBlockStatus();
@@ -108,6 +270,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _pagingController.addPageRequestListener((pageKey) {
       _fetchPage(pageKey);
     });
+    _loadPinnedMessages();
+    _loadConversationMembers();
 
     widget.webRTCService.callState.addListener(_handleCallStateChange);
     widget.socketService
@@ -125,14 +289,82 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (msg.type == "SYSTEM" && msg.contentText.contains("left the call")) {
           return;
         }
+
+        // Save socket message to local cache
+        LocalCacheService.instance.saveMessages(
+          widget.conversation.conversationId,
+          [msg.toJson()],
+        ).catchError((e) {
+          debugPrint("Error caching socket message: $e");
+        });
+
         final items = _pagingController.itemList;
         if (items != null) {
-          final exists = items.any((m) => m.id == msg.id);
-          if (!exists) {
-            final newList = List<MessageItem>.from(items);
-            newList.insert(0, msg);
-            _pagingController.itemList = newList;
+          final newList = List<MessageItem>.from(items);
+          
+          // 1. Check if the real message already exists by ID
+          final existingIdx = newList.indexWhere((m) => m.id == msg.id && !m.isPending);
+          
+          if (existingIdx != -1) {
+            // Real message already exists! Clean up any duplicate pending message that might match
+            if (msg.clientMessageId != null && msg.clientMessageId!.isNotEmpty) {
+              final initialLen = newList.length;
+              newList.removeWhere((m) => m.isPending && (m.clientMessageId == msg.clientMessageId || m.id == msg.clientMessageId));
+              if (newList.length != initialLen) {
+                _pagingController.itemList = newList;
+              }
+            }
+            return;
           }
+
+          // 2. Find if there is a pending optimistic message that matches this message
+          final pendingIdx = newList.indexWhere((m) {
+            if (!m.isPending) return false;
+            
+            // Match by clientMessageId if available
+            if (msg.clientMessageId != null && msg.clientMessageId!.isNotEmpty) {
+              if (m.clientMessageId == msg.clientMessageId || m.id == msg.clientMessageId) {
+                return true;
+              }
+            }
+            
+            // Fallback match by content, attachment URL and sender
+            if (m.senderId == msg.senderId && m.type == msg.type) {
+              if (m.resolvedAttachmentUrl != null && msg.resolvedAttachmentUrl != null) {
+                if (m.resolvedAttachmentUrl == msg.resolvedAttachmentUrl) return true;
+              }
+              final mText = m.contentText.trim().toLowerCase();
+              final msgText = msg.contentText.trim().toLowerCase();
+              if (mText == msgText && mText.isNotEmpty) return true;
+              
+              final mTime = DateTime.tryParse(m.sentAt);
+              final msgTime = DateTime.tryParse(msg.sentAt);
+              if (mTime != null && msgTime != null) {
+                if (msgTime.difference(mTime).inSeconds.abs() < 15) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          });
+
+          if (pendingIdx != -1) {
+            // Replace the optimistic pending message with the real one from Socket
+            newList[pendingIdx] = msg;
+            _pagingController.itemList = newList;
+          } else {
+            // Check if it already exists by clientMessageId (even if not pending, to prevent double receipt)
+            final duplicateByClientMsgId = msg.clientMessageId != null && 
+                newList.any((m) => m.clientMessageId == msg.clientMessageId);
+            
+            if (!duplicateByClientMsgId) {
+              // Insert as a new message at the top
+              newList.insert(0, msg);
+              _pagingController.itemList = newList;
+            }
+          }
+        } else {
+          _pagingController.itemList = [msg];
         }
         // Remove from typing if message arrived
         if (msg.senderId != widget.currentUser.id) {
@@ -383,8 +615,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       return;
     }
 
-    Navigator.push(
-      context,
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => CallScreen(
           webRTCService: widget.webRTCService,
@@ -596,14 +827,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         widget.conversation.conversationId,
         cursor: pageKey,
         limit: 30,
+        q: _isSearching && _searchQueryController.text.trim().isNotEmpty
+            ? _searchQueryController.text.trim()
+            : null,
+        type: _isSearching ? _searchType : null,
+        fromUserId: _isSearching ? _searchFromUserId : null,
+        after: _isSearching ? _searchAfterDate?.toUtc().toIso8601String() : null,
+        before: _isSearching ? _searchBeforeDate?.toUtc().toIso8601String() : null,
       );
       final filteredItems = result.items.where((msg) {
         return !(msg.type == "SYSTEM" && msg.contentText.contains("left the call"));
       }).toList();
-      if (result.hasNextPage) {
-        _pagingController.appendPage(filteredItems, result.cursor);
+
+      if (pageKey == null) {
+        // Cache the first page messages locally
+        final messagesJson = filteredItems.map((m) => m.toJson()).toList();
+        LocalCacheService.instance.saveMessages(
+          widget.conversation.conversationId,
+          messagesJson,
+        ).catchError((e) {
+          debugPrint("Error caching messages locally: $e");
+        });
+
+        // Update in-memory static cache
+        _conversationMessagesCache[widget.conversation.conversationId] = filteredItems;
+
+        // Atomic update of the first page to replace cached/existing items without triggering recursive loops
+        _pagingController.value = PagingState<String?, MessageItem>(
+          nextPageKey: result.hasNextPage ? result.cursor : null,
+          error: null,
+          itemList: filteredItems,
+        );
       } else {
-        _pagingController.appendLastPage(filteredItems);
+        if (result.hasNextPage) {
+          _pagingController.appendPage(filteredItems, result.cursor);
+        } else {
+          _pagingController.appendLastPage(filteredItems);
+        }
       }
     } catch (error) {
       _pagingController.error = error;
@@ -670,52 +930,235 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _sendMessage(
-      {required String text, _PendingAttachment? attachment}) async {
-    if (text.isEmpty && attachment == null) return;
+      {required String text, List<_PendingAttachment> attachments = const []}) async {
+    if (text.isEmpty && attachments.isEmpty) return;
 
-    setState(() => _sending = true);
+    // Reset replying state locally
+    setState(() => _replyingTo = null);
 
     try {
-      String? attachmentUrl;
-      String? attachmentKey;
+      // 1. Send TEXT-only messages optimistically
+      if (text.isNotEmpty && attachments.isEmpty) {
+        final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
+        
+        final optimisticMsg = MessageItem(
+          id: clientMsgId,
+          conversationId: widget.conversation.conversationId,
+          senderId: widget.currentUser.id,
+          senderName: widget.currentUser.fullName ?? "Tôi",
+          senderAvatarUrl: widget.currentUser.avatarUrl,
+          type: "TEXT",
+          content: text,
+          sentAt: DateTime.now().toUtc().toIso8601String(),
+          clientMessageId: clientMsgId,
+          isPending: true,
+        );
 
-      if (attachment != null) {
-        if (attachment.path.startsWith("http://") || attachment.path.startsWith("https://")) {
-          attachmentUrl = attachment.path;
-        } else {
-          final uploadResult = await widget.uploadService.uploadMedia(
-            filePath: attachment.path,
-            fileName: attachment.name,
-            mimeType: attachment.mimeType,
-            target: "MESSAGE",
-          );
-          attachmentUrl = uploadResult.url;
-          attachmentKey = uploadResult.key;
+        if (mounted) {
+          setState(() {
+            final currentItems = _pagingController.itemList ?? [];
+            _pagingController.itemList = [optimisticMsg, ...currentItems];
+          });
+          _scrollToBottom();
         }
+
+        widget.conversationService.sendMessage(
+          widget.conversation.conversationId,
+          content: text,
+          clientMessageId: clientMsgId,
+          type: "TEXT",
+          replyTo: _replyingTo?.id,
+        ).then((actualMsg) {
+          if (mounted) {
+            final items = _pagingController.itemList;
+            if (items != null) {
+              final newList = List<MessageItem>.from(items);
+              final idx = newList.indexWhere((m) => m.id == clientMsgId);
+              if (idx != -1) {
+                newList[idx] = actualMsg.copyWith(clientMessageId: clientMsgId);
+                setState(() {
+                  _pagingController.itemList = newList;
+                });
+              }
+            }
+          }
+        }).catchError((e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Lỗi gửi tin nhắn: $e"))
+            );
+            final items = _pagingController.itemList;
+            if (items != null) {
+              final newList = List<MessageItem>.from(items);
+              newList.removeWhere((m) => m.id == clientMsgId);
+              setState(() {
+                _pagingController.itemList = newList;
+              });
+            }
+          }
+        });
       }
 
-      final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
+      // 2. Send attachments (URL-based like stickers/gifs sent optimistically, local files uploaded normally)
+      for (final attachment in attachments) {
+        final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
+        final isFirst = attachments.indexOf(attachment) == 0;
+        final messageContent = (isFirst && text.isNotEmpty) ? text : "";
+        final isUrl = attachment.path.startsWith("http://") || attachment.path.startsWith("https://");
 
-      final msg = await widget.conversationService.sendMessage(
-        widget.conversation.conversationId,
-        content: text,
-        clientMessageId: clientMsgId,
-        type: attachment != null ? attachment.type : "TEXT",
-        attachmentUrl: attachmentUrl,
-        attachmentKey: attachmentKey,
-        replyTo: _replyingTo?.id,
-      );
+        if (isUrl) {
+          // Stickers and GIFs (pre-existing web URLs) can be optimistically sent immediately!
+          final optimisticAttachmentMsg = MessageItem(
+            id: clientMsgId,
+            conversationId: widget.conversation.conversationId,
+            senderId: widget.currentUser.id,
+            senderName: widget.currentUser.fullName ?? "Tôi",
+            senderAvatarUrl: widget.currentUser.avatarUrl,
+            type: attachment.type,
+            content: messageContent,
+            attachmentUrl: attachment.path,
+            sentAt: DateTime.now().toUtc().toIso8601String(),
+            clientMessageId: clientMsgId,
+            isPending: true,
+          );
 
-      // Do not manually insert message here, the socket listener will handle it.
-      // This prevents double messages when sending.
+          if (mounted) {
+            setState(() {
+              final currentItems = _pagingController.itemList ?? [];
+              _pagingController.itemList = [optimisticAttachmentMsg, ...currentItems];
+            });
+            _scrollToBottom();
+          }
 
-      setState(() => _replyingTo = null);
+          widget.conversationService.sendMessage(
+            widget.conversation.conversationId,
+            content: messageContent,
+            clientMessageId: clientMsgId,
+            type: attachment.type,
+            attachmentUrl: attachment.path,
+            replyTo: isFirst ? _replyingTo?.id : null,
+          ).then((actualMsg) {
+            if (mounted) {
+              final items = _pagingController.itemList;
+              if (items != null) {
+                final newList = List<MessageItem>.from(items);
+                final idx = newList.indexWhere((m) => m.id == clientMsgId);
+                if (idx != -1) {
+                  newList[idx] = actualMsg.copyWith(clientMessageId: clientMsgId);
+                  setState(() {
+                    _pagingController.itemList = newList;
+                  });
+                }
+              }
+            }
+          }).catchError((e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("Lỗi gửi tệp tin: $e"))
+              );
+              final items = _pagingController.itemList;
+              if (items != null) {
+                final newList = List<MessageItem>.from(items);
+                newList.removeWhere((m) => m.id == clientMsgId);
+                setState(() {
+                  _pagingController.itemList = newList;
+                });
+              }
+            }
+          });
+        } else {
+          // Local files (require uploading step first)
+          if (mounted) setState(() => _sending = true);
+          try {
+            final uploadResult = await widget.uploadService.uploadMedia(
+              filePath: attachment.path,
+              fileName: attachment.name,
+              mimeType: attachment.mimeType,
+              target: "MESSAGE",
+            );
+
+            final actualMsg = await widget.conversationService.sendMessage(
+              widget.conversation.conversationId,
+              content: messageContent,
+              clientMessageId: clientMsgId,
+              type: attachment.type,
+              attachmentUrl: uploadResult.url,
+              attachmentKey: uploadResult.key,
+              replyTo: isFirst ? _replyingTo?.id : null,
+            );
+
+            if (mounted) {
+              final items = _pagingController.itemList;
+              if (items != null) {
+                final newList = List<MessageItem>.from(items);
+                final finalMsg = actualMsg.copyWith(clientMessageId: clientMsgId);
+                final exists = newList.any((m) => m.id == finalMsg.id || 
+                    (finalMsg.clientMessageId != null && m.clientMessageId == finalMsg.clientMessageId));
+                if (!exists) {
+                  newList.insert(0, finalMsg);
+                  setState(() {
+                    _pagingController.itemList = newList;
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("Lỗi tải lên tệp: $e"))
+              );
+            }
+          } finally {
+            if (mounted) setState(() => _sending = false);
+          }
+        }
+      }
       _scrollToBottom();
     } catch (e) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Error: $e")));
-    } finally {
-      setState(() => _sending = false);
+          .showSnackBar(SnackBar(content: Text("Lỗi hệ thống: $e")));
+    }
+  }
+
+  Future<void> _pinMessage(String messageId) async {
+    try {
+      await widget.conversationService.pinMessage(
+        widget.conversation.conversationId,
+        messageId,
+      );
+      _loadPinnedMessages();
+      AppToast.show(
+        context,
+        message: "Đã ghim tin nhắn thành công!",
+        type: AppToastType.success,
+      );
+    } catch (e) {
+      AppToast.show(
+        context,
+        message: "Không thể ghim tin nhắn: $e",
+        type: AppToastType.error,
+      );
+    }
+  }
+
+  Future<void> _unpinMessage(String messageId) async {
+    try {
+      await widget.conversationService.unpinMessage(
+        widget.conversation.conversationId,
+        messageId,
+      );
+      _loadPinnedMessages();
+      AppToast.show(
+        context,
+        message: "Đã bỏ ghim tin nhắn!",
+        type: AppToastType.success,
+      );
+    } catch (e) {
+      AppToast.show(
+        context,
+        message: "Không thể bỏ ghim: $e",
+        type: AppToastType.error,
+      );
     }
   }
 
@@ -770,6 +1213,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   _showForwardDialog(message);
                 },
               ),
+              (() {
+                final isPinned = _pinnedMessages.any((m) => m.id == message.id);
+                return ListTile(
+                  leading: Icon(
+                    isPinned ? Icons.pin_drop_outlined : Icons.push_pin_outlined,
+                    color: isPinned ? Colors.orange : const Color(0xFF7C3AED),
+                  ),
+                  title: Text(
+                    isPinned ? "Bỏ ghim tin nhắn" : "Ghim tin nhắn",
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    if (isPinned) {
+                      _unpinMessage(message.id);
+                    } else {
+                      _pinMessage(message.id);
+                    }
+                  },
+                );
+              })(),
               if (message.senderId == widget.currentUser.id &&
                   !message.isDeleted)
                 ListTile(
@@ -847,8 +1311,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               child: FutureBuilder<PaginatedResult<ConversationSummary>>(
                 future: widget.conversationService.listConversations(limit: 50),
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData)
-                    return const Center(child: CircularProgressIndicator());
+                  if (!snapshot.hasData) {
+                    return Skeletonizer(
+                      enabled: true,
+                      child: ListView.builder(
+                        itemCount: 5,
+                        itemBuilder: (context, idx) => ListTile(
+                          leading: const CircleAvatar(radius: 20),
+                          title: Container(
+                            width: 150,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              color: Colors.grey,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
                   final convs = snapshot.data!.items
                       .where((c) =>
                           c.conversationId !=
@@ -952,6 +1433,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         children: [
           _buildHeader(),
           _buildActiveCallBanner(),
+          _buildPinnedMessagesBar(),
+          _buildSearchPanel(),
           Expanded(child: _buildMessageList()),
           _buildTypingIndicator(),
           if (_replyingTo != null) _buildReplyPreview(),
@@ -1048,8 +1531,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                   onPressed: () {
                     // Navigate directly to CallScreen
-                    Navigator.push(
-                      context,
+                    Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => CallScreen(
                           webRTCService: widget.webRTCService,
@@ -1124,8 +1606,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Expanded(
             child: GestureDetector(
               onTap: () async {
-                await Navigator.push(
-                  context,
+                await Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(
                     builder: (_) => ConversationInfoScreen(
                       conversation: widget.conversation,
@@ -1152,6 +1633,28 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
           ),
           IconButton(
+            icon: Icon(
+              _showSearchPanel ? Icons.search_off : Icons.search,
+              color: _showSearchPanel ? Colors.redAccent : const Color(0xFF7C3AED),
+            ),
+            onPressed: () {
+              setState(() {
+                _showSearchPanel = !_showSearchPanel;
+                if (!_showSearchPanel) {
+                  _isSearching = false;
+                  _searchQueryController.clear();
+                  _searchType = null;
+                  _searchFromUserId = null;
+                  _searchAfterDate = null;
+                  _searchBeforeDate = null;
+                  _pagingController.refresh();
+                } else {
+                  _loadConversationMembers();
+                }
+              });
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.videocam_outlined, color: Color(0xFF7C3AED)),
             onPressed: () => _startCall(video: true),
           ),
@@ -1164,8 +1667,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onPressed: () {
               if (widget.conversation.isGroup) {
                 final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
-                Navigator.push(
-                  context,
+                Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(
                     builder: (_) => GroupSettingsScreen(
                       groupId: groupId,
@@ -1176,8 +1678,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   _loadGroupName();
                 });
               } else {
-                Navigator.push(
-                  context,
+                Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(
                     builder: (_) => ConversationInfoScreen(
                       conversation: widget.conversation,
@@ -1194,6 +1695,423 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildPinnedMessagesBar() {
+    if (_pinnedMessages.isEmpty) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final latestPin = _pinnedMessages.last;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B).withOpacity(0.8) : Colors.amber.shade50.withOpacity(0.9),
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? const Color(0xFF334155) : Colors.amber.shade200,
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.push_pin, color: Colors.orange, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: GestureDetector(
+              onTap: _showPinnedMessagesDialog,
+              child: Text(
+                "Tin nhắn đã ghim: ${latestPin.contentText.isNotEmpty ? latestPin.contentText : latestPin.attachmentName}",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
+            ),
+          ),
+          if (_pinnedMessages.length > 1)
+            GestureDetector(
+              onTap: _showPinnedMessagesDialog,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  "+${_pinnedMessages.length - 1}",
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange,
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(
+              Icons.close,
+              size: 16,
+              color: isDark ? Colors.white54 : Colors.black54,
+            ),
+            onPressed: () => _unpinMessage(latestPin.id),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPinnedMessagesDialog() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(Icons.push_pin, color: Colors.orange),
+            const SizedBox(width: 8),
+            Text(
+              "Tin nhắn đã ghim",
+              style: TextStyle(
+                color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Container(
+          width: double.maxFinite,
+          constraints: const BoxConstraints(maxHeight: 300),
+          child: _pinnedMessages.isEmpty
+              ? const Center(child: Text("Chưa có tin nhắn ghim nào"))
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _pinnedMessages.length,
+                  separatorBuilder: (_, __) => Divider(color: isDark ? const Color(0xFF334155) : null),
+                  itemBuilder: (context, index) {
+                    final msg = _pinnedMessages[index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        msg.senderName,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 12,
+                        ),
+                      ),
+                      subtitle: Text(
+                        msg.contentText.isNotEmpty ? msg.contentText : msg.attachmentName,
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.black54,
+                          fontSize: 14,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.pin_drop_outlined, color: Colors.orange, size: 20),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _unpinMessage(msg.id);
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              "Đóng",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchPanel() {
+    if (!_showSearchPanel) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Member names map for sender selection
+    final List<DropdownMenuItem<String>> memberItems = [
+      DropdownMenuItem(
+        value: null,
+        child: Text("Tất cả người gửi", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+      ),
+    ];
+    for (final member in _conversationMembers) {
+      if (member is Map) {
+        final Map<String, dynamic> memberMap = Map<String, dynamic>.from(member);
+        final parsed = _InviteCandidate.fromJson(memberMap);
+        final String uid = parsed.userId;
+        final String name = parsed.displayName;
+        if (uid.isNotEmpty) {
+          memberItems.add(DropdownMenuItem(
+            value: uid,
+            child: Text(name, style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+          ));
+        }
+      }
+    }
+
+    final types = {
+      null: "Tất cả",
+      "TEXT": "Văn bản",
+      "IMAGE": "Hình ảnh",
+      "VIDEO": "Video",
+      "AUDIO": "Ghi âm",
+      "DOC": "Tài liệu"
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _searchQueryController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: "Tìm kiếm từ khóa...",
+              hintStyle: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey[600]),
+              prefixIcon: Icon(Icons.search, color: const Color(0xFF7C3AED), size: 20),
+              suffixIcon: _searchQueryController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _searchQueryController.clear();
+                        _applySearch();
+                      },
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            onChanged: (val) {
+              setState(() {});
+              _applySearch();
+            },
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 32,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: types.entries.map((entry) {
+                final isSelected = _searchType == entry.key;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: FilterChip(
+                    label: Text(
+                      entry.value,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isSelected
+                            ? Colors.white
+                            : (isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
+                    selected: isSelected,
+                    selectedColor: const Color(0xFF7C3AED),
+                    checkmarkColor: Colors.white,
+                    backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                    onSelected: (selected) {
+                      setState(() {
+                        _searchType = selected ? entry.key : null;
+                      });
+                      _applySearch();
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: _searchFromUserId,
+                      dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                      items: memberItems,
+                      onChanged: (val) {
+                        setState(() {
+                          _searchFromUserId = val;
+                        });
+                        _applySearch();
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildDatePickerButton(
+                  label: _searchAfterDate != null
+                      ? DateFormat("dd/MM").format(_searchAfterDate!)
+                      : "Từ ngày",
+                  icon: Icons.date_range_outlined,
+                  onTap: () => _pickSearchDate(isAfter: true),
+                  onClear: _searchAfterDate != null
+                      ? () {
+                          setState(() => _searchAfterDate = null);
+                          _applySearch();
+                        }
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildDatePickerButton(
+                  label: _searchBeforeDate != null
+                      ? DateFormat("dd/MM").format(_searchBeforeDate!)
+                      : "Đến ngày",
+                  icon: Icons.date_range,
+                  onTap: () => _pickSearchDate(isAfter: false),
+                  onClear: _searchBeforeDate != null
+                      ? () {
+                          setState(() => _searchBeforeDate = null);
+                          _applySearch();
+                        }
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDatePickerButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onTap,
+    required VoidCallback? onClear,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: const Color(0xFF7C3AED)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+              ),
+              if (onClear != null) ...[
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onTap: onClear,
+                  child: Icon(Icons.close, size: 14, color: isDark ? Colors.white54 : Colors.black54),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickSearchDate({required bool isAfter}) async {
+    final initialDate = DateTime.now();
+    final firstDate = DateTime(2020);
+    final lastDate = DateTime(2030);
+
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: isAfter
+          ? (_searchAfterDate ?? initialDate)
+          : (_searchBeforeDate ?? initialDate),
+      firstDate: firstDate,
+      lastDate: lastDate,
+    );
+
+    if (selected != null) {
+      setState(() {
+        if (isAfter) {
+          _searchAfterDate = selected;
+        } else {
+          _searchBeforeDate = selected;
+        }
+      });
+      _applySearch();
+    }
+  }
+
+  void _applySearch() {
+    final query = _searchQueryController.text.trim();
+    final hasSearch = query.isNotEmpty ||
+        _searchType != null ||
+        _searchFromUserId != null ||
+        _searchAfterDate != null ||
+        _searchBeforeDate != null;
+
+    setState(() {
+      _isSearching = hasSearch;
+    });
+
+    _pagingController.refresh();
   }
 
   Widget _buildReplyPreview() {
@@ -1298,13 +2216,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.5,
-              color: Color(0xFF7C3AED),
-            ),
+          const Icon(
+            Icons.more_horiz,
+            size: 16,
+            color: Color(0xFF7C3AED),
           ),
           const SizedBox(width: 8),
           Text(
@@ -1349,8 +2264,34 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             currentUserName: widget.currentUser.fullName,
           );
         },
-        firstPageProgressIndicatorBuilder: (_) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFF7C3AED))),
+        firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
+          enabled: true,
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: 6,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final isMine = index % 2 == 0;
+              return Align(
+                alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isMine ? const Color(0xFF7C3AED) : Colors.grey[300],
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(20),
+                      topRight: const Radius.circular(20),
+                      bottomLeft: Radius.circular(isMine ? 20 : 4),
+                      bottomRight: Radius.circular(isMine ? 4 : 20),
+                    ),
+                  ),
+                  child: const Text("Đây là nội dung tin nhắn giả lập để hiển thị skeleton"),
+                ),
+              );
+            },
+          ),
+        ),
         noItemsFoundIndicatorBuilder: (_) => const Center(
             child: Text("Chưa có tin nhắn nào",
                 style: TextStyle(color: Colors.grey))),
@@ -1361,7 +2302,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
 class ChatComposer extends StatefulWidget {
   final Future<void> Function(
-      {required String text, _PendingAttachment? attachment}) onSend;
+      {required String text, List<_PendingAttachment> attachments}) onSend;
   final VoidCallback onLocationRequest;
   final UploadService uploadService;
   final SocketService socketService;
@@ -1390,7 +2331,7 @@ class ChatComposer extends StatefulWidget {
 class _ChatComposerState extends State<ChatComposer> {
   final _textController = TextEditingController();
   final _audioRecorder = AudioRecorder();
-  _PendingAttachment? _attachment;
+  final List<_PendingAttachment> _attachments = [];
   bool _isRecording = false;
   int _recordDuration = 0;
   Timer? _timer;
@@ -1646,12 +2587,12 @@ class _ChatComposerState extends State<ChatComposer> {
     if (path != null) {
       final name = path.split("/").last;
       setState(() {
-        _attachment = _PendingAttachment(
+        _attachments.add(_PendingAttachment(
           path: path,
           name: name,
           type: "AUDIO",
           mimeType: "audio/mp4",
-        );
+        ));
       });
     }
   }
@@ -1673,15 +2614,34 @@ class _ChatComposerState extends State<ChatComposer> {
 
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
-    final selected = await picker.pickImage(source: source);
-    if (selected == null) return;
-    setState(() {
-      _attachment = _PendingAttachment(
-          path: selected.path,
-          name: selected.name,
-          type: "IMAGE",
-          mimeType: selected.mimeType);
-    });
+    if (source == ImageSource.gallery) {
+      final selectedList = await picker.pickMultipleMedia();
+      if (selectedList.isEmpty) return;
+      setState(() {
+        for (var selected in selectedList) {
+          final isVideo = selected.path.toLowerCase().endsWith(".mp4") ||
+              selected.path.toLowerCase().endsWith(".mov") ||
+              selected.path.toLowerCase().endsWith(".avi") ||
+              selected.path.toLowerCase().endsWith(".mkv");
+          _attachments.add(_PendingAttachment(
+            path: selected.path,
+            name: selected.name,
+            type: isVideo ? "VIDEO" : "IMAGE",
+            mimeType: selected.mimeType,
+          ));
+        }
+      });
+    } else {
+      final selected = await picker.pickImage(source: source);
+      if (selected == null) return;
+      setState(() {
+        _attachments.add(_PendingAttachment(
+            path: selected.path,
+            name: selected.name,
+            type: "IMAGE",
+            mimeType: selected.mimeType));
+      });
+    }
   }
 
   Future<void> _pickVideo(ImageSource source) async {
@@ -1689,25 +2649,26 @@ class _ChatComposerState extends State<ChatComposer> {
     final selected = await picker.pickVideo(source: source);
     if (selected == null) return;
     setState(() {
-      _attachment = _PendingAttachment(
+      _attachments.add(_PendingAttachment(
           path: selected.path,
           name: selected.name,
           type: "VIDEO",
-          mimeType: selected.mimeType);
+          mimeType: selected.mimeType));
     });
   }
 
   Future<void> _pickFile() async {
-    final selected = await FilePicker.platform.pickFiles();
+    final selected = await FilePicker.platform.pickFiles(allowMultiple: true);
     if (selected == null || selected.files.isEmpty) return;
-    final file = selected.files.first;
-    if (file.path == null) return;
     setState(() {
-      _attachment = _PendingAttachment(
-          path: file.path!,
-          name: file.name,
-          type: "DOC",
-          mimeType: lookupMimeType(file.path!));
+      for (final file in selected.files) {
+        if (file.path == null) continue;
+        _attachments.add(_PendingAttachment(
+            path: file.path!,
+            name: file.name,
+            type: "DOC",
+            mimeType: lookupMimeType(file.path!)));
+      }
     });
   }
 
@@ -1768,12 +2729,14 @@ class _ChatComposerState extends State<ChatComposer> {
         final name = gifUrl.split("/").last;
         widget.onSend(
           text: "GIF Image",
-          attachment: _PendingAttachment(
-            path: gifUrl,
-            name: name,
-            type: "IMAGE",
-            mimeType: "image/gif",
-          ),
+          attachments: [
+            _PendingAttachment(
+              path: gifUrl,
+              name: name,
+              type: "IMAGE",
+              mimeType: "image/gif",
+            ),
+          ],
         );
       },
     );
@@ -1786,12 +2749,14 @@ class _ChatComposerState extends State<ChatComposer> {
         final name = stickerUrl.split("/").last;
         widget.onSend(
           text: "",
-          attachment: _PendingAttachment(
-            path: stickerUrl,
-            name: name,
-            type: "IMAGE",
-            mimeType: "image/gif",
-          ),
+          attachments: [
+            _PendingAttachment(
+              path: stickerUrl,
+              name: name,
+              type: "IMAGE",
+              mimeType: "image/gif",
+            ),
+          ],
         );
       },
     );
@@ -1834,29 +2799,88 @@ class _ChatComposerState extends State<ChatComposer> {
           children: [
             if (widget.isGroup && _getMentionQuery() != null)
               _buildMentionSuggestions(),
-            if (_attachment != null)
+            if (_attachments.isNotEmpty)
               Container(
+                height: 90,
                 margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(12)),
-                child: Row(
-                  children: [
-                    Icon(
-                        _attachment!.type == "VIDEO"
-                            ? Icons.videocam
-                            : Icons.attach_file,
-                        color: const Color(0xFF7C3AED)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: Text(_attachment!.name,
-                            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                            maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    IconButton(
-                        icon: Icon(Icons.close, color: isDark ? Colors.white70 : Colors.black54),
-                        onPressed: () => setState(() => _attachment = null)),
-                  ],
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _attachments.length,
+                  itemBuilder: (context, index) {
+                    final att = _attachments[index];
+                    final isImage = att.type == "IMAGE" && !att.path.startsWith("http");
+                    
+                    return Container(
+                      width: 80,
+                      margin: const EdgeInsets.only(right: 8),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                                  border: Border.all(
+                                    color: isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                                child: isImage
+                                    ? Image.file(
+                                        File(att.path),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : Center(
+                                        child: Icon(
+                                          att.type == "VIDEO"
+                                              ? Icons.videocam
+                                              : att.type == "AUDIO"
+                                                  ? Icons.mic
+                                                  : Icons.insert_drive_file,
+                                          color: const Color(0xFF7C3AED),
+                                          size: 28,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          if (att.type == "VIDEO")
+                            const Positioned(
+                              bottom: 4,
+                              right: 4,
+                              child: Icon(
+                                Icons.play_circle_fill,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                          Positioned(
+                            top: 2,
+                            right: 2,
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _attachments.removeAt(index);
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
             Row(
@@ -1946,7 +2970,7 @@ class _ChatComposerState extends State<ChatComposer> {
                   const SizedBox(
                       width: 24,
                       height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: Icon(Icons.access_time_rounded, size: 24, color: Color(0xFF7C3AED)))
                 else ...[
                   if (_isRecording)
                     _buildComposerButton(
@@ -1955,7 +2979,7 @@ class _ChatComposerState extends State<ChatComposer> {
                       onTap: _stopRecording,
                     )
                   else if (_textController.text.trim().isEmpty &&
-                      _attachment == null) ...[
+                      _attachments.isEmpty) ...[
                     _buildComposerButton(
                       icon: const Icon(Icons.mic_none_outlined,
                           color: Color(0xFF7C3AED), size: 28),
@@ -1968,7 +2992,7 @@ class _ChatComposerState extends State<ChatComposer> {
                       icon: const Icon(Icons.thumb_up_rounded,
                           color: Color(0xFF7C3AED), size: 28),
                       onTap: () =>
-                          widget.onSend(text: "👍", attachment: null),
+                          widget.onSend(text: "👍", attachments: const []),
                     ),
                   ] else
                     _buildComposerButton(
@@ -1976,10 +3000,10 @@ class _ChatComposerState extends State<ChatComposer> {
                           color: Color(0xFF7C3AED), size: 28),
                       onTap: () {
                         final text = _textController.text.trim();
-                        if (text.isNotEmpty || _attachment != null) {
-                          widget.onSend(text: text, attachment: _attachment);
+                        if (text.isNotEmpty || _attachments.isNotEmpty) {
+                          widget.onSend(text: text, attachments: List.from(_attachments));
                           _textController.clear();
-                          setState(() => _attachment = null);
+                          setState(() => _attachments.clear());
                         }
                       },
                     ),
@@ -2473,6 +3497,80 @@ class _AttachmentView extends StatelessWidget {
   final bool isMine;
   const _AttachmentView({required this.message, required this.isMine});
 
+  Future<void> _downloadImage(BuildContext context, String url) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Đang tải ảnh xuống..."),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      String extension = "jpg";
+      try {
+        final uri = Uri.parse(url);
+        final path = uri.path;
+        final lastSegment = path.split("/").last;
+        if (lastSegment.contains(".")) {
+          extension = lastSegment.split(".").last;
+        }
+      } catch (_) {}
+
+      if (extension.length > 5 || extension.contains("/")) {
+        extension = "jpg";
+      }
+
+      final fileName = "chat_img_${DateTime.now().millisecondsSinceEpoch}.$extension";
+
+      final task = DownloadTask(
+        url: url,
+        filename: fileName,
+        directory: 'downloads',
+        baseDirectory: BaseDirectory.temporary,
+        updates: Updates.statusAndProgress,
+        retries: 3,
+      );
+
+      final result = await FileDownloader().download(task);
+      if (result.status == TaskStatus.complete) {
+        final path = await FileDownloader().moveToSharedStorage(task, SharedStorage.images);
+        if (path != null && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Đã lưu ảnh vào thư viện thành công!"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Không thể lưu ảnh vào thư viện."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Tải ảnh thất bại."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Lỗi khi tải ảnh: $e"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final url = message.resolvedAttachmentUrl!;
@@ -2487,15 +3585,32 @@ class _AttachmentView extends StatelessWidget {
                 children: [
                   Center(
                     child: InteractiveViewer(
-                      child: Image.network(url, fit: BoxFit.contain),
+                      child: CachedNetworkImage(
+                        imageUrl: url,
+                        fit: BoxFit.contain,
+                        placeholder: (context, url) => const Center(
+                          child: Icon(Icons.image_outlined, color: Colors.white30, size: 48),
+                        ),
+                        errorWidget: (context, url, error) => const Icon(Icons.broken_image_outlined, color: Colors.white54, size: 64),
+                      ),
                     ),
                   ),
                   Positioned(
                     top: 40,
                     right: 20,
-                    child: IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white, size: 30),
-                      onPressed: () => Navigator.pop(context),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.download, color: Colors.white, size: 30),
+                          onPressed: () => _downloadImage(context, url),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -2505,7 +3620,26 @@ class _AttachmentView extends StatelessWidget {
         },
         child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
-          child: Image.network(url, width: 200, height: 150, fit: BoxFit.cover),
+          child: CachedNetworkImage(
+            imageUrl: url,
+            width: 200,
+            height: 150,
+            fit: BoxFit.cover,
+            placeholder: (context, url) => Container(
+              width: 200,
+              height: 150,
+              color: Colors.grey.shade200,
+              child: const Center(
+                child: Icon(Icons.image_outlined, color: Colors.grey, size: 36),
+              ),
+            ),
+            errorWidget: (context, url, error) => Container(
+              width: 200,
+              height: 150,
+              color: Colors.grey.shade200,
+              child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+            ),
+          ),
         ),
       );
     }

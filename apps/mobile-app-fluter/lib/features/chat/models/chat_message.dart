@@ -60,8 +60,8 @@ class ChatMessage {
     if (!content.trim().startsWith('{')) return null;
     try {
       final parsed = jsonDecode(content);
-      if (parsed is Map<String, dynamic> && parsed.containsKey('poll')) {
-        return parsed['poll'] as Map<String, dynamic>;
+      if (parsed is Map && parsed.containsKey('poll')) {
+        return Map<String, dynamic>.from(parsed['poll'] as Map);
       }
     } catch (_) {}
     return null;

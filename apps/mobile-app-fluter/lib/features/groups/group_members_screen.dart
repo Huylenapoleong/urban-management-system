@@ -327,8 +327,7 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
                       Navigator.pop(context);
                       final profile = member['profile'] as UserProfile?;
                       if (profile != null) {
-                        Navigator.push(
-                          context,
+                        Navigator.of(context, rootNavigator: true).push(
                           MaterialPageRoute(
                             builder: (_) => ProfileScreen(
                               user: profile,

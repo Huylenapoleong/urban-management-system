@@ -10,6 +10,7 @@ import "../contacts/contacts_screen.dart";
 import "../notifications/notifications_screen.dart";
 import "../profile/profile_screen.dart";
 import "../reports/reports_screen.dart";
+import "../../services/location_service.dart";
 import "home_screen.dart";
 import "../../models/conversation_summary.dart";
 import "../chat/call_screen.dart";
@@ -139,6 +140,7 @@ class _HomeShellState extends State<HomeShell> {
       ReportsScreen(
         reportService: services.reportService,
         uploadService: services.uploadService,
+        locationService: LocationService(apiClient: services.apiClient),
       ),
       ProfileScreen(
         user: user,
