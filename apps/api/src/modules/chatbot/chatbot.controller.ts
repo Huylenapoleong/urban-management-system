@@ -57,8 +57,8 @@ export class ChatbotController {
   private getSafeOfficerRole(user: AuthenticatedUser): UserRole {
     const role = user.role;
 
-    if (ChatbotController.OFFICER_ROLES.includes(role as UserRole)) {
-      return role as UserRole;
+    if (ChatbotController.OFFICER_ROLES.includes(role)) {
+      return role;
     }
 
     return 'WARD_OFFICER';

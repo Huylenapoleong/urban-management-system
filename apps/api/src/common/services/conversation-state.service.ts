@@ -312,7 +312,7 @@ export class ConversationStateService {
       return true;
     }
 
-    const messageType = message.type as SupportedMessageType;
+    const messageType = message.type;
 
     return this.hasMeaningfulMessageBody(
       messageType,

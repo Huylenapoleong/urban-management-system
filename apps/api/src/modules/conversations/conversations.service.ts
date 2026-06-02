@@ -454,7 +454,7 @@ export class ConversationsService {
   ): Promise<ConversationAlias[]> {
     const access = await this.resolveConversationAccess(actor, conversationId);
     const participants = new Set(access.participants);
-    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
+    const ownerId = actor.id;
     const aliasMap = await this.getConversationAliasMap(
       ownerId,
       access.conversationKey,
@@ -485,7 +485,7 @@ export class ConversationsService {
       maxLength: 100,
     });
     const occurredAt = nowIso();
-    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
+    const ownerId = actor.id;
     const existingAlias = await this.getConversationAlias(
       ownerId,
       access.conversationKey,
@@ -526,7 +526,7 @@ export class ConversationsService {
 
     this.ensureConversationAliasTarget(access, targetUserId);
 
-    const ownerId = access.isGroup ? 'GLOBAL' : actor.id;
+    const ownerId = actor.id;
 
     const existingAlias = await this.getConversationAlias(
       ownerId,

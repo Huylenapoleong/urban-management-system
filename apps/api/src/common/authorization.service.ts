@@ -36,8 +36,16 @@ export class AuthorizationService {
     }
   }
 
-  canReadUser(_actor: AuthenticatedUser, _target: StoredUser): boolean {
-    return true;
+  canReadUser(actor: AuthenticatedUser, target: StoredUser): boolean {
+    if (actor.id === target.userId) {
+      return true;
+    }
+
+    if (actor.role === 'CITIZEN') {
+      return false;
+    }
+
+    return this.canAccessLocationScope(actor, target.locationCode);
   }
 
   canManageUser(actor: AuthenticatedUser, target: StoredUser): boolean {

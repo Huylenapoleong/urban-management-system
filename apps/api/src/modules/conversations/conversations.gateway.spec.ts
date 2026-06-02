@@ -282,6 +282,7 @@ describe('ConversationsGateway', () => {
         callerName: actor.fullName,
         callerAvatarUrl: actor.avatarUrl,
         isVideo: true,
+        isGroup: false,
         startedAt: '2026-04-22T14:00:00.000Z',
         serverTimestamp: expect.any(String),
       },
