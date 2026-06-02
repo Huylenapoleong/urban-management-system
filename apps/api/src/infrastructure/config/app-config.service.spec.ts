@@ -33,6 +33,7 @@ describe('AppConfigService', () => {
     process.env.NODE_ENV = 'production';
     process.env.JWT_ACCESS_SECRET = 'a'.repeat(32);
     process.env.JWT_REFRESH_SECRET = 'b'.repeat(32);
+    process.env.GROQ_API_KEY = 'mock-groq-key';
     delete process.env.SWAGGER_ENABLED;
 
     const config = new AppConfigService();
@@ -42,6 +43,7 @@ describe('AppConfigService', () => {
 
   it('rejects default jwt secrets in production', () => {
     process.env.NODE_ENV = 'production';
+    process.env.GROQ_API_KEY = 'mock-groq-key';
     delete process.env.JWT_ACCESS_SECRET;
     delete process.env.JWT_REFRESH_SECRET;
 
@@ -99,6 +101,7 @@ describe('AppConfigService', () => {
     process.env.NODE_ENV = 'production';
     process.env.JWT_ACCESS_SECRET = 'a'.repeat(32);
     process.env.JWT_REFRESH_SECRET = 'b'.repeat(32);
+    process.env.GROQ_API_KEY = 'mock-groq-key';
     process.env.CORS_ORIGIN = '*';
 
     expect(() => new AppConfigService()).toThrow(
