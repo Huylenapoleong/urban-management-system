@@ -197,8 +197,7 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
                 onTap: () {
                   Navigator.pop(context);
                   final services = context.read<AppServices>();
-                  Navigator.push(
-                    context,
+                  Navigator.of(context, rootNavigator: true).push(
                     MaterialPageRoute(
                       builder: (_) => ChatDetailScreen(
                         conversation: ConversationSummary(
@@ -227,8 +226,7 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
                 onTap: () {
                   Navigator.pop(context);
                   final services = context.read<AppServices>();
-                  Navigator.push(
-                    context,
+                  Navigator.of(context, rootNavigator: true).push(
                     MaterialPageRoute(
                       builder: (_) => ProfileScreen(
                         user: friend,

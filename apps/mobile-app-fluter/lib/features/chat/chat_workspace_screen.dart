@@ -423,7 +423,7 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
               IconButton(
                 icon: const Icon(Icons.edit_note_outlined, color: Color(0xFF7C3AED), size: 28),
                 onPressed: () {
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactsScreen()));
+                  Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => const ContactsScreen()));
                 },
               ),
               const SizedBox(width: 8),
@@ -497,7 +497,7 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
                       widget.conversationService.markConversationAsRead(conversation.conversationId);
                       widget.socketService.markAsRead(conversation.conversationId);
                     }
-                    await Navigator.of(context).push(MaterialPageRoute(
+                    await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
                       settings: RouteSettings(
                         name: "chat_detail/${conversation.conversationId}",
                       ),

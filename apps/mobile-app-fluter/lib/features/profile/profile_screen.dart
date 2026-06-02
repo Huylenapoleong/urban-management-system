@@ -12,6 +12,8 @@ import "edit_profile_screen.dart";
 import "security_screen.dart";
 import "help_support_screen.dart";
 import "about_app_screen.dart";
+import "user_management_screen.dart";
+import "knowledge_base_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "widgets/avatar_bottom_sheet.dart";
 import "../shared/widgets/app_logo_button.dart";
@@ -235,8 +237,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildActionList(BuildContext context, UserProfile user, bool isMe) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isOfficial = user.role != 'CITIZEN';
+    
     return Column(
       children: [
+        if (isMe && isOfficial) ...[
+          _buildSectionTitle("Quản lý & Nghiệp vụ"),
+          _buildActionItem(
+            context,
+            icon: Icons.people_outline_rounded,
+            title: "Quản lý nhân sự & cư dân",
+            subtitle: user.role == 'PROVINCE_OFFICER'
+              ? "Quản lý Cán bộ phường & Cư dân trong tỉnh"
+              : "Quản lý Cư dân trong địa bàn",
+            iconColor: Colors.purple.shade600,
+            bgColor: isDark ? Colors.purple.shade900.withOpacity(0.3) : Colors.purple.shade50,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+                builder: (_) => const UserManagementScreen(),
+              ));
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
         if (isMe) ...[
           _buildSectionTitle("Cá nhân"),
           _buildActionItem(
@@ -248,7 +271,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             bgColor: isDark ? Colors.blue.shade900.withOpacity(0.3) : Colors.blue.shade50,
             onTap: () {
               if (widget.userService == null) return;
-              Navigator.of(context).push(MaterialPageRoute(
+              Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
                 builder: (_) => EditProfileScreen(
                   user: user,
                   userService: widget.userService!,
@@ -266,13 +289,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
             bgColor: isDark ? Colors.orange.shade900.withOpacity(0.3) : Colors.orange.shade50,
             onTap: () {
               final appServices = context.read<AppServices>();
-              Navigator.of(context).push(MaterialPageRoute(
+              Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
                 builder: (_) => SecurityScreen(authService: appServices.authService),
               ));
             },
           ),
           const SizedBox(height: 24),
         ],
+        _buildSectionTitle("Khám phá & Tiện ích"),
+        _buildActionItem(
+          context,
+          icon: Icons.book_outlined,
+          title: "Tra cứu luật & dịch vụ công",
+          subtitle: "Quy định xây dựng, đất đai, môi trường...",
+          iconColor: Colors.green.shade600,
+          bgColor: isDark ? Colors.green.shade900.withOpacity(0.3) : Colors.green.shade50,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+              builder: (_) => const KnowledgeBaseScreen(),
+            ));
+          },
+        ),
+        const SizedBox(height: 16),
         _buildSectionTitle("Hệ thống"),
         if (isMe)
           _buildActionItem(
@@ -282,7 +320,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             iconColor: isDark ? Colors.grey[400]! : Colors.grey.shade700,
             bgColor: isDark ? Colors.grey.shade800.withOpacity(0.3) : Colors.grey.shade200,
             onTap: () {
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
             },
           ),
         _buildActionItem(
@@ -292,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           iconColor: Colors.teal.shade600,
           bgColor: isDark ? Colors.teal.shade900.withOpacity(0.3) : Colors.teal.shade50,
           onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpSupportScreen()));
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => const HelpSupportScreen()));
           },
         ),
         _buildActionItem(
@@ -302,7 +340,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           iconColor: Colors.indigo.shade600,
           bgColor: isDark ? Colors.indigo.shade900.withOpacity(0.3) : Colors.indigo.shade50,
           onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutAppScreen()));
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => const AboutAppScreen()));
           },
         ),
         const SizedBox(height: 32),

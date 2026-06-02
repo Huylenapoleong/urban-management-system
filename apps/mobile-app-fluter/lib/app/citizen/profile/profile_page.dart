@@ -1,24 +1,32 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../state/auth_controller.dart';
+import 'package:provider/provider.dart';
+import '../../../services/app_services.dart';
+import '../../../state/session_controller.dart';
+import '../../../features/profile/profile_screen.dart';
 
-class CitizenProfilePage extends ConsumerWidget {
+/// Citizen profile page — đọc user từ SessionController
+/// và delegate cho ProfileScreen có sẵn.
+class CitizenProfilePage extends StatelessWidget {
   const CitizenProfilePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Cá nhân'),
-      ),
-      body: Center(
-        child: FilledButton(
-          onPressed: () {
-            ref.read(authControllerProvider.notifier).logout();
-          },
-          child: const Text('Đăng xuất'),
-        ),
-      ),
+  Widget build(BuildContext context) {
+    final session = context.watch<SessionController>();
+    final services = context.read<AppServices>();
+    final user = session.user;
+
+    if (user == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return ProfileScreen(
+      user: user,
+      userService: services.userService,
+      uploadService: services.uploadService,
+      onRefreshProfile: session.refreshProfile,
+      onLogout: session.logout,
     );
   }
 }

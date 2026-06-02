@@ -149,7 +149,7 @@ class MessageItem {
 
     try {
       final parsed = jsonDecode(raw);
-      if (parsed is Map<String, dynamic>) {
+      if (parsed is Map) {
         final textValue = parsed["text"] ?? parsed["content"];
         if (textValue != null) {
           return "$textValue";
@@ -195,8 +195,8 @@ class MessageItem {
     if (!content.trim().startsWith('{')) return null;
     try {
       final parsed = jsonDecode(content);
-      if (parsed is Map<String, dynamic> && parsed.containsKey('poll')) {
-        return parsed['poll'] as Map<String, dynamic>;
+      if (parsed is Map && parsed.containsKey('poll')) {
+        return Map<String, dynamic>.from(parsed['poll'] as Map);
       }
     } catch (_) {}
     return null;

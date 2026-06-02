@@ -25,6 +25,12 @@ class CitizenLayout extends StatelessWidget {
               context.go('/citizen/chats');
               break;
             case 2:
+              context.go('/citizen/contacts');
+              break;
+            case 3:
+              context.go('/citizen/reports');
+              break;
+            case 4:
               context.go('/citizen/profile');
               break;
           }
@@ -41,6 +47,16 @@ class CitizenLayout extends StatelessWidget {
             label: 'Tin nhắn',
           ),
           NavigationDestination(
+            icon: Icon(Icons.people_outline),
+            selectedIcon: Icon(Icons.people),
+            label: 'Bạn bè',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.description_outlined),
+            selectedIcon: Icon(Icons.description),
+            label: 'Báo cáo',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: 'Cá nhân',
@@ -53,7 +69,9 @@ class CitizenLayout extends StatelessWidget {
   int _calculateSelectedIndex(String location) {
     if (location.startsWith('/citizen/home')) return 0;
     if (location.startsWith('/citizen/chats')) return 1;
-    if (location.startsWith('/citizen/profile')) return 2;
+    if (location.startsWith('/citizen/contacts')) return 2;
+    if (location.startsWith('/citizen/reports')) return 3;
+    if (location.startsWith('/citizen/profile')) return 4;
     return 0; // Default
   }
 }

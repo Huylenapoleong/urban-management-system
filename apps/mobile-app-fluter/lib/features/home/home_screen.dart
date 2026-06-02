@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import '../../state/session_controller.dart';
 import '../../services/app_services.dart';
 import '../notifications/notifications_screen.dart';
 import '../contacts/contacts_screen.dart';
 import '../chatbot/ai_assistant_page.dart';
 import '../reports/reports_screen.dart';
+import '../../services/location_service.dart';
 import '../map/map_screen.dart';
 import '../events/events_screen.dart';
 import '../profile/about_app_screen.dart';
@@ -50,12 +52,14 @@ class HomeScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AiAssistantPage()),
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (context) => const AiAssistantPage(),
           );
         },
-        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF7C3AED) : const Color(0xFF0F172A),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF7C3AED) : const Color(0xFF1E1B4B),
         icon: const Icon(Icons.auto_awesome, color: Colors.white),
         label: const Text('Trợ lý AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
@@ -82,7 +86,7 @@ class HomeScreen extends StatelessWidget {
         IconButton(
           icon: Icon(Icons.people_outline, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
           onPressed: () {
-            Navigator.of(context).push(MaterialPageRoute(
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
               builder: (_) => const ContactsScreen(),
             ));
           },
@@ -90,7 +94,7 @@ class HomeScreen extends StatelessWidget {
         IconButton(
           icon: Icon(Icons.notifications_outlined, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
           onPressed: () {
-            Navigator.of(context).push(MaterialPageRoute(
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
               builder: (_) => const NotificationsScreen(),
             ));
           },
@@ -176,9 +180,16 @@ class HomeScreen extends StatelessWidget {
           const Color(0xFFFEE2E2), 
           const Color(0xFFEF4444),
           onTap: () {
-            Navigator.push(context, MaterialPageRoute(
-              builder: (_) => ReportsScreen(reportService: services.reportService),
-            ));
+            final session = context.read<SessionController>();
+            final role = session.user?.role;
+            final isOfficial = role != null &&
+                const {'ADMIN', 'PROVINCE_OFFICER', 'WARD_OFFICER', 'OFFICER'}
+                    .contains(role.toUpperCase());
+            if (isOfficial) {
+              context.go('/official/reports');
+            } else {
+              context.go('/citizen/reports');
+            }
           },
         ),
         _buildActionItem(
@@ -188,7 +199,7 @@ class HomeScreen extends StatelessWidget {
           const Color(0xFFE0F2FE), 
           const Color(0xFF0EA5E9),
           onTap: () {
-            Navigator.push(context, MaterialPageRoute(
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
               builder: (_) => const MapScreen(),
             ));
           },
@@ -200,7 +211,7 @@ class HomeScreen extends StatelessWidget {
           const Color(0xFFF0FDF4), 
           const Color(0xFF22C55E),
           onTap: () {
-            Navigator.push(context, MaterialPageRoute(
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
               builder: (_) => const EventsScreen(),
             ));
           },
@@ -212,7 +223,7 @@ class HomeScreen extends StatelessWidget {
           const Color(0xFFFEF9C3), 
           const Color(0xFFEAB308),
           onTap: () {
-            Navigator.push(context, MaterialPageRoute(
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
               builder: (_) => const AboutAppScreen(),
             ));
           },

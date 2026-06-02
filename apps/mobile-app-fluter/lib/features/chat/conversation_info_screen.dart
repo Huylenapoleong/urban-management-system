@@ -421,8 +421,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
             Icons.photo_outlined,
             "Ảnh & Video đã gửi",
             onTap: () {
-              Navigator.push(
-                context,
+              Navigator.of(context, rootNavigator: true).push(
                 MaterialPageRoute(
                   builder: (_) => GroupSharedMediaScreen(
                     conversationId: widget.conversation.conversationId,
@@ -439,8 +438,7 @@ class _ConversationInfoScreenState extends ConsumerState<ConversationInfoScreen>
             Icons.link,
             "Link đã chia sẻ",
             onTap: () {
-              Navigator.push(
-                context,
+              Navigator.of(context, rootNavigator: true).push(
                 MaterialPageRoute(
                   builder: (_) => GroupSharedMediaScreen(
                     conversationId: widget.conversation.conversationId,

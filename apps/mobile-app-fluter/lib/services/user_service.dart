@@ -21,6 +21,11 @@ class UserService {
     return UserProfile.fromJson((raw as Map).cast<String, dynamic>());
   }
 
+  Future<UserProfile> createUser(Map<String, dynamic> payload) async {
+    final raw = await _apiClient.post("/users", data: payload);
+    return UserProfile.fromJson((raw as Map).cast<String, dynamic>());
+  }
+
   Future<List<UserProfile>> listUsers({
     String? role,
     String? status,

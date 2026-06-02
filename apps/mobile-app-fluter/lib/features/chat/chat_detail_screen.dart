@@ -1,6 +1,8 @@
 import "dart:async";
+import "dart:io";
 import "package:file_picker/file_picker.dart";
 import "dart:convert";
+
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 import "package:intl/intl.dart";
@@ -27,6 +29,7 @@ import "conversation_info_screen.dart";
 import "call_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "../shared/widgets/app_toast.dart";
+import "package:background_downloader/background_downloader.dart";
 import "../../app/shared/chat/widgets/gif_picker_sheet.dart";
 import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
@@ -79,6 +82,124 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String? _fetchedGroupName;
   bool _isPeerBlocked = false;
 
+  List<MessageItem> _pinnedMessages = [];
+  bool _loadingPinned = false;
+
+  // Search state variables
+  bool _isSearching = false;
+  bool _showSearchPanel = false;
+  final TextEditingController _searchQueryController = TextEditingController();
+  String? _searchType;
+  String? _searchFromUserId;
+  DateTime? _searchAfterDate;
+  DateTime? _searchBeforeDate;
+  List<dynamic> _conversationMembers = [];
+  bool _loadingMembers = false;
+
+  Future<void> _loadConversationMembers() async {
+    if (!mounted) return;
+    setState(() => _loadingMembers = true);
+    try {
+      if (widget.conversation.isGroup) {
+        var groupId = widget.conversation.groupId;
+        if (groupId == null) {
+          final convId = widget.conversation.conversationId;
+          if (convId.startsWith("group:")) {
+            groupId = convId.substring(6);
+          } else if (convId.startsWith("group#")) {
+            groupId = convId.substring(6);
+          } else if (convId.startsWith("grp#")) {
+            groupId = convId.substring(4);
+          } else if (convId.startsWith("GRP#")) {
+            groupId = convId.substring(4);
+          }
+        }
+        if (groupId != null) {
+          final membersRaw = await widget.groupService.listMembers(groupId);
+          final populatedMembers = await Future.wait(membersRaw.map((m) async {
+            final userId = m['userId']?.toString();
+            if (userId == null) return m;
+            try {
+              final profile = await widget.userService.getUserById(userId);
+              return {
+                ...m,
+                'fullName': profile.fullName,
+                'displayName': profile.fullName,
+                'avatarUrl': profile.avatarUrl,
+              };
+            } catch (_) {
+              return m;
+            }
+          }));
+          if (mounted) {
+            setState(() {
+              _conversationMembers = populatedMembers;
+            });
+          }
+        }
+      } else {
+        // DM members: Me & Peer
+        final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+        final List<Map<String, dynamic>> dmMembers = [
+          {
+            "userId": widget.currentUser.id,
+            "displayName": widget.currentUser.fullName ?? "Tôi",
+            "avatarUrl": widget.currentUser.avatarUrl,
+            "role": "MEMBER",
+          }
+        ];
+        if (peerId != null) {
+          try {
+            final peerProfile = await widget.userService.getUserById(peerId);
+            dmMembers.add({
+              "userId": peerId,
+              "displayName": peerProfile.fullName ?? widget.conversation.title,
+              "avatarUrl": peerProfile.avatarUrl ?? widget.conversation.avatarUrl,
+              "role": "MEMBER",
+            });
+          } catch (_) {
+            dmMembers.add({
+              "userId": peerId,
+              "displayName": widget.conversation.title,
+              "avatarUrl": widget.conversation.avatarUrl,
+              "role": "MEMBER",
+            });
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _conversationMembers = dmMembers;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading members for search: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _loadingMembers = false);
+      }
+    }
+  }
+
+  Future<void> _loadPinnedMessages() async {
+    if (!mounted) return;
+    setState(() => _loadingPinned = true);
+    try {
+      final list = await widget.conversationService.listPinnedMessages(widget.conversation.conversationId);
+      if (mounted) {
+        setState(() {
+          _pinnedMessages = list;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading pinned messages: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _loadingPinned = false);
+      }
+    }
+  }
+
   Future<void> _loadGroupName() async {
     try {
       final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
@@ -108,6 +229,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _pagingController.addPageRequestListener((pageKey) {
       _fetchPage(pageKey);
     });
+    _loadPinnedMessages();
+    _loadConversationMembers();
 
     widget.webRTCService.callState.addListener(_handleCallStateChange);
     widget.socketService
@@ -383,8 +506,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       return;
     }
 
-    Navigator.push(
-      context,
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => CallScreen(
           webRTCService: widget.webRTCService,
@@ -596,6 +718,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         widget.conversation.conversationId,
         cursor: pageKey,
         limit: 30,
+        q: _isSearching && _searchQueryController.text.trim().isNotEmpty
+            ? _searchQueryController.text.trim()
+            : null,
+        type: _isSearching ? _searchType : null,
+        fromUserId: _isSearching ? _searchFromUserId : null,
+        after: _isSearching ? _searchAfterDate?.toUtc().toIso8601String() : null,
+        before: _isSearching ? _searchBeforeDate?.toUtc().toIso8601String() : null,
       );
       final filteredItems = result.items.where((msg) {
         return !(msg.type == "SYSTEM" && msg.contentText.contains("left the call"));
@@ -670,16 +799,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _sendMessage(
-      {required String text, _PendingAttachment? attachment}) async {
-    if (text.isEmpty && attachment == null) return;
+      {required String text, List<_PendingAttachment> attachments = const []}) async {
+    if (text.isEmpty && attachments.isEmpty) return;
 
     setState(() => _sending = true);
 
     try {
-      String? attachmentUrl;
-      String? attachmentKey;
+      if (text.isNotEmpty && attachments.isEmpty) {
+        final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
+        await widget.conversationService.sendMessage(
+          widget.conversation.conversationId,
+          content: text,
+          clientMessageId: clientMsgId,
+          type: "TEXT",
+          replyTo: _replyingTo?.id,
+        );
+      }
 
-      if (attachment != null) {
+      for (final attachment in attachments) {
+        String? attachmentUrl;
+        String? attachmentKey;
+
         if (attachment.path.startsWith("http://") || attachment.path.startsWith("https://")) {
           attachmentUrl = attachment.path;
         } else {
@@ -692,22 +832,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           attachmentUrl = uploadResult.url;
           attachmentKey = uploadResult.key;
         }
+
+        final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
+        final isFirst = attachments.indexOf(attachment) == 0;
+        final messageContent = (isFirst && text.isNotEmpty) ? text : "";
+
+        await widget.conversationService.sendMessage(
+          widget.conversation.conversationId,
+          content: messageContent,
+          clientMessageId: clientMsgId,
+          type: attachment.type,
+          attachmentUrl: attachmentUrl,
+          attachmentKey: attachmentKey,
+          replyTo: isFirst ? _replyingTo?.id : null,
+        );
       }
-
-      final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
-
-      final msg = await widget.conversationService.sendMessage(
-        widget.conversation.conversationId,
-        content: text,
-        clientMessageId: clientMsgId,
-        type: attachment != null ? attachment.type : "TEXT",
-        attachmentUrl: attachmentUrl,
-        attachmentKey: attachmentKey,
-        replyTo: _replyingTo?.id,
-      );
-
-      // Do not manually insert message here, the socket listener will handle it.
-      // This prevents double messages when sending.
 
       setState(() => _replyingTo = null);
       _scrollToBottom();
@@ -716,6 +855,48 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           .showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
       setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _pinMessage(String messageId) async {
+    try {
+      await widget.conversationService.pinMessage(
+        widget.conversation.conversationId,
+        messageId,
+      );
+      _loadPinnedMessages();
+      AppToast.show(
+        context,
+        message: "Đã ghim tin nhắn thành công!",
+        type: AppToastType.success,
+      );
+    } catch (e) {
+      AppToast.show(
+        context,
+        message: "Không thể ghim tin nhắn: $e",
+        type: AppToastType.error,
+      );
+    }
+  }
+
+  Future<void> _unpinMessage(String messageId) async {
+    try {
+      await widget.conversationService.unpinMessage(
+        widget.conversation.conversationId,
+        messageId,
+      );
+      _loadPinnedMessages();
+      AppToast.show(
+        context,
+        message: "Đã bỏ ghim tin nhắn!",
+        type: AppToastType.success,
+      );
+    } catch (e) {
+      AppToast.show(
+        context,
+        message: "Không thể bỏ ghim: $e",
+        type: AppToastType.error,
+      );
     }
   }
 
@@ -770,6 +951,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   _showForwardDialog(message);
                 },
               ),
+              (() {
+                final isPinned = _pinnedMessages.any((m) => m.id == message.id);
+                return ListTile(
+                  leading: Icon(
+                    isPinned ? Icons.pin_drop_outlined : Icons.push_pin_outlined,
+                    color: isPinned ? Colors.orange : const Color(0xFF7C3AED),
+                  ),
+                  title: Text(
+                    isPinned ? "Bỏ ghim tin nhắn" : "Ghim tin nhắn",
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    if (isPinned) {
+                      _unpinMessage(message.id);
+                    } else {
+                      _pinMessage(message.id);
+                    }
+                  },
+                );
+              })(),
               if (message.senderId == widget.currentUser.id &&
                   !message.isDeleted)
                 ListTile(
@@ -952,6 +1154,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         children: [
           _buildHeader(),
           _buildActiveCallBanner(),
+          _buildPinnedMessagesBar(),
+          _buildSearchPanel(),
           Expanded(child: _buildMessageList()),
           _buildTypingIndicator(),
           if (_replyingTo != null) _buildReplyPreview(),
@@ -1048,8 +1252,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                   onPressed: () {
                     // Navigate directly to CallScreen
-                    Navigator.push(
-                      context,
+                    Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => CallScreen(
                           webRTCService: widget.webRTCService,
@@ -1124,8 +1327,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Expanded(
             child: GestureDetector(
               onTap: () async {
-                await Navigator.push(
-                  context,
+                await Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(
                     builder: (_) => ConversationInfoScreen(
                       conversation: widget.conversation,
@@ -1152,6 +1354,28 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
           ),
           IconButton(
+            icon: Icon(
+              _showSearchPanel ? Icons.search_off : Icons.search,
+              color: _showSearchPanel ? Colors.redAccent : const Color(0xFF7C3AED),
+            ),
+            onPressed: () {
+              setState(() {
+                _showSearchPanel = !_showSearchPanel;
+                if (!_showSearchPanel) {
+                  _isSearching = false;
+                  _searchQueryController.clear();
+                  _searchType = null;
+                  _searchFromUserId = null;
+                  _searchAfterDate = null;
+                  _searchBeforeDate = null;
+                  _pagingController.refresh();
+                } else {
+                  _loadConversationMembers();
+                }
+              });
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.videocam_outlined, color: Color(0xFF7C3AED)),
             onPressed: () => _startCall(video: true),
           ),
@@ -1164,8 +1388,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onPressed: () {
               if (widget.conversation.isGroup) {
                 final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
-                Navigator.push(
-                  context,
+                Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(
                     builder: (_) => GroupSettingsScreen(
                       groupId: groupId,
@@ -1176,8 +1399,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   _loadGroupName();
                 });
               } else {
-                Navigator.push(
-                  context,
+                Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(
                     builder: (_) => ConversationInfoScreen(
                       conversation: widget.conversation,
@@ -1194,6 +1416,423 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildPinnedMessagesBar() {
+    if (_pinnedMessages.isEmpty) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final latestPin = _pinnedMessages.last;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B).withOpacity(0.8) : Colors.amber.shade50.withOpacity(0.9),
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? const Color(0xFF334155) : Colors.amber.shade200,
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.push_pin, color: Colors.orange, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: GestureDetector(
+              onTap: _showPinnedMessagesDialog,
+              child: Text(
+                "Tin nhắn đã ghim: ${latestPin.contentText.isNotEmpty ? latestPin.contentText : latestPin.attachmentName}",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
+            ),
+          ),
+          if (_pinnedMessages.length > 1)
+            GestureDetector(
+              onTap: _showPinnedMessagesDialog,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  "+${_pinnedMessages.length - 1}",
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange,
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(
+              Icons.close,
+              size: 16,
+              color: isDark ? Colors.white54 : Colors.black54,
+            ),
+            onPressed: () => _unpinMessage(latestPin.id),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPinnedMessagesDialog() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(Icons.push_pin, color: Colors.orange),
+            const SizedBox(width: 8),
+            Text(
+              "Tin nhắn đã ghim",
+              style: TextStyle(
+                color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Container(
+          width: double.maxFinite,
+          constraints: const BoxConstraints(maxHeight: 300),
+          child: _pinnedMessages.isEmpty
+              ? const Center(child: Text("Chưa có tin nhắn ghim nào"))
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _pinnedMessages.length,
+                  separatorBuilder: (_, __) => Divider(color: isDark ? const Color(0xFF334155) : null),
+                  itemBuilder: (context, index) {
+                    final msg = _pinnedMessages[index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        msg.senderName,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 12,
+                        ),
+                      ),
+                      subtitle: Text(
+                        msg.contentText.isNotEmpty ? msg.contentText : msg.attachmentName,
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.black54,
+                          fontSize: 14,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.pin_drop_outlined, color: Colors.orange, size: 20),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _unpinMessage(msg.id);
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              "Đóng",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchPanel() {
+    if (!_showSearchPanel) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Member names map for sender selection
+    final List<DropdownMenuItem<String>> memberItems = [
+      DropdownMenuItem(
+        value: null,
+        child: Text("Tất cả người gửi", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+      ),
+    ];
+    for (final member in _conversationMembers) {
+      if (member is Map) {
+        final Map<String, dynamic> memberMap = Map<String, dynamic>.from(member);
+        final parsed = _InviteCandidate.fromJson(memberMap);
+        final String uid = parsed.userId;
+        final String name = parsed.displayName;
+        if (uid.isNotEmpty) {
+          memberItems.add(DropdownMenuItem(
+            value: uid,
+            child: Text(name, style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+          ));
+        }
+      }
+    }
+
+    final types = {
+      null: "Tất cả",
+      "TEXT": "Văn bản",
+      "IMAGE": "Hình ảnh",
+      "VIDEO": "Video",
+      "AUDIO": "Ghi âm",
+      "DOC": "Tài liệu"
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _searchQueryController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: "Tìm kiếm từ khóa...",
+              hintStyle: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey[600]),
+              prefixIcon: Icon(Icons.search, color: const Color(0xFF7C3AED), size: 20),
+              suffixIcon: _searchQueryController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _searchQueryController.clear();
+                        _applySearch();
+                      },
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            onChanged: (val) {
+              setState(() {});
+              _applySearch();
+            },
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 32,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: types.entries.map((entry) {
+                final isSelected = _searchType == entry.key;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: FilterChip(
+                    label: Text(
+                      entry.value,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isSelected
+                            ? Colors.white
+                            : (isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
+                    selected: isSelected,
+                    selectedColor: const Color(0xFF7C3AED),
+                    checkmarkColor: Colors.white,
+                    backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                    onSelected: (selected) {
+                      setState(() {
+                        _searchType = selected ? entry.key : null;
+                      });
+                      _applySearch();
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: _searchFromUserId,
+                      dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                      items: memberItems,
+                      onChanged: (val) {
+                        setState(() {
+                          _searchFromUserId = val;
+                        });
+                        _applySearch();
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildDatePickerButton(
+                  label: _searchAfterDate != null
+                      ? DateFormat("dd/MM").format(_searchAfterDate!)
+                      : "Từ ngày",
+                  icon: Icons.date_range_outlined,
+                  onTap: () => _pickSearchDate(isAfter: true),
+                  onClear: _searchAfterDate != null
+                      ? () {
+                          setState(() => _searchAfterDate = null);
+                          _applySearch();
+                        }
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildDatePickerButton(
+                  label: _searchBeforeDate != null
+                      ? DateFormat("dd/MM").format(_searchBeforeDate!)
+                      : "Đến ngày",
+                  icon: Icons.date_range,
+                  onTap: () => _pickSearchDate(isAfter: false),
+                  onClear: _searchBeforeDate != null
+                      ? () {
+                          setState(() => _searchBeforeDate = null);
+                          _applySearch();
+                        }
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDatePickerButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onTap,
+    required VoidCallback? onClear,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: const Color(0xFF7C3AED)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+              ),
+              if (onClear != null) ...[
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onTap: onClear,
+                  child: Icon(Icons.close, size: 14, color: isDark ? Colors.white54 : Colors.black54),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickSearchDate({required bool isAfter}) async {
+    final initialDate = DateTime.now();
+    final firstDate = DateTime(2020);
+    final lastDate = DateTime(2030);
+
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: isAfter
+          ? (_searchAfterDate ?? initialDate)
+          : (_searchBeforeDate ?? initialDate),
+      firstDate: firstDate,
+      lastDate: lastDate,
+    );
+
+    if (selected != null) {
+      setState(() {
+        if (isAfter) {
+          _searchAfterDate = selected;
+        } else {
+          _searchBeforeDate = selected;
+        }
+      });
+      _applySearch();
+    }
+  }
+
+  void _applySearch() {
+    final query = _searchQueryController.text.trim();
+    final hasSearch = query.isNotEmpty ||
+        _searchType != null ||
+        _searchFromUserId != null ||
+        _searchAfterDate != null ||
+        _searchBeforeDate != null;
+
+    setState(() {
+      _isSearching = hasSearch;
+    });
+
+    _pagingController.refresh();
   }
 
   Widget _buildReplyPreview() {
@@ -1361,7 +2000,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
 class ChatComposer extends StatefulWidget {
   final Future<void> Function(
-      {required String text, _PendingAttachment? attachment}) onSend;
+      {required String text, List<_PendingAttachment> attachments}) onSend;
   final VoidCallback onLocationRequest;
   final UploadService uploadService;
   final SocketService socketService;
@@ -1390,7 +2029,7 @@ class ChatComposer extends StatefulWidget {
 class _ChatComposerState extends State<ChatComposer> {
   final _textController = TextEditingController();
   final _audioRecorder = AudioRecorder();
-  _PendingAttachment? _attachment;
+  final List<_PendingAttachment> _attachments = [];
   bool _isRecording = false;
   int _recordDuration = 0;
   Timer? _timer;
@@ -1646,12 +2285,12 @@ class _ChatComposerState extends State<ChatComposer> {
     if (path != null) {
       final name = path.split("/").last;
       setState(() {
-        _attachment = _PendingAttachment(
+        _attachments.add(_PendingAttachment(
           path: path,
           name: name,
           type: "AUDIO",
           mimeType: "audio/mp4",
-        );
+        ));
       });
     }
   }
@@ -1673,15 +2312,34 @@ class _ChatComposerState extends State<ChatComposer> {
 
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
-    final selected = await picker.pickImage(source: source);
-    if (selected == null) return;
-    setState(() {
-      _attachment = _PendingAttachment(
-          path: selected.path,
-          name: selected.name,
-          type: "IMAGE",
-          mimeType: selected.mimeType);
-    });
+    if (source == ImageSource.gallery) {
+      final selectedList = await picker.pickMultipleMedia();
+      if (selectedList.isEmpty) return;
+      setState(() {
+        for (var selected in selectedList) {
+          final isVideo = selected.path.toLowerCase().endsWith(".mp4") ||
+              selected.path.toLowerCase().endsWith(".mov") ||
+              selected.path.toLowerCase().endsWith(".avi") ||
+              selected.path.toLowerCase().endsWith(".mkv");
+          _attachments.add(_PendingAttachment(
+            path: selected.path,
+            name: selected.name,
+            type: isVideo ? "VIDEO" : "IMAGE",
+            mimeType: selected.mimeType,
+          ));
+        }
+      });
+    } else {
+      final selected = await picker.pickImage(source: source);
+      if (selected == null) return;
+      setState(() {
+        _attachments.add(_PendingAttachment(
+            path: selected.path,
+            name: selected.name,
+            type: "IMAGE",
+            mimeType: selected.mimeType));
+      });
+    }
   }
 
   Future<void> _pickVideo(ImageSource source) async {
@@ -1689,25 +2347,26 @@ class _ChatComposerState extends State<ChatComposer> {
     final selected = await picker.pickVideo(source: source);
     if (selected == null) return;
     setState(() {
-      _attachment = _PendingAttachment(
+      _attachments.add(_PendingAttachment(
           path: selected.path,
           name: selected.name,
           type: "VIDEO",
-          mimeType: selected.mimeType);
+          mimeType: selected.mimeType));
     });
   }
 
   Future<void> _pickFile() async {
-    final selected = await FilePicker.platform.pickFiles();
+    final selected = await FilePicker.platform.pickFiles(allowMultiple: true);
     if (selected == null || selected.files.isEmpty) return;
-    final file = selected.files.first;
-    if (file.path == null) return;
     setState(() {
-      _attachment = _PendingAttachment(
-          path: file.path!,
-          name: file.name,
-          type: "DOC",
-          mimeType: lookupMimeType(file.path!));
+      for (final file in selected.files) {
+        if (file.path == null) continue;
+        _attachments.add(_PendingAttachment(
+            path: file.path!,
+            name: file.name,
+            type: "DOC",
+            mimeType: lookupMimeType(file.path!)));
+      }
     });
   }
 
@@ -1768,12 +2427,14 @@ class _ChatComposerState extends State<ChatComposer> {
         final name = gifUrl.split("/").last;
         widget.onSend(
           text: "GIF Image",
-          attachment: _PendingAttachment(
-            path: gifUrl,
-            name: name,
-            type: "IMAGE",
-            mimeType: "image/gif",
-          ),
+          attachments: [
+            _PendingAttachment(
+              path: gifUrl,
+              name: name,
+              type: "IMAGE",
+              mimeType: "image/gif",
+            ),
+          ],
         );
       },
     );
@@ -1786,12 +2447,14 @@ class _ChatComposerState extends State<ChatComposer> {
         final name = stickerUrl.split("/").last;
         widget.onSend(
           text: "",
-          attachment: _PendingAttachment(
-            path: stickerUrl,
-            name: name,
-            type: "IMAGE",
-            mimeType: "image/gif",
-          ),
+          attachments: [
+            _PendingAttachment(
+              path: stickerUrl,
+              name: name,
+              type: "IMAGE",
+              mimeType: "image/gif",
+            ),
+          ],
         );
       },
     );
@@ -1834,29 +2497,88 @@ class _ChatComposerState extends State<ChatComposer> {
           children: [
             if (widget.isGroup && _getMentionQuery() != null)
               _buildMentionSuggestions(),
-            if (_attachment != null)
+            if (_attachments.isNotEmpty)
               Container(
+                height: 90,
                 margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(12)),
-                child: Row(
-                  children: [
-                    Icon(
-                        _attachment!.type == "VIDEO"
-                            ? Icons.videocam
-                            : Icons.attach_file,
-                        color: const Color(0xFF7C3AED)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: Text(_attachment!.name,
-                            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                            maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    IconButton(
-                        icon: Icon(Icons.close, color: isDark ? Colors.white70 : Colors.black54),
-                        onPressed: () => setState(() => _attachment = null)),
-                  ],
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _attachments.length,
+                  itemBuilder: (context, index) {
+                    final att = _attachments[index];
+                    final isImage = att.type == "IMAGE" && !att.path.startsWith("http");
+                    
+                    return Container(
+                      width: 80,
+                      margin: const EdgeInsets.only(right: 8),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                                  border: Border.all(
+                                    color: isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                                child: isImage
+                                    ? Image.file(
+                                        File(att.path),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : Center(
+                                        child: Icon(
+                                          att.type == "VIDEO"
+                                              ? Icons.videocam
+                                              : att.type == "AUDIO"
+                                                  ? Icons.mic
+                                                  : Icons.insert_drive_file,
+                                          color: const Color(0xFF7C3AED),
+                                          size: 28,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          if (att.type == "VIDEO")
+                            const Positioned(
+                              bottom: 4,
+                              right: 4,
+                              child: Icon(
+                                Icons.play_circle_fill,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                          Positioned(
+                            top: 2,
+                            right: 2,
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _attachments.removeAt(index);
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
             Row(
@@ -1955,7 +2677,7 @@ class _ChatComposerState extends State<ChatComposer> {
                       onTap: _stopRecording,
                     )
                   else if (_textController.text.trim().isEmpty &&
-                      _attachment == null) ...[
+                      _attachments.isEmpty) ...[
                     _buildComposerButton(
                       icon: const Icon(Icons.mic_none_outlined,
                           color: Color(0xFF7C3AED), size: 28),
@@ -1968,7 +2690,7 @@ class _ChatComposerState extends State<ChatComposer> {
                       icon: const Icon(Icons.thumb_up_rounded,
                           color: Color(0xFF7C3AED), size: 28),
                       onTap: () =>
-                          widget.onSend(text: "👍", attachment: null),
+                          widget.onSend(text: "👍", attachments: const []),
                     ),
                   ] else
                     _buildComposerButton(
@@ -1976,10 +2698,10 @@ class _ChatComposerState extends State<ChatComposer> {
                           color: Color(0xFF7C3AED), size: 28),
                       onTap: () {
                         final text = _textController.text.trim();
-                        if (text.isNotEmpty || _attachment != null) {
-                          widget.onSend(text: text, attachment: _attachment);
+                        if (text.isNotEmpty || _attachments.isNotEmpty) {
+                          widget.onSend(text: text, attachments: List.from(_attachments));
                           _textController.clear();
-                          setState(() => _attachment = null);
+                          setState(() => _attachments.clear());
                         }
                       },
                     ),
@@ -2473,6 +3195,80 @@ class _AttachmentView extends StatelessWidget {
   final bool isMine;
   const _AttachmentView({required this.message, required this.isMine});
 
+  Future<void> _downloadImage(BuildContext context, String url) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Đang tải ảnh xuống..."),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      String extension = "jpg";
+      try {
+        final uri = Uri.parse(url);
+        final path = uri.path;
+        final lastSegment = path.split("/").last;
+        if (lastSegment.contains(".")) {
+          extension = lastSegment.split(".").last;
+        }
+      } catch (_) {}
+
+      if (extension.length > 5 || extension.contains("/")) {
+        extension = "jpg";
+      }
+
+      final fileName = "chat_img_${DateTime.now().millisecondsSinceEpoch}.$extension";
+
+      final task = DownloadTask(
+        url: url,
+        filename: fileName,
+        directory: 'downloads',
+        baseDirectory: BaseDirectory.temporary,
+        updates: Updates.statusAndProgress,
+        retries: 3,
+      );
+
+      final result = await FileDownloader().download(task);
+      if (result.status == TaskStatus.complete) {
+        final path = await FileDownloader().moveToSharedStorage(task, SharedStorage.images);
+        if (path != null && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Đã lưu ảnh vào thư viện thành công!"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Không thể lưu ảnh vào thư viện."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Tải ảnh thất bại."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Lỗi khi tải ảnh: $e"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final url = message.resolvedAttachmentUrl!;
@@ -2493,9 +3289,19 @@ class _AttachmentView extends StatelessWidget {
                   Positioned(
                     top: 40,
                     right: 20,
-                    child: IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white, size: 30),
-                      onPressed: () => Navigator.pop(context),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.download, color: Colors.white, size: 30),
+                          onPressed: () => _downloadImage(context, url),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
                     ),
                   ),
                 ],

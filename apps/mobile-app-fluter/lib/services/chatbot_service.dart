@@ -3,11 +3,17 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../core/config/app_config.dart';
 import '../core/network/api_client.dart';
+import '../core/storage/auth_token_store.dart';
 
 class ChatbotService {
-  ChatbotService({required ApiClient apiClient}) : _apiClient = apiClient;
+  ChatbotService({
+    required ApiClient apiClient,
+    required AuthTokenStore tokenStore,
+  })  : _apiClient = apiClient,
+        _tokenStore = tokenStore;
 
   final ApiClient _apiClient;
+  final AuthTokenStore _tokenStore;
 
   /// Hỏi đáp JSON (Không streaming)
   Future<Map<String, dynamic>> ask(String question) async {
@@ -49,6 +55,12 @@ class ChatbotService {
     
     final request = http.Request('POST', url);
     request.headers['Content-Type'] = 'application/json';
+    
+    final token = await _tokenStore.readAccessToken();
+    if (token != null && token.trim().isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    
     request.body = jsonEncode({'question': question});
 
     final response = await request.send();

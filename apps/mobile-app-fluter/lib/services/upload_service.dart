@@ -23,12 +23,11 @@ class UploadService {
     String? entityId,
   }) async {
     String finalPath = filePath;
-    final resolvedMimeType = mimeType ?? lookupMimeType(filePath) ?? "application/octet-stream";
+    var resolvedMimeType = mimeType ?? lookupMimeType(filePath) ?? "application/octet-stream";
     
     if (resolvedMimeType.startsWith("image/")) {
       try {
         final tempDir = await getTemporaryDirectory();
-        final fileNameOnly = fileName ?? filePath.split("/").last;
         final timestamp = DateTime.now().millisecondsSinceEpoch;
         final targetPath = "${tempDir.path}/compressed_${timestamp}.jpg";
         
@@ -39,6 +38,7 @@ class UploadService {
         );
         if (compressed != null) {
           finalPath = compressed.path;
+          resolvedMimeType = "image/jpeg";
         }
       } catch (e) {
         print("Image compression failed: $e");

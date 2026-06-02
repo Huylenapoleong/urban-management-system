@@ -45,8 +45,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           IconButton(
             icon: const Icon(Icons.group_add_outlined, size: 28),
             onPressed: () {
-              Navigator.push(
-                context,
+              Navigator.of(context, rootNavigator: true).push(
                 MaterialPageRoute(builder: (context) => const CreateGroupScreen()),
               );
             },
