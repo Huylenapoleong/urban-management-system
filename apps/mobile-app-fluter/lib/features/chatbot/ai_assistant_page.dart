@@ -20,6 +20,13 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
   bool _isTyping = false;
 
   @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _messages.add(AiMessage(

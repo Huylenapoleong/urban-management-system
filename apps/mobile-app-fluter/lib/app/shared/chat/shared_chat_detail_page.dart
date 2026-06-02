@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../features/chat/models/chat_message.dart';
@@ -340,10 +341,18 @@ class _Bubble extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      message.attachmentUrl!,
+                    child: CachedNetworkImage(
+                      imageUrl: message.attachmentUrl!,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
+                      placeholder: (context, url) => const SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Color(0xFF7C3AED)),
+                        ),
+                      ),
+                      errorWidget: (context, url, error) => const Icon(Icons.error),
                     ),
                   ),
                 )

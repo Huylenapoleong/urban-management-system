@@ -1,29 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-/// Bottom-nav shell cho giao diện Citizen.
-/// GoRouter's ShellRoute sẽ inject [child] là nội dung của route đang active.
+/// Bottom-nav shell cho giao diện Citizen với bộ điều hướng StatefulNavigationShell để tối ưu hóa bộ nhớ đệm.
 class CitizenShell extends StatelessWidget {
-  const CitizenShell({super.key, required this.child});
+  const CitizenShell({super.key, required this.navigationShell});
 
-  final Widget child;
-
-  static int _selectedIndex(String location) {
-    if (location.startsWith('/citizen/chats')) return 1;
-    if (location.startsWith('/citizen/contacts')) return 2;
-    if (location.startsWith('/citizen/reports')) return 3;
-    if (location.startsWith('/citizen/profile')) return 4;
-    return 0; // /citizen/home
-  }
+  final StatefulNavigationShell navigationShell;
 
   @override
   Widget build(BuildContext context) {
-    final location = GoRouterState.of(context).uri.path;
-    final idx = _selectedIndex(location);
+    final idx = navigationShell.currentIndex;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      body: child,
+      body: navigationShell,
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [
@@ -41,18 +31,10 @@ class CitizenShell extends StatelessWidget {
           selectedIndex: idx,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           onDestinationSelected: (i) {
-            switch (i) {
-              case 0:
-                context.go('/citizen/home');
-              case 1:
-                context.go('/citizen/chats');
-              case 2:
-                context.go('/citizen/contacts');
-              case 3:
-                context.go('/citizen/reports');
-              case 4:
-                context.go('/citizen/profile');
-            }
+            navigationShell.goBranch(
+              i,
+              initialLocation: i == navigationShell.currentIndex,
+            );
           },
           destinations: const [
             NavigationDestination(

@@ -37,24 +37,49 @@ class _UserAvatarState extends State<UserAvatar> {
   String? _avatarUrl;
   bool _loading = false;
   static final Set<String> _failedIds = {};
+  static final Map<String, String> _resolvedAvatarUrls = {};
 
   @override
   void initState() {
     super.initState();
+    final id = widget.userId ?? widget.groupId;
     _avatarUrl = _normalizeUrl(widget.initialAvatarUrl);
-    // Always attempt to fetch latest from DB if we have an ID
-    _fetchAvatar();
+    
+    if (_avatarUrl != null && _avatarUrl!.isNotEmpty && id != null) {
+      _resolvedAvatarUrls[id] = _avatarUrl!;
+    }
+    
+    if ((_avatarUrl == null || _avatarUrl!.isEmpty) && id != null) {
+      if (_resolvedAvatarUrls.containsKey(id)) {
+        _avatarUrl = _resolvedAvatarUrls[id];
+      }
+    }
+    
+    if ((_avatarUrl == null || _avatarUrl!.isEmpty) && id != null) {
+      _fetchAvatar();
+    }
   }
 
   @override
   void didUpdateWidget(UserAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final id = widget.userId ?? widget.groupId;
+    
     if (widget.initialAvatarUrl != oldWidget.initialAvatarUrl) {
-      setState(() => _avatarUrl = _normalizeUrl(widget.initialAvatarUrl));
+      final normalized = _normalizeUrl(widget.initialAvatarUrl);
+      if (normalized != null && normalized.isNotEmpty && id != null) {
+        _resolvedAvatarUrls[id] = normalized;
+      }
+      setState(() => _avatarUrl = normalized);
     }
+    
     if ((_avatarUrl == null || _avatarUrl!.isEmpty) && 
         (widget.userId != oldWidget.userId || widget.groupId != oldWidget.groupId)) {
-      _fetchAvatar();
+      if (id != null && _resolvedAvatarUrls.containsKey(id)) {
+        setState(() => _avatarUrl = _resolvedAvatarUrls[id]);
+      } else {
+        _fetchAvatar();
+      }
     }
   }
 
@@ -98,9 +123,13 @@ class _UserAvatarState extends State<UserAvatar> {
         final prefs = await SharedPreferences.getInstance();
         final localOverride = prefs.getString("group_avatar_override_$id");
         if (localOverride != null && localOverride.isNotEmpty) {
+          final normalized = _normalizeUrl(localOverride);
+          if (normalized != null && normalized.isNotEmpty) {
+            _resolvedAvatarUrls[id] = normalized;
+          }
           if (mounted) {
             setState(() {
-              _avatarUrl = _normalizeUrl(localOverride);
+              _avatarUrl = normalized;
             });
             return;
           }
@@ -114,9 +143,13 @@ class _UserAvatarState extends State<UserAvatar> {
       setState(() => _loading = true);
       try {
         final profile = await widget.userService!.getUserById(widget.userId!);
+        final url = _normalizeUrl(profile.avatarUrl ?? profile.avatarAsset?.resolvedUrl);
+        if (url != null && url.isNotEmpty) {
+          _resolvedAvatarUrls[id] = url;
+        }
         if (mounted) {
           setState(() {
-            _avatarUrl = _normalizeUrl(profile.avatarUrl ?? profile.avatarAsset?.resolvedUrl);
+            _avatarUrl = url;
             _loading = false;
           });
         }
@@ -127,9 +160,13 @@ class _UserAvatarState extends State<UserAvatar> {
       setState(() => _loading = true);
       try {
         final group = await widget.groupService!.getGroup(widget.groupId!);
+        final url = _normalizeUrl(group["avatarUrl"]?.toString());
+        if (url != null && url.isNotEmpty) {
+          _resolvedAvatarUrls[id] = url;
+        }
         if (mounted) {
           setState(() {
-            _avatarUrl = _normalizeUrl(group["avatarUrl"]?.toString());
+            _avatarUrl = url;
             _loading = false;
           });
         }
@@ -218,25 +255,16 @@ class _UserAvatarState extends State<UserAvatar> {
         borderRadius: isGroup ? BorderRadius.circular(widget.radius * 0.5) : null,
       ),
       child: Center(
-        child: loading
-            ? SizedBox(
-                width: widget.radius,
-                height: widget.radius,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(bgColor),
+        child: isGroup && (_avatarUrl == null || _avatarUrl!.isEmpty)
+            ? Icon(Icons.group, color: bgColor, size: widget.radius * 1.2)
+            : Text(
+                initials,
+                style: TextStyle(
+                  color: bgColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: widget.radius * 0.8,
                 ),
-              )
-            : isGroup && (_avatarUrl == null || _avatarUrl!.isEmpty)
-              ? Icon(Icons.group, color: bgColor, size: widget.radius * 1.2)
-              : Text(
-                  initials,
-                  style: TextStyle(
-                    color: bgColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: widget.radius * 0.8,
-                  ),
-                ),
+              ),
       ),
     );
   }

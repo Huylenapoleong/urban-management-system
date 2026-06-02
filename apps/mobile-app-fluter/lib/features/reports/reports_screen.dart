@@ -4,6 +4,7 @@ import "package:geolocator/geolocator.dart";
 import "package:image_picker/image_picker.dart";
 import "package:geocoding/geocoding.dart";
 import "package:provider/provider.dart";
+import "package:cached_network_image/cached_network_image.dart";
 import "dart:io";
 
 import "../../models/report_item.dart";
@@ -767,12 +768,24 @@ class _ReportCard extends StatelessWidget {
             final url = displayUrls[index];
             return ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                url,
+              child: CachedNetworkImage(
+                imageUrl: url,
                 width: 100,
                 height: 100,
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
+                placeholder: (context, url) => Container(
+                  width: 100,
+                  height: 100,
+                  color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                  child: const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ),
+                errorWidget: (context, url, error) {
                   return Container(
                     width: 100,
                     height: 100,

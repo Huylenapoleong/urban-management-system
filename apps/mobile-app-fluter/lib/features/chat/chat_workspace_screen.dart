@@ -6,7 +6,6 @@ import "package:flutter_slidable/flutter_slidable.dart";
 import "package:skeletonizer/skeletonizer.dart";
 
 import "../../models/conversation_summary.dart";
-import "../../models/message_item.dart";
 import "../../services/conversation_service.dart";
 import "../../services/upload_service.dart";
 import "../../services/socket_service.dart";
@@ -18,6 +17,7 @@ import "../contacts/contacts_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "../shared/widgets/app_logo_button.dart";
 import "../../core/utils/translation_helper.dart";
+import "../../services/local_cache_service.dart";
 
 class ChatWorkspaceScreen extends StatefulWidget {
   final ConversationService conversationService;
@@ -54,6 +54,7 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
   StreamSubscription? _readySub;
   Map<String, dynamic> _userPresence = {};
   bool _updatingSettings = false;
+  List<ConversationSummary>? _cachedConversations;
 
   @override
   bool get wantKeepAlive => true;
@@ -61,6 +62,7 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
   @override
   void initState() {
     super.initState();
+    _loadCache();
     _pagingController.addPageRequestListener((pageKey) {
       _fetchPage(pageKey);
     });
@@ -87,9 +89,9 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
               newList[idx] = conv;
             }
             _pagingController.itemList = newList;
-          } else {
-            _pagingController.refresh();
           }
+          // Ignored if the conversation is not in the currently loaded list
+          // to prevent expensive and infinite network refresh cycles for off-screen/archived items.
         }
       }
     });
@@ -178,6 +180,17 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
     });
   }
 
+  Future<void> _loadCache() async {
+    try {
+      final cached = await LocalCacheService.instance.getConversations();
+      if (cached.isNotEmpty && mounted) {
+        setState(() {
+          _cachedConversations = cached.map((e) => ConversationSummary.fromJson(e)).toList();
+        });
+      }
+    } catch (_) {}
+  }
+
   void _sortConversations(List<ConversationSummary> list) {
     list.sort((a, b) {
       if (a.isPinned != b.isPinned) {
@@ -190,16 +203,33 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
   Future<void> _fetchPage(String? pageKey) async {
     try {
       final isSearching = _searchController.text.trim().isNotEmpty;
+
       final result = await widget.conversationService.listConversations(
         q: isSearching ? _searchController.text.trim() : null,
         includeArchived: isSearching ? true : null,
         cursor: pageKey,
         limit: 20,
       );
-      if (result.hasNextPage) {
-        _pagingController.appendPage(result.items, result.cursor);
+
+      if (pageKey == null && !isSearching) {
+        // Cache the fresh first page conversations locally
+        final conversationsJson = result.items.map((c) => c.toJson()).toList();
+        LocalCacheService.instance.saveConversations(conversationsJson).catchError((e) {
+          debugPrint("Error caching conversations: $e");
+        });
+
+        // Atomic update of the first page to replace cached items without triggering recursive loops
+        _pagingController.value = PagingState<String?, ConversationSummary>(
+          nextPageKey: result.hasNextPage ? result.cursor : null,
+          error: null,
+          itemList: result.items,
+        );
       } else {
-        _pagingController.appendLastPage(result.items);
+        if (result.hasNextPage) {
+          _pagingController.appendPage(result.items, result.cursor);
+        } else {
+          _pagingController.appendLastPage(result.items);
+        }
       }
       
       final items = _pagingController.itemList;
@@ -219,14 +249,17 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
             .toList();
 
         for (final id in peerIds) {
-          widget.userService.getUserPresence(id).then((presence) {
-            if (mounted) {
-              setState(() {
-                _userPresence = Map<String, dynamic>.from(_userPresence);
-                _userPresence[id] = presence;
-              });
-            }
-          }).catchError((_) {});
+          // Only fetch presence via HTTP if not already tracked in memory (synced by WebSocket)
+          if (!_userPresence.containsKey(id)) {
+            widget.userService.getUserPresence(id).then((presence) {
+              if (mounted) {
+                setState(() {
+                  _userPresence = Map<String, dynamic>.from(_userPresence);
+                  _userPresence[id] = presence;
+                });
+              }
+            }).catchError((_) {});
+          }
         }
       }
     } catch (error) {
@@ -516,72 +549,102 @@ class _ChatWorkspaceScreenState extends State<ChatWorkspaceScreen> with Automati
                   },
                 ),
               ),
-              firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
-                enabled: true,
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: 8,
-                  separatorBuilder: (context, __) => Divider(
-                    height: 1,
-                    indent: 84,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.grey.shade800
-                        : const Color(0xFFF1F5F9),
-                  ),
-                  itemBuilder: (context, index) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      child: Row(
-                        children: [
-                          const CircleAvatar(
-                            radius: 28,
-                            backgroundColor: Colors.grey,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Container(
-                                      width: 120,
-                                      height: 16,
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                    ),
-                                    Container(
-                                      width: 40,
-                                      height: 12,
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Container(
-                                  width: double.infinity,
-                                  height: 14,
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+              firstPageProgressIndicatorBuilder: (_) {
+                if (_cachedConversations != null && _cachedConversations!.isNotEmpty) {
+                  return Skeletonizer(
+                    enabled: true,
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _cachedConversations!.length,
+                      separatorBuilder: (context, __) => Divider(
+                        height: 1,
+                        indent: 84,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.grey.shade800
+                            : const Color(0xFFF1F5F9),
                       ),
-                    );
-                  },
-                ),
-              ),
+                      itemBuilder: (context, index) {
+                        final conversation = _cachedConversations![index];
+                        return _ConversationCard(
+                          conversation: conversation,
+                          currentUser: widget.currentUser,
+                          userService: widget.userService,
+                          groupService: widget.groupService,
+                          userPresence: _userPresence,
+                          onTap: () {},
+                        );
+                      },
+                    ),
+                  );
+                }
+                return Skeletonizer(
+                  enabled: true,
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: 8,
+                    separatorBuilder: (context, __) => Divider(
+                      height: 1,
+                      indent: 84,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade800
+                          : const Color(0xFFF1F5F9),
+                    ),
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        child: Row(
+                          children: [
+                            const CircleAvatar(
+                              radius: 28,
+                              backgroundColor: Colors.grey,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        width: 120,
+                                        height: 16,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                      Container(
+                                        width: 40,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Container(
+                                    width: double.infinity,
+                                    height: 14,
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
               noItemsFoundIndicatorBuilder: (_) => Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,

@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../../models/report_item.dart';
 import '../../../services/app_services.dart';
@@ -1104,12 +1107,28 @@ class _OfficialReportCard extends StatelessWidget {
                         separatorBuilder: (_, __) => const SizedBox(width: 8),
                         itemBuilder: (_, i) => ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            _imageUrls[i],
+                          child: CachedNetworkImage(
+                            imageUrl: _imageUrls[i],
                             width: 76,
                             height: 76,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                            placeholder: (_, __) => Container(
+                              width: 76,
+                              height: 76,
+                              color: isDark
+                                  ? const Color(0xFF0F172A)
+                                  : Colors.grey.shade100,
+                              child: const Center(
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Color(0xFF15803D)),
+                                ),
+                              ),
+                            ),
+                            errorWidget: (_, __, ___) => Container(
                               width: 76,
                               height: 76,
                               color: isDark
@@ -1436,12 +1455,25 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                     separatorBuilder: (_, __) => const SizedBox(width: 8),
                     itemBuilder: (_, i) => ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        _imageUrls[i],
+                      child: CachedNetworkImage(
+                        imageUrl: _imageUrls[i],
                         width: 120,
                         height: 120,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                        placeholder: (_, __) => Container(
+                          width: 120,
+                          height: 120,
+                          color: Colors.grey.shade200,
+                          child: const Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Color(0xFF15803D)),
+                            ),
+                          ),
+                        ),
+                        errorWidget: (_, __, ___) => Container(
                           width: 120,
                           height: 120,
                           color: Colors.grey.shade200,

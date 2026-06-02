@@ -2,28 +2,20 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-/// Bottom-nav shell cho giao diện Official với thiết kế Floating Glassmorphic 4 tabs.
+/// Bottom-nav shell cho giao diện Official với thiết kế Floating Glassmorphic và bộ điều hướng StatefulNavigationShell.
 class OfficialShell extends StatelessWidget {
-  const OfficialShell({super.key, required this.child});
+  const OfficialShell({super.key, required this.navigationShell});
 
-  final Widget child;
-
-  static int _selectedIndex(String location) {
-    if (location.startsWith('/official/reports')) return 1;
-    if (location.startsWith('/official/chats')) return 2;
-    if (location.startsWith('/official/profile')) return 3;
-    return 0; // /official/home
-  }
+  final StatefulNavigationShell navigationShell;
 
   @override
   Widget build(BuildContext context) {
-    final location = GoRouterState.of(context).uri.path;
-    final idx = _selectedIndex(location);
+    final idx = navigationShell.currentIndex;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       extendBody: true, // Cho phép body cuộn bên dưới thanh điều hướng kính mờ
-      body: child,
+      body: navigationShell,
       bottomNavigationBar: Container(
         margin: EdgeInsets.fromLTRB(
           16, 
@@ -44,7 +36,7 @@ class OfficialShell extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(24),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
               height: 68,
               padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -94,21 +86,10 @@ class OfficialShell extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
-          if (isSelected) return;
-          switch (index) {
-            case 0:
-              context.go('/official/home');
-              break;
-            case 1:
-              context.go('/official/reports');
-              break;
-            case 2:
-              context.go('/official/chats');
-              break;
-            case 3:
-              context.go('/official/profile');
-              break;
-          }
+          navigationShell.goBranch(
+            index,
+            initialLocation: index == navigationShell.currentIndex,
+          );
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),

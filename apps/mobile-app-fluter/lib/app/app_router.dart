@@ -104,161 +104,203 @@ GoRouter createAppRouter(SessionController session) {
         ),
       ),
 
-      // ── Citizen ShellRoute ─────────────────────────────────────────────────
-      ShellRoute(
-        builder: (_, __, child) => CitizenShell(child: child),
-        routes: [
-          GoRoute(
-            path: '/citizen/home',
-            pageBuilder: (_, __) => const NoTransitionPage(
-              child: CitizenHomePage(),
-            ),
-          ),
-          GoRoute(
-            path: '/citizen/chats',
-            pageBuilder: (context, __) {
-              final services = context.read<AppServices>();
-              return NoTransitionPage(
-                child: ChatWorkspaceScreen(
-                  conversationService: services.conversationService,
-                  uploadService: services.uploadService,
-                  socketService: services.socketService,
-                  userService: services.userService,
-                  groupService: services.groupService,
-                  webRTCService: services.webRTCService,
-                  currentUser: session.user,
-                ),
-              );
-            },
+      // ── Official Contacts (Root Route) ────────────────────────────────────
+      GoRoute(
+        path: '/official/contacts',
+        pageBuilder: (_, __) => const NoTransitionPage(
+          child: ContactsScreen(),
+        ),
+      ),
+
+      // ── Citizen StatefulShellRoute ─────────────────────────────────────────
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) {
+          return CitizenShell(navigationShell: navigationShell);
+        },
+        branches: [
+          StatefulShellBranch(
             routes: [
               GoRoute(
-                path: ':conversationId',
-                builder: (context, state) {
-                  final id = Uri.decodeComponent(
-                      state.pathParameters['conversationId'] ?? '');
-                  final name = Uri.decodeComponent(
-                      state.uri.queryParameters['name'] ?? '');
+                path: '/citizen/home',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                  child: CitizenHomePage(),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/citizen/chats',
+                pageBuilder: (context, __) {
                   final services = context.read<AppServices>();
-                  return ChatDetailScreen(
-                    conversation: ConversationSummary(
-                      conversationId: id,
-                      groupName: name,
-                      unreadCount: 0,
-                      isGroup: id.startsWith("group:") || id.startsWith("GRP#"),
-                      updatedAt: DateTime.now().toIso8601String(),
+                  return NoTransitionPage(
+                    child: ChatWorkspaceScreen(
+                      conversationService: services.conversationService,
+                      uploadService: services.uploadService,
+                      socketService: services.socketService,
+                      userService: services.userService,
+                      groupService: services.groupService,
+                      webRTCService: services.webRTCService,
+                      currentUser: session.user,
                     ),
-                    conversationService: services.conversationService,
-                    uploadService: services.uploadService,
-                    socketService: services.socketService,
-                    userService: services.userService,
-                    groupService: services.groupService,
-                    webRTCService: services.webRTCService,
-                    currentUser: session.user,
+                  );
+                },
+                routes: [
+                  GoRoute(
+                    path: ':conversationId',
+                    builder: (context, state) {
+                      final id = Uri.decodeComponent(
+                          state.pathParameters['conversationId'] ?? '');
+                      final name = Uri.decodeComponent(
+                          state.uri.queryParameters['name'] ?? '');
+                      final services = context.read<AppServices>();
+                      return ChatDetailScreen(
+                        conversation: ConversationSummary(
+                          conversationId: id,
+                          groupName: name,
+                          unreadCount: 0,
+                          isGroup: id.startsWith("group:") || id.startsWith("GRP#"),
+                          updatedAt: DateTime.now().toIso8601String(),
+                        ),
+                        conversationService: services.conversationService,
+                        uploadService: services.uploadService,
+                        socketService: services.socketService,
+                        userService: services.userService,
+                        groupService: services.groupService,
+                        webRTCService: services.webRTCService,
+                        currentUser: session.user,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/citizen/contacts',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                  child: ContactsScreen(),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/citizen/reports',
+                pageBuilder: (context, __) {
+                  final services = context.read<AppServices>();
+                  return NoTransitionPage(
+                    child: ReportsScreen(
+                      reportService: services.reportService,
+                      uploadService: services.uploadService,
+                      locationService: LocationService(apiClient: services.apiClient),
+                    ),
                   );
                 },
               ),
             ],
           ),
-          GoRoute(
-            path: '/citizen/contacts',
-            pageBuilder: (_, __) => const NoTransitionPage(
-              child: ContactsScreen(),
-            ),
-          ),
-          GoRoute(
-            path: '/citizen/reports',
-            pageBuilder: (context, __) {
-              final services = context.read<AppServices>();
-              return NoTransitionPage(
-                child: ReportsScreen(
-                  reportService: services.reportService,
-                  uploadService: services.uploadService,
-                  locationService: LocationService(apiClient: services.apiClient),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/citizen/profile',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                  child: _CitizenProfileRoute(),
                 ),
-              );
-            },
-          ),
-          GoRoute(
-            path: '/citizen/profile',
-            pageBuilder: (_, __) => const NoTransitionPage(
-              child: _CitizenProfileRoute(),
-            ),
+              ),
+            ],
           ),
         ],
       ),
 
-      // ── Official ShellRoute ─────────────────────────────────────────────────
-      ShellRoute(
-        builder: (_, __, child) => OfficialShell(child: child),
-        routes: [
-          GoRoute(
-            path: '/official/home',
-            pageBuilder: (_, __) => const NoTransitionPage(
-              child: OfficialHomePage(),
-            ),
-          ),
-          GoRoute(
-            path: '/official/reports',
-            pageBuilder: (_, __) => const NoTransitionPage(
-              child: OfficialReportsPage(),
-            ),
-          ),
-          GoRoute(
-            path: '/official/chats',
-            pageBuilder: (context, __) {
-              final services = context.read<AppServices>();
-              return NoTransitionPage(
-                child: ChatWorkspaceScreen(
-                  conversationService: services.conversationService,
-                  uploadService: services.uploadService,
-                  socketService: services.socketService,
-                  userService: services.userService,
-                  groupService: services.groupService,
-                  webRTCService: services.webRTCService,
-                  currentUser: session.user,
-                ),
-              );
-            },
+      // ── Official StatefulShellRoute ────────────────────────────────────────
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) {
+          return OfficialShell(navigationShell: navigationShell);
+        },
+        branches: [
+          StatefulShellBranch(
             routes: [
               GoRoute(
-                path: ':conversationId',
-                builder: (context, state) {
-                  final id = Uri.decodeComponent(
-                      state.pathParameters['conversationId'] ?? '');
-                  final name = Uri.decodeComponent(
-                      state.uri.queryParameters['name'] ?? '');
-                  final services = context.read<AppServices>();
-                  return ChatDetailScreen(
-                    conversation: ConversationSummary(
-                      conversationId: id,
-                      groupName: name,
-                      unreadCount: 0,
-                      isGroup: id.startsWith("group:") || id.startsWith("GRP#"),
-                      updatedAt: DateTime.now().toIso8601String(),
-                    ),
-                    conversationService: services.conversationService,
-                    uploadService: services.uploadService,
-                    socketService: services.socketService,
-                    userService: services.userService,
-                    groupService: services.groupService,
-                    webRTCService: services.webRTCService,
-                    currentUser: session.user,
-                  );
-                },
+                path: '/official/home',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                  child: OfficialHomePage(),
+                ),
               ),
             ],
           ),
-          GoRoute(
-            path: '/official/contacts',
-            pageBuilder: (_, __) => const NoTransitionPage(
-              child: ContactsScreen(),
-            ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/official/reports',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                  child: OfficialReportsPage(),
+                ),
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/official/profile',
-            pageBuilder: (_, __) => const NoTransitionPage(
-              child: OfficialProfilePage(),
-            ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/official/chats',
+                pageBuilder: (context, __) {
+                  final services = context.read<AppServices>();
+                  return NoTransitionPage(
+                    child: ChatWorkspaceScreen(
+                      conversationService: services.conversationService,
+                      uploadService: services.uploadService,
+                      socketService: services.socketService,
+                      userService: services.userService,
+                      groupService: services.groupService,
+                      webRTCService: services.webRTCService,
+                      currentUser: session.user,
+                    ),
+                  );
+                },
+                routes: [
+                  GoRoute(
+                    path: ':conversationId',
+                    builder: (context, state) {
+                      final id = Uri.decodeComponent(
+                          state.pathParameters['conversationId'] ?? '');
+                      final name = Uri.decodeComponent(
+                          state.uri.queryParameters['name'] ?? '');
+                      final services = context.read<AppServices>();
+                      return ChatDetailScreen(
+                        conversation: ConversationSummary(
+                          conversationId: id,
+                          groupName: name,
+                          unreadCount: 0,
+                          isGroup: id.startsWith("group:") || id.startsWith("GRP#"),
+                          updatedAt: DateTime.now().toIso8601String(),
+                        ),
+                        conversationService: services.conversationService,
+                        uploadService: services.uploadService,
+                        socketService: services.socketService,
+                        userService: services.userService,
+                        groupService: services.groupService,
+                        webRTCService: services.webRTCService,
+                        currentUser: session.user,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/official/profile',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                  child: OfficialProfilePage(),
+                ),
+              ),
+            ],
           ),
         ],
       ),
