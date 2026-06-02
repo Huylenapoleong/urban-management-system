@@ -1,0 +1,81 @@
+name: Deploy API to Amazon ECS
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'apps/api/**'
+      - 'libs/**'
+      - '.github/workflows/deploy-aws.yml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: urban-chat-api-repo
+  ECS_CLUSTER: urban-chat-api-cluster
+  ECS_SERVICE: urban-chat-api-task-service
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f apps/api/Dockerfile .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Download current ECS task definition and extract container name
+      id: get-task-def
+      run: |
+        # Lấy ARN của Task Definition đang chạy trong Service
+        TASK_DEF_ARN=$(aws ecs describe-services --cluster ${{ env.ECS_CLUSTER }} --services ${{ env.ECS_SERVICE }} --query "services[0].taskDefinition" --output text)
+        
+        # Tải Task Definition đó về file JSON
+        aws ecs describe-task-definition --task-definition $TASK_DEF_ARN --query taskDefinition > task-definition.json
+        
+        # Xoá các field không cần thiết do AWS tự generate (nếu không xoá sẽ bị lỗi khi register revision mới)
+        jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' task-definition.json > clean-task-def.json
+        
+        # Trích xuất linh động tên Container (vì chúng ta không biết chính xác tên bạn đặt trên UI)
+        CONTAINER_NAME=$(jq -r '.containerDefinitions[0].name' clean-task-def.json)
+        echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: clean-task-def.json
+        container-name: ${{ steps.get-task-def.outputs.container_name }}
+        image: ${{ steps.build-image.outputs.image }}
+
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
