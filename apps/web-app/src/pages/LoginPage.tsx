@@ -4,7 +4,7 @@ import { useAuth } from "@/providers/auth-context";
 import { login, type LoginRequest } from "@/services/auth.api";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (typeof error !== "object" || error === null) {
@@ -15,8 +15,23 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return typeof message === "string" && message.trim() ? message : fallback;
 }
 
+function getRedirectPath(state: unknown): string {
+  if (typeof state !== "object" || state === null || !("from" in state)) {
+    return "/";
+  }
+
+  const from = (state as { from?: unknown }).from;
+  if (typeof from !== "object" || from === null || !("pathname" in from)) {
+    return "/";
+  }
+
+  const pathname = (from as { pathname?: unknown }).pathname;
+  return typeof pathname === "string" && pathname.trim() ? pathname : "/";
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login: authenticate } = useAuth();
   const [formData, setFormData] = useState<LoginRequest>({
     login: "",
@@ -29,7 +44,8 @@ export function LoginPage() {
     onSuccess: (data) => {
       if (data.tokens?.accessToken) {
         authenticate(data.tokens.accessToken);
-        navigate("/");
+        const from = getRedirectPath(location.state);
+        navigate(from, { replace: true });
       } else {
         setError("Token đăng nhập không được tìm thấy.");
       }

@@ -1,0 +1,2752 @@
+import "dart:async";
+import "package:file_picker/file_picker.dart";
+import "dart:convert";
+import "package:flutter/material.dart";
+import "package:flutter/services.dart";
+import "package:intl/intl.dart";
+import "package:image_picker/image_picker.dart";
+import "package:mime/mime.dart";
+import "package:infinite_scroll_pagination/infinite_scroll_pagination.dart";
+import "package:geolocator/geolocator.dart";
+import "package:url_launcher/url_launcher.dart";
+import "package:record/record.dart";
+import "package:path_provider/path_provider.dart";
+import "package:audioplayers/audioplayers.dart";
+
+import "package:shared_preferences/shared_preferences.dart";
+import "../../models/conversation_summary.dart";
+import "../../models/message_item.dart";
+import "../../models/paginated_result.dart";
+import "../../services/conversation_service.dart";
+import "../../services/socket_service.dart";
+import "../../services/upload_service.dart";
+import "../../services/user_service.dart";
+import "../../services/group_service.dart";
+import "../../services/webrtc_service.dart";
+import "conversation_info_screen.dart";
+import "call_screen.dart";
+import "../shared/widgets/user_avatar.dart";
+import "../shared/widgets/app_toast.dart";
+import "../../app/shared/chat/widgets/gif_picker_sheet.dart";
+import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
+import "../groups/group_settings_screen.dart";
+import "../../core/utils/translation_helper.dart";
+import "../../app/shared/chat/widgets/poll_message_bubble.dart";
+import "models/chat_message.dart";
+
+class ChatDetailScreen extends StatefulWidget {
+  final ConversationSummary conversation;
+  final ConversationService conversationService;
+  final UploadService uploadService;
+  final SocketService socketService;
+  final UserService userService;
+  final GroupService groupService;
+  final WebRTCService webRTCService;
+  final dynamic currentUser;
+
+  const ChatDetailScreen({
+    super.key,
+    required this.conversation,
+    required this.conversationService,
+    required this.uploadService,
+    required this.socketService,
+    required this.userService,
+    required this.groupService,
+    required this.webRTCService,
+    required this.currentUser,
+  });
+
+  @override
+  State<ChatDetailScreen> createState() => _ChatDetailScreenState();
+}
+
+class _ChatDetailScreenState extends State<ChatDetailScreen> {
+  final PagingController<String?, MessageItem> _pagingController =
+      PagingController(firstPageKey: null);
+  final ScrollController _scrollController = ScrollController();
+  StreamSubscription? _msgSub;
+  StreamSubscription? _presenceSub;
+  StreamSubscription? _snapshotSub;
+  Map<String, dynamic> _userPresence = {};
+  bool _sending = false;
+  MessageItem? _replyingTo;
+  Map<String, List<String>> _messageReactions = {};
+  Map<String, String> _typingUsers = {};
+  StreamSubscription? _typingSub;
+  String? _conversationKey;
+  Map<String, String> _aliases = {};
+  bool _loadingAliases = false;
+  String? _fetchedGroupName;
+  bool _isPeerBlocked = false;
+
+  Future<void> _loadGroupName() async {
+    try {
+      final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
+      final group = await widget.groupService.getGroup(groupId);
+      if (mounted && group.containsKey("groupName")) {
+        setState(() {
+          _fetchedGroupName = group["groupName"].toString();
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReactions();
+    _loadAliases();
+    _checkBlockStatus();
+    if (widget.conversation.isGroup) {
+      _loadGroupName();
+    }
+    if (widget.conversation.unreadCount > 0) {
+      widget.conversationService
+          .markConversationAsRead(widget.conversation.conversationId)
+          .catchError((_) {});
+    }
+    _pagingController.addPageRequestListener((pageKey) {
+      _fetchPage(pageKey);
+    });
+
+    widget.webRTCService.callState.addListener(_handleCallStateChange);
+    widget.socketService
+        .joinConversation(widget.conversation.conversationId)
+        .then((data) {
+      if (mounted && data != null) {
+        setState(() {
+          _conversationKey = data["conversationKey"];
+        });
+      }
+    });
+
+    _msgSub = widget.socketService.onMessageCreated.listen((msg) {
+      if (mounted && msg.conversationId == widget.conversation.conversationId) {
+        if (msg.type == "SYSTEM" && msg.contentText.contains("left the call")) {
+          return;
+        }
+        final items = _pagingController.itemList;
+        if (items != null) {
+          final exists = items.any((m) => m.id == msg.id);
+          if (!exists) {
+            final newList = List<MessageItem>.from(items);
+            newList.insert(0, msg);
+            _pagingController.itemList = newList;
+          }
+        }
+        // Remove from typing if message arrived
+        if (msg.senderId != widget.currentUser.id) {
+          setState(() {
+            _typingUsers.remove(msg.senderId);
+          });
+        }
+        if (msg.type == "SYSTEM") {
+          _loadAliases();
+        }
+      }
+    });
+
+    _typingSub = widget.socketService.onTypingState.listen((data) {
+      if (mounted &&
+          _conversationKey != null &&
+          data["conversationKey"] == _conversationKey) {
+        final userId = data["userId"]?.toString();
+        final fullName = data["fullName"]?.toString() ?? "Ai đó";
+        final isTyping = data["isTyping"] == true;
+        if (userId != null && userId != widget.currentUser.id) {
+          setState(() {
+            if (isTyping) {
+              _typingUsers[userId] = fullName;
+            } else {
+              _typingUsers.remove(userId);
+            }
+          });
+        }
+      }
+    });
+
+    widget.socketService.onMessageUpdated.listen((msg) {
+      if (mounted && msg.conversationId == widget.conversation.conversationId) {
+        final items = _pagingController.itemList;
+        if (items != null) {
+          final idx = items.indexWhere((m) => m.id == msg.id);
+          if (idx != -1) {
+            final newList = List<MessageItem>.from(items);
+            newList[idx] = msg;
+            _pagingController.itemList = newList;
+          }
+        }
+      }
+    });
+
+    _presenceSub = widget.socketService.onPresenceUpdated.listen((data) {
+      final presence = data["presence"] ?? data;
+      final userId = presence["userId"]?.toString();
+      if (mounted && userId != null) {
+        setState(() => _userPresence[userId] = presence);
+      }
+    });
+
+    _snapshotSub = widget.socketService.onPresenceSnapshot.listen((data) {
+      final participants = data["participants"];
+      if (mounted && participants is List) {
+        setState(() {
+          for (var p in participants) {
+            if (p is Map) {
+              final userId = p["userId"]?.toString();
+              if (userId != null) {
+                _userPresence[userId] = p;
+              }
+            }
+          }
+        });
+      }
+    });
+
+    // Fetch initial presence for DM
+    final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+    if (peerId != null) {
+      widget.userService.getUserPresence(peerId).then((presence) {
+        if (mounted) setState(() => _userPresence[peerId] = presence);
+      }).catchError((_) {});
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.socketService.leaveConversation(widget.conversation.conversationId);
+    widget.webRTCService.callState.removeListener(_handleCallStateChange);
+    _msgSub?.cancel();
+    _presenceSub?.cancel();
+    _snapshotSub?.cancel();
+    _typingSub?.cancel();
+    _pagingController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAliases() async {
+    if (_loadingAliases) return;
+    _loadingAliases = true;
+    try {
+      final aliasList = await widget.conversationService
+          .listConversationAliases(widget.conversation.conversationId);
+      if (mounted) {
+        setState(() {
+          _aliases = {
+            for (var a in aliasList)
+              a['userId'].toString(): a['alias'].toString()
+          };
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading aliases: $e");
+    } finally {
+      _loadingAliases = false;
+    }
+  }
+
+  Future<void> _checkBlockStatus() async {
+    if (widget.conversation.isGroup) return;
+    final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+    if (peerId == null) return;
+    try {
+      final blockedList = await widget.userService.listBlockedUsers();
+      final isBlocked = blockedList.any((item) => item['userId']?.toString() == peerId);
+      if (mounted) {
+        setState(() {
+          _isPeerBlocked = isBlocked;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error checking block status: $e");
+    }
+  }
+
+  Future<void> _unblockUserDirectly() async {
+    if (widget.conversation.isGroup) return;
+    final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+    if (peerId == null) return;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Text(
+          "Bỏ chặn người dùng?",
+          style: TextStyle(
+            color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          "Người này sẽ có thể gửi tin nhắn và gọi điện cho bạn trở lại.",
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Hủy",
+              style: TextStyle(color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED)),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Bỏ chặn"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _sending = true);
+      try {
+        await widget.userService.unblockUser(peerId);
+        if (mounted) {
+          setState(() {
+            _isPeerBlocked = false;
+            _sending = false;
+          });
+          AppToast.show(
+            context,
+            message: "Đã bỏ chặn người dùng thành công",
+            type: AppToastType.success,
+          );
+        }
+      } catch (e) {
+        if (mounted) setState(() => _sending = false);
+        AppToast.show(
+          context,
+          message: translateGroupError(e, fallback: "Không thể bỏ chặn người dùng"),
+          type: AppToastType.error,
+        );
+      }
+    }
+  }
+
+  void _handleCallStateChange() {
+    if (widget.webRTCService.callState.value != CallState.idle && mounted) {
+      // Check if this screen is already showing the call screen
+      // If not, we might need to show it
+      // Actually, we can just push it when state becomes ringing or connecting
+      // But we only do it if the conversationId matches this chat (or it's an incoming call)
+
+      // For now, let's just push it if we are not on it.
+      // In a better architecture, the CallScreen would be handled globally (Overlay)
+    }
+  }
+
+  Future<void> _startCall({bool video = true}) async {
+    List<String> inviteeUserIds = const [];
+
+    if (widget.conversation.isGroup) {
+      var groupId = widget.conversation.groupId;
+      if (groupId == null) {
+        final convId = widget.conversation.conversationId;
+        if (convId.startsWith("group:")) {
+          groupId = convId.substring(6);
+        } else if (convId.startsWith("group#")) {
+          groupId = convId.substring(6);
+        } else if (convId.startsWith("grp#")) {
+          groupId = convId.substring(4);
+        } else if (convId.startsWith("GRP#")) {
+          groupId = convId.substring(4);
+        }
+      }
+      if (groupId != null) {
+        try {
+          final members = await widget.groupService.listMembers(groupId);
+          final currentUserId = widget.currentUser?.id?.toString();
+          inviteeUserIds = members
+              .map(_InviteCandidate.fromJson)
+              .where((member) =>
+                  member.userId.isNotEmpty && member.userId != currentUserId)
+              .map((member) => member.userId)
+              .toList();
+        } catch (e) {
+          debugPrint("Failed to fetch group members for calling: $e");
+        }
+      }
+    }
+
+    await widget.webRTCService.startCall(
+      widget.conversation.conversationId,
+      video: video,
+      inviteeUserIds: inviteeUserIds,
+      userId: widget.currentUser.id,
+    );
+
+    if (!mounted || widget.webRTCService.callState.value == CallState.idle) {
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CallScreen(
+          webRTCService: widget.webRTCService,
+          conversation: widget.conversation,
+          currentUser: widget.currentUser,
+          launchedFromChatDetail: true,
+        ),
+      ),
+    );
+  }
+
+  Future<List<String>?> _pickGroupInvitees() async {
+    final groupId = widget.conversation.groupId;
+    if (groupId == null) {
+      return const [];
+    }
+
+    try {
+      final members = await widget.groupService.listMembers(groupId);
+      final currentUserId = widget.currentUser?.id?.toString();
+      final invitees = members
+          .map(_InviteCandidate.fromJson)
+          .where((member) =>
+              member.userId.isNotEmpty && member.userId != currentUserId)
+          .toList();
+
+      if (!mounted) {
+        return null;
+      }
+
+      return showModalBottomSheet<List<String>>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (sheetContext) {
+          final selectedIds = <String>{};
+
+          return SafeArea(
+            child: Container(
+              height: MediaQuery.of(sheetContext).size.height * 0.78,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "Chọn người được mời",
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "Bỏ chọn tất cả để gọi cả nhóm như luồng cũ.",
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: invitees.isEmpty
+                        ? const Center(
+                            child: Text(
+                              "Không có thành viên khác để mời",
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          )
+                        : StatefulBuilder(
+                            builder: (context, setSheetState) {
+                              return ListView.separated(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                itemCount: invitees.length,
+                                separatorBuilder: (_, __) =>
+                                    const Divider(height: 1),
+                                itemBuilder: (context, index) {
+                                  final member = invitees[index];
+                                  final isSelected =
+                                      selectedIds.contains(member.userId);
+                                  return CheckboxListTile(
+                                    value: isSelected,
+                                    onChanged: (checked) {
+                                      setSheetState(() {
+                                        if (checked == true) {
+                                          selectedIds.add(member.userId);
+                                        } else {
+                                          selectedIds.remove(member.userId);
+                                        }
+                                      });
+                                    },
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                    activeColor: const Color(0xFF7C3AED),
+                                    title: Text(member.displayName),
+                                    subtitle: Text(member.roleLabel),
+                                    secondary: UserAvatar(
+                                      userId: member.userId,
+                                      initialAvatarUrl: member.avatarUrl,
+                                      initialDisplayName: member.displayName,
+                                      radius: 18,
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            child: const Text("Hủy"),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF7C3AED),
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () {
+                              Navigator.pop(sheetContext, selectedIds.toList());
+                            },
+                            child: const Text("Bắt đầu"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Không tải được danh sách thành viên: $e")));
+      }
+      return null;
+    }
+  }
+
+  Future<void> _loadReactions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs
+        .getString("local_reactions_${widget.conversation.conversationId}");
+    if (raw != null) {
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      setState(() {
+        _messageReactions =
+            decoded.map((k, v) => MapEntry(k, List<String>.from(v)));
+      });
+    }
+  }
+
+  Future<void> _saveReactions() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        "local_reactions_${widget.conversation.conversationId}",
+        jsonEncode(_messageReactions));
+  }
+
+  void _handleToggleReaction(String messageId, String emoji) {
+    setState(() {
+      final reactions = _messageReactions[messageId] ?? [];
+      if (reactions.contains(emoji)) {
+        reactions.remove(emoji);
+      } else {
+        reactions.add(emoji);
+      }
+      if (reactions.isEmpty) {
+        _messageReactions.remove(messageId);
+      } else {
+        _messageReactions[messageId] = reactions;
+      }
+    });
+    _saveReactions();
+  }
+
+  Future<void> _fetchPage(String? pageKey) async {
+    try {
+      final result = await widget.conversationService.listMessages(
+        widget.conversation.conversationId,
+        cursor: pageKey,
+        limit: 30,
+      );
+      final filteredItems = result.items.where((msg) {
+        return !(msg.type == "SYSTEM" && msg.contentText.contains("left the call"));
+      }).toList();
+      if (result.hasNextPage) {
+        _pagingController.appendPage(filteredItems, result.cursor);
+      } else {
+        _pagingController.appendLastPage(filteredItems);
+      }
+    } catch (error) {
+      _pagingController.error = error;
+    }
+  }
+
+  Future<void> _sendLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    setState(() => _sending = true);
+    try {
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("Dịch vụ định vị đã bị tắt. Vui lòng bật GPS.")));
+        }
+        return;
+      }
+
+      permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text("Quyền truy cập vị trí bị từ chối")));
+          }
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  "Quyền truy cập vị trí bị từ chối vĩnh viễn. Vui lòng bật trong cài đặt.")));
+        }
+        return;
+      }
+
+      // Use settings for better performance
+      const locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      );
+
+      Position position = await Geolocator.getCurrentPosition(
+        locationSettings: locationSettings,
+      );
+
+      final text =
+          "Vị trí của tôi: https://www.google.com/maps/search/?api=1&query=${position.latitude},${position.longitude}";
+      await _sendMessage(text: text);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Lỗi lấy vị trí: $e")));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _sendMessage(
+      {required String text, _PendingAttachment? attachment}) async {
+    if (text.isEmpty && attachment == null) return;
+
+    setState(() => _sending = true);
+
+    try {
+      String? attachmentUrl;
+      String? attachmentKey;
+
+      if (attachment != null) {
+        if (attachment.path.startsWith("http://") || attachment.path.startsWith("https://")) {
+          attachmentUrl = attachment.path;
+        } else {
+          final uploadResult = await widget.uploadService.uploadMedia(
+            filePath: attachment.path,
+            fileName: attachment.name,
+            mimeType: attachment.mimeType,
+            target: "MESSAGE",
+          );
+          attachmentUrl = uploadResult.url;
+          attachmentKey = uploadResult.key;
+        }
+      }
+
+      final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
+
+      final msg = await widget.conversationService.sendMessage(
+        widget.conversation.conversationId,
+        content: text,
+        clientMessageId: clientMsgId,
+        type: attachment != null ? attachment.type : "TEXT",
+        attachmentUrl: attachmentUrl,
+        attachmentKey: attachmentKey,
+        replyTo: _replyingTo?.id,
+      );
+
+      // Do not manually insert message here, the socket listener will handle it.
+      // This prevents double messages when sending.
+
+      setState(() => _replyingTo = null);
+      _scrollToBottom();
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Error: $e")));
+    } finally {
+      setState(() => _sending = false);
+    }
+  }
+
+  void _showMessageActions(MessageItem message) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF334155) : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 16),
+              _buildReactionRow(message),
+              Divider(color: isDark ? const Color(0xFF334155) : null),
+              ListTile(
+                leading: const Icon(Icons.reply, color: Color(0xFF7C3AED)),
+                title: Text("Trả lời", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  setState(() => _replyingTo = message);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy, color: Color(0xFF7C3AED)),
+                title: Text("Sao chép", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Clipboard.setData(ClipboardData(text: message.contentText));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Đã sao chép")));
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.forward_rounded, color: Color(0xFF7C3AED)),
+                title: Text("Chuyển tiếp", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showForwardDialog(message);
+                },
+              ),
+              if (message.senderId == widget.currentUser.id &&
+                  !message.isDeleted)
+                ListTile(
+                  leading: const Icon(Icons.undo, color: Colors.redAccent),
+                  title: const Text("Thu hồi",
+                      style: TextStyle(color: Colors.redAccent)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _recallMessage(message);
+                  },
+                ),
+              ListTile(
+                leading:
+                    const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: const Text("Xóa với tôi",
+                    style: TextStyle(color: Colors.redAccent)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteForMe(message);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReactionRow(MessageItem message) {
+    final emojis = ["❤️", "😂", "😮", "😢", "😡", "👍"];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: emojis
+            .map((emoji) => GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    _handleToggleReaction(message.id, emoji);
+                  },
+                  child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  void _showForwardDialog(MessageItem message) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.7,
+        decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF334155) : Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2))),
+            Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text("Chuyển tiếp đến",
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87))),
+            Expanded(
+              child: FutureBuilder<PaginatedResult<ConversationSummary>>(
+                future: widget.conversationService.listConversations(limit: 50),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData)
+                    return const Center(child: CircularProgressIndicator());
+                  final convs = snapshot.data!.items
+                      .where((c) =>
+                          c.conversationId !=
+                          widget.conversation.conversationId)
+                      .toList();
+                  return ListView.builder(
+                    itemCount: convs.length,
+                    itemBuilder: (context, idx) {
+                      final c = convs[idx];
+                      return ListTile(
+                        leading: CircleAvatar(
+                            backgroundImage: (c.isGroup
+                                        ? c.groupAvatarUrl
+                                        : (c.peerAvatarUrl ?? c.avatarUrl)) !=
+                                    null
+                                ? NetworkImage(c.isGroup
+                                    ? c.groupAvatarUrl!
+                                    : (c.peerAvatarUrl ?? c.avatarUrl)!)
+                                : null),
+                        title: Text(c.title, style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _forwardMessage(message, c.conversationId);
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _forwardMessage(MessageItem message, String targetConvId) {
+    widget.conversationService.forwardMessage(
+        widget.conversation.conversationId, message.id,
+        targetConversationIds: [targetConvId]).then((_) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Đã chuyển tiếp")));
+    }).catchError((e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+    });
+  }
+
+  void _recallMessage(MessageItem message) {
+    widget.conversationService
+        .recallMessage(widget.conversation.conversationId, message.id,
+            scope: "EVERYONE")
+        .then((_) {
+      if (!mounted) return;
+      final items = _pagingController.itemList;
+      if (items != null) {
+        final idx = items.indexWhere((m) => m.id == message.id);
+        if (idx != -1) {
+          final newList = List<MessageItem>.from(items);
+          newList[idx] = items[idx].copyWith(
+              isDeleted: true, contentText: "", resolvedAttachmentUrl: null);
+          _pagingController.itemList = newList;
+        }
+      }
+    });
+  }
+
+  void _deleteForMe(MessageItem message) {
+    widget.conversationService
+        .recallMessage(widget.conversation.conversationId, message.id,
+            scope: "SELF")
+        .then((_) {
+      if (!mounted) return;
+      final items = _pagingController.itemList;
+      if (items != null) {
+        final idx = items.indexWhere((m) => m.id == message.id);
+        if (idx != -1) {
+          final newList = List<MessageItem>.from(items);
+          newList.removeAt(idx);
+          _pagingController.itemList = newList;
+        }
+      }
+    });
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      body: Column(
+        children: [
+          _buildHeader(),
+          _buildActiveCallBanner(),
+          Expanded(child: _buildMessageList()),
+          _buildTypingIndicator(),
+          if (_replyingTo != null) _buildReplyPreview(),
+          if (_isPeerBlocked)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.block, color: Colors.orange.shade400, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Bạn đã chặn người dùng này.",
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _unblockUserDirectly(),
+                      child: const Text(
+                        "Bỏ chặn",
+                        style: TextStyle(
+                          color: Color(0xFF7C3AED),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ChatComposer(
+              onSend: _sendMessage,
+              onLocationRequest: _sendLocation,
+              uploadService: widget.uploadService,
+              socketService: widget.socketService,
+              groupService: widget.groupService,
+              userService: widget.userService,
+              conversationId: widget.conversation.conversationId,
+              sending: _sending,
+              isGroup: widget.conversation.isGroup,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActiveCallBanner() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ValueListenableBuilder<CallState>(
+      valueListenable: widget.webRTCService.callState,
+      builder: (context, state, _) {
+        if (state != CallState.idle &&
+          widget.conversation.isGroup &&
+            widget.webRTCService.currentConversationId ==
+                widget.conversation.conversationId) {
+          return Container(
+            color: Colors.green.withValues(alpha: 0.15),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.group_add, color: Colors.green),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        state == CallState.ringing
+                            ? "Cuộc gọi nhóm đang chờ"
+                            : "Cuộc gọi nhóm đang diễn ra",
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.green),
+                      ),
+                      Text('Nhấn để xem hoặc tham gia',
+                          style:
+                              TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.black54)),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                  ),
+                  onPressed: () {
+                    // Navigate directly to CallScreen
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CallScreen(
+                          webRTCService: widget.webRTCService,
+                          conversation: widget.conversation,
+                          currentUser: widget.currentUser,
+                          launchedFromChatDetail: true,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Tham gia'),
+                ),
+              ],
+            ),
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  Widget _buildHeader() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final peerId = widget.conversation.getPeerId(widget.currentUser?.id);
+    final resolvedTitle = (!widget.conversation.isGroup && peerId != null && _aliases.containsKey(peerId))
+        ? _aliases[peerId]!
+        : widget.conversation.isGroup
+            ? (_fetchedGroupName ?? widget.conversation.title)
+            : widget.conversation.title;
+
+    return Container(
+      padding: EdgeInsets.only(
+          top: MediaQuery.of(context).padding.top,
+          left: 8,
+          right: 8,
+          bottom: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        boxShadow: [
+          BoxShadow(
+              color: isDark ? Colors.transparent : Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2))
+        ],
+      ),
+      child: Row(
+        children: [
+          IconButton(
+              icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
+              onPressed: () => Navigator.pop(context)),
+          UserAvatar(
+            userId: widget.conversation.isGroup ? null : widget.conversation.getPeerId(widget.currentUser?.id),
+            groupId: widget.conversation.isGroup ? widget.conversation.groupId : null,
+            initialAvatarUrl: widget.conversation.isGroup ? widget.conversation.groupAvatarUrl : (widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl),
+            initialDisplayName: resolvedTitle,
+            radius: 20,
+            showStatus: !widget.conversation.isGroup,
+            isActive: !widget.conversation.isGroup &&
+                widget.conversation.getPeerId(widget.currentUser.id) != null &&
+                (_userPresence[widget.conversation
+                        .getPeerId(widget.currentUser.id)!] is Map
+                    ? _userPresence[widget.conversation
+                            .getPeerId(widget.currentUser.id)!]["isActive"] ==
+                        true
+                    : _userPresence[widget.conversation
+                            .getPeerId(widget.currentUser.id)!] ==
+                        true),
+            userService: widget.userService,
+            groupService: widget.groupService,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: GestureDetector(
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ConversationInfoScreen(
+                      conversation: widget.conversation,
+                      conversationService: widget.conversationService,
+                    ),
+                  ),
+                );
+                _loadAliases();
+                _checkBlockStatus();
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(resolvedTitle,
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  _buildStatusText(),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.videocam_outlined, color: Color(0xFF7C3AED)),
+            onPressed: () => _startCall(video: true),
+          ),
+          IconButton(
+            icon: const Icon(Icons.call_outlined, color: Color(0xFF7C3AED)),
+            onPressed: () => _startCall(video: false),
+          ),
+          IconButton(
+            icon: const Icon(Icons.more_vert, color: Color(0xFF64748B)),
+            onPressed: () {
+              if (widget.conversation.isGroup) {
+                final groupId = widget.conversation.groupId ?? widget.conversation.conversationId.replaceAll("group:", "");
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => GroupSettingsScreen(
+                      groupId: groupId,
+                      groupName: resolvedTitle,
+                    ),
+                  ),
+                ).then((_) {
+                  _loadGroupName();
+                });
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ConversationInfoScreen(
+                      conversation: widget.conversation,
+                      conversationService: widget.conversationService,
+                    ),
+                  ),
+                ).then((_) {
+                  _loadAliases();
+                  _checkBlockStatus();
+                });
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplyPreview() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          border: Border(top: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)))),
+      child: Row(
+        children: [
+          Container(
+              width: 4,
+              height: 32,
+              decoration: BoxDecoration(
+                  color: const Color(0xFF7C3AED),
+                  borderRadius: BorderRadius.circular(2))),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("Đang trả lời ${_aliases[_replyingTo!.senderId] ?? _replyingTo!.senderName}",
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF7C3AED))),
+                Text(_replyingTo!.contentText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, color: isDark ? Colors.grey[300] : Colors.grey[600])),
+              ],
+            ),
+          ),
+          IconButton(
+              icon: Icon(Icons.close, size: 20, color: isDark ? Colors.white : Colors.black),
+              onPressed: () => setState(() => _replyingTo = null)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusText() {
+    if (widget.conversation.isGroup) return const SizedBox.shrink();
+    final peerId = widget.conversation.getPeerId(widget.currentUser.id);
+    final presence = _userPresence[peerId];
+    final isActive = presence is Map
+        ? presence["isActive"] == true
+        : (presence == true);
+
+    String statusText = isActive ? "Đang hoạt động" : "Ngoại tuyến";
+    if (!isActive && presence is Map && presence["lastSeenAt"] != null) {
+      final lastSeen = DateTime.tryParse(presence["lastSeenAt"].toString());
+      if (lastSeen != null) {
+        statusText = "Hoạt động ${_formatLastSeen(lastSeen)} trước";
+      }
+    }
+
+    return Row(
+      children: [
+        if (isActive)
+          Container(
+            width: 8,
+            height: 8,
+            margin: const EdgeInsets.only(right: 6),
+            decoration: const BoxDecoration(
+                color: Colors.green, shape: BoxShape.circle),
+          ),
+        Flexible(
+          child: Text(
+            statusText,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              color: isActive ? Colors.green : Colors.grey.shade500,
+              fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    if (_typingUsers.isEmpty) return const SizedBox.shrink();
+
+    final names = _typingUsers.values.toList();
+    String text = "";
+    if (names.length == 1) {
+      text = "${names[0]} đang nhập...";
+    } else if (names.length == 2) {
+      text = "${names[0]} và ${names[1]} đang nhập...";
+    } else {
+      text = "${names.length} người đang nhập...";
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: Color(0xFF7C3AED),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatLastSeen(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inDays > 0) return "${diff.inDays} ngày";
+    if (diff.inHours > 0) return "${diff.inHours} giờ";
+    if (diff.inMinutes > 0) return "${diff.inMinutes} phút";
+    return "vài giây";
+  }
+
+  Widget _buildMessageList() {
+    return PagedListView<String?, MessageItem>.separated(
+      pagingController: _pagingController,
+      scrollController: _scrollController,
+      reverse: true,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      builderDelegate: PagedChildBuilderDelegate<MessageItem>(
+        itemBuilder: (context, message, index) {
+          final isMine = message.senderId == widget.currentUser.id;
+          final senderAlias = _aliases[message.senderId];
+          return ChatMessageBubble(
+            message: message,
+            isMine: isMine,
+            senderAlias: senderAlias,
+            reactions: _messageReactions[message.id] ?? [],
+            userService: widget.userService,
+            onLongPress: () => _showMessageActions(message),
+            currentUserName: widget.currentUser.fullName,
+          );
+        },
+        firstPageProgressIndicatorBuilder: (_) => const Center(
+            child: CircularProgressIndicator(color: Color(0xFF7C3AED))),
+        noItemsFoundIndicatorBuilder: (_) => const Center(
+            child: Text("Chưa có tin nhắn nào",
+                style: TextStyle(color: Colors.grey))),
+      ),
+    );
+  }
+}
+
+class ChatComposer extends StatefulWidget {
+  final Future<void> Function(
+      {required String text, _PendingAttachment? attachment}) onSend;
+  final VoidCallback onLocationRequest;
+  final UploadService uploadService;
+  final SocketService socketService;
+  final GroupService groupService;
+  final UserService userService;
+  final String conversationId;
+  final bool sending;
+  final bool isGroup;
+
+  const ChatComposer(
+      {super.key,
+      required this.onSend,
+      required this.onLocationRequest,
+      required this.uploadService,
+      required this.socketService,
+      required this.groupService,
+      required this.userService,
+      required this.conversationId,
+      required this.sending,
+      required this.isGroup});
+
+  @override
+  State<ChatComposer> createState() => _ChatComposerState();
+}
+
+class _ChatComposerState extends State<ChatComposer> {
+  final _textController = TextEditingController();
+  final _audioRecorder = AudioRecorder();
+  _PendingAttachment? _attachment;
+  bool _isRecording = false;
+  int _recordDuration = 0;
+  Timer? _timer;
+  Timer? _typingTimer;
+  bool _isTypingSent = false;
+  List<_InviteCandidate> _groupMembers = [];
+  bool _loadingMembers = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _textController.addListener(() {
+      if (mounted) {
+        setState(() {});
+        _handleTyping();
+      }
+    });
+    if (widget.isGroup) {
+      _loadGroupMembers();
+    }
+  }
+
+  Future<void> _loadGroupMembers() async {
+    setState(() => _loadingMembers = true);
+    try {
+      var groupId = widget.conversationId;
+      if (groupId.startsWith("group:")) {
+        groupId = groupId.substring(6);
+      } else if (groupId.startsWith("group#")) {
+        groupId = groupId.substring(6);
+      } else if (groupId.startsWith("grp#")) {
+        groupId = groupId.substring(4);
+      } else if (groupId.startsWith("GRP#")) {
+        groupId = groupId.substring(4);
+      }
+      final membersRaw = await widget.groupService.listMembers(groupId);
+      
+      // Hydrate profiles in parallel to resolve names and avatars
+      final populatedMembers = await Future.wait(membersRaw.map((m) async {
+        final userId = m['userId']?.toString();
+        if (userId == null) return m;
+        try {
+          final profile = await widget.userService.getUserById(userId);
+          return {
+            ...m,
+            'fullName': profile.fullName,
+            'displayName': profile.fullName,
+            'avatarUrl': profile.avatarUrl,
+          };
+        } catch (_) {
+          return m;
+        }
+      }));
+
+      if (mounted) {
+        setState(() {
+          _groupMembers = populatedMembers.map(_InviteCandidate.fromJson).toList();
+          _loadingMembers = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading members for mentions: $e");
+      if (mounted) {
+        setState(() => _loadingMembers = false);
+      }
+    }
+  }
+
+  String? _getMentionQuery() {
+    final text = _textController.text;
+    final selection = _textController.selection;
+    if (!selection.isValid || selection.baseOffset <= 0) return null;
+    
+    final cursorPosition = selection.baseOffset;
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    
+    final lastAtSignIndex = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSignIndex == -1) return null;
+    
+    if (lastAtSignIndex > 0) {
+      final charBeforeAt = textBeforeCursor[lastAtSignIndex - 1];
+      if (charBeforeAt != ' ' && charBeforeAt != '\n') {
+        return null;
+      }
+    }
+    
+    final textFromAtToCursor = textBeforeCursor.substring(lastAtSignIndex + 1);
+    if (textFromAtToCursor.contains(' ') || textFromAtToCursor.contains('\n')) {
+      return null;
+    }
+    
+    return textFromAtToCursor;
+  }
+
+  void _applyMention(_InviteCandidate member) {
+    final text = _textController.text;
+    final selection = _textController.selection;
+    if (!selection.isValid) return;
+
+    final cursorPosition = selection.baseOffset;
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    final textAfterCursor = text.substring(cursorPosition);
+
+    final lastAtSignIndex = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSignIndex == -1) return;
+
+    final newMention = "@${member.displayName} ";
+    final newTextBeforeCursor = textBeforeCursor.replaceRange(
+      lastAtSignIndex,
+      cursorPosition,
+      newMention,
+    );
+
+    final newText = newTextBeforeCursor + textAfterCursor;
+    final newCursorPosition = lastAtSignIndex + newMention.length;
+
+    _textController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newCursorPosition),
+    );
+  }
+
+  Widget _buildMentionSuggestions() {
+    final query = _getMentionQuery() ?? "";
+    final filtered = _groupMembers.where((member) {
+      final name = member.displayName.toLowerCase();
+      return name.contains(query.toLowerCase());
+    }).toList();
+
+    if (filtered.isEmpty) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 200),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, -2),
+          )
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          itemCount: filtered.length,
+          separatorBuilder: (_, __) => Divider(
+            height: 1,
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
+          ),
+          itemBuilder: (context, index) {
+            final member = filtered[index];
+            return ListTile(
+              dense: true,
+              leading: UserAvatar(
+                userId: member.userId,
+                initialAvatarUrl: member.avatarUrl,
+                initialDisplayName: member.displayName,
+                radius: 14,
+              ),
+              title: Text(
+                member.displayName,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              subtitle: Text(
+                member.roleLabel,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+              ),
+              onTap: () => _applyMention(member),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _handleTyping() {
+    if (_textController.text.trim().isEmpty) {
+      if (_isTypingSent) {
+        widget.socketService.stopTyping(widget.conversationId);
+        _isTypingSent = false;
+      }
+      _typingTimer?.cancel();
+      return;
+    }
+
+    if (!_isTypingSent) {
+      widget.socketService.startTyping(widget.conversationId);
+      _isTypingSent = true;
+    }
+
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _isTypingSent) {
+        widget.socketService.stopTyping(widget.conversationId);
+        _isTypingSent = false;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    _audioRecorder.dispose();
+    _timer?.cancel();
+    _typingTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      if (await _audioRecorder.hasPermission()) {
+        final tempDir = await getTemporaryDirectory();
+        final path = "${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a";
+        
+        await _audioRecorder.start(const RecordConfig(), path: path);
+        
+        setState(() {
+          _isRecording = true;
+          _recordDuration = 0;
+        });
+        
+        _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          setState(() => _recordDuration++);
+        });
+      }
+    } catch (e) {
+      print("Error starting recording: $e");
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    _timer?.cancel();
+    final path = await _audioRecorder.stop();
+    setState(() => _isRecording = false);
+    
+    if (path != null) {
+      final name = path.split("/").last;
+      setState(() {
+        _attachment = _PendingAttachment(
+          path: path,
+          name: name,
+          type: "AUDIO",
+          mimeType: "audio/mp4",
+        );
+      });
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    _timer?.cancel();
+    await _audioRecorder.stop();
+    setState(() {
+      _isRecording = false;
+      _recordDuration = 0;
+    });
+  }
+
+  String _formatDuration(int seconds) {
+    final mins = (seconds / 60).floor();
+    final secs = seconds % 60;
+    return "${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}";
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final selected = await picker.pickImage(source: source);
+    if (selected == null) return;
+    setState(() {
+      _attachment = _PendingAttachment(
+          path: selected.path,
+          name: selected.name,
+          type: "IMAGE",
+          mimeType: selected.mimeType);
+    });
+  }
+
+  Future<void> _pickVideo(ImageSource source) async {
+    final picker = ImagePicker();
+    final selected = await picker.pickVideo(source: source);
+    if (selected == null) return;
+    setState(() {
+      _attachment = _PendingAttachment(
+          path: selected.path,
+          name: selected.name,
+          type: "VIDEO",
+          mimeType: selected.mimeType);
+    });
+  }
+
+  Future<void> _pickFile() async {
+    final selected = await FilePicker.platform.pickFiles();
+    if (selected == null || selected.files.isEmpty) return;
+    final file = selected.files.first;
+    if (file.path == null) return;
+    setState(() {
+      _attachment = _PendingAttachment(
+          path: file.path!,
+          name: file.name,
+          type: "DOC",
+          mimeType: lookupMimeType(file.path!));
+    });
+  }
+
+  void _showPicker() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.blue),
+                title: Text("Chụp ảnh", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                }),
+            ListTile(
+                leading: const Icon(Icons.videocam, color: Colors.red),
+                title: Text("Quay Video", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickVideo(ImageSource.camera);
+                }),
+            ListTile(
+                leading: const Icon(Icons.image, color: Colors.purple),
+                title: Text("Thư viện ảnh/Video", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                }),
+            ListTile(
+                leading: const Icon(Icons.attach_file, color: Colors.orange),
+                title: Text("Tệp tin", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickFile();
+                }),
+            ListTile(
+                leading: const Icon(Icons.location_on, color: Colors.green),
+                title: Text("Vị trí", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  widget.onLocationRequest();
+                }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showGifPicker() {
+    GifPickerSheet.show(
+      context,
+      onGifSelected: (gifUrl) {
+        final name = gifUrl.split("/").last;
+        widget.onSend(
+          text: "GIF Image",
+          attachment: _PendingAttachment(
+            path: gifUrl,
+            name: name,
+            type: "IMAGE",
+            mimeType: "image/gif",
+          ),
+        );
+      },
+    );
+  }
+
+  void _showStickerPicker() {
+    StickerPickerSheet.show(
+      context,
+      onStickerSelected: (stickerUrl) {
+        final name = stickerUrl.split("/").last;
+        widget.onSend(
+          text: "",
+          attachment: _PendingAttachment(
+            path: stickerUrl,
+            name: name,
+            type: "IMAGE",
+            mimeType: "image/gif",
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildComposerButton({
+    required Widget icon,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+        child: icon,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          boxShadow: [
+            BoxShadow(
+                color: isDark
+                    ? Colors.black.withOpacity(0.2)
+                    : Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, -4))
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.isGroup && _getMentionQuery() != null)
+              _buildMentionSuggestions(),
+            if (_attachment != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(12)),
+                child: Row(
+                  children: [
+                    Icon(
+                        _attachment!.type == "VIDEO"
+                            ? Icons.videocam
+                            : Icons.attach_file,
+                        color: const Color(0xFF7C3AED)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(_attachment!.name,
+                            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                            maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    IconButton(
+                        icon: Icon(Icons.close, color: isDark ? Colors.white70 : Colors.black54),
+                        onPressed: () => setState(() => _attachment = null)),
+                  ],
+                ),
+              ),
+            Row(
+              children: [
+                if (!_isRecording) ...[
+                  _buildComposerButton(
+                    icon: const Icon(Icons.add_circle_outline,
+                        color: Color(0xFF64748B), size: 28),
+                    onTap: widget.sending ? null : _showPicker,
+                  ),
+                  _buildComposerButton(
+                    icon: const Icon(Icons.gif_box_outlined,
+                        color: Color(0xFF7C3AED), size: 28),
+                    onTap: widget.sending ? null : _showGifPicker,
+                  ),
+                  _buildComposerButton(
+                    icon: const Icon(Icons.sticky_note_2_outlined,
+                        color: Color(0xFF7C3AED), size: 28),
+                    onTap: widget.sending ? null : _showStickerPicker,
+                  ),
+                ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _isRecording
+                      ? Container(
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.red.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.mic, color: Colors.red, size: 20),
+                              const SizedBox(width: 8),
+                              Text(_formatDuration(_recordDuration),
+                                  style: const TextStyle(
+                                      color: Colors.red,
+                                      fontWeight: FontWeight.bold)),
+                              const Spacer(),
+                              const Text("Đang ghi âm...",
+                                  style: TextStyle(
+                                      color: Colors.red, fontSize: 12)),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: _cancelRecording,
+                                child: const Text("Hủy",
+                                    style: TextStyle(color: Colors.grey)),
+                              ),
+                            ],
+                          ),
+                        )
+                      : Container(
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF0F172A)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(28),
+                            border: Border.all(
+                                color: isDark
+                                    ? Colors.grey.shade800
+                                    : Colors.grey.shade200),
+                          ),
+                          child: TextField(
+                            controller: _textController,
+                            maxLines: 5,
+                            minLines: 1,
+                            style: TextStyle(
+                                fontSize: 16,
+                                color: isDark ? Colors.white : Colors.black87),
+                            onChanged: (_) => setState(() {}),
+                            decoration: InputDecoration(
+                              hintText: "Nhắn tin...",
+                              hintStyle: TextStyle(
+                                  color: isDark
+                                      ? Colors.grey[500]
+                                      : Colors.grey[600]),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 12),
+                            ),
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.sending)
+                  const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                else ...[
+                  if (_isRecording)
+                    _buildComposerButton(
+                      icon: const Icon(Icons.check_circle,
+                          color: Color(0xFF7C3AED), size: 28),
+                      onTap: _stopRecording,
+                    )
+                  else if (_textController.text.trim().isEmpty &&
+                      _attachment == null) ...[
+                    _buildComposerButton(
+                      icon: const Icon(Icons.mic_none_outlined,
+                          color: Color(0xFF7C3AED), size: 28),
+                      onTap: () {
+                        print("DEBUG: Mic button pressed");
+                        _startRecording();
+                      },
+                    ),
+                    _buildComposerButton(
+                      icon: const Icon(Icons.thumb_up_rounded,
+                          color: Color(0xFF7C3AED), size: 28),
+                      onTap: () =>
+                          widget.onSend(text: "👍", attachment: null),
+                    ),
+                  ] else
+                    _buildComposerButton(
+                      icon: const Icon(Icons.send_rounded,
+                          color: Color(0xFF7C3AED), size: 28),
+                      onTap: () {
+                        final text = _textController.text.trim();
+                        if (text.isNotEmpty || _attachment != null) {
+                          widget.onSend(text: text, attachment: _attachment);
+                          _textController.clear();
+                          setState(() => _attachment = null);
+                        }
+                      },
+                    ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ChatMessageBubble extends StatelessWidget {
+  final MessageItem message;
+  final bool isMine;
+  final String? senderAlias;
+  final List<String> reactions;
+  final UserService? userService;
+  final VoidCallback? onLongPress;
+  final String? currentUserName;
+
+  const ChatMessageBubble({
+    super.key,
+    required this.message,
+    required this.isMine,
+    this.senderAlias,
+    this.reactions = const [],
+    this.userService,
+    this.onLongPress,
+    this.currentUserName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.type == "SYSTEM") {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return Container(
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            message.contentText.translatedSystemMessage,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: Row(
+        mainAxisAlignment:
+            isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!isMine) ...[
+            UserAvatar(
+              userId: message.senderId,
+              initialAvatarUrl: message.senderAvatarUrl,
+              initialDisplayName: senderAlias ?? message.senderName,
+              radius: 14,
+              userService: userService,
+            ),
+            const SizedBox(width: 8),
+          ],
+          _buildBubble(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBubble(BuildContext context) {
+    final pollData = message.pollData;
+    if (pollData != null) {
+      final chatMsg = ChatMessage(
+        id: message.id,
+        senderId: message.senderId,
+        senderName: message.senderName,
+        content: message.content,
+        type: message.type,
+        sentAt: message.sentAtDate ?? DateTime.now(),
+        attachmentUrl: message.attachmentUrl,
+      );
+      return PollMessageBubble(
+        message: chatMsg,
+        isMine: isMine,
+        conversationId: message.conversationId,
+      );
+    }
+
+    return ConstrainedBox(
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isMine
+              ? const Color(0xFF7C3AED)
+              : (Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF1E293B)
+                  : Colors.white),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(20),
+            topRight: const Radius.circular(20),
+            bottomLeft: Radius.circular(isMine ? 20 : 4),
+            bottomRight: Radius.circular(isMine ? 4 : 20),
+          ),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 4))
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment:
+              isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (message.isDeleted)
+              Text("Tin nhắn đã thu hồi",
+                  style: TextStyle(
+                      fontStyle: FontStyle.italic,
+                      color: isMine ? Colors.white70 : Colors.grey))
+            else ...[
+              if (message.replyTo != null) _buildReplyHeader(context),
+              if (message.contentText.isNotEmpty) _buildContentBody(context),
+              if (message.resolvedAttachmentUrl != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: _AttachmentView(message: message, isMine: isMine),
+                ),
+            ],
+            const SizedBox(height: 4),
+            Text(
+              _formatTime(message.sentAtDate),
+              style: TextStyle(
+                  fontSize: 10,
+                  color: isMine
+                      ? Colors.white.withOpacity(0.7)
+                      : Colors.grey[500]),
+            ),
+            if (reactions.isNotEmpty) _buildReactionsDisplay(context, isMine),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<InlineSpan> _buildTextSpans(BuildContext context, String text) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final defaultStyle = TextStyle(
+      color: isMine
+          ? Colors.white
+          : (isDark ? Colors.white : const Color(0xFF1E1B4B)),
+      fontSize: 15,
+      height: 1.4,
+    );
+
+    if (text.isEmpty) return [TextSpan(text: text, style: defaultStyle)];
+
+    final List<InlineSpan> spans = [];
+    final RegExp tagRegex = RegExp(r'(@[\p{L}0-9_]+(?:\s+[\p{L}0-9_]+)*)', unicode: true);
+    
+    int lastIndex = 0;
+    final matches = tagRegex.allMatches(text);
+
+    for (final match in matches) {
+      if (match.start > lastIndex) {
+        spans.add(TextSpan(
+          text: text.substring(lastIndex, match.start),
+          style: defaultStyle,
+        ));
+      }
+
+      final tagText = match.group(0)!;
+      final tagName = tagText.substring(1).trim();
+
+      final bool isCurrentUserTagged = currentUserName != null &&
+          (currentUserName!.toLowerCase() == tagName.toLowerCase() ||
+           tagName.toLowerCase().contains(currentUserName!.toLowerCase()) ||
+           currentUserName!.toLowerCase().contains(tagName.toLowerCase()));
+
+      spans.add(TextSpan(
+        text: tagText,
+        style: defaultStyle.copyWith(
+          fontWeight: FontWeight.bold,
+          color: isCurrentUserTagged
+              ? (isMine ? Colors.amber.shade200 : Colors.red.shade400)
+              : (isMine ? Colors.white.withOpacity(0.95) : const Color(0xFF7C3AED)),
+        ),
+      ));
+
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastIndex),
+        style: defaultStyle,
+      ));
+    }
+
+    return spans;
+  }
+
+  Widget _buildContentBody(BuildContext context) {
+    final text = message.contentText;
+    final isGps = text.contains("google.com/maps");
+    final hasLink = text.contains("http://") || text.contains("https://");
+
+    if (isGps) {
+      return _buildGpsCard(context, text);
+    }
+
+    if (hasLink) {
+      return _buildLinkCard(context, text);
+    }
+
+    return RichText(
+      text: TextSpan(
+        children: _buildTextSpans(context, text),
+      ),
+    );
+  }
+
+  Widget _buildGpsCard(BuildContext context, String text) {
+    final urlMatch = RegExp(r'(https?://[^\s]+)').firstMatch(text);
+    final url = urlMatch?.group(0) ?? text;
+
+    return InkWell(
+      onTap: () async {
+        final uri = Uri.tryParse(url);
+        if (uri != null && await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Không thể mở đường dẫn này")));
+          }
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(top: 4, bottom: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isMine
+              ? Colors.white.withOpacity(0.15)
+              : (Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF1E293B)
+                  : const Color(0xFFF1F5F9)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: isMine
+                  ? Colors.white24
+                  : (Theme.of(context).brightness == Brightness.dark
+                      ? Colors.grey.shade800
+                      : Colors.grey.shade200)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.location_on,
+                    color: isMine ? Colors.white : const Color(0xFF7C3AED),
+                    size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  "Vị trí đã chia sẻ",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: isMine
+                        ? Colors.white
+                        : (Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white
+                            : const Color(0xFF1E1B4B)),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Nhấn để xem trên bản đồ",
+              style: TextStyle(
+                color: isMine
+                    ? Colors.white70
+                    : (Theme.of(context).brightness == Brightness.dark
+                        ? Colors.grey[400]
+                        : Colors.grey.shade600),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              height: 100,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(8),
+                image: const DecorationImage(
+                  image: NetworkImage(
+                      "https://maps.googleapis.com/maps/api/staticmap?center=21.0285,105.8542&zoom=13&size=400x200&sensor=false"), // Placeholder static map
+                  fit: BoxFit.cover,
+                ),
+              ),
+              child: const Center(
+                  child: Icon(Icons.map, size: 40, color: Colors.white70)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLinkCard(BuildContext context, String text) {
+    final urlMatch = RegExp(r'(https?://[^\s]+)').firstMatch(text);
+    final url = urlMatch?.group(0) ?? "";
+    final cleanText = text.replaceFirst(url, "").trim();
+
+    return Column(
+      crossAxisAlignment:
+          isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: [
+        if (cleanText.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              cleanText,
+              style: TextStyle(
+                  color: isMine
+                      ? Colors.white
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : const Color(0xFF1E1B4B)),
+                  fontSize: 15),
+            ),
+          ),
+        InkWell(
+          onTap: () async {
+            final uri = Uri.tryParse(url);
+            if (uri != null && await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            } else {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("Không thể mở đường dẫn này")));
+              }
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isMine
+                  ? Colors.white.withOpacity(0.15)
+                  : (Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF1E293B)
+                      : const Color(0xFFF1F5F9)),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: isMine
+                      ? Colors.white24
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade800
+                          : Colors.grey.shade200)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.link,
+                    color: isMine ? Colors.white : const Color(0xFF7C3AED)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Liên kết",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isMine
+                              ? Colors.white
+                              : (Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.white
+                                  : const Color(0xFF1E1B4B)),
+                        ),
+                      ),
+                      Text(
+                        url,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isMine
+                              ? Colors.white70
+                              : (Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.grey[400]
+                                  : Colors.grey.shade600),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReactionsDisplay(BuildContext context, bool isMine) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        spacing: 4,
+        children: reactions
+            .map((emoji) => Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isMine
+                        ? Colors.white.withOpacity(0.2)
+                        : (isDark
+                            ? const Color(0xFF334155)
+                            : Colors.grey[100]),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(emoji,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white : Colors.black87)),
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _buildReplyHeader(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isMine
+            ? Colors.white12
+            : (isDark
+                ? const Color(0xFF334155)
+                : Colors.grey[100]),
+        borderRadius: BorderRadius.circular(8),
+        border: Border(
+            left: BorderSide(
+                color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
+                width: 3)),
+      ),
+      child: Text("Đang trả lời...",
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
+              color: isMine
+                  ? Colors.white70
+                  : (isDark
+                      ? Colors.grey[300]
+                      : Colors.grey[700]))),
+    );
+  }
+
+  String _formatTime(DateTime? date) {
+    if (date == null) return "";
+    final localDate = date.toLocal();
+    return "${localDate.hour.toString().padLeft(2, '0')}:${localDate.minute.toString().padLeft(2, '0')}";
+  }
+}
+
+class _AttachmentView extends StatelessWidget {
+  final MessageItem message;
+  final bool isMine;
+  const _AttachmentView({required this.message, required this.isMine});
+
+  @override
+  Widget build(BuildContext context) {
+    final url = message.resolvedAttachmentUrl!;
+    if (message.isImage) {
+      return GestureDetector(
+        onTap: () {
+          showDialog(
+            context: context,
+            builder: (context) => Dialog.fullscreen(
+              backgroundColor: Colors.black,
+              child: Stack(
+                children: [
+                  Center(
+                    child: InteractiveViewer(
+                      child: Image.network(url, fit: BoxFit.contain),
+                    ),
+                  ),
+                  Positioned(
+                    top: 40,
+                    right: 20,
+                    child: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.network(url, width: 200, height: 150, fit: BoxFit.cover),
+        ),
+      );
+    }
+    if (message.isAudio) {
+      return _VoicePlayer(url: url, isMine: isMine);
+    }
+    if (message.isVideo || message.isDocument) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return InkWell(
+        onTap: () async {
+          final uri = Uri.tryParse(url);
+          if (uri != null && await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        },
+        child: Container(
+          width: message.isVideo ? 200 : null,
+          height: message.isVideo ? 150 : null,
+          padding: message.isVideo ? null : const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: message.isVideo
+                ? Colors.black87
+                : (isMine
+                    ? Colors.white24
+                    : (isDark ? const Color(0xFF334155) : Colors.grey[100])),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: message.isVideo
+              ? const Center(
+                  child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.insert_drive_file,
+                      color: isMine
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : Colors.black54),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        message.attachmentName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: isMine
+                                ? Colors.white
+                                : (isDark ? Colors.white70 : Colors.black87)),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
+
+class _VoicePlayer extends StatefulWidget {
+  final String url;
+  final bool isMine;
+  const _VoicePlayer({required this.url, required this.isMine});
+
+  @override
+  State<_VoicePlayer> createState() => _VoicePlayerState();
+}
+
+class _VoicePlayerState extends State<_VoicePlayer> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlaying = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
+    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
+    _audioPlayer.onPlayerComplete.listen((_) => setState(() => _isPlaying = false));
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() async {
+    if (_isPlaying) {
+      await _audioPlayer.pause();
+    } else {
+      await _audioPlayer.play(UrlSource(widget.url));
+    }
+    setState(() => _isPlaying = !_isPlaying);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: 220,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: widget.isMine
+            ? Colors.white.withOpacity(0.2)
+            : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+              color: widget.isMine ? Colors.white : const Color(0xFF7C3AED),
+              size: 32,
+            ),
+            onPressed: _togglePlay,
+          ),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
+                    trackHeight: 2,
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                  ),
+                  child: Slider(
+                    value: _position.inMilliseconds.toDouble(),
+                    max: _duration.inMilliseconds.toDouble() > 0 
+                        ? _duration.inMilliseconds.toDouble() 
+                        : 1.0,
+                    activeColor: widget.isMine ? Colors.white : const Color(0xFF7C3AED),
+                    inactiveColor: widget.isMine
+                        ? Colors.white38
+                        : (isDark ? Colors.grey[600] : Colors.grey[300]),
+                    onChanged: (val) {
+                      _audioPlayer.seek(Duration(milliseconds: val.toInt()));
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _formatDuration(_position),
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: widget.isMine
+                                ? Colors.white70
+                                : (isDark ? Colors.grey[400] : Colors.grey)),
+                      ),
+                      Text(
+                        _formatDuration(_duration),
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: widget.isMine
+                                ? Colors.white70
+                                : (isDark ? Colors.grey[400] : Colors.grey)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final mins = d.inMinutes.toString().padLeft(2, '0');
+    final secs = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return "$mins:$secs";
+  }
+}
+
+class _PendingAttachment {
+  final String path;
+  final String name;
+  final String type;
+  final String? mimeType;
+  const _PendingAttachment(
+      {required this.path,
+      required this.name,
+      required this.type,
+      this.mimeType});
+}
+
+class _InviteCandidate {
+  final String userId;
+  final String displayName;
+  final String? avatarUrl;
+  final String roleLabel;
+
+  const _InviteCandidate({
+    required this.userId,
+    required this.displayName,
+    required this.avatarUrl,
+    required this.roleLabel,
+  });
+
+  factory _InviteCandidate.fromJson(Map<String, dynamic> json) {
+    final userId = (json["userId"] ??
+                json["id"] ??
+                json["memberId"] ??
+                json["user"]?["id"])
+            ?.toString() ??
+        "";
+    final displayName = (json["displayName"] ??
+            json["fullName"] ??
+            json["name"] ??
+            json["user"]?["displayName"] ??
+            json["user"]?["fullName"] ??
+            json["user"]?["name"] ??
+            "Người dùng")
+        .toString();
+    final avatarUrl = (json["avatarUrl"] ??
+            json["avatar"] ??
+            json["user"]?["avatarUrl"] ??
+            json["user"]?["avatar"])
+        ?.toString();
+    final roleLabel = (json["roleInGroup"] ??
+            json["role"] ??
+            json["user"]?["roleInGroup"] ??
+            json["user"]?["role"] ??
+            "MEMBER")
+        .toString();
+
+    return _InviteCandidate(
+      userId: userId,
+      displayName: displayName,
+      avatarUrl: avatarUrl,
+      roleLabel: roleLabel,
+    );
+  }
+}

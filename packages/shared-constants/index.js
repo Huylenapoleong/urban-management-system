@@ -100,6 +100,7 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
   PRESENCE_SNAPSHOT: "presence.snapshot",
   PRESENCE_UPDATED: "presence.updated",
   CALL_INIT: "call.init",
+  CALL_INVITE: "call.invite",
   CALL_ACCEPT: "call.accept",
   CALL_REJECT: "call.reject",
   CALL_END: "call.end",

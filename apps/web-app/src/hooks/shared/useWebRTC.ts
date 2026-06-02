@@ -27,6 +27,8 @@ export interface CallConfig {
   callerAvatarUrl?: string;
   peerName?: string;
   peerAvatarUrl?: string;
+  participantNames?: Record<string, string>;
+  participantAvatarUrls?: Record<string, string>;
   conversationId?: string;
 }
 

@@ -153,3 +153,16 @@ export function buildPaginatedResponse<T>(
     },
   };
 }
+
+export function buildResponse<T>(
+  data: T,
+): ApiSuccessResponse<T, ApiResponseMeta> {
+  return {
+    success: true,
+    data,
+    meta: {
+      count: Array.isArray(data) ? data.length : 1,
+    },
+  };
+}
+

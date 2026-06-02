@@ -1,4 +1,11 @@
 {
-  "compilerOptions": {},
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@urban/shared-constants": ["packages/shared-constants/index.d.ts"],
+      "@urban/shared-types": ["packages/shared-types/index.d.ts"],
+      "@urban/shared-utils": ["packages/shared-utils/index.d.ts"]
+    }
+  },
   "extends": "expo/tsconfig.base"
 }

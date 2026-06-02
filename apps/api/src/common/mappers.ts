@@ -242,6 +242,8 @@ export function toMessage(message: StoredMessage): MessageItem {
     attachmentUrl: message.attachmentUrl,
     replyTo: message.replyTo,
     replyMessage: message.replyMessage,
+    pinnedAt: message.pinnedAt ?? null,
+    pinnedByUserId: message.pinnedByUserId ?? null,
     recalledAt: message.recalledAt ?? null,
     recalledByUserId: message.recalledByUserId,
     deletedForSenderAt: message.deletedForSenderAt ?? null,

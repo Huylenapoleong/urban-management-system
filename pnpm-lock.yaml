@@ -471,6 +471,8 @@ importers:
         specifier: ~5.9.2
         version: 5.9.3
 
+  apps/mobile-app-fluter: {}
+
   apps/web-app:
     dependencies:
       '@radix-ui/react-avatar':
@@ -591,7 +593,11 @@ importers:
 
   packages/shared-constants: {}
 
-  packages/shared-types: {}
+  packages/shared-types:
+    dependencies:
+      '@urban/shared-constants':
+        specifier: workspace:*
+        version: link:../shared-constants
 
   packages/shared-utils:
     dependencies:
