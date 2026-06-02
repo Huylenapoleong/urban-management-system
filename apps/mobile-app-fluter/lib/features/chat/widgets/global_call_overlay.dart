@@ -42,7 +42,7 @@ class GlobalCallOverlay extends StatelessWidget {
 
                   webRTCService.isCallMinimized.value = false;
 
-                  UrbanManagementApp.navigatorKey.currentState!.push(
+                  Navigator.of(context, rootNavigator: true).push(
                     MaterialPageRoute(
                       builder: (_) => CallScreen(
                         webRTCService: webRTCService,
