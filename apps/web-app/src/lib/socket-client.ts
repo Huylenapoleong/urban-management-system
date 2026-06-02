@@ -65,6 +65,8 @@ class SocketClient {
 
         this.socket.on("connect", () => {
           console.log("[Web Socket] Connected");
+          // Emit chat.ready to notify backend that this socket is ready
+          this.socket?.emit(CHAT_SOCKET_EVENTS.READY, {});
           this.connectPromise = null;
           resolve();
         });
@@ -117,6 +119,18 @@ class SocketClient {
         }
       });
     });
+  }
+
+  on(event: string, callback: (...args: unknown[]) => void): void {
+    if (this.socket) {
+      this.socket.on(event, callback);
+    }
+  }
+
+  off(event: string, callback: (...args: unknown[]) => void): void {
+    if (this.socket) {
+      this.socket.off(event, callback);
+    }
   }
 
   // Hàm này giúp khắc phục lỗi "socket not connected"

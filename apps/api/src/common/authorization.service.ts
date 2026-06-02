@@ -36,16 +36,8 @@ export class AuthorizationService {
     }
   }
 
-  canReadUser(actor: AuthenticatedUser, target: StoredUser): boolean {
-    if (actor.id === target.userId) {
-      return true;
-    }
-
-    if (actor.role === 'CITIZEN') {
-      return false;
-    }
-
-    return this.canAccessLocationScope(actor, target.locationCode);
+  canReadUser(_actor: AuthenticatedUser, _target: StoredUser): boolean {
+    return true;
   }
 
   canManageUser(actor: AuthenticatedUser, target: StoredUser): boolean {
@@ -330,10 +322,7 @@ export class AuthorizationService {
         );
       }
 
-      return (
-        target.role !== 'CITIZEN' &&
-        this.canAccessLocationScope(target, actor.locationCode)
-      );
+      return this.canAccessLocationScope(target, actor.locationCode);
     }
 
     if (target.role === 'CITIZEN') {

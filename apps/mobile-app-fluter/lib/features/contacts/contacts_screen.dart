@@ -1,0 +1,82 @@
+import "package:flutter/material.dart";
+import "package:provider/provider.dart";
+import "../../services/app_services.dart";
+import "widgets/friend_list_tab.dart";
+import "widgets/request_list_tab.dart";
+import "widgets/discover_tab.dart";
+import "widgets/group_list_tab.dart";
+import "../groups/create_group_screen.dart";
+import "../shared/widgets/app_logo_button.dart";
+
+class ContactsScreen extends StatefulWidget {
+  const ContactsScreen({super.key});
+
+  @override
+  State<ContactsScreen> createState() => _ContactsScreenState();
+}
+
+class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F172A) : Colors.white,
+        elevation: 0,
+        leading: const AppLogoButton(),
+        title: Text("Bạn bè", style: TextStyle(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B), fontWeight: FontWeight.bold, fontSize: 22)),
+        centerTitle: false,
+        iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.group_add_outlined, size: 28),
+            onPressed: () {
+              Navigator.of(context, rootNavigator: true).push(
+                MaterialPageRoute(builder: (context) => const CreateGroupScreen()),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: const Color(0xFF7C3AED),
+          unselectedLabelColor: Theme.of(context).brightness == Brightness.dark ? Colors.white38 : const Color(0xFF64748B),
+          indicatorColor: const Color(0xFF7C3AED),
+          indicatorWeight: 3,
+          indicatorSize: TabBarIndicatorSize.label,
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          tabs: const [
+            Tab(text: "Bạn bè"),
+            Tab(text: "Nhóm"),
+            Tab(text: "Yêu cầu"),
+            Tab(text: "Khám phá"),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          FriendListTab(userService: context.read<AppServices>().userService),
+          GroupListTab(groupService: context.read<AppServices>().groupService),
+          RequestListTab(userService: context.read<AppServices>().userService),
+          DiscoverTab(userService: context.read<AppServices>().userService),
+        ],
+      ),
+    );
+  }
+}

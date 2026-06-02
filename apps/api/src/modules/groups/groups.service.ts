@@ -125,6 +125,11 @@ export class GroupsService {
       optionalEnum(body, 'messagePolicy', GROUP_MESSAGE_POLICIES) ??
       'ALL_MEMBERS';
 
+    const userIdsInput = body.userIds as string[] | undefined;
+    const userIds = Array.isArray(userIdsInput)
+      ? Array.from(new Set(userIdsInput.filter((id) => id !== actor.id)))
+      : [];
+
     if (
       !this.authorizationService.canCreateGroup(
         actor,
@@ -134,6 +139,24 @@ export class GroupsService {
       )
     ) {
       throw new ForbiddenException('You cannot create this group.');
+    }
+
+    if (userIds.length > 50) {
+      throw new BadRequestException(
+        'You can only add up to 50 members when creating a group.',
+      );
+    }
+
+    for (const userId of userIds) {
+      await this.usersService.getActiveByIdOrThrow(userId);
+      if (
+        actor.role === 'CITIZEN' &&
+        !(await this.usersService.areFriends(actor.id, userId))
+      ) {
+        throw new ForbiddenException(
+          `Citizens can only add their friends to groups. User ${userId} is not your friend.`,
+        );
+      }
     }
 
     const now = nowIso();
@@ -162,7 +185,7 @@ export class GroupsService {
       locationCode,
       createdBy: actor.id,
       description,
-      memberCount: 1,
+      memberCount: 1 + userIds.length,
       isOfficial,
       deletedAt: null,
       createdAt: now,
@@ -182,6 +205,20 @@ export class GroupsService {
       updatedAt: now,
     };
 
+    const otherMemberships: StoredMembership[] = userIds.map((userId) => ({
+      PK: makeGroupPk(groupId),
+      SK: makeMembershipSk(userId),
+      entityType: 'GROUP_MEMBERSHIP',
+      GSI1PK: makeUserGroupsKey(userId),
+      GSI1SK: makeUserGroupsSk(groupId, now),
+      groupId,
+      userId,
+      roleInGroup: 'MEMBER',
+      joinedAt: now,
+      deletedAt: null,
+      updatedAt: now,
+    }));
+
     await this.repository.transactPut([
       {
         tableName: this.config.dynamodbGroupsTableName,
@@ -195,6 +232,12 @@ export class GroupsService {
         conditionExpression:
           'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       },
+      ...otherMemberships.map((m) => ({
+        tableName: this.config.dynamodbMembershipsTableName,
+        item: m,
+        conditionExpression:
+          'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+      })),
       {
         tableName: this.config.dynamodbGroupsTableName,
         item: auditRecord,
@@ -202,6 +245,20 @@ export class GroupsService {
           'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       },
     ]);
+
+    await this.emitGroupLifecycleSystemMessage(
+      actor,
+      groupId,
+      `${actor.fullName} đã tạo nhóm.`,
+    );
+
+    for (const userId of userIds) {
+      await this.emitGroupLifecycleSystemMessage(
+        actor,
+        groupId,
+        `${actor.fullName} đã thêm một thành viên vào nhóm.`,
+      );
+    }
 
     return toGroupMetadata(group);
   }
@@ -684,8 +741,8 @@ export class GroupsService {
         : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       membershipExpressionAttributeValues: existingMembership
         ? {
-            ':expectedDeletedAt': existingMembership.deletedAt,
-          }
+          ':expectedDeletedAt': existingMembership.deletedAt,
+        }
         : undefined,
       auditRecord,
     });
@@ -815,6 +872,12 @@ export class GroupsService {
         actor,
         groupId,
         `Ownership was transferred from ${actor.fullName} to ${this.getUserDisplayName(successorUser, successorUserId)}.`,
+      );
+
+      await this.emitGroupLifecycleSystemMessage(
+        actor,
+        groupId,
+        `${actor.fullName} left the group.`,
       );
 
       await this.removeGroupConversationAccess(actor.id, groupId, occurredAt);
@@ -1109,12 +1172,12 @@ export class GroupsService {
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
     >[0] = [
-      {
-        kind: 'put',
-        tableName: this.config.dynamodbMembershipsTableName,
-        item: nextBan,
-      },
-    ];
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbMembershipsTableName,
+          item: nextBan,
+        },
+      ];
 
     if (targetMembership && !targetMembership.deletedAt) {
       const nextMembership: StoredMembership = {
@@ -1504,8 +1567,8 @@ export class GroupsService {
             : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
           expressionAttributeValues: existingMembership
             ? {
-                ':expectedDeletedAt': existingMembership.deletedAt,
-              }
+              ':expectedDeletedAt': existingMembership.deletedAt,
+            }
             : undefined,
         },
         {
@@ -1769,8 +1832,8 @@ export class GroupsService {
         : 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
       membershipExpressionAttributeValues: existingMembership
         ? {
-            ':expectedDeletedAt': existingMembership.deletedAt,
-          }
+          ':expectedDeletedAt': existingMembership.deletedAt,
+        }
         : undefined,
       auditRecord,
     });
@@ -1944,6 +2007,19 @@ export class GroupsService {
     }
   }
 
+  private translateRole(role?: string): string {
+    switch (role) {
+      case "OWNER":
+        return "Trưởng nhóm";
+      case "DEPUTY":
+        return "Phó nhóm";
+      case "MEMBER":
+        return "Thành viên";
+      default:
+        return role ?? "Thành viên";
+    }
+  }
+
   private getUserDisplayName(user: unknown, fallbackUserId: string): string {
     if (
       user &&
@@ -1994,14 +2070,14 @@ export class GroupsService {
     const transactionItems: Parameters<
       UrbanTableRepository['transactWrite']
     >[0] = [
-      {
-        kind: 'put',
-        tableName: this.config.dynamodbMembershipsTableName,
-        item: input.membership,
-        conditionExpression: input.membershipConditionExpression,
-        expressionAttributeValues: input.membershipExpressionAttributeValues,
-      },
-    ];
+        {
+          kind: 'put',
+          tableName: this.config.dynamodbMembershipsTableName,
+          item: input.membership,
+          conditionExpression: input.membershipConditionExpression,
+          expressionAttributeValues: input.membershipExpressionAttributeValues,
+        },
+      ];
 
     if (input.nextGroup) {
       transactionItems.push({
@@ -2056,9 +2132,9 @@ export class GroupsService {
 
       const name =
         typeof sourceError === 'object' &&
-        sourceError !== null &&
-        'name' in sourceError &&
-        typeof (sourceError as { name?: unknown }).name === 'string'
+          sourceError !== null &&
+          'name' in sourceError &&
+          typeof (sourceError as { name?: unknown }).name === 'string'
           ? (sourceError as { name: string }).name
           : '';
       const message =

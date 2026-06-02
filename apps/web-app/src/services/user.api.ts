@@ -72,25 +72,3 @@ export async function searchUserExactByContact(
   );
 }
 
-// ─── Contact alias ────────────────────────────────────────────────────────────
-
-/**
- * Set a local alias (nickname) for a contact so they appear with a custom
- * display name in the conversation list.
- */
-export async function setContactAlias(
-  userId: string,
-  alias: string,
-): Promise<void> {
-  return await ApiClient.put(
-    `/users/me/contacts/${encodeURIComponent(userId)}/alias`,
-    { alias },
-  );
-}
-
-/** Remove the alias for a contact, reverting to their real display name. */
-export async function deleteContactAlias(userId: string): Promise<void> {
-  return await ApiClient.delete(
-    `/users/me/contacts/${encodeURIComponent(userId)}/alias`,
-  );
-}

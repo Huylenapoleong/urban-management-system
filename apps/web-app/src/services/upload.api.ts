@@ -37,9 +37,6 @@ export async function uploadMedia({
   formData.append("file", file);
 
   return await ApiClient.post("/uploads/media", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
     onUploadProgress: (event: AxiosProgressEvent) => {
       if (!onProgress) {
         return;

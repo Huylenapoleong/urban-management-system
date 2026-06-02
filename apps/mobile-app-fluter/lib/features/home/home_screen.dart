@@ -1,0 +1,291 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
+import '../../state/session_controller.dart';
+import '../../services/app_services.dart';
+import '../notifications/notifications_screen.dart';
+import '../contacts/contacts_screen.dart';
+import '../chatbot/ai_assistant_page.dart';
+import '../reports/reports_screen.dart';
+import '../../services/location_service.dart';
+import '../map/map_screen.dart';
+import '../events/events_screen.dart';
+import '../profile/about_app_screen.dart';
+import '../shared/widgets/app_logo_button.dart';
+
+
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<SessionController>();
+    final user = session.user;
+    if (user == null) return const Scaffold();
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: CustomScrollView(
+        slivers: [
+          _buildAppBar(context, user),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildWelcomeCard(context),
+                  const SizedBox(height: 24),
+                  _buildSectionHeader(context, "Quick Actions"),
+                  const SizedBox(height: 12),
+                  _buildQuickActions(context),
+                  const SizedBox(height: 24),
+                  _buildSectionHeader(context, "System Status"),
+                  const SizedBox(height: 12),
+                  _buildStatusCard(context),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (context) => const AiAssistantPage(),
+          );
+        },
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF7C3AED) : const Color(0xFF1E1B4B),
+        icon: const Icon(Icons.auto_awesome, color: Colors.white),
+        label: const Text('Trợ lý AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  Widget _buildAppBar(BuildContext context, dynamic user) {
+    final name = user.fullName;
+    return SliverAppBar(
+      floating: false,
+      pinned: true,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F172A) : Colors.white,
+      elevation: 0,
+      leading: const AppLogoButton(),
+      title: Text(
+        "Urban Management",
+        style: TextStyle(
+          fontWeight: FontWeight.bold, 
+          fontSize: 18, 
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B)
+        ),
+      ),
+      actions: [
+        IconButton(
+          icon: Icon(Icons.people_outline, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
+          onPressed: () {
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+              builder: (_) => const ContactsScreen(),
+            ));
+          },
+        ),
+        IconButton(
+          icon: Icon(Icons.notifications_outlined, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B)),
+          onPressed: () {
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+              builder: (_) => const NotificationsScreen(),
+            ));
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 16.0, left: 8.0),
+          child: Center(
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFF7C3AED),
+              backgroundImage: user.avatarUrl != null ? NetworkImage(user.avatarUrl!) : null,
+              child: user.avatarUrl == null ? const Icon(Icons.person, color: Colors.white, size: 18) : null,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWelcomeCard(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF7C3AED), Color(0xFF4C1D95)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF7C3AED).withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Urban Management",
+            style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Making your city better together",
+            style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () {},
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF7C3AED),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 0,
+            ),
+            child: const Text("View Dashboard"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(BuildContext context, String title) {
+    return Text(
+      title,
+      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B)),
+    );
+  }
+
+  Widget _buildQuickActions(BuildContext context) {
+    final services = context.read<AppServices>();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        _buildActionItem(
+          context, 
+          Icons.report_problem_outlined, 
+          "Report", 
+          const Color(0xFFFEE2E2), 
+          const Color(0xFFEF4444),
+          onTap: () {
+            final session = context.read<SessionController>();
+            final role = session.user?.role;
+            final isOfficial = role != null &&
+                const {'ADMIN', 'PROVINCE_OFFICER', 'WARD_OFFICER', 'OFFICER'}
+                    .contains(role.toUpperCase());
+            if (isOfficial) {
+              context.go('/official/reports');
+            } else {
+              context.go('/citizen/reports');
+            }
+          },
+        ),
+        _buildActionItem(
+          context, 
+          Icons.map_outlined, 
+          "Map", 
+          const Color(0xFFE0F2FE), 
+          const Color(0xFF0EA5E9),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+              builder: (_) => const MapScreen(),
+            ));
+          },
+        ),
+        _buildActionItem(
+          context, 
+          Icons.event_note_outlined, 
+          "Events", 
+          const Color(0xFFF0FDF4), 
+          const Color(0xFF22C55E),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+              builder: (_) => const EventsScreen(),
+            ));
+          },
+        ),
+        _buildActionItem(
+          context, 
+          Icons.info_outline, 
+          "About", 
+          const Color(0xFFFEF9C3), 
+          const Color(0xFFEAB308),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+              builder: (_) => const AboutAppScreen(),
+            ));
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionItem(
+    BuildContext context, 
+    IconData icon, 
+    String label, 
+    Color bgColor, 
+    Color iconColor, 
+    {required VoidCallback onTap}
+  ) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Column(
+      children: [
+        Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(icon, color: iconColor, size: 28),
+        ),
+        const SizedBox(height: 8),
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF1E1B4B))),
+      ],
+    ),
+  );
+}
+
+  Widget _buildStatusCard(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color ?? (isDark ? const Color(0xFF1E293B) : Colors.white),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isDark ? Colors.grey.shade800 : const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 40),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("All Systems Normal", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : const Color(0xFF1E1B4B))),
+                const SizedBox(height: 4),
+                Text("No major issues reported in your area today.", style: TextStyle(fontSize: 13, color: isDark ? Colors.grey.shade400 : Colors.grey)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

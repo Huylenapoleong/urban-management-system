@@ -8,6 +8,7 @@ import { WebRTCProvider } from "@/providers/WebRTCProvider";
 import { getProfile } from "@/services/user.api";
 import { useQuery } from "@tanstack/react-query";
 import {
+    BookOpen,
     Bot,
     ClipboardList,
     Home,
@@ -69,7 +70,7 @@ export function Sidebar({
     refetchOnReconnect: true,
   });
 
-  const isOfficial = user?.role === "OFFICIAL" || user?.role === "ADMIN";
+  const isOfficial = user?.role === "WARD_OFFICER" || user?.role === "PROVINCE_OFFICER" || user?.role === "ADMIN";
   const unreadMessageCount = useMemo(
     () => conversations.reduce((sum, item) => sum + (item.unreadCount ?? 0), 0),
     [conversations],
@@ -110,6 +111,7 @@ export function Sidebar({
       badgeCount: incomingFriendRequestCount,
     },
     { to: "/groups", icon: Users, label: "Nhóm" },
+    { to: "/knowledge-base", icon: BookOpen, label: "Pháp luật" },
     { to: "/reports", icon: ClipboardList, label: "Báo cáo duyệt" },
   ].filter(Boolean) as NavItem[];
 

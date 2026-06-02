@@ -110,6 +110,7 @@ export interface UserFriendItem {
   contactAlias?: string;
   role: UserRole;
   locationCode: string;
+  unit?: string;
   avatarAsset?: MediaAsset;
   avatarUrl?: string;
   status: UserStatus;
@@ -150,6 +151,7 @@ export interface UserDirectoryItem {
   contactAlias?: string;
   role: UserRole;
   locationCode: string;
+  unit?: string;
   avatarAsset?: MediaAsset;
   avatarUrl?: string;
   status: UserStatus;
@@ -165,6 +167,19 @@ export interface UserContactAlias {
   updatedAt: string;
 }
 
+export interface ConversationAlias {
+  conversationId: string;
+  userId: string;
+  alias: string;
+  updatedAt: string;
+}
+
+export interface ConversationAliasRemovalResult {
+  conversationId: string;
+  userId: string;
+  clearedAt: string;
+}
+
 export interface GroupMetadata {
   id: string;
   groupName: string;
@@ -175,6 +190,7 @@ export interface GroupMetadata {
   description?: string;
   memberCount: number;
   isOfficial: boolean;
+  avatarUrl?: string;
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -259,6 +275,8 @@ export interface MessageItem {
   attachmentUrl?: string;
   replyTo?: string;
   replyMessage?: MessageReplyReference;
+  pinnedAt?: string | null;
+  pinnedByUserId?: string | null;
   recalledAt?: string | null;
   recalledByUserId?: string | null;
   deletedForSenderAt?: string | null;
@@ -292,6 +310,9 @@ export interface ConversationSummary {
   requestRespondedAt?: string | null;
   requestRespondedByUserId?: string | null;
   historyClearedAt?: string | null;
+  avatarUrl?: string;
+  peerAvatarUrl?: string;
+  groupAvatarUrl?: string;
   deletedAt: string | null;
   updatedAt: string;
 }
@@ -428,6 +449,7 @@ export interface ChatCallInitPayload extends ChatConversationCommandPayload {
   callerId: string;
   callerName: string;
   callerAvatarUrl?: string;
+  isGroup: boolean;
   isVideo: boolean;
   startedAt?: string;
   serverTimestamp?: string;

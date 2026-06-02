@@ -1,4 +1,8 @@
-import axios, { type AxiosError } from "axios";
+import axios, {
+  AxiosHeaders,
+  type AxiosError,
+  type InternalAxiosRequestConfig,
+} from "axios";
 
 export interface Envelope<T = unknown> {
   success: boolean;
@@ -30,6 +34,10 @@ type ApiErrorEnvelope = {
   };
 };
 
+type RetryableRequestConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean;
+};
+
 function detectWebSessionScope(): "WEB_DESKTOP" | "WEB_MOBILE" {
   if (typeof navigator === "undefined") {
     return "WEB_DESKTOP";
@@ -41,6 +49,11 @@ function detectWebSessionScope(): "WEB_DESKTOP" | "WEB_MOBILE" {
       userAgent,
     );
   return isMobile ? "WEB_MOBILE" : "WEB_DESKTOP";
+}
+
+function ensureAxiosHeaders(config: InternalAxiosRequestConfig): AxiosHeaders {
+  config.headers = AxiosHeaders.from(config.headers);
+  return config.headers;
 }
 
 export function buildSessionMetadataHeaders(): Record<string, string> {
@@ -58,8 +71,8 @@ export function readAccessToken(): string | null {
 }
 
 export function writeAccessToken(token: string): void {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
   sessionStorage.setItem(AUTH_TOKEN_KEY, token);
-  localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
 export function clearAccessToken(): void {
@@ -75,8 +88,8 @@ export function readRefreshToken(): string | null {
 }
 
 export function writeRefreshToken(token: string): void {
+  localStorage.setItem(REFRESH_TOKEN_KEY, token);
   sessionStorage.setItem(REFRESH_TOKEN_KEY, token);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 export function clearRefreshToken(): void {
@@ -172,15 +185,15 @@ function normalizeConversationRoute(url?: string): string | undefined {
 }
 
 client.interceptors.request.use((config) => {
-  config.headers = config.headers ?? {};
+  const headers = ensureAxiosHeaders(config);
 
   const sessionHeaders = buildSessionMetadataHeaders();
-  config.headers["x-app-variant"] = sessionHeaders["x-app-variant"];
-  config.headers["x-session-scope"] = sessionHeaders["x-session-scope"];
+  headers.set("x-app-variant", sessionHeaders["x-app-variant"]);
+  headers.set("x-session-scope", sessionHeaders["x-session-scope"]);
 
   const token = readAccessToken();
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    headers.set("Authorization", `Bearer ${token}`);
   }
   config.url = normalizeConversationRoute(config.url);
   return config;
@@ -198,9 +211,7 @@ client.interceptors.response.use(
     });
   },
   async (error: AxiosError<ApiErrorEnvelope>) => {
-    const originalRequest = error?.config as
-      | (typeof error.config & { _retry?: boolean })
-      | undefined;
+    const originalRequest = error.config as RetryableRequestConfig | undefined;
     const status = error?.response?.status;
     const requestUrl = String(originalRequest?.url || "");
     const isAuthEndpoint = /\/auth\/(login|register|refresh|logout)/i.test(
@@ -216,8 +227,10 @@ client.interceptors.response.use(
       originalRequest._retry = true;
       const nextAccessToken = await refreshAccessToken();
       if (nextAccessToken) {
-        originalRequest.headers = originalRequest.headers ?? {};
-        originalRequest.headers.Authorization = `Bearer ${nextAccessToken}`;
+        ensureAxiosHeaders(originalRequest).set(
+          "Authorization",
+          `Bearer ${nextAccessToken}`,
+        );
         return client(originalRequest);
       }
     }

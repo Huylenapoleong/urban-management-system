@@ -1,0 +1,9 @@
+{
+  "name": "mobile-app-fluter",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "flutter run -d chrome --web-port 8081",
+    "start:mobile": "flutter run --dart-define=API_BASE_URL=http://192.168.2.195:3001"
+  }
+}
