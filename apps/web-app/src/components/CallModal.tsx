@@ -208,9 +208,13 @@ export function CallModal({ rtc }: CallModalProps) {
         ringtoneRef.current = new Audio("/your_phone_linging_yo_phone_lingin_ringtone-www_tiengdong_com.mp3");
         ringtoneRef.current.loop = true;
       }
-      ringtoneRef.current.play().catch((err) => {
-        console.warn("[CallModal] Autoplay blocked or failed playing ringtone:", err);
-      });
+      const playPromise = ringtoneRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          if (err.name === "AbortError") return;
+          console.warn("[CallModal] Autoplay blocked or failed playing ringtone:", err);
+        });
+      }
     } else {
       if (ringtoneRef.current) {
         ringtoneRef.current.pause();

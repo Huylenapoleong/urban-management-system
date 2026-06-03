@@ -95,7 +95,7 @@ export class AuthOtpService implements OnModuleInit, OnApplicationShutdown {
     private readonly repository: UrbanTableRepository,
     private readonly config: AppConfigService,
     private readonly realtimeRedisService: RealtimeRedisService,
-  ) { }
+  ) {}
 
   onModuleInit(): void {
     if (!this.shouldDispatchOtpAsync()) {

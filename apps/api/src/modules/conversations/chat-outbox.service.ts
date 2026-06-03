@@ -185,6 +185,12 @@ export class ChatOutboxService
     for (const item of items.filter(
       (entry) => entry.entityType === 'CHAT_OUTBOX_EVENT',
     )) {
+      // Avoid race conditions with eager direct dispatch by ignoring events created within last 5 seconds.
+      const ageMs = Date.now() - new Date(item.createdAt).getTime();
+      if (ageMs < 5000) {
+        continue;
+      }
+
       const startedAtMs = Date.now();
       try {
         await this.processChatOutboxEvent(item);

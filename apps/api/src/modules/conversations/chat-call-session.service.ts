@@ -82,7 +82,7 @@ export class ChatCallSessionService {
     const createdAt = nowIso();
     const session: ChatCallSession = {
       acceptedByUserIds: access.isGroup ? [callerUserId] : [],
-      acceptedAt: null,
+      acceptedAt: access.isGroup ? createdAt : null,
       conversationId: access.conversationId,
       conversationKey: access.conversationKey,
       createdAt,
@@ -92,13 +92,15 @@ export class ChatCallSessionService {
       isVideo,
       participantUserIds: Array.from(new Set(access.participants)),
       rejectedByUserIds: [],
-      status: 'RINGING',
+      status: access.isGroup ? 'ACTIVE' : 'RINGING',
       updatedAt: createdAt,
     };
 
     const created = await this.createSessionIfAbsent(
       session,
-      this.config.chatCallInviteTtlSeconds,
+      access.isGroup
+        ? this.config.chatCallActiveTtlSeconds
+        : this.config.chatCallInviteTtlSeconds,
     );
 
     if (!created) {

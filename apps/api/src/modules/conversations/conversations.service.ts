@@ -797,13 +797,13 @@ export class ConversationsService {
     if (pinRecords.length >= MAX_PINNED_MESSAGES_PER_CONVERSATION) {
       if (!replaceMessageId) {
         throw new ConflictException(
-          'Pinned message limit reached. Provide replaceMessageId to replace one of the current pinned messages.',
+          'Đã đạt giới hạn số tin nhắn ghim. Vui lòng gỡ ghim một tin nhắn khác để thay thế.',
         );
       }
 
       if (replaceMessageId === message.messageId) {
         throw new BadRequestException(
-          'replaceMessageId must be different from messageId.',
+          'Tin nhắn thay thế phải khác với tin nhắn hiện tại.',
         );
       }
 
@@ -813,7 +813,7 @@ export class ConversationsService {
 
       if (!replacePinRecord) {
         throw new BadRequestException(
-          'replaceMessageId must be one of the current pinned messages.',
+          'Tin nhắn thay thế không nằm trong danh sách đang ghim.',
         );
       }
 
@@ -825,7 +825,7 @@ export class ConversationsService {
 
       if (!replaceMessage) {
         throw new ConflictException(
-          'Pinned message changed. Please refresh pinned messages and retry.',
+          'Tin nhắn ghim đã được cập nhật. Vui lòng thử lại.',
         );
       }
     }
@@ -943,7 +943,9 @@ export class ConversationsService {
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Pinned messages changed. Please retry.');
+        throw new ConflictException(
+          'Danh sách tin nhắn ghim đã được cập nhật. Vui lòng thử lại.',
+        );
       }
 
       throw error;
@@ -1048,7 +1050,9 @@ export class ConversationsService {
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Pinned messages changed. Please retry.');
+        throw new ConflictException(
+          'Danh sách tin nhắn ghim đã được cập nhật. Vui lòng thử lại.',
+        );
       }
 
       throw error;
@@ -1092,13 +1096,13 @@ export class ConversationsService {
   ): Promise<MessageItem> {
     const normalizedContent = content.trim();
     if (!normalizedContent) {
-      throw new BadRequestException('System message content cannot be empty.');
+      throw new BadRequestException('Tin nhắn hệ thống không được để trống.');
     }
 
     const uniqueParticipants = Array.from(new Set(participants));
     if (uniqueParticipants.length === 0) {
       throw new BadRequestException(
-        'Cannot send a group system message without participants.',
+        'Nhóm không có thành viên nào để nhận tin nhắn.',
       );
     }
 
@@ -1130,7 +1134,7 @@ export class ConversationsService {
     const normalizedContent = content.trim();
 
     if (!normalizedContent) {
-      throw new BadRequestException('System message content cannot be empty.');
+      throw new BadRequestException('Tin nhắn hệ thống không được để trống.');
     }
 
     return this.createMessage(
@@ -1164,7 +1168,9 @@ export class ConversationsService {
       await this.usersService.getActiveByIdOrThrow(targetUserId);
 
     if (targetUser.userId === actor.id) {
-      throw new BadRequestException('Cannot create DM with yourself.');
+      throw new BadRequestException(
+        'Bạn không thể tự nhắn tin cho chính mình.',
+      );
     }
 
     const conversationId = makeDmConversationId(actor.id, targetUser.userId);
@@ -1172,7 +1178,9 @@ export class ConversationsService {
     if (
       !(await this.canAccessDmConversation(actor, targetUser, conversationId))
     ) {
-      throw new ForbiddenException('You cannot access this conversation.');
+      throw new ForbiddenException(
+        'Bạn không có quyền xem cuộc trò chuyện này.',
+      );
     }
     await this.ensureCanSendCitizenDirectMessage(
       actor,
@@ -1202,7 +1210,9 @@ export class ConversationsService {
       await this.usersService.getActiveByIdOrThrow(targetUserId);
 
     if (targetUser.userId === actor.id) {
-      throw new BadRequestException('Cannot create DM with yourself.');
+      throw new BadRequestException(
+        'Bạn không thể tự nhắn tin cho chính mình.',
+      );
     }
 
     this.ensureDirectMessageRequestPair(actor, targetUser);
@@ -1451,7 +1461,7 @@ export class ConversationsService {
       const latestMessage = visibleMessages[0];
 
       if (!latestMessage) {
-        throw new NotFoundException('Conversation not found.');
+        throw new NotFoundException('Cuộc trò chuyện không tồn tại.');
       }
 
       const labelMap =
@@ -1842,7 +1852,7 @@ export class ConversationsService {
   ): Promise<MessageItem> {
     if (!this.authorizationService.isAdmin(actor)) {
       throw new ForbiddenException(
-        'Only administrators can permanently delete messages.',
+        'Chỉ quản trị viên mới có thể xóa tin nhắn vĩnh viễn.',
       );
     }
 
@@ -2213,7 +2223,7 @@ export class ConversationsService {
       )
     ) {
       throw new BadRequestException(
-        'content, attachmentKey or attachmentUrl is required.',
+        'Yêu cầu nội dung, khóa tệp đính kèm hoặc URL tệp đính kèm.',
       );
     }
 
@@ -2550,7 +2560,7 @@ export class ConversationsService {
       await this.usersService.isInteractionBlocked(actor.id, targetUser.userId)
     ) {
       throw new ForbiddenException(
-        'Direct messaging is blocked between these users.',
+        'Nhắn tin trực tiếp đã bị chặn giữa hai người dùng này.',
       );
     }
 
@@ -2605,7 +2615,7 @@ export class ConversationsService {
       await this.usersService.isInteractionBlocked(actor.id, targetUser.userId)
     ) {
       throw new ForbiddenException(
-        'Direct messaging is blocked between these users.',
+        'Nhắn tin trực tiếp đã bị chặn giữa hai người dùng này.',
       );
     }
 
@@ -2638,7 +2648,7 @@ export class ConversationsService {
     }
 
     throw new ForbiddenException(
-      'Citizens can only send direct messages to friends or accepted direct message requests.',
+      'Công dân chỉ có thể gửi tin nhắn trực tiếp cho bạn bè hoặc các yêu cầu kết bạn đã được chấp nhận.',
     );
   }
 
@@ -3815,7 +3825,9 @@ export class ConversationsService {
       return;
     }
 
-    throw new ForbiddenException(`You cannot ${action} this message.`);
+    throw new ForbiddenException(
+      `Bạn không thể ${action === 'edit' ? 'chỉnh sửa' : action === 'delete' ? 'xóa' : action} tin nhắn này.`,
+    );
   }
 
   private async ensureCanMutateConversationMessage(
@@ -4144,7 +4156,9 @@ export class ConversationsService {
       }
 
       if (targetUserId === actor.id) {
-        throw new BadRequestException('Cannot create DM with yourself.');
+        throw new BadRequestException(
+          'Bạn không thể tự nhắn tin cho chính mình.',
+        );
       }
 
       return makeDmConversationId(actor.id, targetUserId);
@@ -4237,11 +4251,15 @@ export class ConversationsService {
     if (
       !(await this.canAccessDmConversation(actor, targetUser, conversationId))
     ) {
-      throw new ForbiddenException('You cannot access this conversation.');
+      throw new ForbiddenException(
+        'Bạn không có quyền xem cuộc trò chuyện này.',
+      );
     }
 
     if (targetUser.userId === actor.id) {
-      throw new BadRequestException('Cannot create DM with yourself.');
+      throw new BadRequestException(
+        'Bạn không thể tự nhắn tin cho chính mình.',
+      );
     }
 
     return conversationId;
@@ -4695,12 +4713,12 @@ export class ConversationsService {
   ): string {
     switch (messagePolicy) {
       case 'OWNER_ONLY':
-        return 'Only the owner can send messages to this group.';
+        return 'Chỉ chủ sở hữu mới có thể gửi tin nhắn đến nhóm này.';
       case 'OWNER_AND_DEPUTIES':
-        return 'Only owners and deputies can send messages to this group.';
+        return 'Chỉ chủ sở hữu và cấp phó mới có thể gửi tin nhắn đến nhóm này.';
       case 'ALL_MEMBERS':
       default:
-        return 'Only active members can send messages to this group.';
+        return 'Chỉ các thành viên đang hoạt động mới có thể gửi tin nhắn đến nhóm này.';
     }
   }
 
@@ -4726,15 +4744,15 @@ export class ConversationsService {
         group.messagePolicy ?? 'ALL_MEMBERS';
 
       if (activeBan && actor.role !== 'ADMIN') {
-        throw new ForbiddenException('You are banned from this group.');
+        throw new ForbiddenException('Bạn đã bị cấm khỏi nhóm này.');
       }
 
       if (!actorMembership || actorMembership.deletedAt) {
         if (actor.role !== 'ADMIN') {
           throw new ForbiddenException(
             requireSendAccess
-              ? 'Only active members can send messages to this group.'
-              : 'Only active members can access this group conversation.',
+              ? 'Chỉ các thành viên đang hoạt động mới có thể gửi tin nhắn đến nhóm này.'
+              : 'Chỉ các thành viên đang hoạt động mới có thể truy cập cuộc trò chuyện nhóm này.',
           );
         }
       }
@@ -4767,7 +4785,9 @@ export class ConversationsService {
     }
 
     if (!participantIds.includes(actor.id)) {
-      throw new ForbiddenException('You cannot access this conversation.');
+      throw new ForbiddenException(
+        'Bạn không có quyền xem cuộc trò chuyện này.',
+      );
     }
 
     const otherParticipantId =
@@ -4780,7 +4800,9 @@ export class ConversationsService {
     if (
       !(await this.canAccessDmConversation(actor, targetUser, conversationId))
     ) {
-      throw new ForbiddenException('You cannot access this conversation.');
+      throw new ForbiddenException(
+        'Bạn không có quyền xem cuộc trò chuyện này.',
+      );
     }
 
     if (requireSendAccess) {
