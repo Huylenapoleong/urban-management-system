@@ -83,7 +83,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       await groupService.createGroup(
         groupName: _nameController.text.trim(),
         groupType: _groupType,
-        locationCode: session.user?.locationCode ?? "VN-HCM-BQ1-P01",
+        locationCode: session.user?.locationCode ?? "VN-79-00001",
         description: _descController.text.trim(),
         userIds: _selectedUserIds.toList(),
       );

@@ -58,6 +58,54 @@ export async function register(params: RegisterRequest) {
   return data;
 }
 
+export async function requestRegisterOtp(params: RegisterRequest) {
+  return await request<{
+    otpRequested: boolean;
+    purpose: string;
+    maskedEmail: string;
+    expiresAt: string;
+    resendAvailableAt: string;
+  }>(client.post("/auth/register/request-otp", params));
+}
+
+export async function verifyRegisterOtp(params: {
+  email: string;
+  otpCode: string;
+}) {
+  const data = await request<{
+    tokens: { accessToken: string; refreshToken: string };
+    user: UserProfile;
+  }>(client.post("/auth/register/verify-otp", params));
+
+  writeAccessToken(data.tokens.accessToken);
+  writeRefreshToken(data.tokens.refreshToken);
+  return data;
+}
+
+export async function requestLoginOtp(params: LoginRequest) {
+  return await request<{
+    otpRequested: boolean;
+    purpose: string;
+    maskedEmail: string;
+    expiresAt: string;
+    resendAvailableAt: string;
+  }>(client.post("/auth/login/request-otp", params));
+}
+
+export async function verifyLoginOtp(params: {
+  login: string;
+  otpCode: string;
+}) {
+  const data = await request<{
+    tokens: { accessToken: string; refreshToken: string };
+    user: UserProfile;
+  }>(client.post("/auth/login/verify-otp", params));
+
+  writeAccessToken(data.tokens.accessToken);
+  writeRefreshToken(data.tokens.refreshToken);
+  return data;
+}
+
 export async function getMe(): Promise<UserProfile> {
   return await request<UserProfile>(client.get("/users/me"));
 }
