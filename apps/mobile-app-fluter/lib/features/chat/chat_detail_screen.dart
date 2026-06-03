@@ -34,7 +34,7 @@ import "../../app/shared/chat/widgets/gif_picker_sheet.dart";
 import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
 import "../../core/utils/translation_helper.dart";
-import "../../app/shared/chat/widgets/poll_message_bubble.dart";
+
 import "models/chat_message.dart";
 import "../../services/local_cache_service.dart";
 import "package:cached_network_image/cached_network_image.dart";
@@ -3087,24 +3087,6 @@ class ChatMessageBubble extends StatelessWidget {
   }
 
   Widget _buildBubble(BuildContext context) {
-    final pollData = message.pollData;
-    if (pollData != null) {
-      final chatMsg = ChatMessage(
-        id: message.id,
-        senderId: message.senderId,
-        senderName: message.senderName,
-        content: message.content,
-        type: message.type,
-        sentAt: message.sentAtDate ?? DateTime.now(),
-        attachmentUrl: message.attachmentUrl,
-      );
-      return PollMessageBubble(
-        message: chatMsg,
-        isMine: isMine,
-        conversationId: message.conversationId,
-      );
-    }
-
     return ConstrainedBox(
       constraints:
           BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),

@@ -11,10 +11,8 @@ import '../../../features/chat/models/chat_message.dart';
 import '../../../state/auth_controller.dart';
 import '../../../state/providers.dart';
 import 'chat_providers.dart';
-import 'widgets/create_poll_sheet.dart';
 import 'widgets/gif_picker_sheet.dart';
 import 'widgets/sticker_picker_sheet.dart';
-import 'widgets/poll_message_bubble.dart';
 
 class SharedChatDetailPage extends ConsumerStatefulWidget {
   const SharedChatDetailPage({
@@ -228,15 +226,7 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
                       );
                     },
                   ),
-                  IconButton(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    constraints: const BoxConstraints(),
-                    icon: const Icon(Icons.poll_outlined, color: Color(0xFF7C3AED), size: 24),
-                    onPressed: () {
-                      FocusScope.of(context).unfocus();
-                      CreatePollBottomSheet.show(context, widget.conversationId);
-                    },
-                  ),
+
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
@@ -282,19 +272,7 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (message.pollData != null) {
-      return Align(
-        alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: PollMessageBubble(
-            message: message,
-            isMine: isMine,
-            conversationId: conversationId,
-          ),
-        ),
-      );
-    }
+
 
     final time = DateFormat('HH:mm').format(message.sentAt.toLocal());
 

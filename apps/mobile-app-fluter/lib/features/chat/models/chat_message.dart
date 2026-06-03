@@ -55,15 +55,4 @@ class ChatMessage {
       isOptimistic: isOptimistic ?? this.isOptimistic,
     );
   }
-
-  Map<String, dynamic>? get pollData {
-    if (!content.trim().startsWith('{')) return null;
-    try {
-      final parsed = jsonDecode(content);
-      if (parsed is Map && parsed.containsKey('poll')) {
-        return Map<String, dynamic>.from(parsed['poll'] as Map);
-      }
-    } catch (_) {}
-    return null;
-  }
 }

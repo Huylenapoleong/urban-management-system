@@ -164,7 +164,30 @@ class _StickerPickerSheetState extends State<StickerPickerSheet> {
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          // Powered by GIPHY attribution
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                "Powered by ",
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.grey[500] : Colors.grey[600],
+                ),
+              ),
+              Text(
+                "GIPHY",
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           // Grid
           Expanded(
             child: _isLoading
