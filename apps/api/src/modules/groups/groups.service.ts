@@ -1680,7 +1680,7 @@ export class GroupsService {
       !this.authorizationService.canManageGroup(
         actor,
         group,
-        actorMembership.role,
+        actorMembership.roleInGroup,
       )
     ) {
       throw new ForbiddenException(
@@ -1771,7 +1771,7 @@ export class GroupsService {
       !this.authorizationService.canManageGroup(
         actor,
         group,
-        actorMembership.role,
+        actorMembership.roleInGroup,
       )
     ) {
       throw new ForbiddenException(
