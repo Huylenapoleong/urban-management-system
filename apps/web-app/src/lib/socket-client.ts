@@ -13,6 +13,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 class SocketClient {
   public socket: Socket | null = null;
+  public activeChatId: string | null = null;
   private connectPromise: Promise<void> | null = null;
   private authToken: string | null = null;
 
