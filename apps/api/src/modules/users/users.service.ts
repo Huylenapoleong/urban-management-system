@@ -645,6 +645,15 @@ export class UsersService {
     return await this.serializeUserProfile(target, actor);
   }
 
+  async getUserLabelMap(userIds: string[]): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    const users = await this.getUsersByIds(userIds);
+    for (const user of users) {
+      map.set(user.userId, user.fullName);
+    }
+    return map;
+  }
+
   async syncContacts(
     actor: AuthenticatedUser,
     phones: string[],

@@ -189,7 +189,7 @@ export class AppConfigService {
   readonly chatOutboxShardCount = readNumber('CHAT_OUTBOX_SHARD_COUNT', 8);
   readonly chatCallInviteTtlSeconds = readNumber(
     'CHAT_CALL_INVITE_TTL_SECONDS',
-    90,
+    15,
   );
   readonly chatCallActiveTtlSeconds = readNumber(
     'CHAT_CALL_ACTIVE_TTL_SECONDS',

@@ -9,7 +9,7 @@ import { GroupsService } from './groups.service';
 
 @Module({
   imports: [
-    UsersModule,
+    forwardRef(() => UsersModule),
     LocationsModule,
     forwardRef(() => ConversationsModule),
   ],

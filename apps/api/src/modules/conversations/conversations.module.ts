@@ -13,7 +13,7 @@ import { GroupsModule } from '../groups/groups.module';
 import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [UsersModule, forwardRef(() => GroupsModule)],
+  imports: [forwardRef(() => UsersModule), forwardRef(() => GroupsModule)],
   controllers: [ConversationsController],
   providers: [
     ConversationsService,

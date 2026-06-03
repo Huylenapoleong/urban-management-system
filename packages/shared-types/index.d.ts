@@ -261,6 +261,17 @@ export interface MessageReplyReference {
   sentAt: string;
 }
 
+export interface ReadWatermark {
+  userId: string;
+  lastReadAt?: string;
+}
+
+export interface MessageReceipt {
+  userId: string;
+  status: "DELIVERED" | "READ";
+  readAt?: string;
+}
+
 export interface MessageItem {
   conversationId: string;
   id: string;

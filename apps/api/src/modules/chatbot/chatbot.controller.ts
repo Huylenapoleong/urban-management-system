@@ -16,10 +16,15 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-response-envelope.decorator';
 import { ChatbotService } from './chatbot.service';
+import {
+  AuthenticatedChatbotAskDto,
+  type AuthenticatedChatbotResultDto,
+} from './dto/authenticated-chatbot.dto';
 import type { ChatbotAnswerDto } from './dto/chatbot-answer.dto';
 import { ChatbotAskDto } from './dto/chatbot-ask.dto';
 import { OfficerGenerateReportDto } from './dto/officer-report.dto';
 import { OfficerSummarizeDto } from './dto/officer-summarize.dto';
+import { AuthenticatedChatbotService } from './services/authenticated-chatbot.service';
 import { GroupChatSummaryService } from './services/group-chat-summary.service';
 import { ReportGeneratorService } from './services/report-generator.service';
 
@@ -29,8 +34,9 @@ import { ReportGeneratorService } from './services/report-generator.service';
  * Endpoints:
  *   1. POST /chatbot/ask (Public) — Citizen hỏi luật (JSON response)
  *   2. POST /chatbot/ask/stream (Public) — Citizen hỏi luật (SSE streaming)
- *   3. POST /chatbot/officer/summarize-group (JWT) — Tóm tắt group chat
- *   4. POST /chatbot/officer/generate-report (JWT) — Phân tích reports
+ *   3. POST /chatbot/auth/ask (JWT) — Chatbot có quyền tóm tắt conversation
+ *   4. POST /chatbot/officer/summarize-group (JWT) — Tóm tắt group chat
+ *   5. POST /chatbot/officer/generate-report (JWT) — Phân tích reports
  *
  * Rate Limiting: 70 requests / 60 giây / IP (áp dụng cho /ask endpoint)
  */
@@ -46,6 +52,7 @@ export class ChatbotController {
 
   constructor(
     private readonly chatbotService: ChatbotService,
+    private readonly authenticatedChatbotService: AuthenticatedChatbotService,
     private readonly groupChatSummaryService: GroupChatSummaryService,
     private readonly reportGeneratorService: ReportGeneratorService,
   ) {}
@@ -124,6 +131,29 @@ export class ChatbotController {
     } finally {
       res.end();
     }
+  }
+
+  // ─── Authenticated Chatbot Endpoint ─────────────────────────────────────────
+
+  @Post('auth/ask')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 70, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Gửi câu hỏi đến AI Chatbot với quyền người dùng',
+    description:
+      'Endpoint yêu cầu JWT. Nếu câu hỏi là yêu cầu tóm tắt hoặc khớp tên group/user trong inbox, ' +
+      'AI sẽ tóm tắt 50 tin nhắn gần nhất mà user được phép xem. ' +
+      'Nếu không phải yêu cầu tóm tắt, endpoint fallback sang chatbot hỏi luật hiện có.',
+  })
+  async authenticatedAsk(
+    @Body() dto: AuthenticatedChatbotAskDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<AuthenticatedChatbotResultDto> {
+    return this.authenticatedChatbotService.ask(
+      user,
+      dto.question,
+      dto.selectedTarget,
+    );
   }
 
   // ─── Officer Endpoints (Require JWT) ────────────────────────────────────────

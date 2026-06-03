@@ -38,6 +38,9 @@ describe('ConversationsGateway', () => {
   const observabilityService = {
     recordRealtimeAck: jest.fn(),
   };
+  const config = {
+    chatCallInviteTtlSeconds: 30,
+  };
   const conversationsService = {
     deleteConversation: jest.fn(),
     resolveConversationAccess: jest.fn(),
@@ -67,6 +70,7 @@ describe('ConversationsGateway', () => {
       conversationsService as never,
       chatCallSessionService as never,
       observabilityService as never,
+      config as never,
     );
   });
 

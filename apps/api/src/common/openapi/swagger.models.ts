@@ -941,6 +941,25 @@ export class MessageReplyReferenceDto {
   sentAt!: string;
 }
 
+export class MessageReceiptDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  userId!: string;
+
+  @ApiProperty({ enum: ['DELIVERED', 'READ'], example: 'READ' })
+  status!: 'DELIVERED' | 'READ';
+
+  @ApiPropertyOptional({ example: '2026-03-25T11:00:00.000Z' })
+  readAt?: string;
+}
+
+export class ReadWatermarkDto {
+  @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
+  userId!: string;
+
+  @ApiPropertyOptional({ example: '2026-03-25T11:00:00.000Z' })
+  lastReadAt?: string;
+}
+
 export class MessageItemDto {
   @ApiProperty({ example: 'group:01JPCY1000AREAGROUP0000000' })
   conversationId!: string;

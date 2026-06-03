@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Bot, Send, X } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -13,18 +13,35 @@ type ChatItem = {
 };
 
 type BotMessageLine = {
-  kind: "paragraph" | "bullet" | "numbered";
+  kind: "heading" | "paragraph" | "bullet" | "numbered";
   text: string;
   marker?: string;
 };
 
-function formatBotMessage(text: string): BotMessageLine[] {
-  const normalized = text
+const slashCommands = [
+  {
+    command: "/summary",
+    label: "Tóm tắt conversation",
+    hint: "Nhập tên group hoặc tên user sau lệnh",
+  },
+];
+
+function normalizeBotText(text: string): string {
+  return text
     .replace(/\r\n/g, "\n")
+    .replace(/\*\*([^*\n]+)\*-\s*/g, "## $1\n")
+    .replace(/\*\*([^*\n]+)\*\*-\s*/g, "## $1\n")
+    .replace(/\*\*([^*\n:]+):\*\*\s*\+\s*/g, "**$1:** ")
+    .replace(/:\s*\+\s*/g, ": ")
+    .replace(/\s+\+\s+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/(\d+)\.\s*\n+\s*/g, "$1. ")
     .replace(/[-*•]\s*\n+\s*/g, "- ")
     .trim();
+}
+
+function formatBotMessage(text: string): BotMessageLine[] {
+  const normalized = normalizeBotText(text);
 
   const rawLines = normalized
     .split("\n")
@@ -39,6 +56,14 @@ function formatBotMessage(text: string): BotMessageLine[] {
       : rawLines;
 
   return lines.map((line) => {
+    const heading = line.match(/^#{1,3}\s+(.*)$/);
+    if (heading) {
+      return {
+        kind: "heading",
+        text: heading[1],
+      } satisfies BotMessageLine;
+    }
+
     const numbered = line.match(/^(\d+)\.\s+(.*)$/);
     if (numbered) {
       return {
@@ -63,6 +88,20 @@ function formatBotMessage(text: string): BotMessageLine[] {
   });
 }
 
+function renderInlineText(text: string): ReactNode {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={`${part}-${index}`} className="font-semibold">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+
+    return part.replace(/\*+/g, "");
+  });
+}
+
 export function ChatbotModal({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<ChatItem[]>([
     {
@@ -72,6 +111,13 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
     },
   ]);
   const [inputText, setInputText] = useState("");
+  const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+  const showSlashSuggestions =
+    inputText.trimStart().startsWith("/") &&
+    !inputText.trimStart().includes(" ");
+  const visibleSlashCommands = showSlashSuggestions ? slashCommands : [];
+  const activeSlashCommand = visibleSlashCommands[activeSlashIndex];
+  const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
@@ -175,6 +221,18 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
     },
   });
 
+  useEffect(() => {
+    if (chatbotMutation.isPending) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatbotMutation.isPending]);
+
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputText.trim() || chatbotMutation.isPending) return;
@@ -185,6 +243,57 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
     ]);
     chatbotMutation.mutate({ question: inputText });
     setInputText("");
+  };
+
+  const handleSelectSlashCommand = (command: string) => {
+    setInputText(`${command} `);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const nextValue = event.target.value;
+    const wasBrowsingSlashCommands = showSlashSuggestions;
+
+    setInputText(nextValue);
+
+    if (!wasBrowsingSlashCommands && nextValue === "/") {
+      setActiveSlashIndex(0);
+    }
+  };
+
+  const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSlashSuggestions || visibleSlashCommands.length === 0) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSlashIndex((current) =>
+        current + 1 >= visibleSlashCommands.length ? 0 : current + 1,
+      );
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSlashIndex((current) =>
+        current - 1 < 0 ? visibleSlashCommands.length - 1 : current - 1,
+      );
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      if (activeSlashCommand) {
+        handleSelectSlashCommand(activeSlashCommand.command);
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setInputText("");
+    }
   };
 
   const handleHeaderPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -277,11 +386,22 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
                     ) : (
                       <div className="space-y-1.5">
                         {formattedBotLines.map((line, index) => {
+                          if (line.kind === "heading") {
+                            return (
+                              <p
+                                key={`${msg.id}-${index}`}
+                                className="leading-relaxed break-words font-semibold text-slate-900 dark:text-slate-50"
+                              >
+                                {renderInlineText(line.text)}
+                              </p>
+                            );
+                          }
+
                           if (line.kind === "numbered") {
                             return (
                               <p key={`${msg.id}-${index}`} className="leading-relaxed break-words flex gap-2">
                                 <span className="font-semibold text-slate-700 dark:text-slate-200">{line.marker}</span>
-                                <span className="whitespace-pre-wrap">{line.text}</span>
+                                <span className="whitespace-pre-wrap">{renderInlineText(line.text)}</span>
                               </p>
                             );
                           }
@@ -290,14 +410,14 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
                             return (
                               <p key={`${msg.id}-${index}`} className="leading-relaxed break-words flex gap-2">
                                 <span className="font-semibold">•</span>
-                                <span className="whitespace-pre-wrap">{line.text}</span>
+                                <span className="whitespace-pre-wrap">{renderInlineText(line.text)}</span>
                               </p>
                             );
                           }
 
                           return (
                             <p key={`${msg.id}-${index}`} className="leading-relaxed whitespace-pre-wrap break-words">
-                              {line.text}
+                              {renderInlineText(line.text)}
                             </p>
                           );
                         })}
@@ -326,11 +446,52 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <form onSubmit={handleSend} className="p-3 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-700 flex gap-2 shrink-0">
+        <form onSubmit={handleSend} className="relative p-3 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-700 flex gap-2 shrink-0">
+          {showSlashSuggestions && (
+            <div
+              className="absolute left-3 right-3 bottom-[64px] rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden"
+              role="listbox"
+              aria-label="Lệnh chatbot"
+            >
+              {visibleSlashCommands.map((item, index) => {
+                const isActive = index === activeSlashIndex;
+                return (
+                  <button
+                    key={item.command}
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    className={`w-full px-3 py-2.5 text-left transition-colors flex items-center justify-between gap-3 ${
+                      isActive
+                        ? "bg-blue-50 dark:bg-slate-700"
+                        : "hover:bg-slate-50 dark:hover:bg-slate-700"
+                    }`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveSlashIndex(index)}
+                    onClick={() => handleSelectSlashCommand(item.command)}
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        {item.command}
+                      </span>
+                      <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
+                        {item.hint}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs text-blue-600 dark:text-blue-300">
+                      {item.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <Input
-            placeholder="Nhắn gì đó..."
+            ref={inputRef}
+            placeholder="Nhắn gì đó hoặc gõ / để dùng lệnh..."
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
             className="flex-1 bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 rounded-full"
             disabled={chatbotMutation.isPending}
           />

@@ -10,6 +10,8 @@ import type {
   ConversationSummary,
   GroupMetadata,
   MessageItem,
+  MessageReceipt,
+  ReadWatermark,
 } from "@urban/shared-types";
 
 type ChatMessageType =
@@ -704,6 +706,51 @@ export async function deleteConversationAlias(
     try {
       return await ApiClient.delete(
         `/conversations/${encodeURIComponent(id)}/aliases/${encodeURIComponent(userId)}`,
+      );
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function getConversationReadWatermarks(
+  conversationId: string,
+): Promise<ReadWatermark[]> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      return await ApiClient.get(
+        `/conversations/${encodeURIComponent(id)}/read-watermarks`,
+      );
+    } catch (error: unknown) {
+      lastError = error;
+      if (getErrorStatus(error) !== 400) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function getMessageReceipts(
+  conversationId: string,
+  messageId: string,
+): Promise<MessageReceipt[]> {
+  const candidates = buildConversationIdCandidates(conversationId);
+  let lastError: unknown;
+
+  for (const id of candidates) {
+    try {
+      return await ApiClient.get(
+        `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/receipts`,
       );
     } catch (error: unknown) {
       lastError = error;

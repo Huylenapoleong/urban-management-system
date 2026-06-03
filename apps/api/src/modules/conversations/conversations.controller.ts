@@ -47,6 +47,8 @@ import {
   ListDirectRequestsQueryDto,
   ListMessagesQueryDto,
   MessageItemDto,
+  MessageReceiptDto,
+  ReadWatermarkDto,
   PinMessageRequestDto,
   RecallMessageRequestDto,
   RecallMessageResultDto,
@@ -772,6 +774,73 @@ export class ConversationsController {
     @Param('messageId') messageId: string,
   ) {
     return this.conversationsService.unpinMessage(
+      user,
+      conversationId,
+      messageId,
+    );
+  }
+
+  @Get(':conversationId/read-watermarks')
+  @ApiOperation({
+    summary: 'Get read watermarks for all participants in a conversation',
+    description:
+      'Returns the lastReadAt timestamp for every participant in the conversation to support read receipt UI.',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'group:01JPCY1000AREAGROUP0000000',
+  })
+  @ApiOkEnvelopeResponse(ReadWatermarkDto, {
+    isArray: true,
+    description: 'Read watermarks of all participants in the conversation.',
+  })
+  @ApiNotFoundExamples('Conversation not found.', [
+    {
+      name: 'notFound',
+      summary: 'Conversation missing',
+      message: 'Cuộc trò chuyện không tồn tại.',
+      path: '/api/conversations/group:invalid/read-watermarks',
+    },
+  ])
+  getReadWatermarks(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.getReadWatermarks(user, conversationId);
+  }
+
+  @Get(':conversationId/messages/:messageId/receipts')
+  @ApiOperation({
+    summary: 'Get exact read and delivery receipts for a specific message',
+    description:
+      'Returns a list of users who have received or read this specific message.',
+  })
+  @ApiParam({
+    name: 'conversationId',
+    example: 'group:01JPCY1000AREAGROUP0000000',
+  })
+  @ApiParam({
+    name: 'messageId',
+    example: '01JPE4MESSAGE0000000000000',
+  })
+  @ApiOkEnvelopeResponse(MessageReceiptDto, {
+    isArray: true,
+    description: 'List of users and their receipt status (DELIVERED or READ).',
+  })
+  @ApiNotFoundExamples('Message or conversation not found.', [
+    {
+      name: 'notFound',
+      summary: 'Message missing',
+      message: 'Tin nhắn không tồn tại.',
+      path: '/api/conversations/group:123/messages/456/receipts',
+    },
+  ])
+  getMessageReceipts(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('conversationId') conversationId: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.conversationsService.getMessageReceipts(
       user,
       conversationId,
       messageId,
