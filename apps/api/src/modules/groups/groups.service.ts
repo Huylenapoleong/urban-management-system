@@ -138,7 +138,7 @@ export class GroupsService {
         isOfficial,
       )
     ) {
-      throw new ForbiddenException('You cannot create this group.');
+      throw new ForbiddenException('Bạn không có quyền tạo nhóm này.');
     }
 
     if (userIds.length > 50) {
@@ -452,7 +452,7 @@ export class GroupsService {
         Boolean(membership && !membership.deletedAt),
       )
     ) {
-      throw new ForbiddenException('You cannot access this group.');
+      throw new ForbiddenException('Bạn không thể truy cập nhóm này.');
     }
 
     return toGroupMetadata(group);
@@ -469,7 +469,9 @@ export class GroupsService {
     const roleInGroup = this.getMembershipRole(membership);
 
     if (!this.authorizationService.canManageGroup(actor, group, roleInGroup)) {
-      throw new ForbiddenException('You cannot update this group.');
+      throw new ForbiddenException(
+        'Bạn không có quyền cập nhật thông tin nhóm.',
+      );
     }
 
     const groupName = optionalString(body, 'groupName', {
@@ -501,7 +503,9 @@ export class GroupsService {
       isRenamingGroup &&
       !this.authorizationService.canRenameGroup(actor, roleInGroup)
     ) {
-      throw new ForbiddenException('Only the owner can rename the group.');
+      throw new ForbiddenException(
+        'Chỉ Trưởng nhóm mới có quyền đổi tên nhóm.',
+      );
     }
 
     if (
@@ -522,7 +526,7 @@ export class GroupsService {
         nextIsOfficial,
       )
     ) {
-      throw new ForbiddenException('Updated group scope is invalid.');
+      throw new ForbiddenException('Phạm vi nhóm không hợp lệ.');
     }
 
     const nextGroup: StoredGroup = {
@@ -569,7 +573,9 @@ export class GroupsService {
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Group changed. Please retry.');
+        throw new ConflictException(
+          'Thông tin nhóm đã thay đổi. Vui lòng thử lại.',
+        );
       }
 
       throw error;
@@ -613,7 +619,7 @@ export class GroupsService {
         this.getMembershipRole(membership),
       )
     ) {
-      throw new ForbiddenException('You cannot delete this group.');
+      throw new ForbiddenException('Bạn không có quyền giải tán nhóm này.');
     }
 
     const deletedAt = nowIso();
@@ -667,7 +673,9 @@ export class GroupsService {
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Group changed. Please retry.');
+        throw new ConflictException(
+          'Thông tin nhóm đã thay đổi. Vui lòng thử lại.',
+        );
       }
 
       throw error;
@@ -698,11 +706,11 @@ export class GroupsService {
     }
 
     if (activeBan) {
-      throw new ForbiddenException('You are banned from this group.');
+      throw new ForbiddenException('Bạn đã bị chặn khỏi nhóm này.');
     }
 
     if (!this.authorizationService.canJoinGroup(actor, group)) {
-      throw new ForbiddenException('You cannot join this group.');
+      throw new ForbiddenException('Bạn không thể tham gia nhóm này.');
     }
 
     const now = nowIso();
@@ -774,7 +782,7 @@ export class GroupsService {
     const membership = await this.getMembership(groupId, actor.id);
 
     if (!membership || membership.deletedAt) {
-      throw new NotFoundException('Membership not found.');
+      throw new NotFoundException('Thành viên không tồn tại hoặc đã rời nhóm.');
     }
 
     if (this.getMembershipRole(membership) === 'OWNER') {
@@ -792,7 +800,9 @@ export class GroupsService {
       );
 
       if (!successorMembership || successorMembership.deletedAt) {
-        throw new NotFoundException('Membership not found.');
+        throw new NotFoundException(
+          'Thành viên không tồn tại hoặc đã rời nhóm.',
+        );
       }
 
       const occurredAt = nowIso();
@@ -866,7 +876,9 @@ export class GroupsService {
         ]);
       } catch (error) {
         if (this.isConditionalWriteConflict(error)) {
-          throw new ConflictException('Group ownership changed. Please retry.');
+          throw new ConflictException(
+            'Quyền Trưởng nhóm đã thay đổi. Vui lòng thử lại.',
+          );
         }
 
         throw error;
@@ -953,7 +965,9 @@ export class GroupsService {
         this.getMembershipRole(actorMembership),
       )
     ) {
-      throw new ForbiddenException('You cannot transfer group ownership.');
+      throw new ForbiddenException(
+        'Bạn không thể chuyển nhượng quyền Trưởng nhóm.',
+      );
     }
 
     const currentOwnerMembership = await this.getOwnerMembershipOrThrow(
@@ -970,7 +984,7 @@ export class GroupsService {
     const targetMembership = await this.getMembership(groupId, targetUserId);
 
     if (!targetMembership || targetMembership.deletedAt) {
-      throw new NotFoundException('Membership not found.');
+      throw new NotFoundException('Thành viên không tồn tại hoặc đã rời nhóm.');
     }
 
     const targetUser =
@@ -1049,7 +1063,9 @@ export class GroupsService {
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Group ownership changed. Please retry.');
+        throw new ConflictException(
+          'Quyền Trưởng nhóm đã thay đổi. Vui lòng thử lại.',
+        );
       }
 
       throw error;
@@ -1084,7 +1100,9 @@ export class GroupsService {
         Boolean(actorMembership && !actorMembership.deletedAt),
       )
     ) {
-      throw new ForbiddenException('You cannot access members of this group.');
+      throw new ForbiddenException(
+        'Bạn không thể xem danh sách thành viên nhóm.',
+      );
     }
 
     return (await this.queryGroupMemberships(groupId))
@@ -1132,7 +1150,7 @@ export class GroupsService {
     );
 
     if (userId === actor.id) {
-      throw new BadRequestException('You cannot ban yourself from the group.');
+      throw new BadRequestException('Bạn không thể tự chặn chính mình.');
     }
 
     const targetUser = await this.usersService.getByIdOrThrow(userId);
@@ -1148,7 +1166,7 @@ export class GroupsService {
     const targetRoleInGroup = this.getMembershipRole(targetMembership);
 
     if (targetRoleInGroup === 'OWNER') {
-      throw new ForbiddenException('The group owner cannot be banned.');
+      throw new ForbiddenException('Không thể chặn Trưởng nhóm.');
     }
 
     if (
@@ -1157,7 +1175,9 @@ export class GroupsService {
       targetRoleInGroup &&
       targetRoleInGroup !== 'MEMBER'
     ) {
-      throw new ForbiddenException('Deputies can only ban regular members.');
+      throw new ForbiddenException(
+        'Phó nhóm chỉ có quyền chặn thành viên thường.',
+      );
     }
 
     const occurredAt = nowIso();
@@ -1244,7 +1264,9 @@ export class GroupsService {
       await this.repository.transactWrite(transactionItems);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Group ban changed. Please retry.');
+        throw new ConflictException(
+          'Danh sách chặn đã thay đổi. Vui lòng thử lại.',
+        );
       }
 
       throw error;
@@ -1273,7 +1295,7 @@ export class GroupsService {
     const targetUserName = await this.resolveUserDisplayName(userId);
 
     if (!existingBan) {
-      throw new NotFoundException('Group ban not found.');
+      throw new NotFoundException('Người dùng không nằm trong danh sách chặn.');
     }
 
     const auditRecord = this.auditTrailService.buildGroupEvent({
@@ -1315,8 +1337,12 @@ export class GroupsService {
     actor: AuthenticatedUser,
     groupId: string,
   ): Promise<GroupInviteLink[]> {
-    await this.getManageGroupContext(actor, groupId);
-
+    const actorMembership = await this.getMembership(groupId, actor.id);
+    if (!actorMembership || actorMembership.deletedAt) {
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý thành viên nhóm này.',
+      );
+    }
     return (await this.queryGroupInviteLinks(groupId)).map(toGroupInviteLink);
   }
 
@@ -1333,7 +1359,12 @@ export class GroupsService {
       }),
     );
     const maxUses = this.parseInviteMaxUses(body.maxUses);
-    await this.getManageGroupContext(actor, groupId);
+    const actorMembership = await this.getMembership(groupId, actor.id);
+    if (!actorMembership || actorMembership.deletedAt) {
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý thành viên nhóm này.',
+      );
+    }
 
     const occurredAt = nowIso();
     const inviteId = createUlid();
@@ -1411,7 +1442,7 @@ export class GroupsService {
     const inviteLink = await this.getInviteLink(groupId, inviteId);
 
     if (!inviteLink) {
-      throw new NotFoundException('Invite link not found.');
+      throw new NotFoundException('Không tìm thấy link mời.');
     }
 
     if (inviteLink.disabledAt) {
@@ -1465,7 +1496,7 @@ export class GroupsService {
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Invite link changed. Please retry.');
+        throw new ConflictException('Link mời đã thay đổi. Vui lòng thử lại.');
       }
 
       throw error;
@@ -1481,14 +1512,14 @@ export class GroupsService {
     const inviteLookup = await this.getInviteCodeLookup(code);
 
     if (!inviteLookup) {
-      throw new NotFoundException('Invite link not found.');
+      throw new NotFoundException('Không tìm thấy link mời.');
     }
 
     const group = await this.getGroupOrThrow(inviteLookup.groupId);
     const activeBan = await this.getActiveBan(group.groupId, actor.id);
 
     if (activeBan) {
-      throw new ForbiddenException('You are banned from this group.');
+      throw new ForbiddenException('Bạn đã bị chặn khỏi nhóm này.');
     }
 
     const inviteLink = await this.getInviteLink(
@@ -1497,22 +1528,22 @@ export class GroupsService {
     );
 
     if (!inviteLink) {
-      throw new NotFoundException('Invite link not found.');
+      throw new NotFoundException('Không tìm thấy link mời.');
     }
 
     if (inviteLink.disabledAt) {
-      throw new ForbiddenException('Invite link is no longer active.');
+      throw new ForbiddenException('Link mời không còn hiệu lực.');
     }
 
     if (inviteLink.expiresAt && inviteLink.expiresAt <= nowIso()) {
-      throw new ForbiddenException('Invite link has expired.');
+      throw new ForbiddenException('Link mời đã hết hạn.');
     }
 
     if (
       inviteLink.maxUses !== null &&
       inviteLink.usedCount >= inviteLink.maxUses
     ) {
-      throw new ForbiddenException('Invite link has reached its usage limit.');
+      throw new ForbiddenException('Link mời đã đạt giới hạn số lần sử dụng.');
     }
 
     const existingMembership = await this.getMembership(
@@ -1606,7 +1637,7 @@ export class GroupsService {
       ]);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Invite link changed. Please retry.');
+        throw new ConflictException('Link mời đã thay đổi. Vui lòng thử lại.');
       }
 
       throw error;
@@ -1615,7 +1646,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       group.groupId,
-      `${actor.fullName} joined the group via invite link.`,
+      `${actor.fullName} đã tham gia nhóm bằng link mời.`,
     );
 
     return toMembership(membership);
@@ -1635,10 +1666,27 @@ export class GroupsService {
       normalizeGroupMemberRole(
         optionalEnum(body, 'roleInGroup', GROUP_MEMBER_ROLE_INPUTS),
       ) ?? undefined;
-    const { group, actorMembership } = await this.getManageGroupContext(
-      actor,
-      groupId,
-    );
+    const group = await this.getGroupOrThrow(groupId);
+    const actorMembership = await this.getMembership(groupId, actor.id);
+    if (!actorMembership || actorMembership.deletedAt) {
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý thành viên nhóm này.',
+      );
+    }
+
+    if (
+      roleInGroup !== undefined &&
+      roleInGroup !== 'MEMBER' &&
+      !this.authorizationService.canManageGroup(
+        actor,
+        group,
+        actorMembership.role,
+      )
+    ) {
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý thành viên nhóm này.',
+      );
+    }
 
     return this.addMemberInternal(
       actor,
@@ -1702,10 +1750,34 @@ export class GroupsService {
       normalizeGroupMemberRole(
         optionalEnum(body, 'roleInGroup', GROUP_MEMBER_ROLE_INPUTS),
       ) ?? undefined;
-    const { group, actorMembership } = await this.getManageGroupContext(
-      actor,
-      groupId,
-    );
+    const group = await this.getGroupOrThrow(groupId);
+    const actorMembership = await this.getMembership(groupId, actor.id);
+    if (!actorMembership || actorMembership.deletedAt) {
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý thành viên nhóm này.',
+      );
+    }
+
+    const requiresManageRights =
+      action === 'update' ||
+      action === 'remove' ||
+      action === 'transfer' ||
+      (action === 'add' &&
+        roleInGroup !== undefined &&
+        roleInGroup !== 'MEMBER');
+
+    if (
+      requiresManageRights &&
+      !this.authorizationService.canManageGroup(
+        actor,
+        group,
+        actorMembership.role,
+      )
+    ) {
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý thành viên nhóm này.',
+      );
+    }
 
     if (action === 'add') {
       return this.addMemberInternal(
@@ -1731,7 +1803,7 @@ export class GroupsService {
       return this.removeMemberInternal(actor, group, actorMembership, userId);
     }
 
-    throw new BadRequestException('Unsupported action.');
+    throw new BadRequestException('Thao tác không hợp lệ.');
   }
 
   private async getManageGroupContext(
@@ -1751,7 +1823,7 @@ export class GroupsService {
         this.getMembershipRole(actorMembership),
       )
     ) {
-      throw new ForbiddenException('You cannot manage members of this group.');
+      throw new ForbiddenException('Bạn không có quyền quản lý thành viên.');
     }
 
     return { group, actorMembership };
@@ -1769,7 +1841,7 @@ export class GroupsService {
     const targetUser = await this.usersService.getActiveByIdOrThrow(userId);
 
     if (activeBan) {
-      throw new ForbiddenException('This user is banned from the group.');
+      throw new ForbiddenException('Người dùng này đã bị chặn khỏi nhóm.');
     }
 
     if (
@@ -1777,19 +1849,15 @@ export class GroupsService {
       userId !== actor.id &&
       !(await this.usersService.areFriends(actor.id, userId))
     ) {
-      throw new ForbiddenException(
-        'Citizens can only add their friends to groups.',
-      );
+      throw new ForbiddenException('Cư dân chỉ có thể thêm bạn bè vào nhóm.');
     }
 
     if (existingMembership && !existingMembership.deletedAt) {
-      throw new BadRequestException('Membership already exists.');
+      throw new BadRequestException('Người dùng này đã ở trong nhóm.');
     }
 
     if (roleInGroup === 'OWNER') {
-      throw new ForbiddenException(
-        'Owner role cannot be assigned via member management.',
-      );
+      throw new ForbiddenException('Không thể bổ nhiệm Trưởng nhóm tại đây.');
     }
 
     const now = nowIso();
@@ -1845,7 +1913,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       group.groupId,
-      `${actor.fullName} added ${this.getUserDisplayName(targetUser, userId)} to the group.`,
+      `${actor.fullName} đã thêm ${this.getUserDisplayName(targetUser, userId)} vào nhóm.`,
     );
 
     return toMembership(membership);
@@ -1862,24 +1930,20 @@ export class GroupsService {
 
     const targetUser = await this.usersService.getActiveByIdOrThrow(userId);
     if (!existingMembership || existingMembership.deletedAt) {
-      throw new NotFoundException('Membership not found.');
+      throw new NotFoundException('Thành viên không tồn tại hoặc đã rời nhóm.');
     }
 
     if (!roleInGroup) {
-      throw new BadRequestException(
-        'roleInGroup is required for update action.',
-      );
+      throw new BadRequestException('Vai trò không được để trống.');
     }
 
     if (roleInGroup === 'OWNER') {
-      throw new ForbiddenException(
-        'Owner role cannot be assigned via member management.',
-      );
+      throw new ForbiddenException('Không thể bổ nhiệm Trưởng nhóm tại đây.');
     }
 
     if (existingMembership.roleInGroup === 'OWNER') {
       throw new BadRequestException(
-        'Owner role cannot be changed via member management.',
+        'Không thể tước quyền Trưởng nhóm tại đây.',
       );
     }
 
@@ -1914,7 +1978,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       group.groupId,
-      `${actor.fullName} changed ${this.getUserDisplayName(targetUser, userId)}'s role to ${roleInGroup}.`,
+      `${actor.fullName} đã bổ nhiệm ${this.getUserDisplayName(targetUser, userId)} làm ${this.translateRole(roleInGroup)}.`,
     );
 
     return toMembership(nextMembership);
@@ -1930,11 +1994,13 @@ export class GroupsService {
 
     const targetUser = await this.usersService.getByIdOrThrow(userId);
     if (!existingMembership || existingMembership.deletedAt) {
-      throw new NotFoundException('Membership not found.');
+      throw new NotFoundException('Thành viên không tồn tại hoặc đã rời nhóm.');
     }
 
     if (existingMembership.roleInGroup === 'OWNER') {
-      throw new BadRequestException('Owner cannot be removed directly.');
+      throw new BadRequestException(
+        'Vui lòng chuyển quyền Trưởng nhóm trước khi rời đi hoặc xóa.',
+      );
     }
 
     const nextMembership: StoredMembership = {
@@ -1977,7 +2043,7 @@ export class GroupsService {
     await this.emitGroupLifecycleSystemMessage(
       actor,
       group.groupId,
-      `${actor.fullName} removed ${this.getUserDisplayName(targetUser, userId)} from the group.`,
+      `${actor.fullName} đã mời ${this.getUserDisplayName(targetUser, userId)} ra khỏi nhóm.`,
     );
 
     return toMembership(nextMembership);
@@ -2110,7 +2176,9 @@ export class GroupsService {
       await this.repository.transactWrite(transactionItems);
     } catch (error) {
       if (this.isConditionalWriteConflict(error)) {
-        throw new ConflictException('Group membership changed. Please retry.');
+        throw new ConflictException(
+          'Danh sách thành viên đã thay đổi. Vui lòng thử lại.',
+        );
       }
 
       throw error;
@@ -2184,7 +2252,7 @@ export class GroupsService {
     );
 
     if (!group || group.deletedAt) {
-      throw new NotFoundException('Group not found.');
+      throw new NotFoundException('Không tìm thấy nhóm.');
     }
 
     return group;
@@ -2246,7 +2314,7 @@ export class GroupsService {
     );
 
     if (!ownerMembership) {
-      throw new NotFoundException('Membership not found.');
+      throw new NotFoundException('Thành viên không tồn tại hoặc đã rời nhóm.');
     }
 
     return ownerMembership;
@@ -2328,13 +2396,15 @@ export class GroupsService {
     const parsed = Date.parse(expiresAt);
 
     if (!Number.isFinite(parsed)) {
-      throw new BadRequestException('expiresAt must be a valid ISO timestamp.');
+      throw new BadRequestException('expiresAt sai định dạng thời gian.');
     }
 
     const normalized = new Date(parsed).toISOString();
 
     if (normalized <= nowIso()) {
-      throw new BadRequestException('expiresAt must be in the future.');
+      throw new BadRequestException(
+        'expiresAt phải là thời gian trong tương lai.',
+      );
     }
 
     return normalized;
@@ -2348,13 +2418,15 @@ export class GroupsService {
     const parsed = Date.parse(expiresAt);
 
     if (!Number.isFinite(parsed)) {
-      throw new BadRequestException('expiresAt must be a valid ISO timestamp.');
+      throw new BadRequestException('expiresAt sai định dạng thời gian.');
     }
 
     const normalized = new Date(parsed).toISOString();
 
     if (normalized <= nowIso()) {
-      throw new BadRequestException('expiresAt must be in the future.');
+      throw new BadRequestException(
+        'expiresAt phải là thời gian trong tương lai.',
+      );
     }
 
     return normalized;
@@ -2372,7 +2444,7 @@ export class GroupsService {
       maxUses > 1000
     ) {
       throw new BadRequestException(
-        'maxUses must be an integer between 1 and 1000.',
+        'Giới hạn sử dụng (maxUses) phải là số nguyên từ 1 đến 1000.',
       );
     }
 
