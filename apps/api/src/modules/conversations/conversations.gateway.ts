@@ -28,6 +28,8 @@ import type {
   ChatMessageAccepted,
   ChatMessageDeletedAccepted,
   ChatMessageDeletePayload,
+  ChatMessageDeliveredAccepted,
+  ChatMessageDeliveredPayload,
   ChatMessageRecallPayload,
   ChatMessageSendPayload,
   ChatMessageUpdatedAccepted,
@@ -413,6 +415,35 @@ export class ConversationsGateway
       },
       'CHAT_MESSAGE_DELETE_FAILED',
       CHAT_SOCKET_EVENTS.MESSAGE_DELETE,
+    );
+  }
+
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED)
+  async markMessageDelivered(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: ChatMessageDeliveredPayload,
+  ): Promise<ChatSocketAck<ChatMessageDeliveredAccepted>> {
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const body = ensureObject(payload as unknown);
+        const conversationId = requiredString(body, 'conversationId', {
+          minLength: 1,
+          maxLength: 200,
+        });
+        const messageId = requiredString(body, 'messageId', {
+          minLength: 5,
+          maxLength: 50,
+        });
+
+        return this.conversationsService.markMessageDelivered(
+          user,
+          conversationId,
+          messageId,
+        );
+      },
+      'CHAT_MESSAGE_DELIVERED_FAILED',
+      CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED,
     );
   }
 

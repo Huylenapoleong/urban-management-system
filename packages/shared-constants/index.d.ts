@@ -109,6 +109,7 @@ export const CHAT_SOCKET_EVENTS: {
   readonly MESSAGE_UPDATE: "message.update";
   readonly MESSAGE_DELETE: "message.delete";
   readonly MESSAGE_RECALL: "message.recall";
+  readonly MESSAGE_DELIVERED: "message.delivered";
   readonly MESSAGE_CREATED: "message.created";
   readonly MESSAGE_UPDATED: "message.updated";
   readonly MESSAGE_DELETED: "message.deleted";

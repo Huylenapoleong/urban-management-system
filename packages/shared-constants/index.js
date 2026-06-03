@@ -88,6 +88,7 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
   MESSAGE_UPDATE: "message.update",
   MESSAGE_DELETE: "message.delete",
   MESSAGE_RECALL: "message.recall",
+  MESSAGE_DELIVERED: "message.delivered",
   MESSAGE_CREATED: "message.created",
   MESSAGE_UPDATED: "message.updated",
   MESSAGE_DELETED: "message.deleted",

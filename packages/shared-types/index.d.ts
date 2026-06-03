@@ -269,6 +269,7 @@ export interface ReadWatermark {
 export interface MessageReceipt {
   userId: string;
   status: "DELIVERED" | "READ";
+  deliveredAt?: string;
   readAt?: string;
 }
 
@@ -531,6 +532,10 @@ export interface ChatMessageDeletePayload extends ChatConversationCommandPayload
   messageId: string;
 }
 
+export interface ChatMessageDeliveredPayload extends ChatConversationCommandPayload {
+  messageId: string;
+}
+
 export interface ChatMessageRecallPayload extends ChatConversationCommandPayload {
   messageId: string;
   scope: MessageRecallScope;
@@ -575,6 +580,13 @@ export interface ChatMessageDeletedAccepted {
   conversationKey: string;
   messageId: string;
   deletedAt: string;
+}
+
+export interface ChatMessageDeliveredAccepted {
+  conversationId: string;
+  conversationKey: string;
+  messageId: string;
+  deliveredAt: string;
 }
 
 export interface RecallMessageResult {

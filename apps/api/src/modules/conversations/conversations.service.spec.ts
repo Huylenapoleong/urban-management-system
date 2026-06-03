@@ -436,6 +436,266 @@ describe('ConversationsService', () => {
       }),
     );
   });
+
+  it('only lists explicit delivery receipts before a message is read', async () => {
+    const sentMessage: StoredMessage = {
+      ...latestMessage,
+      messageId: '01MESSAGE0000000000000002',
+      SK: 'MSG#2026-03-18T10:10:00.000Z#01MESSAGE0000000000000002',
+      senderId: actor.id,
+      senderName: actor.fullName,
+      sentAt: '2026-03-18T10:10:00.000Z',
+      updatedAt: '2026-03-18T10:10:00.000Z',
+    };
+    const senderSummary: StoredConversation = {
+      ...actorSummary,
+      lastReadAt: sentMessage.sentAt,
+      updatedAt: sentMessage.sentAt,
+    };
+    const recipientSummary: StoredConversation = {
+      ...otherSummary,
+      lastReadAt: null,
+      unreadCount: 1,
+      updatedAt: sentMessage.sentAt,
+    };
+    const deliveryReceipt = {
+      PK: makeConversationPk(conversationKey),
+      SK: `MSGDLV#${sentMessage.messageId}#${otherUser.userId}`,
+      entityType: 'MESSAGE_DELIVERY_RECEIPT',
+      conversationId: conversationKey,
+      messageId: sentMessage.messageId,
+      userId: otherUser.userId,
+      deliveredAt: '2026-03-18T10:10:01.000Z',
+    };
+    let includeDeliveryReceipt = false;
+
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === sentMessage.PK &&
+          sk === `MSGREF#${sentMessage.messageId}`
+        ) {
+          return {
+            PK: sentMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: sentMessage.messageId,
+            messageSk: sentMessage.SK,
+            senderId: sentMessage.senderId,
+            sentAt: sentMessage.sentAt,
+            updatedAt: sentMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === sentMessage.PK &&
+          sk === sentMessage.SK
+        ) {
+          return sentMessage;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === senderSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [senderSummary];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === recipientSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [recipientSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === sentMessage.PK &&
+          options?.beginsWith === `MSGDLV#${sentMessage.messageId}#`
+        ) {
+          return includeDeliveryReceipt ? [deliveryReceipt] : [];
+        }
+
+        return [];
+      },
+    );
+
+    await expect(
+      service.getMessageReceipts(
+        actor,
+        `dm:${otherUser.userId}`,
+        sentMessage.messageId,
+      ),
+    ).resolves.toEqual([]);
+
+    includeDeliveryReceipt = true;
+
+    await expect(
+      service.getMessageReceipts(
+        actor,
+        `dm:${otherUser.userId}`,
+        sentMessage.messageId,
+      ),
+    ).resolves.toEqual([
+      {
+        userId: otherUser.userId,
+        status: 'DELIVERED',
+        deliveredAt: deliveryReceipt.deliveredAt,
+      },
+    ]);
+  });
+
+  it('stores delivered ack and emits updated sender delivery state', async () => {
+    const sentMessage: StoredMessage = {
+      ...latestMessage,
+      messageId: '01MESSAGE0000000000000003',
+      SK: 'MSG#2026-03-18T10:11:00.000Z#01MESSAGE0000000000000003',
+      senderId: actor.id,
+      senderName: actor.fullName,
+      sentAt: '2026-03-18T10:11:00.000Z',
+      updatedAt: '2026-03-18T10:11:00.000Z',
+    };
+    const recipientActor = {
+      id: otherUser.userId,
+      role: otherUser.role,
+      locationCode: otherUser.locationCode,
+      fullName: otherUser.fullName,
+      status: otherUser.status,
+      createdAt: otherUser.createdAt,
+      updatedAt: otherUser.updatedAt,
+    };
+    const senderSummary: StoredConversation = {
+      ...actorSummary,
+      lastReadAt: sentMessage.sentAt,
+      updatedAt: sentMessage.sentAt,
+    };
+    const recipientSummary: StoredConversation = {
+      ...otherSummary,
+      lastReadAt: null,
+      unreadCount: 1,
+      updatedAt: sentMessage.sentAt,
+    };
+    const deliveryReceipt = {
+      PK: makeConversationPk(conversationKey),
+      SK: `MSGDLV#${sentMessage.messageId}#${otherUser.userId}`,
+      entityType: 'MESSAGE_DELIVERY_RECEIPT',
+      conversationId: conversationKey,
+      messageId: sentMessage.messageId,
+      userId: otherUser.userId,
+      deliveredAt: '2026-03-18T10:11:01.000Z',
+    };
+
+    repository.get.mockImplementation(
+      (tableName: string, pk: string, sk: string) => {
+        if (
+          tableName === 'Messages' &&
+          pk === sentMessage.PK &&
+          sk === `MSGREF#${sentMessage.messageId}`
+        ) {
+          return {
+            PK: sentMessage.PK,
+            SK: sk,
+            entityType: 'MESSAGE_REF',
+            conversationId: conversationKey,
+            messageId: sentMessage.messageId,
+            messageSk: sentMessage.SK,
+            senderId: sentMessage.senderId,
+            sentAt: sentMessage.sentAt,
+            updatedAt: sentMessage.updatedAt,
+          };
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === sentMessage.PK &&
+          sk === sentMessage.SK
+        ) {
+          return sentMessage;
+        }
+
+        return undefined;
+      },
+    );
+    repository.queryByPk.mockImplementation(
+      (tableName: string, pk: string, options?: { beginsWith?: string }) => {
+        if (
+          tableName === 'Conversations' &&
+          pk === senderSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [senderSummary];
+        }
+
+        if (
+          tableName === 'Conversations' &&
+          pk === recipientSummary.PK &&
+          options?.beginsWith === `CONV#${conversationKey}#LAST#`
+        ) {
+          return [recipientSummary];
+        }
+
+        if (
+          tableName === 'Messages' &&
+          pk === sentMessage.PK &&
+          options?.beginsWith === 'MSGDLV#'
+        ) {
+          return [deliveryReceipt];
+        }
+
+        return [];
+      },
+    );
+
+    const result = await service.markMessageDelivered(
+      recipientActor,
+      `dm:${actor.id}`,
+      sentMessage.messageId,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        conversationId: `dm:${actor.id}`,
+        conversationKey,
+        messageId: sentMessage.messageId,
+        deliveredAt: expect.any(String),
+      }),
+    );
+    expect(repository.transactPut).toHaveBeenCalledWith([
+      expect.objectContaining({
+        tableName: 'Messages',
+        item: expect.objectContaining({
+          entityType: 'MESSAGE_DELIVERY_RECEIPT',
+          conversationId: conversationKey,
+          messageId: sentMessage.messageId,
+          userId: otherUser.userId,
+        }),
+      }),
+    ]);
+    expect(chatRealtimeService.emitToUser).toHaveBeenCalledWith(
+      actor.id,
+      'message.updated',
+      expect.objectContaining({
+        conversationId: `dm:${otherUser.userId}`,
+        updatedByUserId: otherUser.userId,
+        message: expect.objectContaining({
+          id: sentMessage.messageId,
+          deliveryState: 'DELIVERED',
+          deliveredCount: 1,
+          recipientCount: 1,
+        }),
+      }),
+    );
+  });
   it('deletes a stale group inbox summary without requiring current group access', async () => {
     const groupConversationKey = 'GRP#group-1';
     const groupSummary: StoredConversation = {
