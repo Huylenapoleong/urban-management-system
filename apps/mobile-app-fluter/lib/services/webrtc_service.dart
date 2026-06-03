@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "package:flutter_webrtc/flutter_webrtc.dart";
 import "package:permission_handler/permission_handler.dart";
 import "package:flutter_dotenv/flutter_dotenv.dart";
+import "call_sound_service.dart";
 import "socket_service.dart";
 
 enum CallState { idle, ringing, connecting, connected }
@@ -70,6 +71,8 @@ class WebRTCService {
   WebRTCService({required this.socketService}) {
     _listenToSocket();
   }
+
+  final _sound = CallSoundService();
 
   int? _extractStatusCode(Object? error) {
     if (error is Map && error["statusCode"] != null) {
@@ -225,8 +228,9 @@ class WebRTCService {
       _startHeartbeat();
       _startSpeakingDetection();
     } else {
-      // Cuộc gọi 1-1: chờ phản hồi nhấc máy
+      // Cuộc gọi 1-1: chờ phản hồi nhấc máy → phát nhạc chuông chờ
       _callStateNotifier.value = CallState.connecting;
+      _sound.playRingtone();
 
       // Hủy cuộc gọi tự động sau 45s nếu không nhấc máy
       _callingTimeoutTimer?.cancel();
@@ -269,6 +273,7 @@ class WebRTCService {
 
     socketService.emitCallAccept(_currentConversationId!);
 
+    _sound.stopRingtone(); // Dừng nhạc khi nhấc máy
     _callStateNotifier.value = CallState.connected;
     _startHeartbeat();
     _startSpeakingDetection();
@@ -288,6 +293,7 @@ class WebRTCService {
   }
 
   void rejectCall() {
+    _sound.stopRingtone(); // Dừng nhạc khi từ chối
     if (_currentConversationId != null) {
       socketService.emitCallReject(_currentConversationId!);
     }
@@ -296,6 +302,8 @@ class WebRTCService {
 
   void stopCall({bool emitSignal = true}) {
     if (_callStateNotifier.value == CallState.idle) return;
+
+    _sound.stopRingtone(); // Đảm bảo dừng nhạc khi kết thúc cuộc gọi
 
     if (emitSignal && _currentConversationId != null) {
       socketService.emitCallEnd(_currentConversationId!);
@@ -522,12 +530,19 @@ class WebRTCService {
 
   void _handleIncomingCall(Map<String, dynamic> data) {
     final callerId = data['callerId']?.toString();
-    if (callerId == _localUserId?.toString()) return;
+    debugPrint("[WebRTCService] Nhan tin hieu cuoc goi den (onCallInit/onCallInvite): $data");
+    debugPrint("[WebRTCService] callerId: $callerId, localUserId: $_localUserId");
+    if (callerId == _localUserId?.toString()) {
+      debugPrint("[WebRTCService] Bo qua cuoc goi vi callerId trung voi localUserId (tu goi chinh minh).");
+      return;
+    }
 
     final incomingConvId = data['conversationId']?.toString();
     if (_callStateNotifier.value != CallState.idle) {
+      debugPrint("[WebRTCService] Trang thai cuoc goi dang ban: ${_callStateNotifier.value}");
       if (_normalizeConversationId(_currentConversationId) !=
           _normalizeConversationId(incomingConvId)) {
+        debugPrint("[WebRTCService] Bo qua cuoc goi vi conversationId khac cuoc goi hien tai.");
         return;
       }
     }

@@ -196,42 +196,54 @@ class SocketService {
     });
 
     socket.on("call.init", (data) {
+      _logger.d("Socket event call.init: $data");
       if (data is Map) _callInitController.add(data.cast<String, dynamic>());
     });
 
     socket.on("call.invite", (data) {
+      _logger.d("Socket event call.invite: $data");
       if (data is Map) _callInviteController.add(data.cast<String, dynamic>());
     });
 
     socket.on("call.accept", (data) {
+      _logger.d("Socket event call.accept: $data");
       if (data is Map) _callAcceptController.add(data.cast<String, dynamic>());
     });
 
     socket.on("call.reject", (data) {
+      _logger.d("Socket event call.reject: $data");
       if (data is Map) _callRejectController.add(data.cast<String, dynamic>());
     });
 
     socket.on("call.end", (data) {
+      _logger.d("Socket event call.end: $data");
       if (data is Map) _callEndController.add(data.cast<String, dynamic>());
     });
 
     socket.on("webrtc.offer", (data) {
+      _logger.d("Socket event webrtc.offer: $data");
       if (data is Map) _webrtcOfferController.add(data.cast<String, dynamic>());
     });
 
     socket.on("webrtc.answer", (data) {
-      if (data is Map)
+      _logger.d("Socket event webrtc.answer: $data");
+      if (data is Map) {
         _webrtcAnswerController.add(data.cast<String, dynamic>());
+      }
     });
 
     socket.on("webrtc.ice-candidate", (data) {
-      if (data is Map)
+      _logger.d("Socket event webrtc.ice-candidate: $data");
+      if (data is Map) {
         _webrtcCandidateController.add(data.cast<String, dynamic>());
+      }
     });
 
     socket.on("call.heartbeat", (data) {
-      if (data is Map)
+      _logger.d("Socket event call.heartbeat: $data");
+      if (data is Map) {
         _callHeartbeatController.add(data.cast<String, dynamic>());
+      }
     });
   }
 
