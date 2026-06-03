@@ -164,6 +164,7 @@ export function MessageInfoModal({
                     key={receipt.userId}
                     userId={receipt.userId}
                     status={receipt.status}
+                    deliveredAt={receipt.deliveredAt}
                     readAt={receipt.readAt}
                     profile={getMemberProfile(receipt.userId)}
                   />
@@ -178,7 +179,7 @@ export function MessageInfoModal({
 }
 
 // Sub-component to fetch/display user profile
-function UserReceiptItem({ userId, status, readAt, profile }: { userId: string, status: string, readAt?: string, profile: { displayName: string; avatarUrl?: string } | null }) {
+function UserReceiptItem({ userId, status, deliveredAt, readAt, profile }: { userId: string, status: string, deliveredAt?: string, readAt?: string, profile: { displayName: string; avatarUrl?: string } | null }) {
   const displayName = profile?.displayName || `User ${userId.substring(userId.length - 4)}`;
   const avatarUrl = profile?.avatarUrl;
   const fallbackInitial = displayName.charAt(0).toUpperCase() || "U";
@@ -209,7 +210,9 @@ function UserReceiptItem({ userId, status, readAt, profile }: { userId: string, 
           ) : (
             <>
               <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-slate-400" />
-              Đã nhận
+              {deliveredAt
+                ? format(new Date(deliveredAt), "HH:mm dd/MM")
+                : "Đã nhận"}
             </>
           )}
         </p>

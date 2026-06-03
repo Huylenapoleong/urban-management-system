@@ -948,6 +948,9 @@ export class MessageReceiptDto {
   @ApiProperty({ enum: ['DELIVERED', 'READ'], example: 'READ' })
   status!: 'DELIVERED' | 'READ';
 
+  @ApiPropertyOptional({ example: '2026-03-25T10:59:30.000Z' })
+  deliveredAt?: string;
+
   @ApiPropertyOptional({ example: '2026-03-25T11:00:00.000Z' })
   readAt?: string;
 }

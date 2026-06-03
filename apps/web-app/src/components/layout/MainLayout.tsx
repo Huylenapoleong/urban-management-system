@@ -48,6 +48,7 @@ type WindowWithLegacyAudioContext = Window & {
 
 type ChatNotificationMessage = {
   conversationId: string;
+  id?: string;
   senderId: string;
   senderName?: string;
   type?: string;
@@ -414,6 +415,15 @@ export function MainLayout() {
       if (!msg || !msg.conversationId || !msg.senderId) return;
 
       if (user?.sub && msg.senderId !== user.sub) {
+        if (msg.id) {
+          void socketClient
+            .safeEmitValidated(CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED, {
+              conversationId: msg.conversationId,
+              messageId: msg.id,
+            })
+            .catch(() => {});
+        }
+
         let isMuted = false;
         try {
           const rawMuted = localStorage.getItem("web-app-muted-conversations");
