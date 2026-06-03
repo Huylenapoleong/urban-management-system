@@ -633,18 +633,34 @@ export function ChatPage() {
         const payload = args[0];
         if (
           !isRecord(payload) ||
-          typeof payload.conversationId !== "string" ||
-          typeof payload.userId !== "string" ||
-          typeof payload.lastReadAt !== "string"
+          typeof payload.conversationId !== "string"
         ) {
           return;
         }
 
         const conversationId = payload.conversationId;
-        const userId = payload.userId;
-        const lastReadAt = payload.lastReadAt;
+        const conversationKey =
+          typeof payload.conversationKey === "string"
+            ? payload.conversationKey
+            : undefined;
+        const userId =
+          typeof payload.readByUserId === "string"
+            ? payload.readByUserId
+            : typeof payload.userId === "string"
+              ? payload.userId
+              : undefined;
+        const lastReadAt =
+          typeof payload.readAt === "string"
+            ? payload.readAt
+            : typeof payload.lastReadAt === "string"
+              ? payload.lastReadAt
+              : undefined;
 
-        if (conversationId === activeChat) {
+        if (!userId || !lastReadAt) {
+          return;
+        }
+
+        if (conversationId === activeChat || conversationKey === activeChat) {
           setReadWatermarks((prev) => ({
             ...prev,
             [userId]: lastReadAt,
