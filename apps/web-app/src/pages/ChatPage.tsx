@@ -15,6 +15,7 @@ import {
   pinMessage,
   setConversationAlias,
   unpinMessage,
+  getConversationReadWatermarks,
 } from "@/services/conversation.api";
 import {
   listMyFriendRequests,
@@ -100,6 +101,7 @@ import {
   Smile,
   SmilePlus,
   Sticker,
+  ThumbsUp,
   Trash2,
   UserRound,
   Video,
@@ -118,6 +120,7 @@ import React, {
 } from "react";
 import { toast } from "react-hot-toast";
 import { useLocation, useNavigate } from "react-router-dom";
+import { MessageInfoModal } from "@/components/MessageInfoModal";
 
 const formatFileSize = (bytes?: number) => {
   if (!bytes || bytes <= 0) return "0 KB";
@@ -439,16 +442,16 @@ function formatLastSeenShort(
     Math.floor((Date.now() - lastSeenMs) / 60000),
   );
   if (diffMinutes < 60) {
-    return `${diffMinutes} phút`;
+    return `${diffMinutes}\u00A0phút`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours} giờ`;
+    return `${diffHours}\u00A0giờ`;
   }
 
   const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays} ngày`;
+  return `${diffDays}\u00A0ngày`;
 }
 
 function formatPresenceText(
@@ -478,6 +481,7 @@ const GROUP_AVATAR_OVERRIDES_STORAGE_KEY = "web-app-group-avatar-overrides";
 const CONVERSATION_ALIAS_STORAGE_KEY = "web-app-conversation-aliases";
 const MESSAGE_REACTIONS_STORAGE_KEY = "web-app-message-reactions";
 const PRESENCE_POLL_INTERVAL_MS = 60_000;
+const QUICK_LIKE_EMOJI = "👍";
 const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
 const URL_PATTERN = /(https?:\/\/[^\s]+)/gi;
 const MESSAGE_BLOCK_GAP_MS = 10 * 60 * 1000;
@@ -608,6 +612,57 @@ export function ChatPage() {
   }, [activeChat]);
 
   useEffect(() => {
+    let active = true;
+
+    if (activeChat) {
+      // Fetch initial watermarks
+      getConversationReadWatermarks(activeChat)
+        .then((data) => {
+          if (active) {
+            const initialMap: Record<string, string> = {};
+            data.forEach((w) => {
+              if (w.lastReadAt) initialMap[w.userId] = w.lastReadAt;
+            });
+            setReadWatermarks(initialMap);
+          }
+        })
+        .catch(console.error);
+
+      // Listen to real-time updates
+      const handleConversationRead = (...args: unknown[]) => {
+        const payload = args[0];
+        if (
+          !isRecord(payload) ||
+          typeof payload.conversationId !== "string" ||
+          typeof payload.userId !== "string" ||
+          typeof payload.lastReadAt !== "string"
+        ) {
+          return;
+        }
+
+        const conversationId = payload.conversationId;
+        const userId = payload.userId;
+        const lastReadAt = payload.lastReadAt;
+
+        if (conversationId === activeChat) {
+          setReadWatermarks((prev) => ({
+            ...prev,
+            [userId]: lastReadAt,
+          }));
+        }
+      };
+
+      socketClient.on(CHAT_SOCKET_EVENTS.CONVERSATION_READ, handleConversationRead);
+
+      return () => {
+        active = false;
+        socketClient.off(CHAT_SOCKET_EVENTS.CONVERSATION_READ, handleConversationRead);
+        setReadWatermarks({});
+      };
+    }
+  }, [activeChat]);
+
+  useEffect(() => {
     if (chatState.conversationId && chatState.conversationId !== activeChat) {
       setActiveChat(chatState.conversationId);
     }
@@ -678,6 +733,10 @@ export function ChatPage() {
   const [sendingFriendRequestUserId, setSendingFriendRequestUserId] = useState<
     string | null
   >(null);
+
+  const [readWatermarks, setReadWatermarks] = useState<Record<string, string>>({});
+  const [selectedMessageForInfo, setSelectedMessageForInfo] = useState<MessageItem | null>(null);
+
   const [pendingRemoveMemberUserId, setPendingRemoveMemberUserId] = useState<
     string | null
   >(null);
@@ -1051,6 +1110,7 @@ export function ChatPage() {
   const [gifNext, setGifNext] = useState<number | null>(null);
   const [gifLoading, setGifLoading] = useState(false);
   const [gifError, setGifError] = useState("");
+  const [localFailedMessages, setLocalFailedMessages] = useState<{ id: string, text: string, sentAt: string }[]>([]);
   const hasGifResults = gifResults.length > 0;
   const hasGifError = Boolean(gifError);
   const handleGifSearchChange = (
@@ -1490,13 +1550,21 @@ export function ChatPage() {
       | { avatarAsset?: { resolvedUrl?: string }; avatarUrl?: string }
       | undefined
     )?.avatarUrl;
-  const activeContactAvatarUrl =
+  let activeContactAvatarUrl =
     (activeGroupId ? groupAvatarOverrides[activeGroupId] : undefined) ||
     activeContactAvatarFromConversation ||
     activeContactAvatarFromFriendMap ||
     activeContactAvatarFromDmMap ||
     activeContactBaseAvatarUrl ||
     chatState.avatarUrl;
+
+  if (
+    activeContactAvatarUrl === "null" ||
+    activeContactAvatarUrl === "undefined" ||
+    activeContactAvatarUrl?.trim() === ""
+  ) {
+    activeContactAvatarUrl = undefined;
+  }
 
   const activePresence = activeDmUserId
     ? dmPresenceByUserId[activeDmUserId] || activeDmPresence
@@ -1515,10 +1583,6 @@ export function ChatPage() {
   const activeStatusToneClass = activePresence?.isActive
     ? "text-green-600"
     : "text-gray-500 dark:text-slate-400";
-  const activeLastSeenBadge = formatLastSeenShort(
-    activePresence,
-    activeContact?.updatedAt,
-  );
   const callerDisplayName = cachedProfile?.fullName || user?.sub || "Người gọi";
   const callerAvatarUrl =
     cachedProfile?.avatarAsset?.resolvedUrl || cachedProfile?.avatarUrl;
@@ -2563,6 +2627,22 @@ export function ChatPage() {
   }, [activeChat, activeContact?.unreadCount, markAsRead]);
 
   useEffect(() => {
+    setLocalFailedMessages([]);
+    if (activeChat) {
+      if (hasMore && !isLoadingMore) {
+        setTimeout(() => {
+          if (
+            messagesContainerRef.current &&
+            messagesContainerRef.current.scrollTop === 0
+          ) {
+            void loadMore();
+          }
+        }, 100);
+      }
+    }
+  }, [activeChat, hasMore, isLoadingMore, loadMore]);
+
+  useEffect(() => {
     if (!activeChat) {
       setIsInfoOpen(false);
     }
@@ -3555,7 +3635,9 @@ export function ChatPage() {
         if (messageType === "SYSTEM") {
           return formatSystemMessageText(value);
         }
-
+        if (value === "Message was recalled." || value === "Message was recalled" || value === "Tin nhắn đã bị thu hồi") {
+          return "Tin nhắn đã bị thu hồi";
+        }
         return value;
       };
 
@@ -3613,6 +3695,24 @@ export function ChatPage() {
     msg: MessageItem,
     expectedIsVideo: boolean,
   ): CallEndedSummary | null => {
+    try {
+      const parsed = JSON.parse(msg.content);
+      if (parsed && typeof parsed === "object" && parsed.callEvent) {
+        return {
+          conversationId: msg.conversationId,
+          peerUserId: parsed.callEvent.endedByUserId || parsed.callEvent.initiatedByUserId,
+          peerName: msg.senderName || activeConversationDisplayName,
+          peerAvatarUrl: activeContactAvatarUrl,
+          isVideo: parsed.callEvent.isVideo,
+          direction: parsed.callEvent.initiatedByUserId === activeDmUserId ? "incoming" : "outgoing",
+          endedAt: parsed.callEvent.endedAt || msg.sentAt,
+          durationSeconds: parsed.callEvent.durationSeconds || 0,
+        };
+      }
+    } catch {
+      // Fall back to persisted call summaries when the message is not structured call content.
+    }
+
     const candidates = callSummaries.filter(
       (item) =>
         (item.conversationId === msg.conversationId ||
@@ -3646,8 +3746,8 @@ export function ChatPage() {
   };
 
   const getReplyPreviewText = (message: MessageReplyReference): string => {
-    if (message.recalledAt || message.deletedAt) {
-      return "Tin nhắn đã được thu hồi";
+    if (message.recalledAt || message.deletedAt || message.content === "Message was recalled." || message.content === "Message was recalled" || message.content === "Tin nhắn đã bị thu hồi") {
+      return "Tin nhắn đã bị thu hồi";
     }
 
     const text = extractMessageText(message.content, message.type).trim();
@@ -4113,6 +4213,28 @@ export function ChatPage() {
     const hasText = Boolean(inputText.trim());
     const hasAttachment = queuedAttachments.length > 0;
     if (!hasText && !hasAttachment) {
+      const replyTo = replyingMessage?.id;
+      closeMentionMenu();
+      setReplyingMessage(null);
+      stopTyping();
+      focusComposer();
+
+      try {
+        await sendMessageAsync({
+          text: QUICK_LIKE_EMOJI,
+          type: "EMOJI",
+          replyTo,
+        });
+      } catch {
+        setLocalFailedMessages((prev) => [
+          ...prev,
+          {
+            id: `failed-${Date.now()}`,
+            text: QUICK_LIKE_EMOJI,
+            sentAt: new Date().toISOString(),
+          },
+        ]);
+      }
       return;
     }
 
@@ -4136,15 +4258,27 @@ export function ChatPage() {
         stopTyping();
         focusComposer();
 
-        await sendMessageAsync({
-          text: pendingText,
-          type: "TEXT",
-          replyTo,
-          mentions: pendingMentions,
-        });
-        pendingText = "";
-        pendingMentions = [];
-        sentAny = true;
+        try {
+          await sendMessageAsync({
+            text: pendingText,
+            type: "TEXT",
+            replyTo,
+            mentions: pendingMentions,
+          });
+          pendingText = "";
+          pendingMentions = [];
+          sentAny = true;
+        } catch {
+          setLocalFailedMessages((prev) => [
+            ...prev,
+            {
+              id: `failed-${Date.now()}`,
+              text: pendingText,
+              sentAt: new Date().toISOString(),
+            },
+          ]);
+          // keep pendingText to restore input
+        }
       } else {
         setIsUploading(true);
         for (const item of queuedAttachments) {
@@ -4214,6 +4348,10 @@ export function ChatPage() {
     }
   };
 
+  const hasComposerText = Boolean(inputText.trim());
+  const isQuickLikeMode = !hasComposerText && queuedAttachments.length === 0;
+  const composerActionLabel = isQuickLikeMode ? "Gửi nhanh 👍" : "Gửi";
+
   return (
     <div
       className="flex h-full w-full relative overflow-hidden"
@@ -4274,10 +4412,6 @@ export function ChatPage() {
               const chatPresence = chatDmUserId
                 ? dmPresenceByUserId[chatDmUserId]
                 : undefined;
-              const chatLastSeenBadge = formatLastSeenShort(
-                chatPresence,
-                chat.updatedAt,
-              );
               const chatGroupId = extractGroupIdFromConversationId(
                 chat.conversationId,
               );
@@ -4289,7 +4423,7 @@ export function ChatPage() {
                 friendAvatarByUserId,
                 user?.sub,
               );
-              const chatAvatarUrl =
+              let chatAvatarUrl =
                 (chatGroupId ? groupAvatarOverrides[chatGroupId] : undefined) ||
                 chatAvatarFromConversation ||
                 chatAvatarFromFriendMap ||
@@ -4306,6 +4440,14 @@ export function ChatPage() {
                     avatarUrl?: string;
                   }
                 ).avatarUrl;
+
+              if (
+                chatAvatarUrl === "null" ||
+                chatAvatarUrl === "undefined" ||
+                chatAvatarUrl?.trim() === ""
+              ) {
+                chatAvatarUrl = undefined;
+              }
               return (
                 <div
                   key={chat.conversationId}
@@ -4334,11 +4476,6 @@ export function ChatPage() {
                     </Avatar>
                     {!chat.isGroup && chatPresence?.isActive ? (
                       <span className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
-                    ) : null}
-                    {!chat.isGroup && !chatPresence?.isActive ? (
-                      <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
-                        {chatLastSeenBadge || "1m"}
-                      </span>
                     ) : null}
                   </div>
                   <div className="flex-1 min-w-0 pr-1">
@@ -4444,11 +4581,6 @@ export function ChatPage() {
                   </Avatar>
                   {!activeContact?.isGroup && activePresence?.isActive ? (
                     <span className="absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
-                  ) : null}
-                  {!activeContact?.isGroup && !activePresence?.isActive ? (
-                    <span className="absolute -right-1 -bottom-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white shadow-sm ring-2 ring-white dark:ring-slate-900">
-                      {activeLastSeenBadge || "1m"}
-                    </span>
                   ) : null}
                 </div>
                 <div>
@@ -5635,11 +5767,7 @@ export function ChatPage() {
                                   )}
                                 </div>
                                 <p className="text-sm font-medium">
-                                  Cuộc gọi nhóm kết thúc (
-                                  {formatCallDuration(
-                                    callSummary?.durationSeconds ?? 0,
-                                  )}
-                                  )
+                                  {messageText}
                                 </p>
                               </div>
                             </div>
@@ -5686,14 +5814,14 @@ export function ChatPage() {
                             {!summaryIsOutgoing ? (
                               <div className="relative h-8 w-8 shrink-0">
                                 <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
-                                  {senderAvatarUrl ? (
+                                  {activeContact?.avatarUrl ? (
                                     <AvatarImage
-                                      src={senderAvatarUrl}
-                                      alt={senderDisplayName}
+                                      src={activeContact.avatarUrl}
+                                      alt={activeConversationDisplayName}
                                     />
                                   ) : null}
                                   <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
-                                    {(senderDisplayName || "?")
+                                    {(activeConversationDisplayName || "?")
                                       .charAt(0)
                                       .toUpperCase()}
                                   </AvatarFallback>
@@ -5727,23 +5855,6 @@ export function ChatPage() {
                               </div>
                             </div>
 
-                            {summaryIsOutgoing ? (
-                              <div className="relative h-8 w-8 shrink-0">
-                                <Avatar className="h-8 w-8 border border-blue-200 dark:border-blue-800">
-                                  {senderAvatarUrl ? (
-                                    <AvatarImage
-                                      src={senderAvatarUrl}
-                                      alt={senderDisplayName}
-                                    />
-                                  ) : null}
-                                  <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100 text-xs font-semibold">
-                                    {(senderDisplayName || "B")
-                                      .charAt(0)
-                                      .toUpperCase()}
-                                  </AvatarFallback>
-                                </Avatar>
-                              </div>
-                            ) : null}
                           </div>
                         </div>
                       );
@@ -5767,6 +5878,16 @@ export function ChatPage() {
                       );
                     }
 
+                    const isRecalledMessage =
+                      msg.recalledAt ||
+                      msg.content === "Message was recalled." ||
+                      msg.content === "Message was recalled" ||
+                      msg.content === "Tin nhắn đã bị thu hồi";
+
+                    const parsedTextContent = parseMessageText(msg.content).trim();
+                    const isEmojiOnly = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u.test(parsedTextContent);
+                    const isMediaOnly = !isRecalledMessage && ((!!msg.attachmentUrl && (!parsedTextContent || parsedTextContent === msg.attachmentUrl)) || (isEmojiOnly && !msg.attachmentUrl && parsedTextContent.length > 0));
+
                     return (
                       <div
                         key={msg.id}
@@ -5780,14 +5901,14 @@ export function ChatPage() {
                             className={`mb-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 ${isMe ? "text-right pr-10" : "ml-10"}`}
                           >
                             {senderDisplayName}
-                            {msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
+                            {!isRecalledMessage && msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
                               <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500 font-normal italic">
                                 (đã chỉnh sửa)
                               </span>
                             ) : null}
                           </p>
                         ) : (
-                          msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
+                          !isRecalledMessage && msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
                             <p
                               className={`mb-1 text-[10px] text-slate-400 dark:text-slate-500 italic ${isMe ? "text-right pr-10" : "ml-10"}`}
                             >
@@ -5824,19 +5945,27 @@ export function ChatPage() {
 
                           <div
                             onClick={(event) => event.stopPropagation()}
-                            className={`relative px-4 py-2 rounded-2xl shadow-sm ${isMe
-                                ? `bg-blue-600 text-white ${endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl"}`
-                                : `bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 ${endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl"}`
-                              }`}
+                            className={
+                              isRecalledMessage
+                                ? `relative px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-transparent text-slate-500 dark:text-slate-400 italic shadow-none ${isMe ? (endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl") : (endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl")}`
+                                : isMediaOnly
+                                  ? `relative`
+                                  : `relative px-4 py-2 rounded-2xl shadow-sm ${isMe
+                                    ? `bg-blue-600 text-white ${endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl"}`
+                                    : `bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 ${endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl"}`
+                                  }`
+                            }
                           >
-                            {!isEditing ? (
+                            {!isEditing && !isRecalledMessage ? (
                               <div
                                 className={`absolute ${isMe ? "right-full mr-2" : "left-full ml-2"} top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${activeMessageMenuId === msg.id
                                     ? "opacity-100"
                                     : "opacity-0 group-hover:opacity-100"
                                   }`}
                               >
-                                <button
+                                {(!msg.recalledAt && msg.content !== "Message was recalled." && msg.content !== "Message was recalled" && msg.content !== "Tin nhắn đã bị thu hồi") && (
+                                  <>
+                                    <button
                                   type="button"
                                   className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
                                   title="Trả lời"
@@ -5936,54 +6065,71 @@ export function ChatPage() {
                                           Sửa tin nhắn
                                         </button>
                                       ) : null}
-                                      <button
-                                        type="button"
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                        onClick={() =>
-                                          handleOpenForwardDialog(msg.id)
-                                        }
-                                      >
-                                        <Share2 size={14} />
-                                        Chuyển tiếp
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                        onClick={() => handleTogglePin(msg)}
-                                      >
-                                        {(() => {
-                                          try {
-                                            const p = JSON.parse(msg.content);
-                                            return p.isPinned ? (
-                                              <>
-                                                <PinOff
-                                                  size={14}
-                                                  className="text-orange-500"
-                                                />
-                                                Bỏ ghim tin nhắn
-                                              </>
-                                            ) : (
-                                              <>
-                                                <Pin
-                                                  size={14}
-                                                  className="text-blue-500"
-                                                />
-                                                Ghim tin nhắn
-                                              </>
-                                            );
-                                          } catch {
-                                            return (
-                                              <>
-                                                <Pin
-                                                  size={14}
-                                                  className="text-blue-500"
-                                                />
-                                                Ghim tin nhắn
-                                              </>
-                                            );
-                                          }
-                                        })()}
-                                      </button>
+                                      {isMe ? (
+                                        <button
+                                          type="button"
+                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                          onClick={() => {
+                                            setSelectedMessageForInfo(msg);
+                                            setActiveMessageMenuId(null);
+                                          }}
+                                        >
+                                          <Info size={14} />
+                                          Thông tin tin nhắn
+                                        </button>
+                                      ) : null}
+                                      {(!msg.recalledAt && msg.content !== "Message was recalled." && msg.content !== "Message was recalled" && msg.content !== "Tin nhắn đã bị thu hồi") && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                            onClick={() =>
+                                              handleOpenForwardDialog(msg.id)
+                                            }
+                                          >
+                                            <Share2 size={14} />
+                                            Chuyển tiếp
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                            onClick={() => handleTogglePin(msg)}
+                                          >
+                                            {(() => {
+                                              try {
+                                                const p = JSON.parse(msg.content);
+                                                return p.isPinned ? (
+                                                  <>
+                                                    <PinOff
+                                                      size={14}
+                                                      className="text-orange-500"
+                                                    />
+                                                    Bỏ ghim tin nhắn
+                                                  </>
+                                                ) : (
+                                                  <>
+                                                    <Pin
+                                                      size={14}
+                                                      className="text-blue-500"
+                                                    />
+                                                    Ghim tin nhắn
+                                                  </>
+                                                );
+                                              } catch {
+                                                return (
+                                                  <>
+                                                    <Pin
+                                                      size={14}
+                                                      className="text-blue-500"
+                                                    />
+                                                    Ghim tin nhắn
+                                                  </>
+                                                );
+                                              }
+                                            })()}
+                                          </button>
+                                        </>
+                                      )}
 
                                       <div className="border-t border-slate-100 dark:border-slate-800" />
 
@@ -6015,6 +6161,8 @@ export function ChatPage() {
                                     </div>
                                   ) : null}
                                 </div>
+                                  </>
+                                )}
                               </div>
                             ) : null}
                             <div className="relative">
@@ -6089,12 +6237,14 @@ export function ChatPage() {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="break-words">
-                                  {renderMessageTextWithMentions(
-                                    parseMessageText(msg.content),
-                                    isMe,
-                                  )}
-                                </div>
+                                (!msg.attachmentUrl || (parsedTextContent && parsedTextContent !== msg.attachmentUrl)) ? (
+                                  <div className={`break-words ${isEmojiOnly && !msg.attachmentUrl ? "text-5xl leading-none" : ""}`}>
+                                    {renderMessageTextWithMentions(
+                                      parsedTextContent,
+                                      isMe,
+                                    )}
+                                  </div>
+                                ) : null
                               )}
                             </div>
                             {msg.attachmentUrl ? (
@@ -6324,6 +6474,37 @@ export function ChatPage() {
                             Đang xóa...
                           </span>
                         ) : null}
+                        {isMe && index === orderedMessages.length - 1 && Object.keys(readWatermarks).length > 0 ? (
+                          <div className="flex items-center justify-end gap-1 mt-1 pr-10">
+                            {Object.entries(readWatermarks)
+                              .filter(([userId, readAt]) => userId !== user?.sub && new Date(readAt).getTime() >= new Date(msg.sentAt).getTime())
+                              .map(([userId]) => {
+                                const displayName = displayNameByUserId.get(userId) || "Đã xem";
+                                const avatarUrl =
+                                  groupMemberAvatarByUserId.get(userId) ||
+                                  dmAvatarMap[userId] ||
+                                  friendAvatarByUserId[userId];
+
+                                return avatarUrl ? (
+                                  <img
+                                    key={userId}
+                                    src={avatarUrl}
+                                    alt={displayName}
+                                    className="w-4 h-4 rounded-full border border-white dark:border-slate-800 bg-slate-200"
+                                    title={displayName}
+                                  />
+                                ) : (
+                                  <span
+                                    key={userId}
+                                    className="flex h-4 w-4 items-center justify-center rounded-full border border-white bg-slate-200 text-[8px] font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-700 dark:text-slate-200"
+                                    title={displayName}
+                                  >
+                                    {(displayName.charAt(0) || "?").toUpperCase()}
+                                  </span>
+                                );
+                              })}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -6373,6 +6554,24 @@ export function ChatPage() {
                     </div>
                   </div>
                 ) : null}
+
+                {localFailedMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className="group relative flex max-w-[70%] self-end flex-col py-1 animate-in fade-in zoom-in duration-300"
+                  >
+                    <div className="flex items-end justify-end gap-2">
+                      <div className="rounded-2xl border px-4 py-2 border-red-200 dark:border-red-800 bg-red-50 text-red-900 dark:bg-red-900/30 dark:text-red-200">
+                        <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
+                          {msg.text}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-medium text-red-500 mt-1 flex items-center justify-end gap-1 opacity-80">
+                      <ShieldAlert size={12} /> Không gửi được
+                    </span>
+                  </div>
+                ))}
 
                 <div ref={messagesEndRef} />
               </div>
@@ -6699,6 +6898,21 @@ export function ChatPage() {
             ) : null}
 
             {/* Vùng nhập liệu */}
+            {activeDmUserId && blockedUsers.some((b: UserBlockedItem) => b.userId === activeDmUserId) ? (
+              <div className="p-4 sm:p-6 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative flex flex-col items-center justify-center gap-3">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Bạn đã chặn gửi tin nhắn đến người này.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => unblockUserMutation.mutate(activeDmUserId)}
+                  disabled={unblockUserMutation.isPending}
+                  className="px-6 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {unblockUserMutation.isPending ? "Đang bỏ chặn..." : "Bỏ chặn để nhắn tin"}
+                </button>
+              </div>
+            ) : (
             <form
               onSubmit={handleSend}
               className="p-2 sm:p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2"
@@ -7033,21 +7247,25 @@ export function ChatPage() {
                 </div>
                 <button
                   type="submit"
-                  disabled={
-                    isUploading ||
-                    (!inputText.trim() && queuedAttachments.length === 0)
-                  }
+                  disabled={isUploading || isSending}
                   className="h-10 w-10 sm:h-11 sm:w-11 shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
-                  title="Gửi"
+                  title={composerActionLabel}
+                  aria-label={composerActionLabel}
                 >
-                  {isUploading ? (
+                  {isUploading || isSending ? (
                     <span className="text-xs">...</span>
+                  ) : isQuickLikeMode ? (
+                    <ThumbsUp
+                      size={16}
+                      className="sm:w-[18px] sm:h-[18px]"
+                    />
                   ) : (
                     <Send size={16} className="sm:w-[18px] sm:h-[18px]" />
                   )}
                 </button>
               </div>
             </form>
+            )}
 
             {pendingRemoveMemberUserId ? (
               <div
@@ -7886,6 +8104,40 @@ export function ChatPage() {
                 </div>
               </div>
             )}
+
+            <MessageInfoModal
+              isOpen={selectedMessageForInfo !== null}
+              onClose={() => setSelectedMessageForInfo(null)}
+              message={selectedMessageForInfo}
+              conversationId={activeChat || ""}
+              getMemberProfile={(userId) => {
+                if (userId === user?.sub) {
+                  return {
+                    displayName: cachedProfile?.fullName || "Bạn",
+                    avatarUrl: callerAvatarUrl,
+                  };
+                }
+
+                const displayName =
+                  displayNameByUserId.get(userId) ||
+                  (!activeContact?.isGroup && userId === activeDmUserId
+                    ? activeConversationDisplayName
+                    : undefined);
+                const avatarUrl =
+                  groupMemberAvatarByUserId.get(userId) ||
+                  dmAvatarMap[userId] ||
+                  friendAvatarByUserId[userId] ||
+                  (!activeContact?.isGroup && userId === activeDmUserId
+                    ? activeContactAvatarUrl
+                    : undefined);
+
+                if (displayName) {
+                  return { displayName, avatarUrl };
+                }
+
+                return null;
+              }}
+            />
           </>
         )}
       </div>

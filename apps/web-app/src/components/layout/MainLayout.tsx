@@ -42,6 +42,35 @@ type NavItem = {
   badgeCount?: number;
 };
 
+type WindowWithLegacyAudioContext = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+type ChatNotificationMessage = {
+  conversationId: string;
+  senderId: string;
+  senderName?: string;
+  type?: string;
+  content?: string;
+};
+
+type ChatNotificationPayload = ChatNotificationMessage & {
+  message?: ChatNotificationMessage;
+  summary?: Partial<ConversationSummary>;
+};
+
+type ConversationAliasCacheEntry = {
+  userId?: string;
+  alias?: string;
+};
+
+type FriendCacheEntry = {
+  userId?: string;
+  displayName?: string;
+  contactAlias?: string;
+  fullName?: string;
+};
+
 function formatBadgeCount(value: number): string {
   if (value > 99) {
     return "99+";
@@ -270,10 +299,11 @@ let sharedAudioCtx: AudioContext | null = null;
 const playTingSound = () => {
   try {
     if (!sharedAudioCtx) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      sharedAudioCtx = new AudioContext();
+      const AudioContextConstructor =
+        window.AudioContext ||
+        (window as WindowWithLegacyAudioContext).webkitAudioContext;
+      if (!AudioContextConstructor) return;
+      sharedAudioCtx = new AudioContextConstructor();
     }
 
     if (sharedAudioCtx.state === 'suspended') {
@@ -379,8 +409,7 @@ export function MainLayout() {
   }, [conversations]);
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handleNewMessage = (payload: any) => {
+    const handleNewMessage = (payload: ChatNotificationPayload) => {
       const msg = "message" in payload ? payload.message : payload;
       if (!msg || !msg.conversationId || !msg.senderId) return;
 
@@ -406,7 +435,11 @@ export function MainLayout() {
           );
 
           if (!conv) {
-            const cachedConvs = queryClient.getQueryData<any[]>(["conversations", ""]) || [];
+            const cachedConvs =
+              queryClient.getQueryData<ConversationSummary[]>([
+                "conversations",
+                "",
+              ]) || [];
             conv = cachedConvs.find(
               (c) => c.conversationId?.toLowerCase() === msg.conversationId?.toLowerCase(),
             );
@@ -417,18 +450,22 @@ export function MainLayout() {
 
           if (isDm) {
             const peerId = msg.conversationId.slice(3);
-            const cachedAliases = queryClient.getQueryData<any[]>(["conversation-aliases", msg.conversationId]);
+            const cachedAliases = queryClient.getQueryData<
+              ConversationAliasCacheEntry[]
+            >(["conversation-aliases", msg.conversationId]);
             if (cachedAliases) {
               const matchedAlias = cachedAliases.find(
                 (a) => a.userId?.toLowerCase() === peerId.toLowerCase()
               );
-              if (matchedAlias) {
+              if (matchedAlias?.alias) {
                 resolvedPeerName = matchedAlias.alias;
               }
             }
 
             if (!resolvedPeerName) {
-              const cachedFriends = queryClient.getQueryData<any[]>(["friends"]) || [];
+              const cachedFriends =
+                queryClient.getQueryData<FriendCacheEntry[]>(["friends"]) ||
+                [];
               const friend = cachedFriends.find(
                 (f) => f.userId?.toLowerCase() === peerId.toLowerCase(),
               );
@@ -447,18 +484,21 @@ export function MainLayout() {
           }
 
           let resolvedSenderName = "";
-          const cachedAliasesForSender = queryClient.getQueryData<any[]>(["conversation-aliases", msg.conversationId]);
+          const cachedAliasesForSender = queryClient.getQueryData<
+            ConversationAliasCacheEntry[]
+          >(["conversation-aliases", msg.conversationId]);
           if (cachedAliasesForSender) {
             const matchedAlias = cachedAliasesForSender.find(
               (a) => a.userId?.toLowerCase() === msg.senderId?.toLowerCase()
             );
-            if (matchedAlias) {
+            if (matchedAlias?.alias) {
               resolvedSenderName = matchedAlias.alias;
             }
           }
 
           if (!resolvedSenderName) {
-            const cachedFriends = queryClient.getQueryData<any[]>(["friends"]) || [];
+            const cachedFriends =
+              queryClient.getQueryData<FriendCacheEntry[]>(["friends"]) || [];
             const senderFriend = cachedFriends.find(
               (f) => f.userId?.toLowerCase() === msg.senderId?.toLowerCase(),
             );
@@ -546,7 +586,7 @@ export function MainLayout() {
         clearTimeout(notificationTimerRef.current);
       }
     };
-  }, [user?.sub]);
+  }, [queryClient, user?.sub]);
 
   useEffect(() => {
     const handleActiveChatChanged = () => {
