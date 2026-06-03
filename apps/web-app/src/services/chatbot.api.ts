@@ -2,6 +2,10 @@ import ApiClient from "@/lib/api-client";
 
 export type ChatbotMessageRequest = {
   question: string;
+  selectedTarget?: {
+    type: "GROUP" | "USER";
+    id: string;
+  };
 };
 
 export type ChatbotSource = {
@@ -12,6 +16,17 @@ export type ChatbotSource = {
 export type ChatbotMessageResponse = {
   answer: string;
   sources: ChatbotSource[];
+  status?: "summary" | "candidates" | "not_found" | "law";
+  summary?: string;
+  messagesFetched?: number;
+  target?: ChatbotConversationTarget;
+  candidates?: ChatbotConversationTarget[];
+};
+
+type ChatbotConversationTarget = {
+  id: string;
+  type: "GROUP" | "USER";
+  name: string;
 };
 
 function getErrorStatus(error: unknown): number | undefined {
@@ -27,7 +42,11 @@ export async function sendMessageToChatbot(
   params: ChatbotMessageRequest,
 ): Promise<ChatbotMessageResponse> {
   try {
-    return await ApiClient.post("/chatbot/ask", params);
+    const response = (await ApiClient.post(
+      "/chatbot/auth/ask",
+      params,
+    )) as ChatbotMessageResponse;
+    return normalizeChatbotResponse(response);
   } catch (error: unknown) {
     if (getErrorStatus(error) === 404) {
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -40,4 +59,33 @@ export async function sendMessageToChatbot(
 
     throw error;
   }
+}
+
+function normalizeChatbotResponse(
+  response: ChatbotMessageResponse,
+): ChatbotMessageResponse {
+  if (response.status !== "candidates") {
+    return {
+      ...response,
+      answer:
+        response.answer ||
+        response.summary ||
+        "Xin lỗi, tôi chưa có câu trả lời phù hợp.",
+      sources: response.sources ?? [],
+    };
+  }
+
+  const candidateLines =
+    response.candidates
+      ?.map((candidate) => {
+        const typeLabel = candidate.type === "GROUP" ? "Nhóm" : "Người dùng";
+        return `- ${typeLabel}: ${candidate.name}`;
+      })
+      .join("\n") ?? "";
+
+  return {
+    ...response,
+    answer: [response.answer, candidateLines].filter(Boolean).join("\n\n"),
+    sources: response.sources ?? [],
+  };
 }

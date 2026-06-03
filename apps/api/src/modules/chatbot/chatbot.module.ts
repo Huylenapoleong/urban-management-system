@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { ConversationsModule } from '../conversations/conversations.module';
 import { ChatbotController } from './chatbot.controller';
 import { ChatbotService } from './chatbot.service';
 import { KnowledgeRepository } from './repositories/knowledge.repository';
+import { AuthenticatedChatbotService } from './services/authenticated-chatbot.service';
 import { ChatbotPrivacyService } from './services/chatbot-privacy.service';
 import { GroqClientService } from './services/groq-client.service';
 import { GroupChatSummaryService } from './services/group-chat-summary.service';
@@ -20,11 +22,13 @@ import { ReportGeneratorService } from './services/report-generator.service';
  *
  * New services:
  *   - ChatbotPrivacyService: kiểm tra RBAC + Group membership
+ *   - AuthenticatedChatbotService: route chatbot auth + tóm tắt conversation
  *   - GroupChatSummaryService: tóm tắt group chat cho Officer
  *   - ReportGeneratorService: phân tích reports cho Officer
  */
 @Module({
   imports: [
+    ConversationsModule,
     ThrottlerModule.forRoot([
       {
         name: 'default',
@@ -36,6 +40,7 @@ import { ReportGeneratorService } from './services/report-generator.service';
   controllers: [ChatbotController],
   providers: [
     ChatbotService,
+    AuthenticatedChatbotService,
     GroqClientService,
     KnowledgeRepository,
     ChatbotPrivacyService,
