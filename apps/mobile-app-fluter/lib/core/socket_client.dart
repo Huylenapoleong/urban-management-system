@@ -2,8 +2,8 @@ import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter/foundation.dart';
 
-// Const endpoint (assuming Web simulator uses 3001)
-const String _socketOrigin = 'http://localhost:3001';
+import 'config/app_config.dart';
+
 const String _chatNamespace = '/chat';
 
 class SocketClient {
@@ -40,7 +40,7 @@ class SocketClient {
       }
 
       _socket = io.io(
-        '$_socketOrigin$_chatNamespace',
+        '${AppConfig.socketOrigin}$_chatNamespace',
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
             .setAuth({'token': token})

@@ -59,9 +59,23 @@ class _HomeShellState extends State<HomeShell> {
     };
     _webRTCService.callState.addListener(_callStateListener!);
     _callInitSub = services.socketService.onCallInit.listen((data) {
+      debugPrint("[HomeShell] Nhan su kien onCallInit: $data");
+      final callerId = data['callerId']?.toString();
+      final localUserId = services.webRTCService.localUserId;
+      if (callerId != null && callerId == localUserId?.toString()) {
+        debugPrint("[HomeShell] Bo qua mo cuoc goi vi day la tin hieu tu goi (trung account).");
+        return;
+      }
       _openIncomingCall(context, services.webRTCService, session.user, data);
     });
     _callInviteSub = services.socketService.onCallInvite.listen((data) {
+      debugPrint("[HomeShell] Nhan su kien onCallInvite: $data");
+      final callerId = data['callerId']?.toString();
+      final localUserId = services.webRTCService.localUserId;
+      if (callerId != null && callerId == localUserId?.toString()) {
+        debugPrint("[HomeShell] Bo qua mo cuoc goi vi day la tin hieu tu moi (trung account).");
+        return;
+      }
       _openIncomingCall(context, services.webRTCService, session.user, data);
     });
   }

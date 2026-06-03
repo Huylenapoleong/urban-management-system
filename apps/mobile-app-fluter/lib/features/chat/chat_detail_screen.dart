@@ -80,6 +80,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   MessageItem? _replyingTo;
   Map<String, List<String>> _messageReactions = {};
   Map<String, String> _typingUsers = {};
+  final Map<String, Timer> _typingTimers = {};
   StreamSubscription? _typingSub;
   String? _conversationKey;
   Map<String, String> _aliases = {};
@@ -247,7 +248,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     
     // Check synchronous in-memory cache first
     final memCached = _conversationMessagesCache[widget.conversation.conversationId];
-    if (memCached != null && memCached.isNotEmpty) {
+    final bool hasCache = memCached != null && memCached.isNotEmpty;
+    if (hasCache) {
       _pagingController.value = PagingState<String?, MessageItem>(
         nextPageKey: null,
         error: null,
@@ -270,6 +272,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _pagingController.addPageRequestListener((pageKey) {
       _fetchPage(pageKey);
     });
+    if (hasCache) {
+      _fetchPage(null);
+    }
     _loadPinnedMessages();
     _loadConversationMembers();
 
@@ -367,9 +372,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           _pagingController.itemList = [msg];
         }
         // Remove from typing if message arrived
-        if (msg.senderId != widget.currentUser.id) {
+        final myId = widget.currentUser.id.toString();
+        if (msg.senderId != myId) {
           setState(() {
             _typingUsers.remove(msg.senderId);
+            _typingTimers[msg.senderId]?.cancel();
+            _typingTimers.remove(msg.senderId);
           });
         }
         if (msg.type == "SYSTEM") {
@@ -385,12 +393,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final userId = data["userId"]?.toString();
         final fullName = data["fullName"]?.toString() ?? "Ai đó";
         final isTyping = data["isTyping"] == true;
-        if (userId != null && userId != widget.currentUser.id) {
+        
+        final myId = widget.currentUser.id.toString();
+        if (userId != null && userId != myId) {
           setState(() {
             if (isTyping) {
               _typingUsers[userId] = fullName;
+              _typingTimers[userId]?.cancel();
+              _typingTimers[userId] = Timer(const Duration(seconds: 6), () {
+                if (mounted) {
+                  setState(() {
+                    _typingUsers.remove(userId);
+                    _typingTimers.remove(userId);
+                  });
+                }
+              });
             } else {
               _typingUsers.remove(userId);
+              _typingTimers[userId]?.cancel();
+              _typingTimers.remove(userId);
             }
           });
         }
@@ -452,6 +473,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _presenceSub?.cancel();
     _snapshotSub?.cancel();
     _typingSub?.cancel();
+    for (final timer in _typingTimers.values) {
+      timer.cancel();
+    }
+    _typingTimers.clear();
     _pagingController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -936,70 +961,33 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     // Reset replying state locally
     setState(() => _replyingTo = null);
 
+    if (mounted) setState(() => _sending = true);
+
     try {
-      // 1. Send TEXT-only messages optimistically
+      // 1. Send TEXT-only messages synchronously
       if (text.isNotEmpty && attachments.isEmpty) {
         final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
-        
-        final optimisticMsg = MessageItem(
-          id: clientMsgId,
-          conversationId: widget.conversation.conversationId,
-          senderId: widget.currentUser.id,
-          senderName: widget.currentUser.fullName ?? "Tôi",
-          senderAvatarUrl: widget.currentUser.avatarUrl,
-          type: "TEXT",
-          content: text,
-          sentAt: DateTime.now().toUtc().toIso8601String(),
-          clientMessageId: clientMsgId,
-          isPending: true,
-        );
-
-        if (mounted) {
-          setState(() {
-            final currentItems = _pagingController.itemList ?? [];
-            _pagingController.itemList = [optimisticMsg, ...currentItems];
-          });
-          _scrollToBottom();
-        }
-
-        widget.conversationService.sendMessage(
+        final actualMsg = await widget.conversationService.sendMessage(
           widget.conversation.conversationId,
           content: text,
           clientMessageId: clientMsgId,
           type: "TEXT",
           replyTo: _replyingTo?.id,
-        ).then((actualMsg) {
-          if (mounted) {
-            final items = _pagingController.itemList;
-            if (items != null) {
-              final newList = List<MessageItem>.from(items);
-              final idx = newList.indexWhere((m) => m.id == clientMsgId);
-              if (idx != -1) {
-                newList[idx] = actualMsg.copyWith(clientMessageId: clientMsgId);
-                setState(() {
-                  _pagingController.itemList = newList;
-                });
-              }
-            }
+        );
+
+        if (mounted) {
+          final currentItems = _pagingController.itemList ?? [];
+          final exists = currentItems.any((m) => m.id == actualMsg.id || 
+              (actualMsg.clientMessageId != null && m.clientMessageId == actualMsg.clientMessageId));
+          if (!exists) {
+            setState(() {
+              _pagingController.itemList = [actualMsg, ...currentItems];
+            });
           }
-        }).catchError((e) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Lỗi gửi tin nhắn: $e"))
-            );
-            final items = _pagingController.itemList;
-            if (items != null) {
-              final newList = List<MessageItem>.from(items);
-              newList.removeWhere((m) => m.id == clientMsgId);
-              setState(() {
-                _pagingController.itemList = newList;
-              });
-            }
-          }
-        });
+        }
       }
 
-      // 2. Send attachments (URL-based like stickers/gifs sent optimistically, local files uploaded normally)
+      // 2. Send attachments synchronously (pre-existing web URLs like stickers/gifs, or local files)
       for (final attachment in attachments) {
         final clientMsgId = "client_${DateTime.now().microsecondsSinceEpoch}";
         final isFirst = attachments.indexOf(attachment) == 0;
@@ -1007,116 +995,74 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final isUrl = attachment.path.startsWith("http://") || attachment.path.startsWith("https://");
 
         if (isUrl) {
-          // Stickers and GIFs (pre-existing web URLs) can be optimistically sent immediately!
-          final optimisticAttachmentMsg = MessageItem(
-            id: clientMsgId,
-            conversationId: widget.conversation.conversationId,
-            senderId: widget.currentUser.id,
-            senderName: widget.currentUser.fullName ?? "Tôi",
-            senderAvatarUrl: widget.currentUser.avatarUrl,
-            type: attachment.type,
-            content: messageContent,
-            attachmentUrl: attachment.path,
-            sentAt: DateTime.now().toUtc().toIso8601String(),
-            clientMessageId: clientMsgId,
-            isPending: true,
-          );
-
-          if (mounted) {
-            setState(() {
-              final currentItems = _pagingController.itemList ?? [];
-              _pagingController.itemList = [optimisticAttachmentMsg, ...currentItems];
-            });
-            _scrollToBottom();
-          }
-
-          widget.conversationService.sendMessage(
+          final actualMsg = await widget.conversationService.sendMessage(
             widget.conversation.conversationId,
             content: messageContent,
             clientMessageId: clientMsgId,
             type: attachment.type,
             attachmentUrl: attachment.path,
             replyTo: isFirst ? _replyingTo?.id : null,
-          ).then((actualMsg) {
-            if (mounted) {
-              final items = _pagingController.itemList;
-              if (items != null) {
-                final newList = List<MessageItem>.from(items);
-                final idx = newList.indexWhere((m) => m.id == clientMsgId);
-                if (idx != -1) {
-                  newList[idx] = actualMsg.copyWith(clientMessageId: clientMsgId);
-                  setState(() {
-                    _pagingController.itemList = newList;
-                  });
-                }
-              }
+          );
+
+          if (mounted) {
+            final currentItems = _pagingController.itemList ?? [];
+            final exists = currentItems.any((m) => m.id == actualMsg.id || 
+                (actualMsg.clientMessageId != null && m.clientMessageId == actualMsg.clientMessageId));
+            if (!exists) {
+              setState(() {
+                _pagingController.itemList = [actualMsg, ...currentItems];
+              });
             }
-          }).catchError((e) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("Lỗi gửi tệp tin: $e"))
-              );
-              final items = _pagingController.itemList;
-              if (items != null) {
-                final newList = List<MessageItem>.from(items);
-                newList.removeWhere((m) => m.id == clientMsgId);
+          }
+        } else {
+          // Local files
+          final uploadResult = await widget.uploadService.uploadMedia(
+            filePath: attachment.path,
+            fileName: attachment.name,
+            mimeType: attachment.mimeType,
+            target: "MESSAGE",
+          );
+
+          final actualMsg = await widget.conversationService.sendMessage(
+            widget.conversation.conversationId,
+            content: messageContent,
+            clientMessageId: clientMsgId,
+            type: attachment.type,
+            attachmentUrl: uploadResult.url,
+            attachmentKey: uploadResult.key,
+            replyTo: isFirst ? _replyingTo?.id : null,
+          );
+
+          if (mounted) {
+            final items = _pagingController.itemList;
+            if (items != null) {
+              final newList = List<MessageItem>.from(items);
+              final finalMsg = actualMsg.copyWith(clientMessageId: clientMsgId);
+              final exists = newList.any((m) => m.id == finalMsg.id || 
+                  (finalMsg.clientMessageId != null && m.clientMessageId == finalMsg.clientMessageId));
+              if (!exists) {
+                newList.insert(0, finalMsg);
                 setState(() {
                   _pagingController.itemList = newList;
                 });
               }
             }
-          });
-        } else {
-          // Local files (require uploading step first)
-          if (mounted) setState(() => _sending = true);
-          try {
-            final uploadResult = await widget.uploadService.uploadMedia(
-              filePath: attachment.path,
-              fileName: attachment.name,
-              mimeType: attachment.mimeType,
-              target: "MESSAGE",
-            );
-
-            final actualMsg = await widget.conversationService.sendMessage(
-              widget.conversation.conversationId,
-              content: messageContent,
-              clientMessageId: clientMsgId,
-              type: attachment.type,
-              attachmentUrl: uploadResult.url,
-              attachmentKey: uploadResult.key,
-              replyTo: isFirst ? _replyingTo?.id : null,
-            );
-
-            if (mounted) {
-              final items = _pagingController.itemList;
-              if (items != null) {
-                final newList = List<MessageItem>.from(items);
-                final finalMsg = actualMsg.copyWith(clientMessageId: clientMsgId);
-                final exists = newList.any((m) => m.id == finalMsg.id || 
-                    (finalMsg.clientMessageId != null && m.clientMessageId == finalMsg.clientMessageId));
-                if (!exists) {
-                  newList.insert(0, finalMsg);
-                  setState(() {
-                    _pagingController.itemList = newList;
-                  });
-                }
-              }
-            }
-          } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("Lỗi tải lên tệp: $e"))
-              );
-            }
-          } finally {
-            if (mounted) setState(() => _sending = false);
           }
         }
       }
       _scrollToBottom();
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Lỗi hệ thống: $e")));
+      if (mounted) {
+        final errorMsg = e.toString().contains("upload") || e.toString().contains("tải lên")
+            ? "Lỗi tải lên tệp: $e"
+            : "Lỗi gửi tin nhắn: $e";
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMsg))
+        );
+      }
+      rethrow;
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -2337,6 +2283,7 @@ class _ChatComposerState extends State<ChatComposer> {
   Timer? _timer;
   Timer? _typingTimer;
   bool _isTypingSent = false;
+  String _previousText = "";
   List<_InviteCandidate> _groupMembers = [];
   bool _loadingMembers = false;
 
@@ -2345,8 +2292,12 @@ class _ChatComposerState extends State<ChatComposer> {
     super.initState();
     _textController.addListener(() {
       if (mounted) {
-        setState(() {});
-        _handleTyping();
+        final currentText = _textController.text;
+        if (currentText != _previousText) {
+          _previousText = currentText;
+          setState(() {});
+          _handleTyping();
+        }
       }
     });
     if (widget.isGroup) {
@@ -2728,7 +2679,7 @@ class _ChatComposerState extends State<ChatComposer> {
       onGifSelected: (gifUrl) {
         final name = gifUrl.split("/").last;
         widget.onSend(
-          text: "GIF Image",
+          text: "",
           attachments: [
             _PendingAttachment(
               path: gifUrl,
@@ -2998,12 +2949,23 @@ class _ChatComposerState extends State<ChatComposer> {
                     _buildComposerButton(
                       icon: const Icon(Icons.send_rounded,
                           color: Color(0xFF7C3AED), size: 28),
-                      onTap: () {
+                      onTap: () async {
                         final text = _textController.text.trim();
                         if (text.isNotEmpty || _attachments.isNotEmpty) {
-                          widget.onSend(text: text, attachments: List.from(_attachments));
+                          final prevText = text;
+                          final prevAttachments = List<_PendingAttachment>.from(_attachments);
                           _textController.clear();
                           setState(() => _attachments.clear());
+                          try {
+                            await widget.onSend(text: text, attachments: prevAttachments);
+                          } catch (e) {
+                            if (mounted) {
+                              _textController.text = prevText;
+                              setState(() {
+                                _attachments.addAll(prevAttachments);
+                              });
+                            }
+                          }
                         }
                       },
                     ),

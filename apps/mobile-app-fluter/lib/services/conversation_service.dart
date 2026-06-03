@@ -1,9 +1,7 @@
 import "../core/network/api_client.dart";
-import "../core/network/api_exception.dart";
 import "../models/conversation_summary.dart";
 import "../models/message_item.dart";
 import "../models/paginated_result.dart";
-import "local_cache_service.dart";
 
 const Object _unsetConversationPreference = Object();
 
@@ -188,38 +186,18 @@ class ConversationService {
     String? attachmentUrl,
     String? replyTo,
   }) async {
-    try {
-      final raw = await _apiClient.post(
-        "/conversations/${Uri.encodeComponent(conversationId)}/messages",
-        data: {
-          "content": content,
-          "clientMessageId": clientMessageId,
-          "type": type,
-          if (attachmentKey != null) "attachmentKey": attachmentKey,
-          if (attachmentUrl != null) "attachmentUrl": attachmentUrl,
-          if (replyTo != null) "replyTo": replyTo,
-        },
-      );
-      return MessageItem.fromJson((raw as Map).cast<String, dynamic>());
-    } catch (e) {
-      if (e is ApiException && e.statusCode != null && e.statusCode! < 500) {
-        rethrow;
-      }
-      final pendingMessage = MessageItem(
-        id: clientMessageId,
-        conversationId: conversationId,
-        senderId: "pending",
-        senderName: "Me",
-        type: type,
-        content: content,
-        sentAt: DateTime.now().toUtc().toIso8601String(),
-        attachmentUrl: attachmentUrl,
-        attachmentKey: attachmentKey,
-        isPending: true,
-      );
-      await LocalCacheService.instance.savePendingMessage(pendingMessage.toJson());
-      return pendingMessage;
-    }
+    final raw = await _apiClient.post(
+      "/conversations/${Uri.encodeComponent(conversationId)}/messages",
+      data: {
+        "content": content,
+        "clientMessageId": clientMessageId,
+        "type": type,
+        if (attachmentKey != null) "attachmentKey": attachmentKey,
+        if (attachmentUrl != null) "attachmentUrl": attachmentUrl,
+        if (replyTo != null) "replyTo": replyTo,
+      },
+    );
+    return MessageItem.fromJson((raw as Map).cast<String, dynamic>());
   }
 
   Future<MessageItem> updateMessage(

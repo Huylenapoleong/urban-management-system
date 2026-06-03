@@ -2,6 +2,9 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/chat/widgets/call_incoming_listener.dart';
+import '../../features/chat/widgets/notification_listener_widget.dart';
+
 /// Bottom-nav shell cho giao diện Official với thiết kế Floating Glassmorphic và bộ điều hướng StatefulNavigationShell.
 class OfficialShell extends StatelessWidget {
   const OfficialShell({super.key, required this.navigationShell});
@@ -13,60 +16,65 @@ class OfficialShell extends StatelessWidget {
     final idx = navigationShell.currentIndex;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      extendBody: true, // Cho phép body cuộn bên dưới thanh điều hướng kính mờ
-      body: navigationShell,
-      bottomNavigationBar: Container(
-        margin: EdgeInsets.fromLTRB(
-          16, 
-          0, 
-          16, 
-          16 + MediaQuery.of(context).padding.bottom
-        ),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: isDark ? Colors.black.withOpacity(0.4) : Colors.black.withOpacity(0.08),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: BackdropFilter(
-             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-            child: Container(
-              height: 68,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: isDark 
-                    ? const Color(0xFF1E293B).withOpacity(0.75) 
-                    : Colors.white.withOpacity(0.85),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: isDark 
-                      ? Colors.white.withOpacity(0.08) 
-                      : Colors.black.withOpacity(0.05),
-                  width: 1.5,
-                ),
+    return NotificationListenerWidget(
+      child: CallIncomingListener(
+      child: Scaffold(
+        extendBody: true, // Cho phép body cuộn bên dưới thanh điều hướng kính mờ
+        body: navigationShell,
+        bottomNavigationBar: Container(
+          margin: EdgeInsets.fromLTRB(
+            16, 
+            0, 
+            16, 
+            16 + MediaQuery.of(context).padding.bottom
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: isDark ? Colors.black.withOpacity(0.4) : Colors.black.withOpacity(0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildNavItem(context, 0, Icons.home_outlined, Icons.home, 'Trang chủ', idx),
-                  _buildNavItem(context, 1, Icons.assignment_outlined, Icons.assignment, 'Báo cáo', idx),
-                  _buildNavItem(context, 2, Icons.chat_bubble_outline, Icons.chat_bubble, 'Tin nhắn', idx),
-                  _buildNavItem(context, 3, Icons.person_outline, Icons.person, 'Cá nhân', idx),
-                ],
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: BackdropFilter(
+               filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                height: 68,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: isDark 
+                      ? const Color(0xFF1E293B).withOpacity(0.75) 
+                      : Colors.white.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: isDark 
+                        ? Colors.white.withOpacity(0.08) 
+                        : Colors.black.withOpacity(0.05),
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildNavItem(context, 0, Icons.home_outlined, Icons.home, 'Trang chủ', idx),
+                    _buildNavItem(context, 1, Icons.assignment_outlined, Icons.assignment, 'Báo cáo', idx),
+                    _buildNavItem(context, 2, Icons.chat_bubble_outline, Icons.chat_bubble, 'Tin nhắn', idx),
+                    _buildNavItem(context, 3, Icons.person_outline, Icons.person, 'Cá nhân', idx),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
+    ),
     );
   }
+
 
   Widget _buildNavItem(
     BuildContext context,

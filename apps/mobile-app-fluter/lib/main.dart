@@ -26,6 +26,12 @@ void main() async {
   }
 
   final services = AppServices.create();
+
+  // Khởi tạo local notification service và xin quyền
+  final notifService = services.localNotificationService;
+  await notifService.initialize();
+  await notifService.requestPermission();
+
   runApp(
     ProviderScope(
       child: UrbanManagementApp(services: services),

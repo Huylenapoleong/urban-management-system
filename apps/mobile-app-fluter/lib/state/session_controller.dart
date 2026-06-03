@@ -51,6 +51,7 @@ class SessionController extends ChangeNotifier {
       _user = await _appServices.authService.getMe();
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
+        _appServices.pushNotificationService.initializeAndRegister();
       }
       _errorMessage = null;
       _connectSocket();
@@ -76,6 +77,7 @@ class SessionController extends ChangeNotifier {
       _user = session.user;
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
+        _appServices.pushNotificationService.initializeAndRegister();
       }
       _errorMessage = null;
       _connectSocket();
@@ -103,6 +105,7 @@ class SessionController extends ChangeNotifier {
       _user = session.user;
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
+        _appServices.pushNotificationService.initializeAndRegister();
       }
       _errorMessage = null;
       _connectSocket();
@@ -184,6 +187,7 @@ class SessionController extends ChangeNotifier {
       _user = session.user;
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
+        _appServices.pushNotificationService.initializeAndRegister();
       }
       _errorMessage = null;
       _connectSocket();
@@ -215,6 +219,7 @@ class SessionController extends ChangeNotifier {
   Future<void> logout() async {
     _setLoading(true);
     try {
+      await _appServices.pushNotificationService.unregisterDevice();
       await _appServices.authService.logout();
     } finally {
       _user = null;
