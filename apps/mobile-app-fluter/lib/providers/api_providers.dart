@@ -3,11 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/providers.dart';
 import '../core/api/chat_api.dart';
 
-const String _apiBaseUrl = 'http://localhost:3001';
+import '../core/config/app_config.dart';
 
 final dioProvider = Provider<Dio>((ref) {
   final dio = Dio(BaseOptions(
-    baseUrl: _apiBaseUrl,
+    baseUrl: AppConfig.socketOrigin,
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(seconds: 15),
   ));

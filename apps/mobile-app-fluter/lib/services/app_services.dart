@@ -3,12 +3,13 @@ import "../core/storage/auth_token_store.dart";
 import "auth_service.dart";
 import "conversation_service.dart";
 import "group_service.dart";
-import "local_cache_service.dart";
+import "local_notification_service.dart";
 import "report_service.dart";
 import "socket_service.dart";
 import "upload_service.dart";
 import "user_service.dart";
 import "webrtc_service.dart";
+import "push_notification_service.dart";
 
 class AppServices {
   AppServices._({
@@ -22,6 +23,8 @@ class AppServices {
     required this.groupService,
     required this.socketService,
     required this.webRTCService,
+    required this.pushNotificationService,
+    required this.localNotificationService,
   });
 
   factory AppServices.create() {
@@ -33,28 +36,10 @@ class AppServices {
     final conversationService = ConversationService(apiClient: apiClient);
     final webRTCService = WebRTCService(socketService: socketService);
 
-    socketService.onChatReady.listen((_) async {
-      final pending = await LocalCacheService.instance.getPendingMessages();
-      for (final p in pending) {
-        try {
-          final msgId = p['id'] ?? p['messageId'];
-          if (msgId == null) continue;
-          
-          await conversationService.sendMessage(
-            p['conversationId'],
-            content: p['content'],
-            clientMessageId: msgId,
-            type: p['type'] ?? 'TEXT',
-            attachmentUrl: p['attachmentUrl'],
-            attachmentKey: p['attachmentKey'],
-            replyTo: p['replyTo'],
-          );
-          await LocalCacheService.instance.deleteMessage(msgId);
-        } catch (_) {
-          // If it fails again, it will stay in the outbox
-        }
-      }
-    });
+
+
+    final userService = UserService(apiClient: apiClient);
+    final localNotificationService = LocalNotificationService();
 
     return AppServices._(
       tokenStore: tokenStore,
@@ -63,10 +48,12 @@ class AppServices {
       conversationService: conversationService,
       reportService: ReportService(apiClient: apiClient),
       uploadService: UploadService(apiClient: apiClient),
-      userService: UserService(apiClient: apiClient),
+      userService: userService,
       groupService: GroupService(apiClient: apiClient),
       socketService: socketService,
       webRTCService: webRTCService,
+      pushNotificationService: PushNotificationService(userService: userService),
+      localNotificationService: localNotificationService,
     );
   }
 
@@ -80,4 +67,6 @@ class AppServices {
   final GroupService groupService;
   final SocketService socketService;
   final WebRTCService webRTCService;
+  final PushNotificationService pushNotificationService;
+  final LocalNotificationService localNotificationService;
 }
