@@ -345,7 +345,7 @@ describe('GroupsService', () => {
     authorizationService.canDeleteGroup.mockReturnValue(false);
 
     await expect(service.deleteGroup(actor, group.groupId)).rejects.toThrow(
-      new ForbiddenException('You cannot delete this group.'),
+      new ForbiddenException('Bạn không có quyền giải tán nhóm này.'),
     );
     expect(repository.transactWrite).not.toHaveBeenCalled();
   });
@@ -359,9 +359,7 @@ describe('GroupsService', () => {
         roleInGroup: 'OWNER',
       }),
     ).rejects.toThrow(
-      new ForbiddenException(
-        'Owner role cannot be assigned via member management.',
-      ),
+      new ForbiddenException('Không thể bổ nhiệm Trưởng nhóm tại đây.'),
     );
     expect(repository.put).not.toHaveBeenCalled();
   });
@@ -396,7 +394,9 @@ describe('GroupsService', () => {
       service.manageMember(actor, group.groupId, 'user-2', {
         action: 'add',
       }),
-    ).rejects.toThrow(new BadRequestException('Membership already exists.'));
+    ).rejects.toThrow(
+      new BadRequestException('Người dùng này đã ở trong nhóm.'),
+    );
     expect(repository.transactWrite).not.toHaveBeenCalled();
   });
 
@@ -690,7 +690,7 @@ describe('GroupsService', () => {
         },
       ),
     ).rejects.toThrow(
-      new ForbiddenException('Citizens can only add their friends to groups.'),
+      new ForbiddenException('Cư dân chỉ có thể thêm bạn bè vào nhóm.'),
     );
     expect(repository.transactWrite).not.toHaveBeenCalled();
   });
@@ -725,7 +725,7 @@ describe('GroupsService', () => {
       actor,
       group.groupId,
       expect.arrayContaining(['user-1', 'user-2']),
-      expect.stringContaining('added Member Three to the group'),
+      expect.stringContaining('đã thêm Member Three vào nhóm.'),
     );
   });
 
@@ -847,7 +847,7 @@ describe('GroupsService', () => {
         groupName: 'Renamed group',
       }),
     ).rejects.toThrow(
-      new ForbiddenException('Only the owner can rename the group.'),
+      new ForbiddenException('Chỉ Trưởng nhóm mới có quyền đổi tên nhóm.'),
     );
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
@@ -1047,7 +1047,7 @@ describe('GroupsService', () => {
     };
 
     await expect(service.joinGroup(actor, group.groupId)).rejects.toThrow(
-      new ForbiddenException('You are banned from this group.'),
+      new ForbiddenException('Bạn đã bị chặn khỏi nhóm này.'),
     );
   });
 
@@ -1071,7 +1071,7 @@ describe('GroupsService', () => {
         userId: 'user-3',
       }),
     ).rejects.toThrow(
-      new ForbiddenException('This user is banned from the group.'),
+      new ForbiddenException('Người dùng này đã bị chặn khỏi nhóm.'),
     );
   });
 
@@ -1292,7 +1292,7 @@ describe('GroupsService', () => {
 
     await expect(
       service.joinGroupByInvite(actor, 'invite-code'),
-    ).rejects.toThrow(new ForbiddenException('Invite link has expired.'));
+    ).rejects.toThrow(new ForbiddenException('Link mời đã hết hạn.'));
   });
 
   it('rejects expired invite links even when the actor is already an active member', async () => {
@@ -1324,7 +1324,7 @@ describe('GroupsService', () => {
 
     await expect(
       service.joinGroupByInvite(actor, 'invite-code'),
-    ).rejects.toThrow(new ForbiddenException('Invite link has expired.'));
+    ).rejects.toThrow(new ForbiddenException('Link mời đã hết hạn.'));
   });
 
   it('rejects exhausted invite links', async () => {
@@ -1362,7 +1362,7 @@ describe('GroupsService', () => {
     await expect(
       service.joinGroupByInvite(actor, 'invite-code'),
     ).rejects.toThrow(
-      new ForbiddenException('Invite link has reached its usage limit.'),
+      new ForbiddenException('Link mời đã đạt giới hạn số lần sử dụng.'),
     );
   });
 

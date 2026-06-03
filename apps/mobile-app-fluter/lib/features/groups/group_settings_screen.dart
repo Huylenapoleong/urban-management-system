@@ -11,7 +11,7 @@ import '../shared/widgets/app_toast.dart';
 import 'group_members_screen.dart';
 import 'group_invite_links_screen.dart';
 import 'group_audit_logs_screen.dart';
-import '../../app/shared/chat/widgets/create_poll_sheet.dart';
+
 import 'group_shared_media_screen.dart';
 
 class GroupSettingsScreen extends StatefulWidget {
@@ -422,16 +422,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   )),
                 ),
 
-                _buildTile(
-                  context,
-                  icon: Icons.poll_outlined,
-                  color: const Color(0xFF7C3AED),
-                  title: 'Tạo bình chọn',
-                  subtitle: 'Tạo khảo sát, biểu quyết cho nhóm',
-                  onTap: () {
-                    CreatePollBottomSheet.show(context, "group:${widget.groupId}");
-                  },
-                ),
+
 
                 _buildTile(
                   context,

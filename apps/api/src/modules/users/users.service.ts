@@ -980,8 +980,18 @@ export class UsersService {
   async getPresence(actor: AuthenticatedUser, userId: string) {
     const target = await this.getByIdOrThrow(userId);
 
-    if (!this.authorizationService.canReadUser(actor, target)) {
-      throw new ForbiddenException('You cannot access this profile.');
+    const canRead =
+      this.authorizationService.canReadUser(actor, target) ||
+      this.authorizationService.canAccessDirectConversation(actor, target);
+
+    if (!canRead) {
+      // Check if they are friends as a fallback (friends can always see presence)
+      const isFriend = await this.areFriends(actor.id, target.userId);
+      if (!isFriend) {
+        throw new ForbiddenException(
+          'Bạn không có quyền xem trạng thái hoạt động của người này.',
+        );
+      }
     }
 
     return this.chatPresenceService.getPresence(userId);

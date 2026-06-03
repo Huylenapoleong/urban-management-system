@@ -1167,24 +1167,24 @@ export class ConversationsGateway
     actorName: string,
   ): string {
     if (!callEvent) {
-      return 'Call event.';
+      return 'Sự kiện cuộc gọi.';
     }
 
-    const callLabel = callEvent.isVideo ? 'Video call' : 'Voice call';
+    const callLabel = callEvent.isVideo ? 'Cuộc gọi video' : 'Cuộc gọi thoại';
 
     if (callEvent.status === 'REJECTED') {
-      return `${callLabel} was rejected.`;
+      return `${callLabel} bị từ chối.`;
     }
 
     if (callEvent.status === 'PARTICIPANT_LEFT') {
-      return `${actorName} left the call.`;
+      return `${actorName} đã rời cuộc gọi.`;
     }
 
     if (callEvent.durationSeconds > 0) {
-      return `${callLabel} ended (${this.formatCallDuration(callEvent.durationSeconds)}).`;
+      return `${callLabel} kết thúc (${this.formatCallDuration(callEvent.durationSeconds)}).`;
     }
 
-    return `${callLabel} ended.`;
+    return `${callLabel} kết thúc.`;
   }
 
   private async emitPresenceSnapshot(

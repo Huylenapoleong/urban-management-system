@@ -738,7 +738,7 @@ export class UsersController {
     {
       name: 'presenceForbidden',
       summary: 'Profile access denied',
-      message: 'You cannot access this profile.',
+      message: 'Bạn không có quyền xem trạng thái hoạt động của người này.',
       path: '/api/users/01JPCY0000CITIZENB00000000/presence',
     },
   ])

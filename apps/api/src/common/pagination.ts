@@ -15,11 +15,11 @@ function parseCursorString(
   }
 
   if (Array.isArray(value)) {
-    throw new BadRequestException(`${field} must be a string.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   if (typeof value !== 'string' || !value.trim()) {
-    throw new BadRequestException(`${field} must be a string.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return value.trim();
@@ -44,11 +44,11 @@ function decodeCursorPayload(
   try {
     parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
   } catch {
-    throw new BadRequestException(`${field} is invalid.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    throw new BadRequestException(`${field} is invalid.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   const payload = parsed as Partial<SortCursorPayload>;
@@ -59,7 +59,7 @@ function decodeCursorPayload(
     typeof payload.sortValue !== 'string' ||
     !payload.sortValue.trim()
   ) {
-    throw new BadRequestException(`${field} is invalid.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return {

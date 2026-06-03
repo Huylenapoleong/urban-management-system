@@ -1,7 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/providers/auth-context";
-import { register, type RegisterRequest } from "@/services/auth.api";
+import {
+  requestRegisterOtp,
+  verifyRegisterOtp,
+  type RegisterRequest,
+} from "@/services/auth.api";
 import {
   listLocationProvinces,
   listLocationWards,
@@ -16,6 +20,15 @@ function buildWardLocationCode(provinceCode: string, wardCode: string) {
   return `VN-${provinceCode}-${wardCode}`;
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error !== "object" || error === null) {
+    return fallback;
+  }
+
+  const message = (error as { message?: string }).message;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const { login: authenticate } = useAuth();
@@ -26,6 +39,9 @@ export function RegisterPage() {
     password: "",
     locationCode: "",
   });
+  const [step, setStep] = useState<"register" | "otp">("register");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpMessage, setOtpMessage] = useState("");
   const [error, setError] = useState("");
   const [locationError, setLocationError] = useState("");
   const [provinces, setProvinces] = useState<LocationProvince[]>([]);
@@ -34,6 +50,7 @@ export function RegisterPage() {
   const [selectedWardCode, setSelectedWardCode] = useState("");
   const [isLoadingProvinces, setIsLoadingProvinces] = useState(true);
   const [isLoadingWards, setIsLoadingWards] = useState(false);
+
   const selectedProvince = useMemo(
     () => provinces.find((province) => province.code === selectedProvinceCode),
     [provinces, selectedProvinceCode],
@@ -60,7 +77,7 @@ export function RegisterPage() {
           setLocationError(
             err instanceof Error
               ? err.message
-              : "Khong the tai danh sach tinh/thanh.",
+              : "Không thể tải danh sách tỉnh/thành.",
           );
         }
       } finally {
@@ -106,7 +123,7 @@ export function RegisterPage() {
           setLocationError(
             err instanceof Error
               ? err.message
-              : "Khong the tai danh sach phuong/xa.",
+              : "Không thể tải danh sách phường/xã.",
           );
         }
       } finally {
@@ -133,19 +150,41 @@ export function RegisterPage() {
     }));
   }, [selectedProvinceCode, selectedWardCode]);
 
-  const registerMutation = useMutation({
-    mutationFn: register,
+  const requestOtpMutation = useMutation({
+    mutationFn: requestRegisterOtp,
+    onSuccess: (data) => {
+      setStep("otp");
+      setError("");
+      setOtpMessage(
+        `Mã OTP đã được gửi đến email ${data.maskedEmail || formData.email}.`,
+      );
+    },
+    onError: (err: unknown) => {
+      setError(
+        getErrorMessage(
+          err,
+          "Đăng ký thất bại. Vui lòng kiểm tra lại thông tin.",
+        ),
+      );
+    },
+  });
+
+  const verifyOtpMutation = useMutation({
+    mutationFn: verifyRegisterOtp,
     onSuccess: (data) => {
       if (data.tokens?.accessToken) {
         authenticate(data.tokens.accessToken);
         navigate("/");
       } else {
-        setError("Token dang nhap khong duoc tim thay.");
+        setError("Token đăng nhập không được tìm thấy.");
       }
     },
-    onError: (err: { message?: string }) => {
+    onError: (err: unknown) => {
       setError(
-        err?.message || "Dang ky that bai. Vui long kiem tra lai thong tin.",
+        getErrorMessage(
+          err,
+          "Mã OTP không hợp lệ hoặc đã hết hạn. Vui lòng kiểm tra lại.",
+        ),
       );
     },
   });
@@ -154,183 +193,272 @@ export function RegisterPage() {
     e.preventDefault();
     setError("");
 
-    if (!formData.fullName || !formData.password) {
-      setError("Vui long nhap day du thong tin bat buoc (*)");
-      return;
-    }
-    if (!formData.email && !formData.phone) {
-      setError("Vui long cung cap it nhat Email hoac So dien thoai");
+    if (!formData.fullName || !formData.password || !formData.email) {
+      setError("Vui lòng nhập đầy đủ thông tin bắt buộc (*)");
       return;
     }
     if (!selectedProvinceCode || !selectedWardCode || !formData.locationCode) {
-      setError("Vui long chon day du Tinh/Thanh va Phuong/Xa.");
+      setError("Vui lòng chọn đầy đủ Tỉnh/Thành và Phường/Xã.");
       return;
     }
 
-    registerMutation.mutate(formData);
+    requestOtpMutation.mutate(formData);
+  };
+
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setOtpMessage("");
+
+    if (!otpCode.trim()) {
+      setError("Vui lòng nhập mã OTP.");
+      return;
+    }
+    if (!formData.email) {
+      setError("Không tìm thấy thông tin email.");
+      return;
+    }
+
+    verifyOtpMutation.mutate({
+      email: formData.email.trim(),
+      otpCode: otpCode.trim(),
+    });
+  };
+
+  const handleResendOtp = () => {
+    setError("");
+    setOtpMessage("");
+    if (!formData.email) return;
+    requestOtpMutation.mutate(formData, {
+      onSuccess: (data) => {
+        setOtpMessage(
+          `Mã OTP đã được gửi lại đến email ${data.maskedEmail || formData.email}.`,
+        );
+      },
+    });
   };
 
   return (
     <div className="min-h-screen w-screen bg-slate-100 flex items-center justify-center p-4 py-10 overflow-y-auto">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden mt-8 mb-8">
         <div className="bg-blue-600 p-6 text-center text-white">
-          <h1 className="text-2xl font-bold">Urban Management OTT</h1>
+          <h1 className="text-2xl font-bold">Urban Management System</h1>
           <p className="text-blue-100 mt-2 text-sm">
-            Dang ky tai khoan he thong
+            {step === "register"
+              ? "Đăng ký tài khoản hệ thống"
+              : "Xác thực mã OTP đăng ký"}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <div className="p-6">
           {error && (
-            <div className="bg-red-50 text-red-500 p-3 rounded-lg text-sm">
+            <div className="bg-red-50 text-red-500 p-3 rounded-lg text-sm mb-4">
               {error}
             </div>
           )}
 
           {locationError && (
-            <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-sm">
+            <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-sm mb-4">
               {locationError}
             </div>
           )}
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">
-              Ho va ten (*)
-            </label>
-            <Input
-              type="text"
-              placeholder="Nguyen Van A"
-              value={formData.fullName}
-              onChange={(e) =>
-                setFormData({ ...formData, fullName: e.target.value })
-              }
-              className="w-full"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">
-              So dien thoai
-            </label>
-            <Input
-              type="tel"
-              placeholder="09xx xxx xxx"
-              value={formData.phone}
-              onChange={(e) =>
-                setFormData({ ...formData, phone: e.target.value })
-              }
-              className="w-full"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Email</label>
-            <Input
-              type="email"
-              placeholder="email@example.com"
-              value={formData.email}
-              onChange={(e) =>
-                setFormData({ ...formData, email: e.target.value })
-              }
-              className="w-full"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">
-                Tinh / Thanh (*)
-              </label>
-              <select
-                value={selectedProvinceCode}
-                onChange={(e) => {
-                  setSelectedProvinceCode(e.target.value);
-                  setSelectedWardCode("");
-                }}
-                disabled={isLoadingProvinces}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">
-                  {isLoadingProvinces ? "Dang tai..." : "Chon tinh/thanh"}
-                </option>
-                {provinces.map((province) => (
-                  <option key={province.code} value={province.code}>
-                    {province.fullName}
-                  </option>
-                ))}
-              </select>
+          {otpMessage && (
+            <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm mb-4">
+              {otpMessage}
             </div>
+          )}
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">
-                Phuong / Xa (*)
-              </label>
-              <select
-                value={selectedWardCode}
-                onChange={(e) => setSelectedWardCode(e.target.value)}
-                disabled={!selectedProvinceCode || isLoadingWards}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          {step === "register" ? (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Họ và tên (*)
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Nguyễn Văn A"
+                  value={formData.fullName}
+                  onChange={(e) =>
+                    setFormData({ ...formData, fullName: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Số điện thoại
+                </label>
+                <Input
+                  type="tel"
+                  placeholder="09xx xxx xxx"
+                  value={formData.phone}
+                  onChange={(e) =>
+                    setFormData({ ...formData, phone: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Email (*)
+                </label>
+                <Input
+                  type="email"
+                  placeholder="email@example.com"
+                  value={formData.email}
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Tỉnh / Thành (*)
+                  </label>
+                  <select
+                    value={selectedProvinceCode}
+                    onChange={(e) => {
+                      setSelectedProvinceCode(e.target.value);
+                      setSelectedWardCode("");
+                    }}
+                    disabled={isLoadingProvinces}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">
+                      {isLoadingProvinces ? "Đang tải..." : "Chọn tỉnh/thành"}
+                    </option>
+                    {provinces.map((province) => (
+                      <option key={province.code} value={province.code}>
+                        {province.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Phường / Xã (*)
+                  </label>
+                  <select
+                    value={selectedWardCode}
+                    onChange={(e) => setSelectedWardCode(e.target.value)}
+                    disabled={!selectedProvinceCode || isLoadingWards}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">
+                      {!selectedProvinceCode
+                        ? "Chọn tỉnh/thành trước"
+                        : isLoadingWards
+                          ? "Đang tải..."
+                          : "Chọn phường/xã"}
+                    </option>
+                    {wards.map((ward) => (
+                      <option key={ward.code} value={ward.code}>
+                        {ward.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                <p className="font-medium text-slate-700">
+                  Địa bàn sẽ gửi lên hệ thống
+                </p>
+                <p className="mt-1 text-xs">
+                  {selectedWard?.fullName ||
+                    selectedProvince?.fullName ||
+                    "Sẽ được xác định sau khi chọn đầy đủ tỉnh/thành và phường/xã"}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Mật khẩu (*)
+                </label>
+                <Input
+                  type="password"
+                  placeholder="Nhập mật khẩu"
+                  value={formData.password}
+                  onChange={(e) =>
+                    setFormData({ ...formData, password: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-4"
+                disabled={requestOtpMutation.isPending}
               >
-                <option value="">
-                  {!selectedProvinceCode
-                    ? "Chon tinh/thanh truoc"
-                    : isLoadingWards
-                      ? "Dang tai..."
-                      : "Chon phuong/xa"}
-                </option>
-                {wards.map((ward) => (
-                  <option key={ward.code} value={ward.code}>
-                    {ward.fullName}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+                {requestOtpMutation.isPending ? "Đang gửi OTP..." : "Đăng ký"}
+              </Button>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            <p className="font-medium text-slate-700">
-              Dia ban se gui len backend
-            </p>
-            <p className="mt-1 text-xs">
-              {selectedWard?.fullName ||
-                selectedProvince?.fullName ||
-                "Se duoc xac dinh sau khi chon day du tinh/thanh va phuong/xa"}
-            </p>
-          </div>
+              <div className="text-center text-sm text-gray-500 mt-4">
+                Đã có tài khoản?{" "}
+                <Link
+                  to="/login"
+                  className="text-blue-600 font-medium hover:underline"
+                >
+                  Đăng nhập
+                </Link>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Mã xác thực OTP
+                </label>
+                <Input
+                  type="text"
+                  maxLength={6}
+                  placeholder="Nhập mã OTP 6 chữ số"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  className="w-full text-center text-lg tracking-widest font-bold"
+                />
+              </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">
-              Mat khau (*)
-            </label>
-            <Input
-              type="password"
-              placeholder="Nhap mat khau"
-              value={formData.password}
-              onChange={(e) =>
-                setFormData({ ...formData, password: e.target.value })
-              }
-              className="w-full"
-            />
-          </div>
+              <Button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-4"
+                disabled={verifyOtpMutation.isPending}
+              >
+                {verifyOtpMutation.isPending ? "Đang xác minh..." : "Xác nhận"}
+              </Button>
 
-          <Button
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-4"
-            disabled={registerMutation.isPending}
-          >
-            {registerMutation.isPending ? "Dang xu ly..." : "Dang ky"}
-          </Button>
-
-          <div className="text-center text-sm text-gray-500 mt-4">
-            Da co tai khoan?{" "}
-            <Link
-              to="/login"
-              className="text-blue-600 font-medium hover:underline"
-            >
-              Dang nhap
-            </Link>
-          </div>
-        </form>
+              <div className="flex flex-col space-y-2 mt-4 text-center">
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={requestOtpMutation.isPending}
+                  className="text-sm text-blue-600 hover:underline font-medium"
+                >
+                  Gửi lại mã OTP
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("register");
+                    setError("");
+                    setOtpMessage("");
+                  }}
+                  className="text-xs text-gray-500 hover:underline"
+                >
+                  Quay lại chỉnh sửa thông tin
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -9,13 +9,13 @@ describe('ensureLocationCode', () => {
 
   it('rejects malformed location codes', () => {
     expect(() => ensureLocationCode('79-25747')).toThrow(
-      new BadRequestException('locationCode is invalid.'),
+      new BadRequestException('locationCode không hợp lệ.'),
     );
     expect(() => ensureLocationCode('VN')).toThrow(
-      new BadRequestException('locationCode is invalid.'),
+      new BadRequestException('locationCode không hợp lệ.'),
     );
     expect(() => ensureLocationCode('VN-79--25747')).toThrow(
-      new BadRequestException('locationCode is invalid.'),
+      new BadRequestException('locationCode không hợp lệ.'),
     );
   });
 });

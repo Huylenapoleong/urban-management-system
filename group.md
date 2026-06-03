@@ -156,9 +156,8 @@ Dù API đã hỗ trợ, nhưng ứng dụng di động vẫn còn thiếu nhi�
    - *Giao diện Lưới (Grid Layout)*: Đã có sẵn khung Grid 2 cột, stream ổn định hơn nhờ logic chống xung đột.
    - *Picture-in-Picture (✅)*: Đã triển khai `FloatingCallOverlay` — widget nổi có thể kéo thả, hiển thị video/audio, đếm thời gian, nút kết thúc cuộc gọi. Nhấn vào để quay lại `CallScreen` đầy đủ.
    - *Speaking Detection (✅)*: Đã triển khai hoàn toàn bằng Dart bằng cách định kỳ thăm dò `getStats()` từ `RTCPeerConnection` để lấy mức decibel âm thanh (`audioLevel`). Hiển thị viền phát sáng màu tím và biểu tượng mic khi phát hiện thành viên đang nói, đồng bộ trực quan như Web App.
-6. **Bình chọn (Polls) (✅ Đã hoàn thành)**: 
-   - Đã tích hợp `PollMessageBubble` và `CreatePollBottomSheet` vào Flutter.
-   - Hỗ trợ đầy đủ logic parse JSON, tuỳ chọn "Chọn một/Chọn nhiều", xem phần trăm (%) phiếu bầu và đồng bộ trực tiếp (`editMessage` / `PATCH`) giống hệt Web App.
+6. **Bình chọn (Polls) (❌ Đã gỡ bỏ)**: 
+   - Đã gỡ bỏ hoàn toàn khỏi hệ thống (cả Web App và Mobile App) do giao diện và chức năng còn quá sơ khai.
 7. **Gửi GIF (Giphy Integration) (✅ Đã thêm nút GIF trong chat detail và hoàn thiện gửi GIF)**:
    - Đã xây dựng `GifPickerSheet` với Giphy REST API.
    - Hỗ trợ tải vô cực (Infinite Scroll), Shimmer Loading, và tích hợp trực tiếp vào màn hình Chat thông qua thuộc tính `attachmentUrl` và `type: 'IMAGE'`.

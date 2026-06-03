@@ -1130,23 +1130,23 @@ export class AuthOtpService implements OnModuleInit, OnApplicationShutdown {
     expiresInMinutes: number;
   }): string {
     const purposeLabel = this.formatOtpPurposeLabel(input.purpose);
-    const subject = `[Urban Management] ${purposeLabel} OTP`;
+    const subject = `[Quản lý Đô thị] Mã xác thực OTP - ${purposeLabel}`;
     const plainBody = [
-      'Hello,',
+      'Xin chào,',
       '',
-      'We received a request for your Urban Management account.',
-      `Purpose: ${purposeLabel}`,
-      `OTP code: ${input.otpCode}`,
-      `Expires in: ${input.expiresInMinutes} minute(s)`,
-      `Expires at (UTC): ${input.expiresAt}`,
+      'Chúng tôi đã nhận được yêu cầu cần xác thực cho tài khoản Quản lý Đô thị của bạn.',
+      `Yêu cầu thực hiện: ${purposeLabel}`,
+      `Mã xác thực OTP của bạn là: ${input.otpCode}`,
+      `Thời gian hiệu lực: ${input.expiresInMinutes} phút`,
       '',
-      'If this was not you, please ignore this email and review your account security.',
+      'Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email này để bảo mật tài khoản.',
       '',
-      'Urban Management System',
+      'Cảm ơn bạn đã tin tưởng và sử dụng hệ thống Quản lý Đô thị!',
+      '',
+      'Ban Quản trị Hệ thống Quản lý Đô thị',
     ].join('\r\n');
     const escapedPurpose = this.escapeHtml(purposeLabel);
     const escapedCode = this.escapeHtml(input.otpCode);
-    const escapedExpiresAt = this.escapeHtml(input.expiresAt);
     const htmlBody = [
       '<!doctype html>',
       '<html>',
@@ -1155,18 +1155,18 @@ export class AuthOtpService implements OnModuleInit, OnApplicationShutdown {
       '<tr><td align="center">',
       '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">',
       '<tr><td style="padding:20px 24px;border-bottom:1px solid #e5e7eb;">',
-      '<div style="font-size:18px;font-weight:700;color:#0f172a;">Urban Management</div>',
-      '<div style="margin-top:4px;font-size:13px;color:#6b7280;">Security verification code</div>',
+      '<div style="font-size:18px;font-weight:700;color:#0f172a;">Quản lý Đô thị</div>',
+      '<div style="margin-top:4px;font-size:13px;color:#6b7280;">Mã xác thực bảo mật tài khoản</div>',
       '</td></tr>',
       '<tr><td style="padding:24px;">',
-      '<p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;">Hello,</p>',
-      '<p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;">We received a request that requires OTP verification for your account.</p>',
-      `<p style="margin:0 0 8px 0;font-size:13px;color:#374151;"><strong>Purpose:</strong> ${escapedPurpose}</p>`,
-      `<p style="margin:0 0 14px 0;font-size:13px;color:#374151;"><strong>Expires at (UTC):</strong> ${escapedExpiresAt}</p>`,
+      '<p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;">Xin chào,</p>',
+      '<p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;">Chúng tôi nhận được yêu cầu cần xác thực cho tài khoản của bạn trên hệ thống Quản lý Đô thị.</p>',
+      `<p style="margin:0 0 14px 0;font-size:13px;color:#374151;"><strong>Yêu cầu thực hiện:</strong> ${escapedPurpose}</p>`,
       `<div style="margin:0 0 16px 0;padding:14px 16px;border:1px dashed #bfdbfe;background:#eff6ff;border-radius:8px;font-size:30px;letter-spacing:6px;font-weight:700;text-align:center;color:#1d4ed8;">${escapedCode}</div>`,
-      `<p style="margin:0;font-size:12px;color:#6b7280;">This OTP is valid for ${input.expiresInMinutes} minute(s). If you did not request this, ignore this email.</p>`,
+      `<p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;">Mã xác thực này chỉ có hiệu lực trong vòng ${input.expiresInMinutes} phút. Nếu bạn không thực hiện yêu cầu này, bạn có thể yên tâm bỏ qua email này để giữ an toàn cho tài khoản.</p>`,
+      '<p style="margin:0;font-size:13px;line-height:1.6;color:#374151;">Cảm ơn bạn đã tin tưởng và sử dụng hệ thống của chúng tôi!</p>',
       '</td></tr>',
-      '<tr><td style="padding:14px 24px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;">Urban Management System</td></tr>',
+      '<tr><td style="padding:14px 24px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;">Ban Quản trị Hệ thống Quản lý Đô thị</td></tr>',
       '</table>',
       '</td></tr>',
       '</table>',
@@ -1207,21 +1207,21 @@ export class AuthOtpService implements OnModuleInit, OnApplicationShutdown {
   private formatOtpPurposeLabel(purpose: OtpPurpose): string {
     switch (purpose) {
       case 'REGISTER':
-        return 'Registration';
+        return 'Đăng ký tài khoản';
       case 'LOGIN':
-        return 'Login';
+        return 'Đăng nhập';
       case 'FORGOT_PASSWORD':
-        return 'Password reset';
+        return 'Khôi phục mật khẩu';
       case 'CHANGE_PASSWORD':
-        return 'Password change';
+        return 'Đổi mật khẩu';
       case 'DEACTIVATE_ACCOUNT':
-        return 'Account deactivation';
+        return 'Tạm khóa tài khoản';
       case 'REACTIVATE_ACCOUNT':
-        return 'Account reactivation';
+        return 'Kích hoạt lại tài khoản';
       case 'DELETE_ACCOUNT':
-        return 'Permanent account deletion';
+        return 'Xóa tài khoản vĩnh viễn';
       default:
-        return 'Account verification';
+        return 'Xác thực tài khoản';
     }
   }
 

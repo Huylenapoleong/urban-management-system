@@ -68,7 +68,6 @@ import {
   Bell,
   BellOff,
   ChevronDown,
-  BarChart3,
   Copy,
   Download,
   Eraser,
@@ -228,25 +227,7 @@ type GifItem = {
   previewUrl: string;
 };
 
-type PollOption = {
-  id: string;
-  text: string;
-  votes: string[];
-};
 
-type PollMessageContent = {
-  text?: string;
-  poll?: {
-    question: string;
-    options: PollOption[];
-    isMultipleChoice?: boolean;
-  };
-};
-
-type ParsedPollMessage = {
-  pollData?: PollMessageContent;
-  text?: string;
-};
 
 type ManageGroupTab = "members" | "bans" | "links" | "audit" | "settings";
 
@@ -618,6 +599,15 @@ export function ChatPage() {
   );
 
   useEffect(() => {
+    socketClient.activeChatId = activeChat;
+    window.dispatchEvent(new CustomEvent("active-chat-changed"));
+    return () => {
+      socketClient.activeChatId = null;
+      window.dispatchEvent(new CustomEvent("active-chat-changed"));
+    };
+  }, [activeChat]);
+
+  useEffect(() => {
     if (chatState.conversationId && chatState.conversationId !== activeChat) {
       setActiveChat(chatState.conversationId);
     }
@@ -795,6 +785,12 @@ export function ChatPage() {
       return {};
     }
   });
+
+  const conversationAliasesRef = useRef(conversationAliases);
+  useEffect(() => {
+    conversationAliasesRef.current = conversationAliases;
+  }, [conversationAliases]);
+
   const [aliasInput, setAliasInput] = useState("");
   const [groupAvatarOverrides, setGroupAvatarOverrides] = useState<
     Record<string, string>
@@ -1048,11 +1044,8 @@ export function ChatPage() {
 
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [showAllPinned, setShowAllPinned] = useState(false);
-  const [isPollModalOpen, setIsPollModalOpen] = useState(false);
   const [isGifPickerOpen, setIsGifPickerOpen] = useState(false);
   const [gifPickerTab, setGifPickerTab] = useState<"gif" | "sticker">("gif");
-  const [pollQuestion, setPollQuestion] = useState("");
-  const [pollOptions, setPollOptions] = useState(["", ""]);
   const [gifSearch, setGifSearch] = useState("");
   const [gifResults, setGifResults] = useState<GifItem[]>([]);
   const [gifNext, setGifNext] = useState<number | null>(null);
@@ -1080,126 +1073,27 @@ export function ChatPage() {
     setActiveMessageMenuId(null);
   };
 
-  const parsePollMessage = (rawContent: string): ParsedPollMessage => {
+  const parseMessageText = (rawContent: string): string => {
     try {
       const parsed: unknown = JSON.parse(rawContent);
       if (isRecord(parsed)) {
-        if ("poll" in parsed) {
-          return {
-            pollData: parsed as PollMessageContent,
-            text: typeof parsed.text === "string" ? parsed.text : undefined,
-          };
-        }
-
-        const nestedText = parsed.text;
-        if (typeof nestedText === "string") {
+        const text = parsed.text;
+        if (typeof text === "string") {
           try {
-            const nestedParsed: unknown = JSON.parse(nestedText);
-            if (isRecord(nestedParsed)) {
-              if ("poll" in nestedParsed) {
-                return {
-                  pollData: nestedParsed as PollMessageContent,
-                  text:
-                    typeof nestedParsed.text === "string"
-                      ? nestedParsed.text
-                      : nestedText,
-                };
-              }
+            const nested: unknown = JSON.parse(text);
+            if (isRecord(nested) && typeof nested.text === "string") {
+              return nested.text;
             }
           } catch {
-            return { text: nestedText };
+            // ignore
           }
-          return { text: nestedText };
+          return text;
         }
       }
     } catch {
-      return { text: rawContent };
+      // ignore
     }
-
-    return { text: rawContent };
-  };
-
-  const handleCreatePoll = async () => {
-    if (
-      !pollQuestion.trim() ||
-      pollOptions.filter((o) => o.trim()).length < 2
-    ) {
-      toast.error("Vui lòng nhập câu hỏi và ít nhất 2 lựa chọn");
-      return;
-    }
-
-    const pollData = {
-      text: `📊 Bình chọn: ${pollQuestion}`,
-      poll: {
-        question: pollQuestion,
-        options: pollOptions
-          .map((option) => option.trim())
-          .filter(Boolean)
-          .map((option, index) => ({
-            id: String(index),
-            text: option,
-            votes: [],
-          })),
-        isMultipleChoice: false,
-      },
-    };
-
-    try {
-      await sendMessageAsync({
-        text: JSON.stringify(pollData),
-        type: "TEXT",
-      });
-      setIsPollModalOpen(false);
-      setPollQuestion("");
-      setPollOptions(["", ""]);
-    } catch {
-      toast.error("Không thể tạo bình chọn");
-    }
-  };
-
-  const handleVote = async (msg: MessageItem, optionId: string) => {
-    try {
-      const voterId = user?.sub;
-      if (!voterId) return;
-
-      const parsed = parsePollMessage(msg.content);
-      const pollData = parsed.pollData;
-      const poll = pollData?.poll;
-      if (!poll) return;
-
-      const newOptions = poll.options.map((opt) => {
-        const votes = opt.votes || [];
-        const hasVoted = votes.includes(voterId);
-
-        if (opt.id === optionId) {
-          return {
-            ...opt,
-            votes: hasVoted
-              ? votes.filter((id) => id !== voterId)
-              : [...votes, voterId],
-          };
-        }
-
-        // Single choice logic: remove vote from other options
-        if (!poll.isMultipleChoice) {
-          return {
-            ...opt,
-            votes: votes.filter((id) => id !== voterId),
-          };
-        }
-
-        return opt;
-      });
-
-      const newContent = JSON.stringify({
-        ...pollData,
-        poll: { ...poll, options: newOptions },
-      });
-
-      await updateMessageAsync({ messageId: msg.id, text: newContent });
-    } catch {
-      toast.error("Không thể bình chọn");
-    }
+    return rawContent;
   };
 
   const handleSendGif = async (url: string) => {
@@ -3317,9 +3211,10 @@ export function ChatPage() {
   useEffect(() => {
     const handleClickOutside = () => {
       setActiveMessageMenuId(null);
+      setReactionPickerMessageId(null);
     };
 
-    if (!activeMessageMenuId) {
+    if (!activeMessageMenuId && !reactionPickerMessageId) {
       return;
     }
 
@@ -3327,7 +3222,7 @@ export function ChatPage() {
     return () => {
       window.removeEventListener("click", handleClickOutside);
     };
-  }, [activeMessageMenuId]);
+  }, [activeMessageMenuId, reactionPickerMessageId]);
 
   const handleStartCall = (isVideo: boolean) => {
     if (!activeContact) return;
@@ -3798,13 +3693,20 @@ export function ChatPage() {
     setEditingMessageId(messageId);
     setEditingText(extractMessageText(content));
     setActiveMessageMenuId(null);
+    setReactionPickerMessageId(null);
     setMessageActionError("");
   };
 
   const handleStartReplyMessage = (message: MessageItem) => {
     setReplyingMessage(normalizeQuotedMessage(message));
     setActiveMessageMenuId(null);
+    setReactionPickerMessageId(null);
     setMessageActionError("");
+    
+    // Focus the chat input bar after setting reply message
+    setTimeout(() => {
+      composerInputRef.current?.focus();
+    }, 50);
   };
 
   const handleFocusMessageById = (messageId?: string) => {
@@ -4645,7 +4547,7 @@ export function ChatPage() {
                             {(() => {
                               try {
                                 const p = JSON.parse(m.content);
-                                return p.text || p.poll?.question || m.content;
+                                return p.text || m.content;
                               } catch {
                                 return m.content;
                               }
@@ -5873,200 +5775,26 @@ export function ChatPage() {
                         }}
                         className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col rounded-2xl transition-all animate-in fade-in slide-in-from-bottom-2 duration-300 ${focusedMessageId === msg.id ? "ring-2 ring-amber-300/80 ring-offset-2 ring-offset-slate-100 dark:ring-amber-400/70 dark:ring-offset-slate-950" : ""} ${!startsSenderBlock ? "-mt-2" : ""}`}
                       >
-                        {!isEditing ? (
-                          <div
-                            className={`absolute ${isMe ? "-left-24" : "-right-24"} bottom-6 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${activeMessageMenuId === msg.id
-                                ? "opacity-100"
-                                : "opacity-0 group-hover:opacity-100"
-                              }`}
-                          >
-                            <button
-                              type="button"
-                              className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                              title="Trả lời"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleStartReplyMessage(msg);
-                              }}
-                            >
-                              <Quote size={14} />
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                              title="Chuyển tiếp"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleOpenForwardDialog(msg.id);
-                              }}
-                            >
-                              <Share2 size={14} />
-                            </button>
-
-                            <div className="relative">
-                              <button
-                                type="button"
-                                className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                                title="Bày tỏ cảm xúc"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setReactionPickerMessageId((prev) =>
-                                    prev === msg.id ? null : msg.id,
-                                  );
-                                }}
-                              >
-                                <SmilePlus size={14} />
-                              </button>
-
-                              {reactionPickerMessageId === msg.id ? (
-                                <div
-                                  className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}
-                                >
-                                  {QUICK_REACTION_EMOJIS.map((emoji) => (
-                                    <button
-                                      key={`${msg.id}-${emoji}`}
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleToggleMessageReaction(
-                                          msg.id,
-                                          emoji,
-                                        );
-                                        setReactionPickerMessageId(null);
-                                      }}
-                                      className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
-                                    >
-                                      {emoji}
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="relative">
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setMessageMenuPlacement("up");
-                                  setActiveMessageMenuId((prev) =>
-                                    prev === msg.id ? null : msg.id,
-                                  );
-                                }}
-                                className="rounded-full p-1.5 text-white/90 transition hover:bg-white/20 hover:text-white"
-                                title="Tùy chọn tin nhắn"
-                              >
-                                <MoreHorizontal size={14} />
-                              </button>
-
-                              {activeMessageMenuId === msg.id ? (
-                                <div
-                                  className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}
-                                >
-                                  {isMe && canEditMessage ? (
-                                    <button
-                                      type="button"
-                                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                      onClick={() =>
-                                        handleStartEditMessage(
-                                          msg.id,
-                                          msg.content,
-                                        )
-                                      }
-                                    >
-                                      <Pencil size={14} />
-                                      Sửa tin nhắn
-                                    </button>
-                                  ) : null}
-                                  <button
-                                    type="button"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                    onClick={() =>
-                                      handleOpenForwardDialog(msg.id)
-                                    }
-                                  >
-                                    <Share2 size={14} />
-                                    Chuyển tiếp
-                                  </button>
-                                  {canRecallEveryone ? (
-                                    <button
-                                      type="button"
-                                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                      onClick={() =>
-                                        void handleDeleteMessage(
-                                          msg.id,
-                                          "EVERYONE",
-                                        )
-                                      }
-                                    >
-                                      <Trash2 size={14} />
-                                      Thu hồi với mọi người
-                                    </button>
-                                  ) : null}
-                                  <button
-                                    type="button"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100 border-t border-slate-100 dark:border-slate-800"
-                                    onClick={() => handleTogglePin(msg)}
-                                  >
-                                    {(() => {
-                                      try {
-                                        const p = JSON.parse(msg.content);
-                                        return p.isPinned ? (
-                                          <>
-                                            <PinOff
-                                              size={14}
-                                              className="text-orange-500"
-                                            />
-                                            Bỏ ghim tin nhắn
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Pin
-                                              size={14}
-                                              className="text-blue-500"
-                                            />
-                                            Ghim tin nhắn
-                                          </>
-                                        );
-                                      } catch {
-                                        return (
-                                          <>
-                                            <Pin
-                                              size={14}
-                                              className="text-blue-500"
-                                            />
-                                            Ghim tin nhắn
-                                          </>
-                                        );
-                                      }
-                                    })()}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                    onClick={() =>
-                                      void handleDeleteMessage(msg.id, "SELF")
-                                    }
-                                  >
-                                    <Trash2 size={14} />
-                                    Ẩn với tôi
-                                  </button>
-                                  <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
-                                    Sẽ thêm tính năng khác sau
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : null}
-
                         {shouldShowSenderMeta ? (
                           <p
                             className={`mb-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 ${isMe ? "text-right pr-10" : "ml-10"}`}
                           >
                             {senderDisplayName}
+                            {msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
+                              <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500 font-normal italic">
+                                (đã chỉnh sửa)
+                              </span>
+                            ) : null}
                           </p>
-                        ) : null}
+                        ) : (
+                          msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
+                            <p
+                              className={`mb-1 text-[10px] text-slate-400 dark:text-slate-500 italic ${isMe ? "text-right pr-10" : "ml-10"}`}
+                            >
+                              (đã chỉnh sửa)
+                            </p>
+                          ) : null
+                        )}
 
                         <div
                           className={`flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}
@@ -6096,11 +5824,199 @@ export function ChatPage() {
 
                           <div
                             onClick={(event) => event.stopPropagation()}
-                            className={`px-4 py-2 rounded-2xl shadow-sm ${isMe
+                            className={`relative px-4 py-2 rounded-2xl shadow-sm ${isMe
                                 ? `bg-blue-600 text-white ${endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl"}`
                                 : `bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 ${endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl"}`
                               }`}
                           >
+                            {!isEditing ? (
+                              <div
+                                className={`absolute ${isMe ? "right-full mr-2" : "left-full ml-2"} top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${activeMessageMenuId === msg.id
+                                    ? "opacity-100"
+                                    : "opacity-0 group-hover:opacity-100"
+                                  }`}
+                              >
+                                <button
+                                  type="button"
+                                  className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                  title="Trả lời"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleStartReplyMessage(msg);
+                                  }}
+                                >
+                                  <Quote size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                  title="Chuyển tiếp"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleOpenForwardDialog(msg.id);
+                                  }}
+                                >
+                                  <Share2 size={14} />
+                                </button>
+
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                    title="Bày tỏ cảm xúc"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setActiveMessageMenuId(null);
+                                      setReactionPickerMessageId((prev) =>
+                                        prev === msg.id ? null : msg.id,
+                                      );
+                                    }}
+                                  >
+                                    <SmilePlus size={14} />
+                                  </button>
+
+                                  {reactionPickerMessageId === msg.id ? (
+                                    <div
+                                      className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}
+                                    >
+                                      {QUICK_REACTION_EMOJIS.map((emoji) => (
+                                        <button
+                                          key={`${msg.id}-${emoji}`}
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleToggleMessageReaction(
+                                              msg.id,
+                                              emoji,
+                                            );
+                                            setReactionPickerMessageId(null);
+                                          }}
+                                          className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                                        >
+                                          {emoji}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setReactionPickerMessageId(null);
+                                      setMessageMenuPlacement("up");
+                                      setActiveMessageMenuId((prev) =>
+                                        prev === msg.id ? null : msg.id,
+                                      );
+                                    }}
+                                    className="rounded-full p-1.5 text-white/90 transition hover:bg-white/20 hover:text-white"
+                                    title="Tùy chọn tin nhắn"
+                                  >
+                                    <MoreHorizontal size={14} />
+                                  </button>
+
+                                  {activeMessageMenuId === msg.id ? (
+                                    <div
+                                      className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}
+                                    >
+                                      {isMe && canEditMessage ? (
+                                        <button
+                                          type="button"
+                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                          onClick={() =>
+                                            handleStartEditMessage(
+                                              msg.id,
+                                              msg.content,
+                                            )
+                                          }
+                                        >
+                                          <Pencil size={14} />
+                                          Sửa tin nhắn
+                                        </button>
+                                      ) : null}
+                                      <button
+                                        type="button"
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                        onClick={() =>
+                                          handleOpenForwardDialog(msg.id)
+                                        }
+                                      >
+                                        <Share2 size={14} />
+                                        Chuyển tiếp
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                        onClick={() => handleTogglePin(msg)}
+                                      >
+                                        {(() => {
+                                          try {
+                                            const p = JSON.parse(msg.content);
+                                            return p.isPinned ? (
+                                              <>
+                                                <PinOff
+                                                  size={14}
+                                                  className="text-orange-500"
+                                                />
+                                                Bỏ ghim tin nhắn
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Pin
+                                                  size={14}
+                                                  className="text-blue-500"
+                                                />
+                                                Ghim tin nhắn
+                                              </>
+                                            );
+                                          } catch {
+                                            return (
+                                              <>
+                                                <Pin
+                                                  size={14}
+                                                  className="text-blue-500"
+                                                />
+                                                Ghim tin nhắn
+                                              </>
+                                            );
+                                          }
+                                        })()}
+                                      </button>
+
+                                      <div className="border-t border-slate-100 dark:border-slate-800" />
+
+                                      {canRecallEveryone ? (
+                                        <button
+                                          type="button"
+                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                          onClick={() =>
+                                            void handleDeleteMessage(
+                                              msg.id,
+                                              "EVERYONE",
+                                            )
+                                          }
+                                        >
+                                          <Trash2 size={14} />
+                                          Thu hồi với mọi người
+                                        </button>
+                                      ) : null}
+                                      <button
+                                        type="button"
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                        onClick={() =>
+                                          void handleDeleteMessage(msg.id, "SELF")
+                                        }
+                                      >
+                                        <Trash2 size={14} />
+                                        Ẩn với tôi
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ) : null}
                             <div className="relative">
                               {isForwardedMessage ? (
                                 <div
@@ -6174,127 +6090,10 @@ export function ChatPage() {
                                 </div>
                               ) : (
                                 <div className="break-words">
-                                  {(() => {
-                                    try {
-                                      const parsed = parsePollMessage(
-                                        msg.content,
-                                      );
-                                      if (parsed.pollData?.poll) {
-                                        const poll = parsed.pollData.poll;
-                                        const totalVotes = poll.options.reduce(
-                                          (sum, opt) =>
-                                            sum + (opt.votes?.length || 0),
-                                          0,
-                                        );
-                                        return (
-                                          <div
-                                            className={`mt-1 p-3 rounded-xl border ${isMe ? "bg-white/10 border-white/20" : "bg-slate-50 dark:bg-slate-800 border-slate-100 dark:border-slate-700"} w-full min-w-[240px] max-w-[320px]`}
-                                          >
-                                            <div className="flex items-center gap-2 mb-3">
-                                              <div
-                                                className={`p-1.5 rounded-lg ${isMe ? "bg-white/20" : "bg-blue-100 dark:bg-blue-900/30"}`}
-                                              >
-                                                <BarChart3
-                                                  size={14}
-                                                  className={
-                                                    isMe
-                                                      ? "text-white"
-                                                      : "text-blue-600"
-                                                  }
-                                                />
-                                              </div>
-                                              <h3
-                                                className={`text-sm font-bold ${isMe ? "text-white" : "text-slate-800 dark:text-slate-100"}`}
-                                              >
-                                                {poll.question}
-                                              </h3>
-                                            </div>
-                                            <div className="space-y-1.5">
-                                              {poll.options.map((option) => {
-                                                const votes =
-                                                  option.votes || [];
-                                                const voterId = user?.sub;
-                                                const percentage =
-                                                  totalVotes > 0
-                                                    ? Math.round(
-                                                      (votes.length /
-                                                        totalVotes) *
-                                                      100,
-                                                    )
-                                                    : 0;
-                                                const hasVoted = voterId
-                                                  ? votes.includes(voterId)
-                                                  : false;
-
-                                                return (
-                                                  <button
-                                                    key={`opt-${msg.id}-${option.id}`}
-                                                    onClick={() =>
-                                                      handleVote(msg, option.id)
-                                                    }
-                                                    className="w-full text-left group relative"
-                                                  >
-                                                    <div
-                                                      className={`relative z-10 flex items-center justify-between px-3 py-2 rounded-lg border transition-all ${hasVoted
-                                                          ? isMe
-                                                            ? "bg-white/30 border-white"
-                                                            : "bg-blue-50 border-blue-400 dark:bg-blue-900/40 dark:border-blue-500"
-                                                          : isMe
-                                                            ? "border-white/10 hover:bg-white/5"
-                                                            : "border-slate-200 dark:border-slate-700 hover:border-blue-300"
-                                                        }`}
-                                                    >
-                                                      <span
-                                                        className={`text-xs font-medium truncate pr-4 ${isMe
-                                                            ? "text-white"
-                                                            : hasVoted
-                                                              ? "text-blue-700 dark:text-blue-300"
-                                                              : "text-slate-600 dark:text-slate-300"
-                                                          }`}
-                                                      >
-                                                        {option.text}
-                                                      </span>
-                                                      <span
-                                                        className={`text-[10px] font-bold ${isMe ? "text-white/80" : "text-slate-400"}`}
-                                                      >
-                                                        {votes.length}
-                                                      </span>
-
-                                                      <div
-                                                        className={`absolute left-0 top-0 bottom-0 opacity-15 transition-all duration-700 ease-out rounded-lg ${isMe ? "bg-white" : "bg-blue-500"}`}
-                                                        style={{
-                                                          width: `${percentage}%`,
-                                                        }}
-                                                      />
-                                                    </div>
-                                                  </button>
-                                                );
-                                              })}
-                                            </div>
-                                            <div className="mt-3 pt-2 border-t border-black/5 dark:border-white/5 flex items-center justify-between text-[10px] opacity-60 font-medium uppercase tracking-wider">
-                                              <span>
-                                                {totalVotes} lượt bình chọn
-                                              </span>
-                                              <span>
-                                                {poll.isMultipleChoice
-                                                  ? "Được chọn nhiều"
-                                                  : "Chọn 1"}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        );
-                                      }
-                                      return renderMessageTextWithMentions(
-                                        parsed.text || msg.content,
-                                        isMe,
-                                      );
-                                    } catch {
-                                      return renderMessageTextWithMentions(
-                                        msg.content,
-                                        isMe,
-                                      );
-                                    }
-                                  })()}
+                                  {renderMessageTextWithMentions(
+                                    parseMessageText(msg.content),
+                                    isMe,
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -6985,14 +6784,7 @@ export function ChatPage() {
                 >
                   <Paperclip size={18} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIsPollModalOpen(true)}
-                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 rounded-lg transition-all"
-                  title="Tạo bình chọn"
-                >
-                  <BarChart3 size={18} />
-                </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -7109,6 +6901,11 @@ export function ChatPage() {
                                 <X size={14} />
                               </button>
                             ) : null}
+                          </div>
+                          {/* Powered by GIPHY attribution */}
+                          <div className="flex items-center justify-center gap-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 font-medium select-none">
+                            <span>Powered by</span>
+                            <span className="font-bold tracking-wider text-slate-500 dark:text-slate-400">GIPHY</span>
                           </div>
                         </div>
                         {hasGifError ? (
@@ -7686,98 +7483,7 @@ export function ChatPage() {
                 </div>
               </div>
             )}
-            {/* Modal tạo bình chọn */}
-            {isPollModalOpen && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
-                <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 animate-in zoom-in-95 duration-300">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                        <BarChart3 size={20} />
-                      </div>
-                      <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-                        Tạo bình chọn mới
-                      </h3>
-                    </div>
-                    <button
-                      onClick={() => setIsPollModalOpen(false)}
-                      className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <X size={20} />
-                    </button>
-                  </div>
 
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">
-                        Câu hỏi
-                      </label>
-                      <Input
-                        placeholder="Bạn muốn hỏi gì?"
-                        value={pollQuestion}
-                        onChange={(e) => setPollQuestion(e.target.value)}
-                        className="bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">
-                        Các lựa chọn
-                      </label>
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1 hide-scrollbar">
-                        {pollOptions.map((opt, i) => (
-                          <div key={i} className="flex gap-2">
-                            <Input
-                              placeholder={`Lựa chọn ${i + 1}`}
-                              value={opt}
-                              onChange={(e) => {
-                                const newOpts = [...pollOptions];
-                                newOpts[i] = e.target.value;
-                                setPollOptions(newOpts);
-                              }}
-                              className="bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
-                            />
-                            {pollOptions.length > 2 && (
-                              <button
-                                onClick={() =>
-                                  setPollOptions((prev) =>
-                                    prev.filter((_, idx) => idx !== i),
-                                  )
-                                }
-                                className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <button
-                        onClick={() => setPollOptions((prev) => [...prev, ""])}
-                        className="mt-3 flex items-center gap-2 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        <Plus size={14} /> Thêm lựa chọn
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-8 flex gap-3">
-                    <button
-                      onClick={() => setIsPollModalOpen(false)}
-                      className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 font-bold text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
-                    >
-                      Hủy
-                    </button>
-                    <button
-                      onClick={handleCreatePoll}
-                      className="flex-1 py-2.5 rounded-xl bg-blue-600 font-bold text-sm text-white hover:bg-blue-700 shadow-lg shadow-blue-500/25 transition-all"
-                    >
-                      Tạo bình chọn
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
             {confirmDialog ? (
               <div
                 className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4"
