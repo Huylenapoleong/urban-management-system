@@ -378,6 +378,7 @@ export class AppConfigService {
       'image/gif',
       'video/mp4',
       'video/quicktime',
+      'video/webm',
       'audio/mpeg',
       'audio/mp4',
       'audio/aac',
