@@ -183,6 +183,7 @@ export function useWebRTC() {
   const callStateRef = useRef<CallState>("IDLE");
   const callStartedAtRef = useRef<number | null>(null);
   const activeGroupCallsTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const groupAutoEndTimerRef = useRef<number | null>(null);
 
   const getIceServers = (): RTCConfiguration => {
     const turnUsername = import.meta.env.VITE_TURN_USERNAME || "";
@@ -257,12 +258,143 @@ export function useWebRTC() {
     return /^(group:|grp#|group#)/i.test(rawConversationId);
   }, []);
 
+  const isGroupConversationId = useCallback((conversationId?: string | null) => {
+    return /^(group:|grp#|group#)/i.test(conversationId?.trim() || "");
+  }, []);
+
+  const getGroupConversationIdAliases = useCallback(
+    (conversationId?: string | null): string[] => {
+      if (!isGroupConversationId(conversationId)) return [];
+
+      const rawConversationId = conversationId!.trim();
+      const upperConversationId = rawConversationId.toUpperCase();
+      const aliases = new Set([rawConversationId]);
+
+      if (upperConversationId.startsWith("GRP#")) {
+        aliases.add(`group:${rawConversationId.slice("GRP#".length)}`);
+      } else if (upperConversationId.startsWith("GROUP:")) {
+        aliases.add(`GRP#${rawConversationId.slice("group:".length)}`);
+      } else if (upperConversationId.startsWith("GROUP#")) {
+        aliases.add(`GRP#${rawConversationId.slice("group#".length)}`);
+      }
+
+      return Array.from(aliases);
+    },
+    [isGroupConversationId],
+  );
+
+  const clearActiveGroupCall = useCallback(
+    (conversationId?: string | null) => {
+      const conversationIds = getGroupConversationIdAliases(conversationId);
+      if (conversationIds.length === 0) return;
+
+      const timeoutIds = new Set(
+        conversationIds
+          .map((conversationIdAlias) =>
+            activeGroupCallsTimeoutsRef.current.get(conversationIdAlias),
+          )
+          .filter((timeoutId): timeoutId is number => timeoutId !== undefined),
+      );
+      timeoutIds.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      conversationIds.forEach((conversationIdAlias) => {
+        activeGroupCallsTimeoutsRef.current.delete(conversationIdAlias);
+      });
+
+      setActiveGroupCalls((prev) => {
+        if (
+          !conversationIds.some((conversationIdAlias) =>
+            prev.has(conversationIdAlias),
+          )
+        ) {
+          return prev;
+        }
+        const next = new Set(prev);
+        conversationIds.forEach((conversationIdAlias) => {
+          next.delete(conversationIdAlias);
+        });
+        return next;
+      });
+    },
+    [getGroupConversationIdAliases],
+  );
+
+  const markActiveGroupCall = useCallback(
+    (conversationId?: string | null) => {
+      const conversationIds = getGroupConversationIdAliases(conversationId);
+      if (conversationIds.length === 0) return;
+
+      setActiveGroupCalls((prev) => {
+        if (
+          conversationIds.every((conversationIdAlias) =>
+            prev.has(conversationIdAlias),
+          )
+        ) {
+          return prev;
+        }
+        const next = new Set(prev);
+        conversationIds.forEach((conversationIdAlias) => {
+          next.add(conversationIdAlias);
+        });
+        return next;
+      });
+
+      const previousTimeoutIds = new Set(
+        conversationIds
+          .map((conversationIdAlias) =>
+            activeGroupCallsTimeoutsRef.current.get(conversationIdAlias),
+          )
+          .filter((timeoutId): timeoutId is number => timeoutId !== undefined),
+      );
+      previousTimeoutIds.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+
+      const timeoutId = window.setTimeout(() => {
+        setActiveGroupCalls((prev) => {
+          if (
+            !conversationIds.some((conversationIdAlias) =>
+              prev.has(conversationIdAlias),
+            )
+          ) {
+            return prev;
+          }
+          const next = new Set(prev);
+          conversationIds.forEach((conversationIdAlias) => {
+            next.delete(conversationIdAlias);
+          });
+          return next;
+        });
+        conversationIds.forEach((conversationIdAlias) => {
+          activeGroupCallsTimeoutsRef.current.delete(conversationIdAlias);
+        });
+      }, 60_000);
+
+      conversationIds.forEach((conversationIdAlias) => {
+        activeGroupCallsTimeoutsRef.current.set(conversationIdAlias, timeoutId);
+      });
+    },
+    [getGroupConversationIdAliases],
+  );
+
+  const clearGroupAutoEndTimer = useCallback(() => {
+    if (groupAutoEndTimerRef.current === null) return;
+    window.clearTimeout(groupAutoEndTimerRef.current);
+    groupAutoEndTimerRef.current = null;
+  }, []);
+
   const cleanup = useCallback(
     (options?: { remoteDurationSeconds?: number }) => {
       console.log("[WebRTC] Dọn dẹp kết nối");
       const currentConfig = activeConfigRef.current;
       const isConnectedCall =
         callStateRef.current === "CONNECTED" && Boolean(currentConfig);
+      const currentConversationId = currentConfig?.conversationId;
+
+      if (isGroupCall(currentConfig)) {
+        clearActiveGroupCall(currentConversationId);
+      }
 
       if (currentConfig && callStateRef.current !== "IDLE") {
         const endedAt = Date.now();
@@ -298,6 +430,7 @@ export function useWebRTC() {
         });
       }
 
+      clearGroupAutoEndTimer();
       callStartedAtRef.current = null;
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -324,7 +457,7 @@ export function useWebRTC() {
       setCallError(null);
       mediaStreamPromiseRef.current = null;
     },
-    [],
+    [clearActiveGroupCall, clearGroupAutoEndTimer, isGroupCall],
   );
 
   useEffect(() => {
@@ -413,6 +546,13 @@ export function useWebRTC() {
     const emitHeartbeat = async () => {
       const config = activeConfigRef.current;
       if (!config) return;
+      if (
+        isGroupCall(config) &&
+        !callStartedAtRef.current &&
+        peerConnectionsRef.current.size === 0
+      ) {
+        return;
+      }
       const signalConvId = resolveSignalConversationId(config);
       if (!signalConvId) return;
       try {
@@ -442,7 +582,7 @@ export function useWebRTC() {
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
-  }, [callState, resolveSignalConversationId, cleanup]);
+  }, [callState, resolveSignalConversationId, cleanup, isGroupCall]);
 
   // CALLING timeout: auto-hangup if no answer within 45 seconds.
   useEffect(() => {
@@ -616,6 +756,7 @@ export function useWebRTC() {
 
           pc = new RTCPeerConnection(getIceServers());
           peerConnectionsRef.current.set(peerId, pc);
+          clearGroupAutoEndTimer();
 
           pc.onicecandidate = (event) => {
             const signalConversationId = resolveSignalConversationId(config);
@@ -716,6 +857,7 @@ export function useWebRTC() {
       resolveSignalConversationId,
       requestLocalMediaStream,
       cleanup,
+      clearGroupAutoEndTimer,
       user?.sub,
     ],
   );
@@ -795,10 +937,9 @@ export function useWebRTC() {
         });
 
         if (isGroupCall(config)) {
-          setCallState("CONNECTED");
-          callStateRef.current = "CONNECTED";
-          // We DO NOT set callStartedAtRef.current here.
-          // The timer only starts when the first person answers (onCallAccept).
+          // Keep the caller ringing until the first participant accepts.
+          // The backend only allows heartbeats after the session becomes ACTIVE.
+          return;
         }
       } catch (rawError: unknown) {
         const error = asSocketError(rawError);
@@ -1044,12 +1185,7 @@ export function useWebRTC() {
     const onCallInit = (data: CallInitEvent) => {
       const isGroup = /^(group:|grp#|group#)/i.test(data.conversationId);
       if (isGroup) {
-        setActiveGroupCalls((prev) => {
-          if (prev.has(data.conversationId)) return prev;
-          const next = new Set(prev);
-          next.add(data.conversationId);
-          return next;
-        });
+        markActiveGroupCall(data.conversationId);
       }
 
       if (data.callerId === userIdRef.current) return;
@@ -1133,6 +1269,7 @@ export function useWebRTC() {
       if (!isMatch) return;
 
       leftPeersRef.current.delete(peerId);
+      clearGroupAutoEndTimer();
 
       if (data.acceptedAt && data.serverTimestamp) {
         if (!callStartedAtRef.current) {
@@ -1170,39 +1307,25 @@ export function useWebRTC() {
       }
 
       if (/^(group:|grp#|group#)/i.test(conversationId)) {
-        setActiveGroupCalls((prev) => {
-          if (!prev.has(conversationId)) {
-            const next = new Set(prev);
-            next.add(conversationId);
-            return next;
-          }
-          return prev;
-        });
-
-        if (activeGroupCallsTimeoutsRef.current.has(conversationId)) {
-          clearTimeout(activeGroupCallsTimeoutsRef.current.get(conversationId));
-        }
-
-        activeGroupCallsTimeoutsRef.current.set(
-          conversationId,
-          window.setTimeout(() => {
-            setActiveGroupCalls((prev) => {
-              const next = new Set(prev);
-              next.delete(conversationId);
-              return next;
-            });
-            activeGroupCallsTimeoutsRef.current.delete(conversationId);
-            // P1: 60 s > 30 s heartbeat interval — tolerates one missed packet.
-          }, 60_000),
-        );
+        markActiveGroupCall(conversationId);
       }
 
       if (!config || callStateRef.current !== "CONNECTED") return;
-      if (config.conversationId !== conversationId) return;
+      const normConvId = (id: string) =>
+        id
+          .toUpperCase()
+          .replace(/^GROUP:/, "GRP#")
+          .replace(/^GROUP#/, "GRP#");
+      if (
+        normConvId(config.conversationId ?? "") !== normConvId(conversationId)
+      ) {
+        return;
+      }
 
       const peerId = data.userId;
       if (peerId === userIdRef.current || leftPeersRef.current.has(peerId))
         return;
+      clearGroupAutoEndTimer();
       if (!peerConnectionsRef.current.has(peerId)) {
         if (userIdRef.current && userIdRef.current > peerId) {
           await initiateConnectionWithPeer(peerId, config);
@@ -1260,14 +1383,42 @@ export function useWebRTC() {
         });
         pendingIceCandidatesRef.current.delete(peerId);
 
-        if (peerConnectionsRef.current.size === 0 && !data.callStillActive) {
-          setActiveGroupCalls((prev) => {
-            if (!prev.has(data.conversationId)) return prev;
-            const next = new Set(prev);
-            next.delete(data.conversationId);
-            return next;
-          });
-          cleanup({ remoteDurationSeconds: data.durationSeconds });
+        if (peerConnectionsRef.current.size === 0) {
+          if (!data.callStillActive) {
+            clearActiveGroupCall(data.conversationId);
+            cleanup({ remoteDurationSeconds: data.durationSeconds });
+            return;
+          }
+
+          if (groupAutoEndTimerRef.current !== null) return;
+
+          const conversationId = data.conversationId;
+          const durationSeconds = data.durationSeconds;
+          groupAutoEndTimerRef.current = window.setTimeout(() => {
+            groupAutoEndTimerRef.current = null;
+            const currentConfig = activeConfigRef.current;
+            if (
+              callStateRef.current !== "CONNECTED" ||
+              !isGroupCall(currentConfig) ||
+              peerConnectionsRef.current.size > 0
+            ) {
+              return;
+            }
+
+            const signalConvId = resolveSignalConversationId(
+              currentConfig,
+              conversationId,
+            );
+            if (signalConvId) {
+              void emitSignal(CHAT_SOCKET_EVENTS.CALL_END, {
+                conversationId: signalConvId,
+                userId: userIdRef.current,
+              });
+            }
+
+            clearActiveGroupCall(conversationId);
+            cleanup({ remoteDurationSeconds: durationSeconds });
+          }, 3_000);
         }
       } else {
         // 1-1 call: verify peerId belongs to the current active call to reject stale events.
@@ -1450,8 +1601,11 @@ export function useWebRTC() {
     };
   }, [
     cleanup,
+    clearActiveGroupCall,
+    clearGroupAutoEndTimer,
     emitSignal,
     flushPendingIceCandidates,
+    markActiveGroupCall,
     resolveSignalConversationId,
     setupPeerConnection,
     initiateConnectionWithPeer,
