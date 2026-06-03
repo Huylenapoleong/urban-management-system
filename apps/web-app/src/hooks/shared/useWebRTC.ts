@@ -802,48 +802,103 @@ export function useWebRTC() {
         }
       } catch (rawError: unknown) {
         const error = asSocketError(rawError);
-        if (getSocketErrorStatusCode(error) === 409 && isGroupCall(config)) {
-          // Group call already active → join it directly
-          console.log("[WebRTC] Group call already active, joining...");
-          try {
-            await requestLocalMediaStream(config.isVideo);
-          } catch (err) {
-            console.error("[WebRTC] Local media stream failed", err);
-          }
-
-          setCallState("CONNECTED");
-          callStateRef.current = "CONNECTED";
-          callStartedAtRef.current = Date.now();
-          setCallError(null);
-
-          try {
-            const response = parseCallAcceptAckPayload(
-              await socketClient.safeEmitValidated(
-                CHAT_SOCKET_EVENTS.CALL_ACCEPT,
-                {
-                  conversationId: signalConversationId,
-                  calleeId: user?.sub,
-                },
-              ),
-            );
-
-            if (response?.acceptedAt && response?.serverTimestamp) {
-              const elapsedMs =
-                new Date(response.serverTimestamp).getTime() -
-                new Date(response.acceptedAt).getTime();
-              callStartedAtRef.current = Date.now() - elapsedMs;
-            } else {
-              callStartedAtRef.current = Date.now();
+        if (getSocketErrorStatusCode(error) === 409) {
+          if (isGroupCall(config)) {
+            // Group call already active → join it directly
+            console.log("[WebRTC] Group call already active, joining...");
+            try {
+              await requestLocalMediaStream(config.isVideo);
+            } catch (err) {
+              console.error("[WebRTC] Local media stream failed", err);
             }
-          } catch (acceptErr) {
-            console.error(
-              "[WebRTC] Failed to join active group call",
-              acceptErr,
-            );
-            setCallError("Lỗi tham gia cuộc gọi nhóm đang diễn ra.");
-            cleanup();
+
+            setCallState("CONNECTED");
+            callStateRef.current = "CONNECTED";
+            callStartedAtRef.current = Date.now();
+            setCallError(null);
+
+            try {
+              const response = parseCallAcceptAckPayload(
+                await socketClient.safeEmitValidated(
+                  CHAT_SOCKET_EVENTS.CALL_ACCEPT,
+                  {
+                    conversationId: signalConversationId,
+                    calleeId: user?.sub,
+                  },
+                ),
+              );
+
+              if (response?.acceptedAt && response?.serverTimestamp) {
+                const elapsedMs =
+                  new Date(response.serverTimestamp).getTime() -
+                  new Date(response.acceptedAt).getTime();
+                callStartedAtRef.current = Date.now() - elapsedMs;
+              } else {
+                callStartedAtRef.current = Date.now();
+              }
+            } catch (acceptErr) {
+              console.error(
+                "[WebRTC] Failed to join active group call",
+                acceptErr,
+              );
+              setCallError("Lỗi tham gia cuộc gọi nhóm đang diễn ra.");
+              cleanup();
+            }
+            return;
+          } else if (config.targetUserId) {
+            // 1-1 call glare: The other party initiated a call at the exact same time.
+            // A session was created by them, so we act as the callee and accept their call.
+            console.log("[WebRTC] 1-1 call glare detected, auto-accepting...");
+            
+            try {
+              await requestLocalMediaStream(config.isVideo);
+            } catch (err) {
+              console.error("[WebRTC] Local media stream failed", err);
+            }
+
+            // Update config so we become the callee (caller is now the targetUserId)
+            const updatedConfig = { ...config, callerId: config.targetUserId };
+            setActiveConfig(updatedConfig);
+            activeConfigRef.current = updatedConfig;
+
+            setCallState("CONNECTED");
+            callStateRef.current = "CONNECTED";
+            callStartedAtRef.current = Date.now();
+            setCallError(null);
+
+            try {
+              const response = parseCallAcceptAckPayload(
+                await socketClient.safeEmitValidated(
+                  CHAT_SOCKET_EVENTS.CALL_ACCEPT,
+                  {
+                    conversationId: signalConversationId,
+                    calleeId: user?.sub,
+                  },
+                ),
+              );
+
+              if (response?.acceptedAt && response?.serverTimestamp) {
+                const elapsedMs =
+                  new Date(response.serverTimestamp).getTime() -
+                  new Date(response.acceptedAt).getTime();
+                callStartedAtRef.current = Date.now() - elapsedMs;
+              } else {
+                callStartedAtRef.current = Date.now();
+              }
+
+              // Since we are now the callee, we wait for the offer from the actual caller
+              await initiateConnectionWithPeer(config.targetUserId, updatedConfig);
+              return;
+            } catch (acceptErr) {
+              console.error(
+                "[WebRTC] Failed to join active 1-1 call on glare",
+                acceptErr,
+              );
+              setCallError("Lỗi kết nối cuộc gọi.");
+              cleanup();
+              return;
+            }
           }
-          return;
         }
 
         console.error("[WebRTC] Lỗi gửi tín hiệu ở call.init", error);

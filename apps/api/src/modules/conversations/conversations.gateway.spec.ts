@@ -480,7 +480,7 @@ describe('ConversationsGateway', () => {
         participants: ['user-1', 'user-2'],
         isGroup: false,
       },
-      expect.stringMatching(/^Video call ended/),
+      expect.stringMatching(/^Cuộc gọi video kết thúc/),
       expect.objectContaining({
         callEvent: expect.objectContaining({
           status: 'ENDED',

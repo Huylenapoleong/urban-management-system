@@ -502,7 +502,7 @@ describe('ConversationsService', () => {
     await expect(
       service.listAuditEvents(actor, 'group:group-1', {}),
     ).rejects.toThrow(
-      'Only active members can access this group conversation.',
+      'Chỉ các thành viên đang hoạt động mới có thể truy cập cuộc trò chuyện nhóm này.',
     );
   });
 
@@ -523,7 +523,7 @@ describe('ConversationsService', () => {
     await expect(
       service.listMessages(actor, 'group:group-1', {}),
     ).rejects.toThrow(
-      'Only active members can access this group conversation.',
+      'Chỉ các thành viên đang hoạt động mới có thể truy cập cuộc trò chuyện nhóm này.',
     );
   });
 
@@ -554,7 +554,7 @@ describe('ConversationsService', () => {
 
     await expect(
       service.listMessages(actor, 'group:group-1', {}),
-    ).rejects.toThrow('You are banned from this group.');
+    ).rejects.toThrow('Bạn đã bị cấm khỏi nhóm này.');
   });
 
   it('pins a visible message and creates a bounded pin record', async () => {
@@ -720,7 +720,9 @@ describe('ConversationsService', () => {
         latestMessage.messageId,
         {},
       ),
-    ).rejects.toThrow('Pinned message limit reached. Provide replaceMessageId');
+    ).rejects.toThrow(
+      'Đã đạt giới hạn số tin nhắn ghim. Vui lòng gỡ ghim một tin nhắn khác để thay thế.',
+    );
     expect(repository.transactWrite).not.toHaveBeenCalled();
   });
 
@@ -901,7 +903,7 @@ describe('ConversationsService', () => {
         type: 'TEXT',
       }),
     ).rejects.toThrow(
-      'Only owners and deputies can send messages to this group.',
+      'Chỉ chủ sở hữu và cấp phó mới có thể gửi tin nhắn đến nhóm này.',
     );
     expect(authorizationService.canSendGroupMessage).toHaveBeenCalledWith(
       actor,
@@ -1114,7 +1116,7 @@ describe('ConversationsService', () => {
         },
       ),
     ).rejects.toThrow(
-      'Only active members can access this group conversation.',
+      'Chỉ các thành viên đang hoạt động mới có thể truy cập cuộc trò chuyện nhóm này.',
     );
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
@@ -1140,7 +1142,7 @@ describe('ConversationsService', () => {
         'group:group-1',
         '01MESSAGE0000000000000001',
       ),
-    ).rejects.toThrow('Only administrators can permanently delete messages.');
+    ).rejects.toThrow('Chỉ quản trị viên mới có thể xóa tin nhắn vĩnh viễn.');
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
@@ -1430,7 +1432,7 @@ describe('ConversationsService', () => {
         content: '{"text":"Xin chao","mention":[]}',
         type: 'TEXT',
       }),
-    ).rejects.toThrow('You cannot access this conversation.');
+    ).rejects.toThrow('Bạn không có quyền xem cuộc trò chuyện này.');
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
@@ -1444,7 +1446,7 @@ describe('ConversationsService', () => {
         type: 'TEXT',
       }),
     ).rejects.toThrow(
-      'Citizens can only send direct messages to friends or accepted direct message requests.',
+      'Công dân chỉ có thể gửi tin nhắn trực tiếp cho bạn bè hoặc các yêu cầu kết bạn đã được chấp nhận.',
     );
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
@@ -1456,7 +1458,9 @@ describe('ConversationsService', () => {
         content: '{"text":"","mention":[]}',
         type: 'TEXT',
       }),
-    ).rejects.toThrow('content, attachmentKey or attachmentUrl is required.');
+    ).rejects.toThrow(
+      'Yêu cầu nội dung, khóa tệp đính kèm hoặc URL tệp đính kèm.',
+    );
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
@@ -1815,7 +1819,7 @@ describe('ConversationsService', () => {
         content: '{"text":"Khong gui duoc nua.","mention":[]}',
         type: 'TEXT',
       }),
-    ).rejects.toThrow('Direct messaging is blocked between these users.');
+    ).rejects.toThrow('Nhắn tin trực tiếp đã bị chặn giữa hai người dùng này.');
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
@@ -1829,7 +1833,7 @@ describe('ConversationsService', () => {
         content: '{"text":"Xin cho phep nhan tin.","mention":[]}',
         type: 'TEXT',
       }),
-    ).rejects.toThrow('Direct messaging is blocked between these users.');
+    ).rejects.toThrow('Nhắn tin trực tiếp đã bị chặn giữa hai người dùng này.');
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
@@ -1875,7 +1879,7 @@ describe('ConversationsService', () => {
           content: '{"text":"Sua trai phep","mention":[]}',
         },
       ),
-    ).rejects.toThrow('You cannot edit this message.');
+    ).rejects.toThrow('Bạn không thể chỉnh sửa tin nhắn này.');
   });
 
   it('stores reply preview metadata when sending a reply', async () => {
@@ -2308,6 +2312,6 @@ describe('ConversationsService', () => {
   it('blocks access when actor is not a participant of raw DM conversation id', async () => {
     await expect(
       service.listMessages(actor, 'DM#user-2#user-3', {}),
-    ).rejects.toThrow('You cannot access this conversation.');
+    ).rejects.toThrow('Bạn không có quyền xem cuộc trò chuyện này.');
   });
 });
