@@ -1172,7 +1172,7 @@ export class AuthOtpService implements OnModuleInit, OnApplicationShutdown {
       '</table>',
       '</body>',
       '</html>',
-    ].join('');
+    ].join('\r\n');
     const boundary = `=_urban_otp_${createUlid()}`;
     const encodedPlainBody = this.escapeSmtpBody(plainBody);
     const encodedHtmlBody = this.escapeSmtpBody(htmlBody);
