@@ -19,7 +19,7 @@ export function ensureObject(
   label = 'payload',
 ): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new BadRequestException(`${label} must be an object.`);
+    throw new BadRequestException(`Dữ liệu ${label} không hợp lệ.`);
   }
 
   return value as Record<string, unknown>;
@@ -31,24 +31,24 @@ function cleanString(
   options: StringOptions = {},
 ): string {
   if (typeof value !== 'string') {
-    throw new BadRequestException(`${field} must be a string.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   const trimmed = value.trim();
 
   if (!options.allowEmpty && trimmed.length === 0) {
-    throw new BadRequestException(`${field} is required.`);
+    throw new BadRequestException(`Vui lòng nhập ${field}.`);
   }
 
   if (options.minLength && trimmed.length < options.minLength) {
     throw new BadRequestException(
-      `${field} must be at least ${options.minLength} characters.`,
+      `${field} yêu cầu tối thiểu ${options.minLength} ký tự.`,
     );
   }
 
   if (options.maxLength && trimmed.length > options.maxLength) {
     throw new BadRequestException(
-      `${field} must be at most ${options.maxLength} characters.`,
+      `${field} vượt quá số ký tự cho phép (${options.maxLength}).`,
     );
   }
 
@@ -85,7 +85,7 @@ export function requiredEnum<T extends string>(
   const value = requiredString(body, field);
 
   if (!values.includes(value as T)) {
-    throw new BadRequestException(`${field} is invalid.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return value as T;
@@ -103,7 +103,7 @@ export function optionalEnum<T extends string>(
   }
 
   if (!values.includes(value as T)) {
-    throw new BadRequestException(`${field} is invalid.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return value as T;
@@ -120,7 +120,7 @@ export function optionalBoolean(
   }
 
   if (typeof value !== 'boolean') {
-    throw new BadRequestException(`${field} must be a boolean.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return value;
@@ -133,7 +133,7 @@ export function requiredBoolean(
   const value = body[field];
 
   if (typeof value !== 'boolean') {
-    throw new BadRequestException(`${field} must be a boolean.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return value;
@@ -152,11 +152,13 @@ export function optionalStringArray(
   }
 
   if (!Array.isArray(value)) {
-    throw new BadRequestException(`${field} must be an array.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   if (value.length > maxItems) {
-    throw new BadRequestException(`${field} exceeds ${maxItems} items.`);
+    throw new BadRequestException(
+      `${field} vượt quá số lượng tối đa (${maxItems}).`,
+    );
   }
 
   return value.map((item, index) =>
@@ -177,7 +179,7 @@ export function optionalQueryString(
   }
 
   if (Array.isArray(value)) {
-    throw new BadRequestException(`${field} must be a string.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return cleanString(value, field);
@@ -195,7 +197,7 @@ export function parseEnumQuery<T extends string>(
   }
 
   if (!values.includes(raw as T)) {
-    throw new BadRequestException(`${field} is invalid.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return raw as T;
@@ -225,7 +227,7 @@ export function parseIsoDateQuery(
   }
 
   if (Number.isNaN(Date.parse(raw))) {
-    throw new BadRequestException(`${field} must be a valid ISO date.`);
+    throw new BadRequestException(`${field} sai định dạng thời gian.`);
   }
 
   return raw;
@@ -241,7 +243,7 @@ export function parseLimit(value: unknown): number {
   const parsed = Number(raw);
 
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new BadRequestException('limit must be a positive integer.');
+    throw new BadRequestException('Số lượng (limit) phải là số nguyên dương.');
   }
 
   return Math.min(parsed, MAX_PAGE_SIZE);
@@ -265,7 +267,7 @@ export function parseBooleanQuery(
     return false;
   }
 
-  throw new BadRequestException(`${field} must be "true" or "false".`);
+  throw new BadRequestException(`${field} không hợp lệ.`);
 }
 
 export function requirePhoneOrEmail(body: Record<string, unknown>): {
@@ -276,18 +278,18 @@ export function requirePhoneOrEmail(body: Record<string, unknown>): {
   const phone = optionalString(body, 'phone', { maxLength: 20 });
 
   if (!email && !phone) {
-    throw new BadRequestException('Either phone or email is required.');
+    throw new BadRequestException('Vui lòng nhập số điện thoại hoặc email.');
   }
 
   const normalizedPhone = phone ? normalizePhone(phone) : undefined;
   const normalizedEmail = email ? normalizeEmail(email) : undefined;
 
   if (normalizedPhone && !PHONE_PATTERN.test(normalizedPhone)) {
-    throw new BadRequestException('phone is invalid.');
+    throw new BadRequestException('Số điện thoại không hợp lệ.');
   }
 
   if (normalizedEmail && !EMAIL_PATTERN.test(normalizedEmail)) {
-    throw new BadRequestException('email is invalid.');
+    throw new BadRequestException('Email không hợp lệ.');
   }
 
   return {
@@ -303,7 +305,7 @@ export function ensureLocationCode(
   const normalized = locationCode.trim().toUpperCase();
 
   if (!LOCATION_CODE_PATTERN.test(normalized)) {
-    throw new BadRequestException(`${field} is invalid.`);
+    throw new BadRequestException(`${field} không hợp lệ.`);
   }
 
   return normalized;
