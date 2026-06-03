@@ -30,6 +30,7 @@ describe('ConversationsService', () => {
     canStartCitizenDm: jest.fn(),
     getActiveByIdOrThrow: jest.fn(),
     getByIdOrThrow: jest.fn(),
+    getUserLabelMap: jest.fn(),
     resolveContactDisplayName: jest.fn(),
   };
   const groupsService = {
@@ -259,6 +260,7 @@ describe('ConversationsService', () => {
     });
     usersService.canStartCitizenDm.mockResolvedValue(true);
     usersService.isInteractionBlocked.mockResolvedValue(false);
+    usersService.getUserLabelMap.mockResolvedValue(new Map());
     usersService.resolveContactDisplayName.mockImplementation(
       (_ownerUserId: string, _targetUserId: string, fallbackFullName: string) =>
         fallbackFullName,

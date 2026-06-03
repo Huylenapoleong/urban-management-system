@@ -210,6 +210,19 @@ export class ConversationsService {
         )
       : new Map<string, StoredConversationMemberAlias>();
 
+    const counterpartLabelMap = keyword
+      ? await this.usersService.getUserLabelMap(
+          Array.from(
+            new Set(
+              deduplicatedItems
+                .filter((item) => !item.isGroup)
+                .map((item) => this.getDmCounterpartId(actor.id, item))
+                .filter((id) => typeof id === 'string'),
+            ),
+          ),
+        )
+      : new Map<string, string>();
+
     const filtered = deduplicatedItems.filter((item) => {
       if (item.deletedAt) {
         return false;
@@ -244,8 +257,13 @@ export class ConversationsService {
           )?.alias
         : undefined;
 
+      const counterpartName = counterpartId
+        ? counterpartLabelMap.get(counterpartId)
+        : undefined;
+
       return [
         alias,
+        counterpartName,
         item.groupName,
         item.lastMessagePreview,
         item.lastSenderName,
@@ -1437,6 +1455,96 @@ export class ConversationsService {
     conversationId: string,
   ): Promise<ConversationSummary> {
     return this.respondToDirectMessageRequest(actor, conversationId, 'BLOCKED');
+  }
+
+  async getReadWatermarks(actor: AuthenticatedUser, conversationId: string) {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+
+    const summariesArray = await Promise.all(
+      access.participants.map((userId) =>
+        this.conversationSummaryService.getConversationSummary(
+          userId,
+          access.conversationKey,
+        ),
+      ),
+    );
+    const summaries = new Map(
+      summariesArray
+        .filter((s): s is NonNullable<typeof s> => s !== undefined)
+        .map((s) => [s.userId, s]),
+    );
+
+    return access.participants.map((userId) => {
+      const summary = summaries.get(userId);
+      return {
+        userId,
+        lastReadAt: summary?.lastReadAt ?? undefined,
+      };
+    });
+  }
+
+  async getMessageReceipts(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    messageId: string,
+  ) {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const message = await this.getMessageOrThrow(
+      access.conversationKey,
+      messageId,
+    );
+
+    if (message.senderId !== actor.id) {
+      throw new ForbiddenException(
+        'Bạn chỉ có thể xem trạng thái nhận của tin nhắn do chính mình gửi.',
+      );
+    }
+
+    const summariesArray = await Promise.all(
+      access.participants.map((userId) =>
+        this.conversationSummaryService.getConversationSummary(
+          userId,
+          access.conversationKey,
+        ),
+      ),
+    );
+    const summaries = new Map(
+      summariesArray
+        .filter((s): s is NonNullable<typeof s> => s !== undefined)
+        .map((s) => [s.userId, s]),
+    );
+
+    const receipts: {
+      userId: string;
+      status: 'DELIVERED' | 'READ';
+      readAt?: string;
+    }[] = [];
+
+    for (const userId of access.participants) {
+      if (userId === message.senderId) {
+        continue;
+      }
+
+      const summary = summaries.get(userId);
+      if (!summary || summary.deletedAt) {
+        continue;
+      }
+
+      if (summary.lastReadAt && summary.lastReadAt >= message.sentAt) {
+        receipts.push({
+          userId,
+          status: 'READ',
+          readAt: summary.lastReadAt,
+        });
+      } else {
+        receipts.push({
+          userId,
+          status: 'DELIVERED',
+        });
+      }
+    }
+
+    return receipts;
   }
 
   async markAsRead(

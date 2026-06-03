@@ -59,6 +59,12 @@ export class ChatCallSessionService {
     private readonly realtimeRedisService: RealtimeRedisService,
   ) {}
 
+  async getActiveCallSession(
+    access: ResolvedConversationAccess,
+  ): Promise<ChatCallSession | undefined> {
+    return this.getSession(access.conversationKey);
+  }
+
   async initiateCall(
     access: ResolvedConversationAccess,
     callerUserId: string,

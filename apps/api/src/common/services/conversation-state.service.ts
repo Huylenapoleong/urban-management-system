@@ -30,7 +30,7 @@ export interface MessageDeliveryContext {
 
 @Injectable()
 export class ConversationStateService {
-  private readonly recalledPlaceholder = 'Message was recalled.';
+  private readonly recalledPlaceholder = 'Tin nhắn đã bị thu hồi';
 
   groupActiveMessagesByConversation(
     messages: StoredMessage[],

@@ -3,10 +3,13 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
+  Logger,
   Param,
   Patch,
   Post,
   Query,
+  forwardRef,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -54,6 +57,8 @@ import {
   UserProfileDto,
 } from '../../common/openapi/swagger.models';
 import { UsersService } from './users.service';
+import { ConversationsService } from '../conversations/conversations.service';
+import { makeDmConversationId } from '@urban/shared-utils';
 
 @ApiTags('Users')
 @ApiBearerAuth('bearer')
@@ -61,7 +66,13 @@ import { UsersService } from './users.service';
 @ApiForbiddenResponse({ type: ErrorResponseDto })
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  private readonly logger = new Logger(UsersController.name);
+
+  constructor(
+    private readonly usersService: UsersService,
+    @Inject(forwardRef(() => ConversationsService))
+    private readonly conversationsService: ConversationsService,
+  ) {}
 
   @Get('me')
   @ApiOperation({ summary: 'Get my profile' })
@@ -295,11 +306,31 @@ export class UsersController {
       },
     ],
   )
-  acceptFriendRequest(
+  async acceptFriendRequest(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
   ) {
-    return this.usersService.acceptFriendRequest(user, userId);
+    const friend = await this.usersService.acceptFriendRequest(user, userId);
+
+    try {
+      const conversationId = makeDmConversationId(user.id, userId);
+      await this.conversationsService.sendConversationSystemMessage(
+        user,
+        {
+          conversationKey: `DM#${conversationId}`,
+          conversationId,
+          participants: [user.id, userId],
+          isGroup: false,
+        },
+        'Hai bạn đã trở thành bạn bè. Hãy bắt đầu trò chuyện.',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send system message for new friendship: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return friend;
   }
 
   @Post('me/friend-requests/:userId/reject')

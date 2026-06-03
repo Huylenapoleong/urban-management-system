@@ -60,6 +60,7 @@ import {
   requiredBoolean,
   requiredString,
 } from '../../common/validation';
+import { AppConfigService } from '../../infrastructure/config/app-config.service';
 import { ObservabilityService } from '../../infrastructure/observability/observability.service';
 import { ChatPresenceService } from '../../infrastructure/realtime/chat-presence.service';
 import { ChatCallSessionService } from './chat-call-session.service';
@@ -94,6 +95,7 @@ export class ConversationsGateway
 {
   private readonly logger = new Logger(ConversationsGateway.name);
   private readonly socketAuthCacheWindowMs = 30_000;
+  private readonly callTimeouts = new Map<string, NodeJS.Timeout>();
 
   @WebSocketServer()
   server!: Server;
@@ -105,6 +107,7 @@ export class ConversationsGateway
     private readonly conversationsService: ConversationsService,
     private readonly chatCallSessionService: ChatCallSessionService,
     private readonly observabilityService: ObservabilityService,
+    private readonly config: AppConfigService,
   ) {}
 
   afterInit(server: Server): void {
@@ -161,7 +164,9 @@ export class ConversationsGateway
   async joinConversation(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: ChatConversationCommandPayload,
-  ): Promise<ChatSocketAck<ChatConversationSubscription>> {
+  ): Promise<
+    ChatSocketAck<ChatConversationSubscription & { activeCall?: object }>
+  > {
     return this.withAck(
       async () => {
         const user = await this.getSocketUser(client);
@@ -187,12 +192,26 @@ export class ConversationsGateway
           client.id,
         );
 
+        const session =
+          await this.chatCallSessionService.getActiveCallSession(access);
+        const activeCall = session
+          ? {
+              initiatedByUserId: session.initiatedByUserId,
+              acceptedByUserIds: session.acceptedByUserIds,
+              status: session.status,
+              isVideo: session.isVideo,
+              startedAt: session.createdAt,
+              acceptedAt: session.acceptedAt,
+            }
+          : undefined;
+
         return {
           conversationId: access.conversationId,
           conversationKey: access.conversationKey,
           isGroup: access.isGroup,
           participantCount: access.participants.length,
           joinedAt: nowIso(),
+          activeCall,
         };
       },
       'CHAT_CONVERSATION_JOIN_FAILED',
@@ -564,6 +583,16 @@ export class ConversationsGateway
             client.id,
             user.id,
           );
+
+          if (!access.isGroup) {
+            const ttlMs = this.config.chatCallInviteTtlSeconds * 1000;
+            const timeoutId = setTimeout(() => {
+              this.handleCallTimeout(access, user).catch((err) =>
+                this.logger.error('Error handling call timeout', err),
+              );
+            }, ttlMs);
+            this.callTimeouts.set(access.conversationKey, timeoutId);
+          }
         }
 
         return {
@@ -601,6 +630,7 @@ export class ConversationsGateway
         );
 
         if (result.shouldEmit) {
+          this.clearCallTimeout(access.conversationKey);
           this.emitSignal(
             access,
             CHAT_SOCKET_EVENTS.CALL_ACCEPT,
@@ -650,6 +680,7 @@ export class ConversationsGateway
         );
 
         if (result.shouldEmit) {
+          this.clearCallTimeout(access.conversationKey);
           this.emitSignal(
             access,
             CHAT_SOCKET_EVENTS.CALL_REJECT,
@@ -710,6 +741,7 @@ export class ConversationsGateway
         );
 
         if (result.shouldEmit) {
+          this.clearCallTimeout(access.conversationKey);
           this.emitSignal(
             access,
             CHAT_SOCKET_EVENTS.CALL_END,
@@ -719,13 +751,16 @@ export class ConversationsGateway
             // includeActor=false (default): only notify the OTHER party.
             // The sender cleans up locally on the client side immediately.
           );
-          void this.persistBestEffortCallSystemMessage(
-            user,
-            access,
-            this.buildCallSystemMessageText(callEvent, user.fullName),
-            CHAT_SOCKET_EVENTS.CALL_END,
-            callEvent,
-          );
+
+          if (!callStillActive || callEvent?.status === 'PARTICIPANT_LEFT') {
+            void this.persistBestEffortCallSystemMessage(
+              user,
+              access,
+              this.buildCallSystemMessageText(callEvent, user.fullName),
+              CHAT_SOCKET_EVENTS.CALL_END,
+              callEvent,
+            );
+          }
         }
 
         return { success: true };
@@ -1099,6 +1134,56 @@ export class ConversationsGateway
     this.chatRealtimeService.emitToUsers(recipients, event, payload);
   }
 
+  private clearCallTimeout(conversationKey: string): void {
+    const timeoutId = this.callTimeouts.get(conversationKey);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      this.callTimeouts.delete(conversationKey);
+    }
+  }
+
+  private async handleCallTimeout(
+    access: ResolvedConversationAccess,
+    callerUser: AuthenticatedUser,
+  ): Promise<void> {
+    this.callTimeouts.delete(access.conversationKey);
+
+    const result = await this.chatCallSessionService.endCall(
+      access,
+      callerUser.id,
+    );
+    if (result.shouldEmit) {
+      const callEvent = result.session
+        ? this.buildCallEventInfo(result.session, 'ENDED', callerUser.id)
+        : undefined;
+
+      const signalPayload = this.buildCallEndPayload(
+        access.conversationKey,
+        callerUser,
+        callEvent,
+        false,
+      );
+
+      this.emitSignal(
+        access,
+        CHAT_SOCKET_EVENTS.CALL_END,
+        signalPayload,
+        '',
+        callerUser.id,
+        undefined,
+        true, // Include actor so caller's devices stop ringing and show missed call
+      );
+
+      void this.persistBestEffortCallSystemMessage(
+        callerUser,
+        access,
+        this.buildCallSystemMessageText(callEvent, callerUser.fullName),
+        CHAT_SOCKET_EVENTS.CALL_END,
+        callEvent,
+      );
+    }
+  }
+
   private buildCallEventInfo(
     session: {
       acceptedAt: string | null;
@@ -1182,6 +1267,13 @@ export class ConversationsGateway
 
     if (callEvent.durationSeconds > 0) {
       return `${callLabel} kết thúc (${this.formatCallDuration(callEvent.durationSeconds)}).`;
+    }
+
+    if (
+      callEvent.status === 'ENDED' &&
+      callEvent.initiatedByUserId === callEvent.endedByUserId
+    ) {
+      return `Cuộc gọi nhỡ.`;
     }
 
     return `${callLabel} kết thúc.`;
