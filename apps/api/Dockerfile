@@ -28,7 +28,7 @@ RUN pnpm --filter api build
 
 # Sử dụng pnpm deploy để tách riêng app api và các dependencies của nó cho production
 # Tính năng này giúp loại bỏ devDependencies và các package không liên quan, làm nhẹ image
-RUN pnpm deploy --filter api --prod /app/deploy
+RUN pnpm deploy --legacy --filter api --prod /app/deploy
 
 # -------------------------
 # Production image
