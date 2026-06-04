@@ -23,7 +23,7 @@ export interface GroupListParams {
 export interface CreateGroupInput {
   groupName: string;
   groupType: string;
-  locationCode: string;
+  locationCode?: string;
   description?: string;
   isOfficial?: boolean;
   messagePolicy?: GroupMessagePolicy;

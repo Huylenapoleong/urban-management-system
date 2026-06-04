@@ -77,13 +77,11 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
     setState(() => _isCreating = true);
     final groupService = context.read<AppServices>().groupService;
-    final session = context.read<SessionController>();
     
     try {
       await groupService.createGroup(
         groupName: _nameController.text.trim(),
         groupType: _groupType,
-        locationCode: session.user?.locationCode ?? "VN-79-00001",
         description: _descController.text.trim(),
         userIds: _selectedUserIds.toList(),
       );

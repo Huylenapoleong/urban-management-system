@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Work+Sans:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -90,14 +90,14 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: "Work Sans", "Inter", sans-serif;
+    font-family: "Lexend", "Inter", sans-serif;
     overflow-x: hidden;
     overflow-y: auto;
     font-size: 15px;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: "Outfit", sans-serif;
+    font-family: "Lexend", sans-serif;
     font-weight: 600;
     letter-spacing: -0.02em;
   }
