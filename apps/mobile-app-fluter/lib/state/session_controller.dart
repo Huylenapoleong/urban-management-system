@@ -19,6 +19,7 @@ class SessionController extends ChangeNotifier {
   StreamSubscription? _unreadMsgSub;
   StreamSubscription? _unreadReadSub;
   int _unreadMessagesCount = 0;
+  String? _activeConversationId;
 
   UserProfile? get user => _user;
   bool get isLoading => _isLoading;
@@ -27,6 +28,16 @@ class SessionController extends ChangeNotifier {
   bool get isAuthenticated => _user != null;
   bool get isDarkMode => _isDarkMode;
   int get unreadMessagesCount => _unreadMessagesCount;
+  String? get activeConversationId => _activeConversationId;
+
+  void setActiveConversationId(String? value, {int? unreadCount}) {
+    _activeConversationId = value;
+    if (value != null && unreadCount != null && unreadCount > 0) {
+      _unreadMessagesCount = (_unreadMessagesCount - unreadCount).clamp(0, 999999);
+      notifyListeners();
+    }
+    fetchTotalUnreadCount();
+  }
 
   Future<void> toggleDarkMode(bool value) async {
     _isDarkMode = value;
@@ -510,8 +521,10 @@ class SessionController extends ChangeNotifier {
 
     _unreadMsgSub = _appServices.socketService.onMessageCreated.listen((msg) {
       if (_user != null && msg.senderId != _user!.id) {
-        _unreadMessagesCount++;
-        notifyListeners();
+        if (msg.conversationId != _activeConversationId) {
+          _unreadMessagesCount++;
+          notifyListeners();
+        }
       }
     });
 

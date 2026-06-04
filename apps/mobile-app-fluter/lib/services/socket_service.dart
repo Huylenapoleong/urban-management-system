@@ -38,6 +38,7 @@ class SocketService {
   final _callRejectController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _callEndController = StreamController<Map<String, dynamic>>.broadcast();
+  final _callRingingController = StreamController<Map<String, dynamic>>.broadcast();
   final _webrtcOfferController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _webrtcAnswerController =
@@ -67,6 +68,8 @@ class SocketService {
   Stream<Map<String, dynamic>> get onCallAccept => _callAcceptController.stream;
   Stream<Map<String, dynamic>> get onCallReject => _callRejectController.stream;
   Stream<Map<String, dynamic>> get onCallEnd => _callEndController.stream;
+  Stream<Map<String, dynamic>> get onCallRinging =>
+      _callRingingController.stream;
   Stream<Map<String, dynamic>> get onWebRTCOffer =>
       _webrtcOfferController.stream;
   Stream<Map<String, dynamic>> get onWebRTCAnswer =>
@@ -231,6 +234,13 @@ class SocketService {
       if (data is Map) _callEndController.add(data.cast<String, dynamic>());
     });
 
+    socket.on("call.ringing", (data) {
+      _logger.d("Socket event call.ringing: $data");
+      if (data is Map) {
+        _callRingingController.add(data.cast<String, dynamic>());
+      }
+    });
+
     socket.on("webrtc.offer", (data) {
       _logger.d("Socket event webrtc.offer: $data");
       if (data is Map) _webrtcOfferController.add(data.cast<String, dynamic>());
@@ -380,6 +390,12 @@ class SocketService {
     }
   }
 
+  void emitCallRinging(String conversationId) {
+    if (isConnected) {
+      _socket?.emit("call.ringing", {"conversationId": conversationId});
+    }
+  }
+
   void emitCallHeartbeat(String conversationId, String userId) {
     if (isConnected) {
       _socket?.emit("call.heartbeat", {
@@ -439,6 +455,7 @@ class SocketService {
     _callAcceptController.close();
     _callRejectController.close();
     _callEndController.close();
+    _callRingingController.close();
     _webrtcOfferController.close();
     _webrtcAnswerController.close();
     _webrtcCandidateController.close();

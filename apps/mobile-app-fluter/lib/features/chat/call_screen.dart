@@ -311,9 +311,14 @@ class _CallScreenState extends State<CallScreen> {
           ? (_loadedGroupName ?? widget.conversation.groupName ?? "Cuộc gọi nhóm")
           : widget.conversation.title;
 
+      final isCaller = widget.webRTCService.activeConfig?['callerId']?.toString() ==
+          widget.currentUser?.id.toString();
+
       final displaySub = isGroup
-          ? "$callerName đang gọi nhóm..."
-          : (isVideo ? "Cuộc gọi Video đến..." : "Cuộc gọi Thoại đến...");
+          ? (isCaller ? "Đang gọi nhóm..." : "$callerName đang gọi nhóm...")
+          : (isCaller
+              ? "Đang đổ chuông..."
+              : (isVideo ? "Cuộc gọi Video đến..." : "Cuộc gọi Thoại đến..."));
 
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,

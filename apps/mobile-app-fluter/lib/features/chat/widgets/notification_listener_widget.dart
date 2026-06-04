@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../services/app_services.dart';
 import '../../../services/local_notification_service.dart';
 import '../../../services/webrtc_service.dart';
+import '../../../services/call_sound_service.dart';
 import '../../../state/session_controller.dart';
 
 /// Widget lắng nghe các sự kiện socket và hiển thị local push notification.
@@ -59,6 +60,17 @@ class _NotificationListenerWidgetState
       services.socketService.onMessageCreated.listen((msg) {
         // Không thông báo tin nhắn của chính mình
         if (msg.senderId == _currentUserId) return;
+
+        // Nếu người dùng đang xem cuộc hội thoại này, không phát âm thanh hoặc hiện thông báo
+        try {
+          final activeConvId = context.read<SessionController>().activeConversationId;
+          if (activeConvId == msg.conversationId) {
+            return;
+          }
+        } catch (_) {}
+
+        // Phát âm thanh tin nhắn mới
+        CallSoundService().playMessageSound();
 
         final senderName = msg.senderName.isNotEmpty ? msg.senderName : 'Ai đó';
         final conversationId = msg.conversationId;
