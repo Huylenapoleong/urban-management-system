@@ -114,7 +114,8 @@ import {
   Video,
   X,
   Loader2,
-
+  Check,
+  RotateCcw,
 } from "lucide-react";
 import React, {
   Fragment,
@@ -937,7 +938,7 @@ export function ChatPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [showSyncNotification, setShowSyncNotification] = useState(true);
+
   const [messageSearch, setMessageSearch] = useState("");
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>("");
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(
@@ -1922,8 +1923,138 @@ export function ChatPage() {
   const previousScrollTopRef = useRef(0);
   const lastActiveChatRef = useRef<string | null>(null);
   const hasInitialScrolledRef = useRef(false);  // chỉ scroll xuống 1 lần khi vào chat
+  const newestMessageIdRef = useRef<string | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
+
+  const [bookmarkedMessageIds, setBookmarkedMessageIds] = useState<Record<string, string[]>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem("bookmarked_messages");
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
+
+  const handleToggleMessageSelection = useCallback((msgId: string) => {
+    setSelectedMessageIds((prev) =>
+      prev.includes(msgId) ? prev.filter((id) => id !== msgId) : [...prev, msgId],
+    );
+  }, []);
+
+  const handleStartMultiSelect = useCallback((msgId: string) => {
+    setIsMultiSelectMode(true);
+    setSelectedMessageIds([msgId]);
+    setActiveMessageMenuId(null);
+  }, []);
+
+  const handleCancelMultiSelect = useCallback(() => {
+    setIsMultiSelectMode(false);
+    setSelectedMessageIds([]);
+  }, []);
+
+  const handleDeleteSelectedMessages = async () => {
+    if (selectedMessageIds.length === 0) return;
+    setConfirmInput("");
+    setConfirmDialog({
+      title: "Xóa nhiều tin nhắn",
+      description: `Bạn có chắc chắn muốn xóa ${selectedMessageIds.length} tin nhắn đã chọn?`,
+      confirmLabel: "Xóa",
+      cancelLabel: "Hủy",
+      intent: "danger",
+      onConfirm: async () => {
+        try {
+          await Promise.all(
+            selectedMessageIds.map((messageId) =>
+              deleteMessageAsync({ messageId, scope: "SELF" }),
+            ),
+          );
+          toast.success(`Đã xóa ${selectedMessageIds.length} tin nhắn`);
+          handleCancelMultiSelect();
+        } catch {
+          toast.error("Có lỗi xảy ra khi xóa một số tin nhắn.");
+        }
+      },
+    });
+  };
+
+  const handleCopySelectedMessages = useCallback(async () => {
+    if (selectedMessageIds.length === 0) return;
+    const selectedMsgs = messages.filter((m) => selectedMessageIds.includes(m.id));
+    const textToCopy = selectedMsgs
+      .map((m) => parseMessageText(m.content))
+      .filter(Boolean)
+      .join("\n");
+    if (textToCopy && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(textToCopy);
+      toast.success("Đã sao chép các tin nhắn đã chọn");
+    } else {
+      toast("Không có nội dung văn bản để sao chép.");
+    }
+  }, [selectedMessageIds, messages]);
+
+  const handleForwardSelectedMessages = useCallback(() => {
+    if (selectedMessageIds.length === 0) return;
+    setForwardingMessageId(selectedMessageIds[0]);
+    setSelectedForwardConversationIds([]);
+    setForwardSearch("");
+    setForwardActionError("");
+    setIsForwardDialogOpen(true);
+  }, [selectedMessageIds]);
+
+  const handleRecallSelectedMessages = useCallback(async () => {
+    if (selectedMessageIds.length === 0) return;
+    setConfirmInput("");
+    setConfirmDialog({
+      title: "Thu hồi nhiều tin nhắn",
+      description: `Bạn có chắc chắn muốn thu hồi ${selectedMessageIds.length} tin nhắn đã chọn với mọi người?`,
+      confirmLabel: "Thu hồi",
+      cancelLabel: "Hủy",
+      intent: "danger",
+      onConfirm: async () => {
+        try {
+          await Promise.all(
+            selectedMessageIds.map((messageId) =>
+              deleteMessageAsync({ messageId, scope: "EVERYONE" }),
+            ),
+          );
+          toast.success(`Đã thu hồi ${selectedMessageIds.length} tin nhắn`);
+          handleCancelMultiSelect();
+        } catch {
+          toast.error("Có lỗi xảy ra khi thu hồi một số tin nhắn.");
+        }
+      },
+    });
+  }, [selectedMessageIds, deleteMessageAsync, handleCancelMultiSelect]);
+
+  const canRecallAllSelected = useMemo(() => {
+    if (selectedMessageIds.length === 0) return false;
+    const selectedMsgs = messages.filter((m) => selectedMessageIds.includes(m.id));
+    return (
+      selectedMsgs.length > 0 &&
+      selectedMsgs.every((m) => m.senderId === user?.sub && !m.recalledAt)
+    );
+  }, [selectedMessageIds, messages, user?.sub]);
+
+  const handleToggleBookmark = useCallback((msgId: string) => {
+    if (!activeChat) return;
+    setBookmarkedMessageIds((prev) => {
+      const currentList = prev[activeChat] || [];
+      const newList = currentList.includes(msgId)
+        ? currentList.filter((id) => id !== msgId)
+        : [...currentList, msgId];
+      const next = { ...prev, [activeChat]: newList };
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("bookmarked_messages", JSON.stringify(next));
+      }
+      toast.success(currentList.includes(msgId) ? "Đã bỏ đánh dấu tin nhắn" : "Đã đánh dấu tin nhắn");
+      return next;
+    });
+    setActiveMessageMenuId(null);
+  }, [activeChat]);
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const container = messagesContainerRef.current;
     if (!container) {
@@ -2883,7 +3014,12 @@ export function ChatPage() {
       loadingOlderMessagesRef.current = false;
       previousScrollHeightRef.current = 0;
       hasInitialScrolledRef.current = false;
+      newestMessageIdRef.current = null;
     }
+
+    const newestMsg = messages[0];
+    const newestMsgId = newestMsg?.id || null;
+    const hasNewMsg = newestMsgId !== null && newestMsgId !== newestMessageIdRef.current;
 
     // Restore vị trí sau khi load tin nhắn cũ
     if (loadingOlderMessagesRef.current) {
@@ -2893,6 +3029,7 @@ export function ChatPage() {
       previousScrollHeightRef.current = 0;
       previousScrollTopRef.current = 0;                      // ← reset
       previousMessageCountRef.current = messages.length;
+      newestMessageIdRef.current = newestMsgId;
 
       if (container && savedHeight > 0) {
         requestAnimationFrame(() => {
@@ -2919,21 +3056,34 @@ export function ChatPage() {
     // Chỉ auto-scroll xuống duy nhất 1 lần khi vừa vào chat
     if (isFirstLoad && !hasInitialScrolledRef.current) {
       hasInitialScrolledRef.current = true;
+      scrollMessagesToBottom("auto");
       frameId = window.requestAnimationFrame(() => {
-        scrollMessagesToBottom();
-        timeoutId = window.setTimeout(scrollMessagesToBottom, 80);
+        scrollMessagesToBottom("auto");
+        timeoutId = window.setTimeout(() => scrollMessagesToBottom("auto"), 80);
+        window.setTimeout(() => scrollMessagesToBottom("auto"), 200);
       });
+    } else if (hasNewMsg && !isFirstLoad && hasActiveChatMessages) {
+      // Tự động cuộn xuống khi có tin nhắn mới (do chính mình gửi hoặc khi đang ở gần đáy chat)
+      const isMe = newestMsg.senderId === user?.sub;
+      const isNearBottom = container
+        ? container.scrollHeight - container.scrollTop - container.clientHeight < 200
+        : false;
+
+      if (isMe || isNearBottom) {
+        timeoutId = window.setTimeout(() => scrollMessagesToBottom("smooth"), 50);
+      }
     }
 
     if (hasActiveChatMessages) {
       previousMessageCountRef.current = messages.length;
+      newestMessageIdRef.current = newestMsgId;
     }
 
     return () => {
       if (frameId !== undefined) window.cancelAnimationFrame(frameId);
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [activeChat, loadingMessages, messages, scrollMessagesToBottom]);
+  }, [activeChat, loadingMessages, messages, scrollMessagesToBottom, user?.sub]);
 
   const handleLoadMoreMessages = useCallback(async () => {
     const container = messagesContainerRef.current;
@@ -3011,7 +3161,19 @@ export function ChatPage() {
   useEffect(() => {
     setLocalFailedMessages([]);
     setLoadMoreFailed(false);
-  }, [activeChat]);
+    hasInitialScrolledRef.current = false;
+    previousMessageCountRef.current = 0;
+    loadingOlderMessagesRef.current = false;
+    previousScrollHeightRef.current = 0;
+    previousScrollTopRef.current = 0;
+    setShowScrollDown(false);
+    newestMessageIdRef.current = null;
+    setIsMultiSelectMode(false);
+    setSelectedMessageIds([]);
+    if (activeChat) {
+      queryClient.removeQueries({ queryKey: ["messages", activeChat] });
+    }
+  }, [activeChat, queryClient]);
 
   useEffect(() => {
     if (!activeChat) {
@@ -3131,6 +3293,9 @@ export function ChatPage() {
     loadingOlderMessagesRef.current = false;
     previousScrollHeightRef.current = 0;
     setShowAllPinned(false);
+    newestMessageIdRef.current = null;
+    setIsMultiSelectMode(false);
+    setSelectedMessageIds([]);
   }, [activeChat]);
 
   useEffect(() => {
@@ -4122,20 +4287,7 @@ export function ChatPage() {
     () => [...filteredMessages].reverse(),
     [filteredMessages],
   );
-  const latestIncomingMessageId = useMemo(() => {
-    for (let index = orderedMessages.length - 1; index >= 0; index -= 1) {
-      const candidate = orderedMessages[index];
-      if (
-        candidate.senderId !== user?.sub &&
-        candidate.type !== "SYSTEM" &&
-        !candidate.recalledAt
-      ) {
-        return candidate.id;
-      }
-    }
 
-    return undefined;
-  }, [orderedMessages, user?.sub]);
 
   const formatCallDuration = (totalSeconds: number): string => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
@@ -4421,10 +4573,22 @@ export function ChatPage() {
     }
 
     try {
-      await forwardMessageAsync({
-        messageId: forwardingMessageId,
-        conversationIds: selectedForwardConversationIds,
-      });
+      if (isMultiSelectMode && selectedMessageIds.length > 0) {
+        await Promise.all(
+          selectedMessageIds.map((messageId) =>
+            forwardMessageAsync({
+              messageId,
+              conversationIds: selectedForwardConversationIds,
+            }),
+          ),
+        );
+        handleCancelMultiSelect();
+      } else {
+        await forwardMessageAsync({
+          messageId: forwardingMessageId,
+          conversationIds: selectedForwardConversationIds,
+        });
+      }
       handleCloseForwardDialog();
     } catch (error: unknown) {
       setForwardActionError(
@@ -5024,7 +5188,7 @@ export function ChatPage() {
               onChange={(e) => setConversationSearch(e.target.value)}
             />
           </div>
-          <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="mt-3 flex items-center justify-start gap-2">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -5041,50 +5205,7 @@ export function ChatPage() {
                 Chưa đọc
               </button>
             </div>
-            <div className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                Phân loại
-                <ChevronDown size={15} />
-              </button>
-              <button
-                type="button"
-                className="rounded-md p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
-                aria-label="Tùy chọn hội thoại"
-              >
-                <MoreHorizontal size={18} />
-              </button>
-            </div>
           </div>
-          {showSyncNotification && (
-            <div className="mt-3 flex items-start gap-3 rounded-lg bg-blue-50 px-3 py-3 text-sm text-slate-700 dark:bg-blue-950/30 dark:text-slate-200 animate-in fade-in duration-200">
-              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-blue-600">
-                <Loader2 size={18} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold">Đồng bộ tin nhắn gần đây</p>
-                <p className="mt-1 leading-5">
-                  Zalo Web của bạn hiện chưa có đầy đủ tin nhắn gần đây
-                </p>
-                <button
-                  type="button"
-                  className="mt-2 font-semibold text-blue-600 hover:underline"
-                >
-                  Nhấn để đồng bộ ngay
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowSyncNotification(false)}
-                className="rounded-md p-1 text-slate-500 hover:bg-blue-100 hover:text-slate-700 dark:hover:bg-slate-800 transition-colors"
-                aria-label="Ẩn thông báo đồng bộ"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          )}
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0 hide-scrollbar [overflow-anchor:none] [scrollbar-gutter:stable]">
@@ -5385,12 +5506,22 @@ export function ChatPage() {
                         key={`pinned-${m.id}`}
                         className="flex items-start justify-between gap-3 rounded-md px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors"
                         onClick={() => {
-                          const el = document.getElementById(`msg-${m.id}`);
+                          const el = messageItemRefs.current[m.id] || document.getElementById(`msg-${m.id}`);
                           if (el) {
                             el.scrollIntoView({
                               behavior: "smooth",
                               block: "center",
                             });
+                            setFocusedMessageId(m.id);
+                            if (messageFocusTimerRef.current !== null) {
+                              window.clearTimeout(messageFocusTimerRef.current);
+                            }
+                            messageFocusTimerRef.current = window.setTimeout(() => {
+                              setFocusedMessageId(null);
+                              messageFocusTimerRef.current = null;
+                            }, 3000);
+                          } else {
+                            toast("Không tìm thấy tin nhắn, vui lòng cuộn lên.");
                           }
                         }}
                       >
@@ -6642,21 +6773,37 @@ export function ChatPage() {
                           parsedTextContent.length > 0));
                     const isInlineReactionPickerOpen =
                       inlineReactionPickerMessageId === msg.id;
-                    const shouldPersistInlineLike =
-                      !isMe && msg.id === latestIncomingMessageId;
+                    const shouldPersistInlineLike = false;
                     const shouldShowInlineLike =
-                      !isEditing && !isRecalledMessage;
+                      !isEditing && !isRecalledMessage && !isMultiSelectMode;
 
                     return (
-                      <MessageBubbleContainer
-                        key={msg.id}
-                        ref={(element) => {
-                          messageItemRefs.current[msg.id] = element;
-                        }}
-                        focused={focusedMessageId === msg.id}
-                        isMe={isMe}
-                        startsSenderBlock={startsSenderBlock}
+                      <div
+                        id={`msg-${msg.id}`}
+                        className={`flex items-center gap-3 w-full group/multiselect cursor-pointer ${
+                          isMe ? "justify-end" : "justify-start"
+                        }`}
+                        onClick={() => isMultiSelectMode && handleToggleMessageSelection(msg.id)}
                       >
+                        {isMultiSelectMode && (
+                          <div className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                            selectedMessageIds.includes(msg.id)
+                              ? "bg-blue-600 border-blue-600 text-white"
+                              : "border-slate-300 bg-white hover:border-blue-500"
+                          }`}>
+                            {selectedMessageIds.includes(msg.id) && (
+                              <Check size={12} strokeWidth={3} />
+                            )}
+                          </div>
+                        )}
+                        <MessageBubbleContainer
+                          ref={(element) => {
+                            messageItemRefs.current[msg.id] = element;
+                          }}
+                          focused={focusedMessageId === msg.id}
+                          isMe={isMe}
+                          startsSenderBlock={startsSenderBlock}
+                        >
                         {shouldShowSenderMeta ? (
                           <p
                             className={`mb-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 ${isMe ? "text-right" : "ml-10"}`}
@@ -6717,7 +6864,7 @@ export function ChatPage() {
                                   }`
                             }
                           >
-                            {!isEditing && !isRecalledMessage ? (
+                            {!isEditing && !isRecalledMessage && !isMultiSelectMode ? (
                               <div
                                 className={`absolute ${isMe ? "right-full mr-2" : "left-full ml-2"} bottom-1 z-30 flex items-center gap-1 transition-opacity ${isInlineReactionPickerOpen
                                   ? "pointer-events-none opacity-0"
@@ -6933,15 +7080,24 @@ export function ChatPage() {
                                           <button
                                             type="button"
                                             className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
-                                            onClick={() => toast("Chức năng đánh dấu sẽ được bổ sung sau.")}
+                                            onClick={() => handleToggleBookmark(msg.id)}
                                           >
-                                            <Star size={18} />
-                                            Đánh dấu tin nhắn
+                                            <Star
+                                              size={18}
+                                              className={
+                                                bookmarkedMessageIds[activeChat || ""]?.includes(msg.id)
+                                                  ? "text-amber-400 fill-amber-400"
+                                                  : ""
+                                              }
+                                            />
+                                            {bookmarkedMessageIds[activeChat || ""]?.includes(msg.id)
+                                              ? "Bỏ đánh dấu tin nhắn"
+                                              : "Đánh dấu tin nhắn"}
                                           </button>
                                           <button
                                             type="button"
                                             className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
-                                            onClick={() => toast("Chức năng chọn nhiều sẽ được bổ sung sau.")}
+                                            onClick={() => handleStartMultiSelect(msg.id)}
                                           >
                                             <ListChecks size={18} />
                                             Chọn nhiều tin nhắn
@@ -6956,14 +7112,6 @@ export function ChatPage() {
                                           >
                                             <Info size={18} />
                                             Xem chi tiết
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
-                                            onClick={() => toast("Tùy chọn khác sẽ được bổ sung sau.")}
-                                          >
-                                            <span>Tùy chọn khác</span>
-                                            <ChevronDown size={16} className="-rotate-90" />
                                           </button>
 
                                           <div className="border-t border-slate-100 dark:border-slate-800" />
@@ -7347,12 +7495,21 @@ export function ChatPage() {
                           </div>
                         ) : null}
                         {endsSenderBlock ? (
-                          <span
-                            className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"} ${!isMe ? "pl-10" : ""}`}
-                          >
-                            {format(new Date(msg.sentAt), "HH:mm")}
-                          </span>
-                        ) : null}
+                          <div className={`mt-1 flex items-center gap-1 ${isMe ? "justify-end" : "justify-start"} ${!isMe ? "pl-10" : ""}`}>
+                            <span className="text-[10px] text-gray-400 dark:text-slate-500">
+                              {format(new Date(msg.sentAt), "HH:mm")}
+                            </span>
+                            {bookmarkedMessageIds[activeChat || ""]?.includes(msg.id) && (
+                              <Star size={10} className="text-amber-400 fill-amber-400 shrink-0" />
+                            )}
+                          </div>
+                        ) : (
+                          !endsSenderBlock && bookmarkedMessageIds[activeChat || ""]?.includes(msg.id) && (
+                            <div className={`mt-0.5 flex items-center gap-1 ${isMe ? "justify-end" : "justify-start"} ${!isMe ? "pl-10" : ""}`}>
+                              <Star size={10} className="text-amber-400 fill-amber-400 shrink-0" />
+                            </div>
+                          )
+                        )}
                         {messageActionError &&
                           (editingMessageId === msg.id ||
                             activeMessageMenuId === msg.id) ? (
@@ -7397,8 +7554,9 @@ export function ChatPage() {
                           </div>
                         ) : null}
                       </MessageBubbleContainer>
-                    );
-                  }}
+                    </div>
+                  );
+                }}
                 />
 
                 {activeContact?.isGroup &&
@@ -7465,6 +7623,22 @@ export function ChatPage() {
                   </div>
                 ))}
 
+                {typingIndicatorText ? (
+                  <div
+                    className="flex items-center gap-1.5 px-4 py-2 text-[11.5px] text-slate-500 dark:text-slate-400 self-start pl-12 animate-in fade-in duration-200"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="font-medium italic">
+                      {typingIndicatorLabel}
+                    </span>
+                    <div className="flex items-center gap-1.5" aria-hidden="true">
+                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.3s]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.15s]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce" />
+                    </div>
+                  </div>
+                ) : null}
                 <div ref={messagesEndRef} />
               </div>
               </div>
@@ -7474,7 +7648,7 @@ export function ChatPage() {
                   type="button"
                   aria-label="Cuon xuong tin nhan moi nhat"
                   onClick={() => scrollMessagesToBottom("smooth")}
-                  className="absolute bottom-5 right-5 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg shadow-slate-900/10 transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:text-blue-600 active:translate-y-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 sm:right-6"
+                  className="absolute bottom-16 right-5 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg shadow-slate-900/10 transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:text-blue-600 active:translate-y-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 sm:right-6"
                   title="Cuộn xuống tin nhắn mới nhất"
                 >
                   <ChevronsDown size={22} />
@@ -7865,7 +8039,63 @@ export function ChatPage() {
                 </button>
               </div>
             ) : (
-              <MessageComposer onSubmit={handleSend}>
+              <>
+                {isMultiSelectMode && (
+                  <div className="w-full border-t border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 px-5 py-3 flex items-center justify-between gap-4 animate-in slide-in-from-bottom-2 duration-300">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex h-7 min-w-7 items-center justify-center rounded bg-blue-50 dark:bg-blue-900/30 text-xs font-bold text-blue-600 dark:text-blue-400 px-2 py-0.5">
+                        {selectedMessageIds.length}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                        Đã chọn
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCopySelectedMessages}
+                        className="flex items-center gap-1.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-3.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors shadow-sm"
+                      >
+                        <Copy size={13} />
+                        Sao chép
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleForwardSelectedMessages}
+                        className="flex items-center gap-1.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-3.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors shadow-sm"
+                      >
+                        <Share2 size={13} />
+                        Chia sẻ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRecallSelectedMessages}
+                        disabled={!canRecallAllSelected}
+                        className="flex items-center gap-1.5 rounded-full bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 disabled:opacity-40 disabled:cursor-not-allowed px-3.5 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 transition-colors shadow-sm"
+                      >
+                        <RotateCcw size={13} />
+                        Thu hồi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteSelectedMessages}
+                        disabled={selectedMessageIds.length === 0}
+                        className="flex items-center gap-1.5 rounded-full bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 disabled:opacity-40 disabled:cursor-not-allowed px-3.5 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 transition-colors shadow-sm"
+                      >
+                        <Trash2 size={13} />
+                        Xóa
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelMultiSelect}
+                        className="px-3 py-1.5 text-sm font-semibold text-slate-650 dark:text-slate-350 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+                      >
+                        Hủy
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <MessageComposer onSubmit={handleSend}>
                 {replyingMessage ? (
                   <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                     <div className="min-w-0">
@@ -7889,22 +8119,7 @@ export function ChatPage() {
                     </button>
                   </div>
                 ) : null}
-                {typingIndicatorText ? (
-                  <div
-                    className="chat-typing-indicator"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span className="chat-typing-label">
-                      {typingIndicatorLabel}
-                    </span>
-                    <span className="chat-typing-dots" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  </div>
-                ) : null}
+
                 {queuedAttachments.length > 0 ? (
                   <div className="space-y-2 max-h-36 overflow-y-auto pr-1 hide-scrollbar">
                     {queuedAttachments.map((item) => (
@@ -7949,7 +8164,7 @@ export function ChatPage() {
                 ) : null}
 
                 {/* Thanh công cụ tiện ích */}
-                <div className="flex h-6 items-center gap-1 animate-in slide-in-from-bottom-1 duration-300">
+                <div className="flex h-6 items-center gap-1 mb-1.5 animate-in slide-in-from-bottom-1 duration-300">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -8289,6 +8504,7 @@ export function ChatPage() {
                   ) : null}
                 </div>
               </MessageComposer>
+            </>
             )}
 
             {pendingRemoveMemberUserId ? (

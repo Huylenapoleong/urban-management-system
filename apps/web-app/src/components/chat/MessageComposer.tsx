@@ -9,7 +9,7 @@ export function MessageComposer({ className, ...props }: MessageComposerProps) {
     <form
       {...props}
       className={cn(
-        "relative z-10 shrink-0 space-y-1 border-t border-slate-200/80 bg-white px-4 pb-2 pt-1.5 shadow-[0_-1px_0_rgba(15,23,42,0.03)] dark:border-slate-800 dark:bg-slate-900 sm:px-5",
+        "relative z-10 shrink-0 space-y-1.5 border-t border-slate-200/80 bg-white px-4 pb-2 pt-3.5 shadow-[0_-1px_0_rgba(15,23,42,0.03)] dark:border-slate-800 dark:bg-slate-900 sm:px-5",
         className,
       )}
     />
