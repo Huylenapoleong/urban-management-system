@@ -2,6 +2,8 @@ import "dart:async";
 import "dart:io";
 import "package:file_picker/file_picker.dart";
 import "dart:convert";
+import "package:provider/provider.dart";
+import "../../state/session_controller.dart";
 
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
@@ -247,6 +249,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        try {
+          context.read<SessionController>().setActiveConversationId(
+            widget.conversation.conversationId,
+            unreadCount: widget.conversation.unreadCount,
+          );
+        } catch (_) {}
+      }
+    });
     
     // Check synchronous in-memory cache first
     final memCached = _conversationMessagesCache[widget.conversation.conversationId];
@@ -269,6 +282,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (widget.conversation.unreadCount > 0) {
       widget.conversationService
           .markConversationAsRead(widget.conversation.conversationId)
+          .then((_) {
+            if (mounted) {
+              try {
+                context.read<SessionController>().fetchTotalUnreadCount();
+              } catch (_) {}
+            }
+          })
           .catchError((_) {});
     }
     _pagingController.addPageRequestListener((pageKey) {
@@ -292,7 +312,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
     // Mark as read on entry
     widget.socketService.markAsRead(widget.conversation.conversationId);
-    widget.conversationService.markConversationAsRead(widget.conversation.conversationId).catchError((_) {});
+    widget.conversationService.markConversationAsRead(widget.conversation.conversationId)
+        .then((_) {
+          if (mounted) {
+            try {
+              context.read<SessionController>().fetchTotalUnreadCount();
+            } catch (_) {}
+          }
+        })
+        .catchError((_) {});
 
     _msgSub = widget.socketService.onMessageCreated.listen((msg) {
       if (mounted && msg.conversationId == widget.conversation.conversationId) {
@@ -517,6 +545,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    try {
+      context.read<SessionController>().setActiveConversationId(null);
+    } catch (_) {}
     widget.socketService.leaveConversation(widget.conversation.conversationId);
     widget.webRTCService.callState.removeListener(_handleCallStateChange);
     _msgSub?.cancel();

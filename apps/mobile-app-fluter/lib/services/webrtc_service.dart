@@ -111,6 +111,7 @@ class WebRTCService {
   void _listenToSocket() {
     socketService.onCallInit.listen((data) => _handleIncomingCall(data));
     socketService.onCallInvite.listen((data) => _handleIncomingCall(data));
+    socketService.onCallRinging.listen((data) => _handleCallRinging(data));
     socketService.onCallAccept.listen((data) => _handleCallAccept(data));
     socketService.onCallReject.listen((data) => _handleCallReject(data));
     socketService.onCallEnd.listen((data) => _handleCallEnd(data));
@@ -562,6 +563,17 @@ class WebRTCService {
     };
 
     _callStateNotifier.value = CallState.ringing;
+
+    if (incomingConvId != null) {
+      socketService.emitCallRinging(incomingConvId);
+    }
+  }
+
+  void _handleCallRinging(Map<String, dynamic> data) {
+    if (_callStateNotifier.value == CallState.connecting) {
+      _callStateNotifier.value = CallState.ringing;
+      debugPrint("[WebRTCService] Callee device is ringing.");
+    }
   }
 
   void _handleCallAccept(Map<String, dynamic> data) {
