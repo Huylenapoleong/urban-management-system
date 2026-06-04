@@ -2,7 +2,6 @@ import "package:flutter/material.dart";
 import "package:skeletonizer/skeletonizer.dart";
 import "package:shared_preferences/shared_preferences.dart";
 import "package:provider/provider.dart";
-import "dart:convert";
 import "../../state/session_controller.dart";
 import "../../services/app_services.dart";
 import "../../models/report_item.dart";
@@ -84,7 +83,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       List<Map<String, dynamic>> friendRequests = [];
       try {
         if (role == 'CITIZEN') {
-          friendRequests = await services.userService.listFriendRequests(direction: "incoming");
+          friendRequests = await services.userService.listFriendRequests(direction: "INCOMING");
         }
       } catch (e) {
         debugPrint("Error loading friend requests in notifications: $e");

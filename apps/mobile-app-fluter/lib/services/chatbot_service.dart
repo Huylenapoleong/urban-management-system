@@ -21,6 +21,21 @@ class ChatbotService {
     return (raw as Map).cast<String, dynamic>();
   }
 
+  /// Hỏi đáp chatbot có xác thực (JWT)
+  Future<Map<String, dynamic>> authenticatedAsk(
+    String question, {
+    Map<String, dynamic>? selectedTarget,
+  }) async {
+    final raw = await _apiClient.post(
+      '/chatbot/auth/ask',
+      data: {
+        'question': question,
+        if (selectedTarget != null) 'selectedTarget': selectedTarget,
+      },
+    );
+    return (raw as Map).cast<String, dynamic>();
+  }
+
   /// Tóm tắt nhóm chat (Cán bộ)
   Future<Map<String, dynamic>> summarizeGroup(String groupId, {int messageCount = 100}) async {
     final raw = await _apiClient.post('/chatbot/officer/summarize-group', data: {

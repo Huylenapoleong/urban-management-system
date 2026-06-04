@@ -134,6 +134,7 @@ class _HomeShellState extends State<HomeShell> {
     final services = context.read<AppServices>();
     final session = context.watch<SessionController>();
     final user = session.user;
+    final unreadCount = session.unreadMessagesCount;
 
     if (user == null) {
       return const Scaffold(body: SizedBox.shrink());
@@ -197,16 +198,25 @@ class _HomeShellState extends State<HomeShell> {
                 selectedIndex: _index,
                 onDestinationSelected: (value) => setState(() => _index = value),
                 labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                destinations: const [
-                  NavigationDestination(
+                destinations: [
+                  const NavigationDestination(
                     icon: Icon(Icons.home_outlined),
                     selectedIcon: Icon(Icons.home, color: Color(0xFF7C3AED)),
                     label: "Trang chủ",
                   ),
                   NavigationDestination(
-                    icon: Icon(Icons.chat_bubble_outline),
-                    selectedIcon:
-                        Icon(Icons.chat_bubble, color: Color(0xFF7C3AED)),
+                    icon: unreadCount > 0
+                        ? Badge(
+                            label: Text(unreadCount > 99 ? "99+" : "$unreadCount"),
+                            child: const Icon(Icons.chat_bubble_outline),
+                          )
+                        : const Icon(Icons.chat_bubble_outline),
+                    selectedIcon: unreadCount > 0
+                        ? Badge(
+                            label: Text(unreadCount > 99 ? "99+" : "$unreadCount"),
+                            child: const Icon(Icons.chat_bubble, color: Color(0xFF7C3AED)),
+                          )
+                        : const Icon(Icons.chat_bubble, color: Color(0xFF7C3AED)),
                     label: "Tin nhắn",
                   ),
                   NavigationDestination(

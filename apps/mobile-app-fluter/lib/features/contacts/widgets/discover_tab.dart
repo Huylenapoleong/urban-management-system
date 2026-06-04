@@ -20,6 +20,8 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
   bool _isLoading = true;
   bool _isSyncing = false;
   String _searchQuery = "";
+  // Track pending request states by userId
+  final Map<String, String> _pendingStates = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -40,7 +42,12 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
       );
       if (mounted) {
         setState(() {
-          _users = users;
+          // Filter out friends and users with pending outgoing from our side
+          // Keep NONE, INCOMING_REQUEST (can accept), and OUTGOING_REQUEST (show sent state)
+          _users = users.where((u) {
+            final rel = u['relationState'] as String? ?? 'NONE';
+            return rel != 'FRIEND';
+          }).toList();
           _isLoading = false;
         });
       }
@@ -105,11 +112,13 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
                         if (index < _syncedUsers.length) {
                           final userData = _syncedUsers[index];
                           final user = UserProfile.fromJson(userData);
-                          return _buildUserItem(user, isSuggested: true);
+                          final rel = userData['relationState'] as String? ?? 'NONE';
+                          return _buildUserItem(user, userData: userData, relationState: rel, isSuggested: true);
                         }
                         final userData = _users[index - _syncedUsers.length];
                         final user = UserProfile.fromJson(userData);
-                        return _buildUserItem(user);
+                        final rel = userData['relationState'] as String? ?? 'NONE';
+                        return _buildUserItem(user, userData: userData, relationState: rel);
                       },
                     ),
             ),
@@ -119,11 +128,15 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
     );
   }
 
-  Widget _buildUserItem(UserProfile user, {bool isSuggested = false}) {
+  Widget _buildUserItem(UserProfile user, {required Map<String, dynamic> userData, required String relationState, bool isSuggested = false}) {
+    // Check local pending state override (after user taps a button)
+    final effectiveState = _pendingStates[user.id] ?? relationState;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white), borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.02), blurRadius: 5)]),
+      decoration: BoxDecoration(color: Theme.of(context).cardTheme.color ?? (isDark ? const Color(0xFF1E293B) : Colors.white), borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: isDark ? Colors.transparent : Colors.black.withOpacity(0.02), blurRadius: 5)]),
       child: Row(
         children: [
           UserAvatar(
@@ -140,7 +153,7 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
               children: [
                 Row(
                   children: [
-                    Text(user.fullName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B))),
+                    Flexible(child: Text(user.fullName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isDark ? Colors.white : const Color(0xFF1E1B4B)), overflow: TextOverflow.ellipsis)),
                     if (isSuggested) Container(
                       margin: const EdgeInsets.only(left: 6),
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -149,18 +162,131 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
                     ),
                   ],
                 ),
-                Text(user.role ?? "Cư dân", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                Text(user.role, style: TextStyle(color: Colors.grey[500], fontSize: 13)),
               ],
             ),
           ),
-          ElevatedButton(
-            onPressed: () => _sendRequest(user.id),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0),
-            child: const Text("Kết bạn"),
-          ),
+          const SizedBox(width: 8),
+          _buildActionButton(user.id, effectiveState),
         ],
       ),
     );
+  }
+
+  Widget _buildActionButton(String userId, String relationState) {
+    switch (relationState) {
+      case 'INCOMING_REQUEST':
+        // They sent a request to us — show Accept button
+        return ElevatedButton.icon(
+          onPressed: () => _acceptRequest(userId),
+          icon: const Icon(Icons.check, size: 16),
+          label: const Text("Chấp nhận"),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            textStyle: const TextStyle(fontSize: 13),
+          ),
+        );
+      case 'OUTGOING_REQUEST':
+        // We already sent — show disabled state
+        return OutlinedButton(
+          onPressed: () => _cancelRequest(userId),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.grey,
+            side: const BorderSide(color: Colors.grey),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            textStyle: const TextStyle(fontSize: 13),
+          ),
+          child: const Text("Đã gửi"),
+        );
+      case 'FRIEND':
+        return const SizedBox.shrink();
+      default: // NONE
+        return ElevatedButton(
+          onPressed: () => _sendRequest(userId),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF7C3AED),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            textStyle: const TextStyle(fontSize: 13),
+          ),
+          child: const Text("Kết bạn"),
+        );
+    }
+  }
+
+  Future<void> _sendRequest(String userId) async {
+    // Optimistic update
+    setState(() => _pendingStates[userId] = 'OUTGOING_REQUEST');
+    try {
+      await widget.userService.sendFriendRequest(userId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Đã gửi yêu cầu kết bạn"), backgroundColor: Color(0xFF7C3AED)),
+        );
+      }
+    } catch (e) {
+      // Revert optimistic update
+      if (mounted) {
+        setState(() => _pendingStates.remove(userId));
+        final errMsg = e.toString().contains('already sent you') 
+            ? 'Người này đã gửi yêu cầu cho bạn. Hãy chấp nhận trong tab Yêu cầu.'
+            : 'Lỗi: $e';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errMsg)));
+        // If conflict due to incoming request, update state accordingly
+        if (e.toString().contains('already sent you')) {
+          setState(() => _pendingStates[userId] = 'INCOMING_REQUEST');
+        }
+      }
+    }
+  }
+
+  Future<void> _cancelRequest(String userId) async {
+    setState(() => _pendingStates[userId] = 'NONE');
+    try {
+      await widget.userService.cancelFriendRequest(userId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Đã hủy yêu cầu kết bạn")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _pendingStates[userId] = 'OUTGOING_REQUEST');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      }
+    }
+  }
+
+  Future<void> _acceptRequest(String userId) async {
+    setState(() => _pendingStates[userId] = 'FRIEND');
+    try {
+      await widget.userService.acceptFriendRequest(userId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Đã kết bạn thành công!"), backgroundColor: Colors.green),
+        );
+        // Remove from list
+        setState(() {
+          _users.removeWhere((u) {
+            final uid = u['userId'] as String? ?? u['id'] as String? ?? '';
+            return uid == userId;
+          });
+          _pendingStates.remove(userId);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _pendingStates[userId] = 'INCOMING_REQUEST');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      }
+    }
   }
 
   Future<void> _syncContacts() async {
@@ -179,35 +305,35 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
         if (phones.isNotEmpty) {
           final matched = await widget.userService.syncContacts(phones);
           if (mounted) {
+            final messenger = ScaffoldMessenger.of(context);
             setState(() {
-              _syncedUsers = matched;
+              _syncedUsers = matched.where((u) {
+                final rel = u['relationState'] as String? ?? 'NONE';
+                return rel != 'FRIEND';
+              }).toList();
               _isSyncing = false;
             });
             if (matched.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Không tìm thấy bạn bè nào từ danh bạ")));
+              messenger.showSnackBar(const SnackBar(content: Text("Không tìm thấy bạn bè nào từ danh bạ")));
             }
           }
         } else {
-          if (mounted) setState(() => _isSyncing = false);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Danh bạ trống")));
+          if (mounted) {
+            setState(() => _isSyncing = false);
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Danh bạ trống")));
+          }
         }
       } else {
-        if (mounted) setState(() => _isSyncing = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cần quyền truy cập danh bạ để sử dụng tính năng này")));
+        if (mounted) {
+          setState(() => _isSyncing = false);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cần quyền truy cập danh bạ để sử dụng tính năng này")));
+        }
       }
     } catch (e) {
-      if (mounted) setState(() => _isSyncing = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi đồng bộ: $e")));
-    }
-  }
-
-  Future<void> _sendRequest(String userId) async {
-    try {
-      await widget.userService.sendFriendRequest(userId);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Đã gửi yêu cầu kết bạn")));
-      _loadUsers();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      if (mounted) {
+        setState(() => _isSyncing = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi đồng bộ: $e")));
+      }
     }
   }
 

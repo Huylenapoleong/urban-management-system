@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../../features/chat/widgets/call_incoming_listener.dart';
 import '../../features/chat/widgets/notification_listener_widget.dart';
+import '../../state/session_controller.dart';
 
 /// Bottom-nav shell cho giao diện Citizen với bộ điều hướng StatefulNavigationShell để tối ưu hóa bộ nhớ đệm.
 class CitizenShell extends StatelessWidget {
@@ -14,6 +16,9 @@ class CitizenShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final idx = navigationShell.currentIndex;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    final session = context.watch<SessionController>();
+    final unreadCount = session.unreadMessagesCount;
 
     return NotificationListenerWidget(
       child: CallIncomingListener(
@@ -41,15 +46,25 @@ class CitizenShell extends StatelessWidget {
                 initialLocation: i == navigationShell.currentIndex,
               );
             },
-            destinations: const [
-              NavigationDestination(
+            destinations: [
+              const NavigationDestination(
                 icon: Icon(Icons.home_outlined),
                 selectedIcon: Icon(Icons.home, color: Color(0xFF1E88E5)),
                 label: 'Trang chủ',
               ),
               NavigationDestination(
-                icon: Icon(Icons.chat_bubble_outline),
-                selectedIcon: Icon(Icons.chat_bubble, color: Color(0xFF1E88E5)),
+                icon: unreadCount > 0
+                    ? Badge(
+                        label: Text(unreadCount > 99 ? "99+" : "$unreadCount"),
+                        child: const Icon(Icons.chat_bubble_outline),
+                      )
+                    : const Icon(Icons.chat_bubble_outline),
+                selectedIcon: unreadCount > 0
+                    ? Badge(
+                        label: Text(unreadCount > 99 ? "99+" : "$unreadCount"),
+                        child: const Icon(Icons.chat_bubble, color: Color(0xFF1E88E5)),
+                      )
+                    : const Icon(Icons.chat_bubble, color: Color(0xFF1E88E5)),
                 label: 'Tin nhắn',
               ),
               NavigationDestination(

@@ -210,7 +210,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
       itemCount: _reports.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        return _ReportCard(report: _reports[index]);
+        final report = _reports[index];
+        return _ReportCard(
+          report: report,
+          onTap: () => _showReportDetailSheet(report),
+        );
       },
     );
   }
@@ -667,11 +671,499 @@ class _ReportsScreenState extends State<ReportsScreen> {
       }
     }
   }
+
+  Widget _buildPriorityBadge(String priority) {
+    Color color;
+    String label;
+    switch (priority.toUpperCase()) {
+      case "URGENT":
+        color = Colors.red.shade900;
+        label = "KHẨN CẤP";
+        break;
+      case "HIGH":
+        color = Colors.red;
+        label = "CAO";
+        break;
+      case "MEDIUM":
+        color = Colors.orange;
+        label = "TRUNG BÌNH";
+        break;
+      case "LOW":
+      default:
+        color = Colors.blue;
+        label = "THẤP";
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        border: Border.all(color: color.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toUpperCase()) {
+      case "NEW": return Colors.amber.shade700;
+      case "IN_PROGRESS": return Colors.blue.shade700;
+      case "RESOLVED": return Colors.green.shade700;
+      default: return Colors.grey.shade700;
+    }
+  }
+
+  void _showReportDetailSheet(ReportItem report) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final session = context.read<SessionController>();
+    final isOwner = session.user?.id == report.userId;
+    final statusColor = _getStatusColor(report.status);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    color: Colors.grey,
+                    borderRadius: BorderRadius.all(Radius.circular(2)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      report.status.replaceAll("_", " "),
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  _buildPriorityBadge(report.priority),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                report.title,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.location_on_outlined, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      report.locationCode,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Phân loại: ${report.category}",
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                ),
+              ),
+              const Divider(height: 32),
+              Text(
+                "Mô tả chi tiết",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                report.description ?? "Không có mô tả",
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.5,
+                  color: isDark ? Colors.grey.shade300 : Colors.grey.shade800,
+                ),
+              ),
+              if (report.mediaUrls.isNotEmpty || report.mediaAssets.isNotEmpty) ...[
+                const Divider(height: 32),
+                Text(
+                  "Hình ảnh đính kèm",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 120,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: report.mediaUrls.isNotEmpty 
+                        ? report.mediaUrls.length 
+                        : report.mediaAssets.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (context, index) {
+                      final url = report.mediaUrls.isNotEmpty 
+                          ? report.mediaUrls[index] 
+                          : report.mediaAssets[index].resolvedUrl ?? "";
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: CachedNetworkImage(
+                          imageUrl: url,
+                          width: 120,
+                          height: 120,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(
+                            width: 120,
+                            height: 120,
+                            color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                            child: const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                          ),
+                          errorWidget: (context, url, error) => Container(
+                            width: 120,
+                            height: 120,
+                            color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                            child: Icon(Icons.broken_image_outlined, color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+              if (isOwner) ...[
+                const Divider(height: 32),
+                if (report.status.toUpperCase() == 'NEW') ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _showUpdateReportSheet(report);
+                          },
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text("Cập nhật"),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF7C3AED),
+                            side: const BorderSide(color: Color(0xFF7C3AED)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => _deleteReport(report),
+                          icon: const Icon(Icons.delete_outline, color: Colors.white),
+                          label: const Text("Xóa báo cáo", style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.redAccent,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else if (report.status.toUpperCase() == 'RESOLVED') ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: FilledButton.icon(
+                      onPressed: () => _closeReport(report),
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: const Text("Đóng báo cáo", style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.green.shade700,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showUpdateReportSheet(ReportItem report) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Prefill controllers
+    final titleUpdateController = TextEditingController(text: report.title);
+    final descUpdateController = TextEditingController(text: report.description);
+    
+    String updateCategory = report.category;
+    String updatePriority = report.priority;
+    bool updateSubmitting = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => StatefulBuilder(
+          builder: (context, setModalState) => SingleChildScrollView(
+            controller: scrollController,
+            padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Container(width: 40, height: 4, decoration: const BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.all(Radius.circular(2))))),
+                const SizedBox(height: 20),
+                Text(
+                  "Cập nhật báo cáo",
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: titleUpdateController,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  decoration: InputDecoration(
+                    labelText: "Chuyện gì đang xảy ra?",
+                    labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: descUpdateController,
+                  maxLines: 4,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  decoration: InputDecoration(
+                    labelText: "Mô tả chi tiết",
+                    labelStyle: TextStyle(color: isDark ? Colors.grey.shade400 : null),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: updateCategory,
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                        dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                        decoration: InputDecoration(
+                          labelText: "Phân loại",
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: "INFRASTRUCTURE", child: Text("Hạ tầng")),
+                          DropdownMenuItem(value: "ENVIRONMENT", child: Text("Môi trường")),
+                          DropdownMenuItem(value: "SECURITY", child: Text("An ninh")),
+                          DropdownMenuItem(value: "ADMIN", child: Text("Hành chính")),
+                        ],
+                        onChanged: (val) => setModalState(() => updateCategory = val!),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: updatePriority,
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                        dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                        decoration: InputDecoration(
+                          labelText: "Ưu tiên",
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: "LOW", child: Text("Thấp")),
+                          DropdownMenuItem(value: "MEDIUM", child: Text("Trung bình")),
+                          DropdownMenuItem(value: "HIGH", child: Text("Cao")),
+                          DropdownMenuItem(value: "URGENT", child: Text("Khẩn cấp")),
+                        ],
+                        onChanged: (val) => setModalState(() => updatePriority = val!),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton(
+                    onPressed: updateSubmitting
+                        ? null
+                        : () async {
+                            if (titleUpdateController.text.trim().isEmpty) {
+                              AppToast.show(context, message: "Vui lòng nhập tiêu đề", type: AppToastType.warning);
+                              return;
+                            }
+                            setModalState(() => updateSubmitting = true);
+                            try {
+                              await widget.reportService.updateReport(
+                                report.id,
+                                {
+                                  "title": titleUpdateController.text.trim(),
+                                  "description": descUpdateController.text.trim(),
+                                  "category": updateCategory,
+                                  "priority": updatePriority,
+                                },
+                              );
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                _loadReports();
+                                AppToast.show(context, message: "Cập nhật báo cáo thành công!", type: AppToastType.success);
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                AppToast.show(context, message: "Lỗi: $e", type: AppToastType.error);
+                              }
+                            } finally {
+                              setModalState(() => updateSubmitting = false);
+                            }
+                          },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF7C3AED),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: updateSubmitting
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text("Lưu thay đổi", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteReport(ReportItem report) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Xóa báo cáo"),
+        content: const Text("Bạn có chắc chắn muốn xóa báo cáo này không? Hành động này không thể hoàn tác."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Hủy"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Xóa"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await widget.reportService.deleteReport(report.id);
+        if (mounted) {
+          Navigator.pop(context); // Close detail sheet
+          _loadReports();
+          AppToast.show(context, message: "Đã xóa báo cáo", type: AppToastType.success);
+        }
+      } catch (e) {
+        if (mounted) AppToast.show(context, message: "Lỗi khi xóa: $e", type: AppToastType.error);
+      }
+    }
+  }
+
+  Future<void> _closeReport(ReportItem report) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Đóng báo cáo"),
+        content: const Text("Bạn có chắc chắn muốn đóng báo cáo này? Trạng thái sẽ được chuyển sang CLOSED."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Hủy"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.green),
+            child: const Text("Đồng ý"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await widget.reportService.updateReportStatus(report.id, "CLOSED");
+        if (mounted) {
+          Navigator.pop(context); // Close detail sheet
+          _loadReports();
+          AppToast.show(context, message: "Đã đóng báo cáo thành công", type: AppToastType.success);
+        }
+      } catch (e) {
+        if (mounted) AppToast.show(context, message: "Lỗi khi đóng: $e", type: AppToastType.error);
+      }
+    }
+  }
 }
 
 class _ReportCard extends StatelessWidget {
-  const _ReportCard({required this.report});
+  const _ReportCard({required this.report, this.onTap});
   final ReportItem report;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -680,60 +1172,67 @@ class _ReportCard extends StatelessWidget {
     final time = DateTime.tryParse(report.updatedAt);
     final formattedTime = time == null ? "" : DateFormat("MMM dd, HH:mm").format(time.toLocal());
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.grey.shade800 : const Color(0xFFF1F5F9),
-        ),
-        boxShadow: isDark 
-            ? null 
-            : [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Text(report.status.replaceAll("_", " "), style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold)),
-              ),
-              Text(formattedTime, style: TextStyle(color: isDark ? Colors.grey.shade500 : Colors.grey.shade400, fontSize: 11)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            report.title,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isDark ? Colors.grey.shade800 : const Color(0xFFF1F5F9),
             ),
+            boxShadow: isDark 
+                ? null 
+                : [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
           ),
-          const SizedBox(height: 6),
-          Text(
-            report.description ?? "Không có mô tả",
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 13),
-          ),
-          _buildMediaGallery(context, isDark),
-          const SizedBox(height: 16),
-          Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.location_on_outlined, size: 14, color: isDark ? Colors.grey.shade500 : Colors.grey.shade400),
-              const SizedBox(width: 4),
-              Expanded(child: Text(report.locationCode, style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
-              const SizedBox(width: 8),
-              _buildPriorityBadge(report.priority),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    child: Text(report.status.replaceAll("_", " "), style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                  Text(formattedTime, style: TextStyle(color: isDark ? Colors.grey.shade500 : Colors.grey.shade400, fontSize: 11)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                report.title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                report.description ?? "Không có mô tả",
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 13),
+              ),
+              _buildMediaGallery(context, isDark),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Icon(Icons.location_on_outlined, size: 14, color: isDark ? Colors.grey.shade500 : Colors.grey.shade400),
+                  const SizedBox(width: 4),
+                  Expanded(child: Text(report.locationCode, style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  const SizedBox(width: 8),
+                  _buildPriorityBadge(report.priority),
+                ],
+              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }

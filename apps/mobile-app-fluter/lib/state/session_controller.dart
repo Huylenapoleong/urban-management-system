@@ -1,3 +1,4 @@
+import "dart:async";
 import "package:flutter/foundation.dart";
 import "package:shared_preferences/shared_preferences.dart";
 
@@ -15,6 +16,9 @@ class SessionController extends ChangeNotifier {
   String? _errorMessage;
   bool _isInitialized = false;
   bool _isDarkMode = false;
+  StreamSubscription? _unreadMsgSub;
+  StreamSubscription? _unreadReadSub;
+  int _unreadMessagesCount = 0;
 
   UserProfile? get user => _user;
   bool get isLoading => _isLoading;
@@ -22,6 +26,7 @@ class SessionController extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   bool get isAuthenticated => _user != null;
   bool get isDarkMode => _isDarkMode;
+  int get unreadMessagesCount => _unreadMessagesCount;
 
   Future<void> toggleDarkMode(bool value) async {
     _isDarkMode = value;
@@ -52,6 +57,8 @@ class SessionController extends ChangeNotifier {
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
         _appServices.pushNotificationService.initializeAndRegister();
+        _setupUnreadListeners();
+        fetchTotalUnreadCount();
       }
       _errorMessage = null;
       _connectSocket();
@@ -78,6 +85,8 @@ class SessionController extends ChangeNotifier {
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
         _appServices.pushNotificationService.initializeAndRegister();
+        _setupUnreadListeners();
+        fetchTotalUnreadCount();
       }
       _errorMessage = null;
       _connectSocket();
@@ -106,6 +115,8 @@ class SessionController extends ChangeNotifier {
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
         _appServices.pushNotificationService.initializeAndRegister();
+        _setupUnreadListeners();
+        fetchTotalUnreadCount();
       }
       _errorMessage = null;
       _connectSocket();
@@ -188,6 +199,8 @@ class SessionController extends ChangeNotifier {
       if (_user != null) {
         _appServices.webRTCService.setLocalUserId(_user!.id);
         _appServices.pushNotificationService.initializeAndRegister();
+        _setupUnreadListeners();
+        fetchTotalUnreadCount();
       }
       _errorMessage = null;
       _connectSocket();
@@ -219,11 +232,14 @@ class SessionController extends ChangeNotifier {
   Future<void> logout() async {
     _setLoading(true);
     try {
+      _unreadMsgSub?.cancel();
+      _unreadReadSub?.cancel();
       await _appServices.pushNotificationService.unregisterDevice();
       await _appServices.authService.logout();
     } finally {
       _user = null;
       _errorMessage = null;
+      _unreadMessagesCount = 0;
       _appServices.socketService.disconnect();
       _setLoading(false);
       notifyListeners();
@@ -324,9 +340,12 @@ class SessionController extends ChangeNotifier {
   Future<bool> logoutAll() async {
     _setLoading(true);
     try {
+      _unreadMsgSub?.cancel();
+      _unreadReadSub?.cancel();
       await _appServices.authService.logoutAll();
       _user = null;
       _errorMessage = null;
+      _unreadMessagesCount = 0;
       _appServices.socketService.disconnect();
       notifyListeners();
       return true;
@@ -465,5 +484,49 @@ class SessionController extends ChangeNotifier {
     } finally {
       _setLoading(false);
     }
+  }
+
+  Future<void> fetchTotalUnreadCount() async {
+    if (_user == null) return;
+    try {
+      final result = await _appServices.conversationService.listConversations(
+        unreadOnly: true,
+        limit: 100,
+      );
+      int sum = 0;
+      for (final conv in result.items) {
+        sum += conv.unreadCount;
+      }
+      _unreadMessagesCount = sum;
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error fetching total unread count: $e");
+    }
+  }
+
+  void _setupUnreadListeners() {
+    _unreadMsgSub?.cancel();
+    _unreadReadSub?.cancel();
+
+    _unreadMsgSub = _appServices.socketService.onMessageCreated.listen((msg) {
+      if (_user != null && msg.senderId != _user!.id) {
+        _unreadMessagesCount++;
+        notifyListeners();
+      }
+    });
+
+    _unreadReadSub = _appServices.socketService.onConversationRead.listen((data) {
+      final readByUserId = data["readByUserId"]?.toString() ?? data["userId"]?.toString();
+      if (_user != null && readByUserId == _user!.id) {
+        fetchTotalUnreadCount();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _unreadMsgSub?.cancel();
+    _unreadReadSub?.cancel();
+    super.dispose();
   }
 }
