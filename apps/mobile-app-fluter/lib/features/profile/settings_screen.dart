@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 import "../../state/session_controller.dart";
+import "notification_settings_screen.dart";
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -42,6 +43,18 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           _buildSection(context, "Tùy chọn"),
+          _buildSettingItem(
+            context,
+            icon: Icons.notifications_none_outlined,
+            title: "Cài đặt thông báo",
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).push(
+                MaterialPageRoute(
+                  builder: (_) => const NotificationSettingsScreen(),
+                ),
+              );
+            },
+          ),
           _buildSettingItem(
             context,
             icon: Icons.language,

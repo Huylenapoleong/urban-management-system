@@ -38,6 +38,7 @@ class _CallScreenState extends State<CallScreen> {
   final Map<String, UserProfile> _profileCache = {};
   final Set<String> _requestedProfileIds = {};
   StreamSubscription? _participantLeftSub;
+  bool _isNavigatingBack = false;
 
   @override
   void initState() {
@@ -109,6 +110,9 @@ class _CallScreenState extends State<CallScreen> {
 
   void _handleCallStateChange() {
     if (widget.webRTCService.callState.value == CallState.idle && mounted) {
+      if (_isNavigatingBack) return;
+      _isNavigatingBack = true;
+      
       if (widget.launchedFromChatDetail) {
         final targetRoute = "chat_detail/${widget.conversation.conversationId}";
         Navigator.of(context).popUntil(

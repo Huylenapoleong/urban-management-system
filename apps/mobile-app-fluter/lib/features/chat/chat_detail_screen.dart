@@ -667,6 +667,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  void _scrollToMessage(String messageId) {
+    final items = _pagingController.itemList ?? [];
+    final idx = items.indexWhere((m) => m.id == messageId);
+    if (idx != -1) {
+      final targetOffset = (idx * 110.0).clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
+      _scrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutQuad,
+      );
+    }
+  }
+
   void _handleCallStateChange() {
     if (widget.webRTCService.callState.value != CallState.idle && mounted) {
       // Check if this screen is already showing the call screen
@@ -2352,6 +2368,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             peerId: peerId,
             peerAvatarUrl: peerAvatarUrl,
             peerDisplayName: peerDisplayName,
+            onReplyTap: message.replyTo != null
+                ? () => _scrollToMessage(message.replyTo!)
+                : null,
           );
         },
         firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
@@ -3148,6 +3167,8 @@ class ChatMessageBubble extends StatelessWidget {
   final String? peerAvatarUrl;
   final String? peerDisplayName;
 
+  final VoidCallback? onReplyTap;
+
   const ChatMessageBubble({
     super.key,
     required this.message,
@@ -3161,6 +3182,7 @@ class ChatMessageBubble extends StatelessWidget {
     this.peerId,
     this.peerAvatarUrl,
     this.peerDisplayName,
+    this.onReplyTap,
   });
 
   @override
@@ -3684,22 +3706,47 @@ class ChatMessageBubble extends StatelessWidget {
 
   Widget _buildReplyHeader(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isMine
-            ? Colors.white12
-            : (isDark
-                ? const Color(0xFF334155)
-                : Colors.grey[100]),
-        borderRadius: BorderRadius.circular(8),
-        border: Border(
-            left: BorderSide(
-                color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
-                width: 3)),
-      ),
-      child: Text("Đang trả lời...",
+    
+    // Lấy nội dung tin nhắn được trả lời
+    String replyText = "Xem tin nhắn đã trả lời";
+    if (message.replyMessage != null) {
+      final text = message.replyMessage!.contentText;
+      if (text.isNotEmpty) {
+        replyText = text;
+      } else {
+        if (message.replyMessage!.type == 'image') {
+          replyText = "📷 Hình ảnh";
+        } else if (message.replyMessage!.type == 'file') {
+          replyText = "📁 Tệp đính kèm";
+        } else if (message.replyMessage!.type == 'audio') {
+          replyText = "🎵 Tin nhắn thoại";
+        } else if (message.replyMessage!.type == 'video') {
+          replyText = "🎥 Video";
+        } else {
+          replyText = "Tin nhắn";
+        }
+      }
+    }
+
+    return GestureDetector(
+      onTap: onReplyTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isMine
+              ? Colors.white12
+              : (isDark
+                  ? const Color(0xFF334155)
+                  : Colors.grey[100]),
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+              left: BorderSide(
+                  color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
+                  width: 3)),
+        ),
+        child: Text(
+          replyText,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -3709,7 +3756,9 @@ class ChatMessageBubble extends StatelessWidget {
                   ? Colors.white70
                   : (isDark
                       ? Colors.grey[300]
-                      : Colors.grey[700]))),
+                      : Colors.grey[700])),
+        ),
+      ),
     );
   }
 
