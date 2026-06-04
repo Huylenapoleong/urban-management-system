@@ -654,6 +654,42 @@ export class UsersService {
     return map;
   }
 
+  async getProfilesForSocialGraph(
+    ownerUserId: string,
+    userIds: string[],
+  ): Promise<UserDirectoryItem[]> {
+    const users = await this.getUsersByIds(userIds);
+
+    // We optionally get contact aliases to show custom names for members
+    const aliasMap = await this.getContactAliasMap(
+      ownerUserId,
+      users.map((u) => u.userId),
+    );
+
+    const promises = users.map((u) => {
+      const aliasRecord = aliasMap.get(u.userId);
+      const aliasName = aliasRecord?.alias;
+      return this.serializeUserDirectoryItem({
+        userId: u.userId,
+        fullName: u.fullName,
+        displayName: aliasName ?? u.fullName,
+        contactAlias: aliasName,
+        role: u.role,
+        locationCode: u.locationCode,
+        unit: u.unit,
+        avatarAsset: u.avatarAsset,
+        avatarUrl: u.avatarUrl,
+        status: u.status,
+        relationState: 'NONE',
+        canMessage: true,
+        canSendFriendRequest: false,
+        canSendMessageRequest: false,
+      });
+    });
+
+    return Promise.all(promises);
+  }
+
   async syncContacts(
     actor: AuthenticatedUser,
     phones: string[],

@@ -12,6 +12,8 @@ import type {
   MessageItem,
   MessageReceipt,
   ReadWatermark,
+  SocialGraphDto,
+  GlobalMessageSearchResultDto,
 } from "@urban/shared-types";
 
 type ChatMessageType =
@@ -175,9 +177,10 @@ function shouldRetryOnConversationId400(error: unknown): boolean {
 
 export async function listConversations(
   searchTerm?: string,
+  matchIds?: string[],
 ): Promise<ConversationSummary[]> {
   const q = searchTerm?.trim() ?? "";
-  const cacheKey = q.toLowerCase();
+  const cacheKey = q ? `${q.toLowerCase()}:${matchIds?.join(",") ?? ""}` : "";
   const now = Date.now();
   const cachedEntry = conversationListCache.get(cacheKey);
 
@@ -195,7 +198,7 @@ export async function listConversations(
   const requestPromise = (async () => {
     try {
       const conversationsPath = q
-        ? `/conversations?q=${encodeURIComponent(q)}`
+        ? `/conversations?q=${encodeURIComponent(q)}${matchIds?.length ? `&matchIds=${encodeURIComponent(matchIds.join(","))}` : ""}`
         : "/conversations";
       const groupsPath = q
         ? `/groups?mine=true&q=${encodeURIComponent(q)}`
@@ -761,4 +764,16 @@ export async function getMessageReceipts(
   }
 
   throw lastError;
+}
+
+export async function getSocialGraph(): Promise<SocialGraphDto> {
+  return await ApiClient.get("/conversations/social-graph");
+}
+
+export async function globalSearchMessages(
+  q: string,
+): Promise<GlobalMessageSearchResultDto> {
+  return await ApiClient.get(
+    `/conversations/global-search-messages?q=${encodeURIComponent(q)}`,
+  );
 }

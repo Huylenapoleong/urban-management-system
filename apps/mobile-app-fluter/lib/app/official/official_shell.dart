@@ -1,9 +1,11 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../../features/chat/widgets/call_incoming_listener.dart';
 import '../../features/chat/widgets/notification_listener_widget.dart';
+import '../../state/session_controller.dart';
 
 /// Bottom-nav shell cho giao diện Official với thiết kế Floating Glassmorphic và bộ điều hướng StatefulNavigationShell.
 class OfficialShell extends StatelessWidget {
@@ -15,6 +17,9 @@ class OfficialShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final idx = navigationShell.currentIndex;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    final session = context.watch<SessionController>();
+    final unreadCount = session.unreadMessagesCount;
 
     return NotificationListenerWidget(
       child: CallIncomingListener(
@@ -60,10 +65,10 @@ class OfficialShell extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildNavItem(context, 0, Icons.home_outlined, Icons.home, 'Trang chủ', idx),
-                    _buildNavItem(context, 1, Icons.assignment_outlined, Icons.assignment, 'Báo cáo', idx),
-                    _buildNavItem(context, 2, Icons.chat_bubble_outline, Icons.chat_bubble, 'Tin nhắn', idx),
-                    _buildNavItem(context, 3, Icons.person_outline, Icons.person, 'Cá nhân', idx),
+                    _buildNavItem(context, 0, Icons.home_outlined, Icons.home, 'Trang chủ', idx, unreadCount),
+                    _buildNavItem(context, 1, Icons.assignment_outlined, Icons.assignment, 'Báo cáo', idx, unreadCount),
+                    _buildNavItem(context, 2, Icons.chat_bubble_outline, Icons.chat_bubble, 'Tin nhắn', idx, unreadCount),
+                    _buildNavItem(context, 3, Icons.person_outline, Icons.person, 'Cá nhân', idx, unreadCount),
                   ],
                 ),
               ),
@@ -83,6 +88,7 @@ class OfficialShell extends StatelessWidget {
     IconData activeIcon,
     String label,
     int currentIndex,
+    int unreadCount,
   ) {
     final isSelected = index == currentIndex;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -109,11 +115,20 @@ class OfficialShell extends StatelessWidget {
               AnimatedScale(
                 scale: isSelected ? 1.15 : 1.0,
                 duration: const Duration(milliseconds: 200),
-                child: Icon(
-                  isSelected ? activeIcon : inactiveIcon,
-                  color: isSelected ? activeColor : inactiveColor,
-                  size: 24,
-                ),
+                child: index == 2 && unreadCount > 0
+                    ? Badge(
+                        label: Text(unreadCount > 99 ? "99+" : "$unreadCount"),
+                        child: Icon(
+                          isSelected ? activeIcon : inactiveIcon,
+                          color: isSelected ? activeColor : inactiveColor,
+                          size: 24,
+                        ),
+                      )
+                    : Icon(
+                        isSelected ? activeIcon : inactiveIcon,
+                        color: isSelected ? activeColor : inactiveColor,
+                        size: 24,
+                      ),
               ),
               const SizedBox(height: 4),
               Text(

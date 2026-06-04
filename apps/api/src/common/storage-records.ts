@@ -41,6 +41,7 @@ export type StorageEntityType =
   | 'MESSAGE_PIN'
   | 'MESSAGE_SEARCH'
   | 'MESSAGE_DEDUP'
+  | 'MESSAGE_DELIVERY_RECEIPT'
   | 'CONVERSATION'
   | 'CONVERSATION_MEMBER_ALIAS'
   | 'DIRECT_MESSAGE_REQUEST'
@@ -338,6 +339,14 @@ export interface StoredMessageDedup extends TableItemBase {
   messageSk: string;
   sentAt: string;
   updatedAt: string;
+}
+
+export interface StoredMessageDeliveryReceipt extends TableItemBase {
+  entityType: 'MESSAGE_DELIVERY_RECEIPT';
+  conversationId: string;
+  messageId: string;
+  userId: string;
+  deliveredAt: string;
 }
 
 export interface StoredConversation

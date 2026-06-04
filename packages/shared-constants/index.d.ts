@@ -109,6 +109,7 @@ export const CHAT_SOCKET_EVENTS: {
   readonly MESSAGE_UPDATE: "message.update";
   readonly MESSAGE_DELETE: "message.delete";
   readonly MESSAGE_RECALL: "message.recall";
+  readonly MESSAGE_DELIVERED: "message.delivered";
   readonly MESSAGE_CREATED: "message.created";
   readonly MESSAGE_UPDATED: "message.updated";
   readonly MESSAGE_DELETED: "message.deleted";
@@ -126,6 +127,7 @@ export const CHAT_SOCKET_EVENTS: {
   readonly CALL_REJECT: "call.reject";
   readonly CALL_END: "call.end";
   readonly CALL_HEARTBEAT: "call.heartbeat";
+  readonly CALL_RINGING: "call.ringing";
   readonly WEBRTC_OFFER: "webrtc.offer";
   readonly WEBRTC_ANSWER: "webrtc.answer";
   readonly WEBRTC_ICE_CANDIDATE: "webrtc.ice-candidate";

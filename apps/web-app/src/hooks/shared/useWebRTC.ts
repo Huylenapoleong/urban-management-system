@@ -5,6 +5,7 @@ import type {
   ChatCallEndPayload,
   ChatCallHeartbeatPayload,
   ChatCallInitPayload,
+  ChatCallRingingPayload,
   ChatWebRTCAnswerPayload,
   ChatWebRTCIceCandidatePayload,
   ChatWebRTCOfferPayload,
@@ -17,7 +18,8 @@ export type CallState =
   | "CALLING"
   | "INCOMING"
   | "CONNECTED"
-  | "CONNECTING";
+  | "CONNECTING"
+  | "RINGING";
 
 export interface CallConfig {
   isVideo: boolean;
@@ -183,6 +185,8 @@ export function useWebRTC() {
   const callStateRef = useRef<CallState>("IDLE");
   const callStartedAtRef = useRef<number | null>(null);
   const activeGroupCallsTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const peerDisconnectTimersRef = useRef<Map<string, number>>(new Map());
+  const iceRestartAttemptsRef = useRef<Map<string, number>>(new Map());
 
   const getIceServers = (): RTCConfiguration => {
     const turnUsername = import.meta.env.VITE_TURN_USERNAME || "";
@@ -193,8 +197,6 @@ export function useWebRTC() {
       { urls: "stun:stun.relay.metered.ca:80" },
     ];
 
-    // Add TURN relays only when credentials are configured.
-    // TURN is required for symmetric NAT traversal (corporate networks, some carriers).
     if (turnUsername && turnPassword) {
       iceServers.push(
         {
@@ -233,8 +235,6 @@ export function useWebRTC() {
       )?.trim();
       if (!rawConversationId) return undefined;
 
-      // Server now emits neutral DM#A#B / GRP#xxx keys — pass them through as-is.
-      // Legacy dm:X format from old clients is still supported by the gateway.
       const isGroupConversation = /^(group:|grp#|group#)/i.test(
         rawConversationId,
       );
@@ -244,8 +244,6 @@ export function useWebRTC() {
         return rawConversationId;
       }
 
-      // Legacy: if rawConversationId is "dm:X" or just a targetUserId-relative string,
-      // keep backward-compat by returning it as-is (gateway handles both forms).
       return rawConversationId;
     },
     [],
@@ -256,6 +254,32 @@ export function useWebRTC() {
     if (!rawConversationId) return false;
     return /^(group:|grp#|group#)/i.test(rawConversationId);
   }, []);
+
+  const handlePeerConnectionLost = useCallback((peerId: string) => {
+    const pc = peerConnectionsRef.current.get(peerId);
+    if (pc) {
+      pc.close();
+      peerConnectionsRef.current.delete(peerId);
+    }
+    setRemoteStreams((prev) => {
+      const next = new Map(prev);
+      next.delete(peerId);
+      return next;
+    });
+    pendingIceCandidatesRef.current.delete(peerId);
+    iceRestartAttemptsRef.current.delete(peerId);
+    if (peerDisconnectTimersRef.current.has(peerId)) {
+        clearTimeout(peerDisconnectTimersRef.current.get(peerId));
+        peerDisconnectTimersRef.current.delete(peerId);
+    }
+  }, []);
+
+  const clearPeerDisconnectTimer = (peerId: string) => {
+      if (peerDisconnectTimersRef.current.has(peerId)) {
+          clearTimeout(peerDisconnectTimersRef.current.get(peerId));
+          peerDisconnectTimersRef.current.delete(peerId);
+      }
+  };
 
   const cleanup = useCallback(
     (options?: { remoteDurationSeconds?: number }) => {
@@ -317,6 +341,9 @@ export function useWebRTC() {
       sentIceCandidateKeysRef.current.clear();
       pendingIceCandidatesRef.current.clear();
       leftPeersRef.current.clear();
+      peerDisconnectTimersRef.current.forEach(timer => clearTimeout(timer));
+      peerDisconnectTimersRef.current.clear();
+      iceRestartAttemptsRef.current.clear();
       setCallState("IDLE");
       callStateRef.current = "IDLE";
       setActiveConfig(null);
@@ -394,7 +421,6 @@ export function useWebRTC() {
         setCallError(
           getSocketErrorMessage(error, "Lỗi gửi tín hiệu qua máy chủ."),
         );
-        // Only cleanup if it's a critical init/accept failure, otherwise might just be 1 peer failing
         if (
           event === CHAT_SOCKET_EVENTS.CALL_INIT ||
           event === CHAT_SOCKET_EVENTS.CALL_ACCEPT
@@ -416,8 +442,6 @@ export function useWebRTC() {
       const signalConvId = resolveSignalConversationId(config);
       if (!signalConvId) return;
       try {
-        // Bypass emitSignal (which swallows errors) — use socketClient directly
-        // so 409/404 (session gone) actually throws and we can cleanup.
         await socketClient.safeEmitValidated(
           CHAT_SOCKET_EVENTS.CALL_HEARTBEAT,
           {
@@ -428,13 +452,11 @@ export function useWebRTC() {
       } catch (err) {
         const code = getSocketErrorStatusCode(asSocketError(err));
         if (code === 409 || code === 404) {
-          // Session was deleted by remote party who hung up (CALL_END was missed).
           cleanup();
         }
       }
     };
 
-    // Delay first ping 3s to let session reach ACTIVE state.
     const initialTimer = window.setTimeout(() => void emitHeartbeat(), 3000);
     const interval = setInterval(() => void emitHeartbeat(), 5000);
 
@@ -444,12 +466,15 @@ export function useWebRTC() {
     };
   }, [callState, resolveSignalConversationId, cleanup]);
 
-  // CALLING timeout: auto-hangup if no answer within 45 seconds.
+  // CALLING timeout: auto-hangup if no answer within 45s (group) or 15s (1-1).
   useEffect(() => {
     if (callState !== "CALLING") return;
+    const config = activeConfigRef.current;
+    const isGroup = isGroupCall(config);
+    const timeoutMs = isGroup ? 45_000 : 30_000;
+
     const timer = window.setTimeout(() => {
       if (callStateRef.current === "CALLING") {
-        const config = activeConfigRef.current;
         const signalConvId = resolveSignalConversationId(config);
         if (signalConvId) {
           void emitSignal(CHAT_SOCKET_EVENTS.CALL_END, {
@@ -458,10 +483,22 @@ export function useWebRTC() {
           });
         }
         cleanup();
+
+        // Play Vietnamese TTS voice announcement for 1-1 call timeout
+        if (!isGroup && typeof window !== "undefined" && "speechSynthesis" in window) {
+          try {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance("Người nhận tạm thời không liên lạc được. Vui lòng gọi lại sau.");
+            utterance.lang = "vi-VN";
+            window.speechSynthesis.speak(utterance);
+          } catch (e) {
+            console.error("Speech synthesis failed", e);
+          }
+        }
       }
-    }, 45_000);
+    }, timeoutMs);
     return () => clearTimeout(timer);
-  }, [callState, cleanup, emitSignal, resolveSignalConversationId]);
+  }, [callState, cleanup, emitSignal, resolveSignalConversationId, isGroupCall]);
 
   const flushQueuedIceSignals = useCallback(() => {
     if (iceSignalTimerRef.current !== null) return;
@@ -473,7 +510,6 @@ export function useWebRTC() {
         return;
       }
 
-      // Add targetId and senderId for Group mesh routing
       await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, {
         conversationId: nextItem.conversationId,
         candidate: {
@@ -507,7 +543,7 @@ export function useWebRTC() {
       if (!candidate.candidate || sentIceCandidateKeysRef.current.has(key))
         return;
 
-      if (sentIceCandidateKeysRef.current.size >= 100) return; // limit fan-out
+      if (sentIceCandidateKeysRef.current.size >= 100) return; 
 
       sentIceCandidateKeysRef.current.add(key);
       pendingIceSignalsRef.current.push({ conversationId, peerId, candidate });
@@ -516,7 +552,85 @@ export function useWebRTC() {
     [flushQueuedIceSignals],
   );
 
+  const schedulePeerDisconnectCheck = useCallback(
+    (peerId: string, config: CallConfig) => {
+      if (peerDisconnectTimersRef.current.has(peerId)) return;
+      const timerId = window.setTimeout(async () => {
+        peerDisconnectTimersRef.current.delete(peerId);
+        const pc = peerConnectionsRef.current.get(peerId);
+        if (!pc) return;
+
+        const connectionLost =
+          pc.connectionState === "disconnected" ||
+          pc.connectionState === "failed" ||
+          pc.iceConnectionState === "disconnected" ||
+          pc.iceConnectionState === "failed";
+
+        if (connectionLost) {
+          const attempts = iceRestartAttemptsRef.current.get(peerId) || 0;
+          if (attempts < 3) {
+            iceRestartAttemptsRef.current.set(peerId, attempts + 1);
+
+            let shouldInitiateRestart = false;
+            if (!isGroupCall(config)) {
+              shouldInitiateRestart = config.callerId === user?.sub;
+            } else {
+              shouldInitiateRestart = (user?.sub || "") > peerId;
+            }
+
+            if (shouldInitiateRestart) {
+              console.log(
+                `[WebRTC] Mất kết nối với ${peerId}, đang thử ICE restart (lần ${
+                  attempts + 1
+                })...`,
+              );
+              try {
+                const offer = await pc.createOffer({ iceRestart: true });
+                await pc.setLocalDescription(offer);
+                const signalConversationId =
+                  resolveSignalConversationId(config);
+                if (signalConversationId) {
+                  await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
+                    conversationId: signalConversationId,
+                    offer: {
+                      type: offer.type,
+                      sdp: offer.sdp,
+                      targetId: peerId,
+                      senderId: user?.sub,
+                    },
+                  });
+                }
+              } catch (err) {
+                console.error("[WebRTC] ICE restart thất bại", err);
+              }
+            } else {
+              console.log(
+                `[WebRTC] Mất kết nối với ${peerId}, chờ peer khởi tạo ICE restart...`,
+              );
+            }
+            schedulePeerDisconnectCheck(peerId, config);
+          } else {
+            console.log(
+              `[WebRTC] ICE restart thất bại sau 3 lần, đóng kết nối với ${peerId}`,
+            );
+            handlePeerConnectionLost(peerId);
+          }
+        }
+      }, 5_000); // Wait 5 seconds before triggering ICE restart
+      peerDisconnectTimersRef.current.set(peerId, timerId);
+    },
+    [
+      handlePeerConnectionLost,
+      isGroupCall,
+      user?.sub,
+      resolveSignalConversationId,
+      emitSignal,
+    ],
+  );
+
   const flushPendingIceCandidates = useCallback(async (peerId: string) => {
+    clearPeerDisconnectTimer(peerId);
+    iceRestartAttemptsRef.current.delete(peerId);
     const pc = peerConnectionsRef.current.get(peerId);
     if (!pc || !pc.remoteDescription) return;
 
@@ -532,12 +646,9 @@ export function useWebRTC() {
   }, []);
 
   const requestLocalMediaStream = useCallback(async (isVideo: boolean) => {
-    // If cached stream already has video (or we only need audio), reuse it.
     if (localStreamRef.current) {
       const hasVideo = localStreamRef.current.getVideoTracks().length > 0;
       if (!isVideo || hasVideo) return localStreamRef.current;
-      // Need video but stream is audio-only: stop existing tracks before upgrading,
-      // otherwise the next getUserMedia call may fail (audio source still captured).
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
       mediaStreamPromiseRef.current = null;
@@ -597,7 +708,6 @@ export function useWebRTC() {
       let pc = peerConnectionsRef.current.get(peerId);
       if (pc) return pc;
 
-      // Prevent concurrent setup for the same peerId
       const pendingPromise = connectingPeersRef.current.get(peerId);
       if (pendingPromise) return pendingPromise;
 
@@ -628,12 +738,41 @@ export function useWebRTC() {
             }
           };
 
+          pc.onconnectionstatechange = () => {
+              if (!pc) return;
+              const isHealthy =
+              pc.connectionState === "connected" ||
+              pc.iceConnectionState === "connected" ||
+              pc.iceConnectionState === "completed";
+            if (isHealthy) {
+              clearPeerDisconnectTimer(peerId);
+              iceRestartAttemptsRef.current.delete(peerId);
+              return;
+            }
+
+            const isClosed =
+              pc.connectionState === "closed" ||
+              pc.iceConnectionState === "closed";
+            if (isClosed) {
+              handlePeerConnectionLost(peerId);
+              return;
+            }
+
+            const isDisconnectedOrFailed =
+              pc.connectionState === "disconnected" ||
+              pc.connectionState === "failed" ||
+              pc.iceConnectionState === "disconnected" ||
+              pc.iceConnectionState === "failed";
+            if (isDisconnectedOrFailed) {
+              schedulePeerDisconnectCheck(peerId, config);
+            }
+          };
+
           pc.ontrack = (event) => {
             setRemoteStreams((prev) => {
               const nextMap = new Map(prev);
               const existingStream = nextMap.get(peerId);
               if (existingStream) {
-                // Create a new MediaStream to force React reference equality update
                 const newStream = new MediaStream(existingStream.getTracks());
                 newStream.addTrack(event.track);
                 nextMap.set(peerId, newStream);
@@ -650,9 +789,8 @@ export function useWebRTC() {
 
           stream.getTracks().forEach((track) => pc!.addTrack(track, stream));
 
-          // Ensure video is negotiated even if local camera fails/is missing,
-          // so we can still receive video from the other participant.
-          if (config.isVideo && stream.getVideoTracks().length === 0) {
+          // Ensure video is negotiated for all calls, so camera can be toggled on/off dynamically.
+          if (stream.getVideoTracks().length === 0) {
             try {
               pc.addTransceiver("video", { direction: "recvonly" });
             } catch (e) {
@@ -671,7 +809,6 @@ export function useWebRTC() {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            // Nhúng targetId, senderId để nhóm có thể định tuyến Mesh
             await emitSignal(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, {
               conversationId: signalConversationId,
               offer: {
@@ -717,6 +854,8 @@ export function useWebRTC() {
       requestLocalMediaStream,
       cleanup,
       user?.sub,
+      handlePeerConnectionLost,
+      schedulePeerDisconnectCheck
     ],
   );
 
@@ -726,19 +865,16 @@ export function useWebRTC() {
       if (peerConnectionsRef.current.has(peerId)) return;
 
       if (!isGroupCall(config)) {
-        // 1-1 Call: Legacy mode
         const isCaller = config.callerId === user?.sub;
         await setupPeerConnection(peerId, isCaller, config);
         return;
       }
 
-      // Group Call: Full Mesh, Polite/Impolite peer using User ID
       const amIHigherId = (user?.sub || "") > peerId;
       if (amIHigherId) {
-        await setupPeerConnection(peerId, true, config); // Create offer
+        await setupPeerConnection(peerId, true, config);
       } else {
-        await setupPeerConnection(peerId, false, config); // Wait for offer
-        // Let the peer know I'm here
+        await setupPeerConnection(peerId, false, config);
         const signalConvId = resolveSignalConversationId(config);
         if (signalConvId) {
           await emitSignal(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT, {
@@ -762,7 +898,6 @@ export function useWebRTC() {
       if (callStateRef.current !== "IDLE") return;
 
       setLastEndedCall(null);
-      // Enrich config with callerId so lastEndedCall.direction computes correctly.
       const enrichedConfig: CallConfig = {
         ...config,
         callerId: config.callerId ?? user?.sub,
@@ -797,15 +932,11 @@ export function useWebRTC() {
         if (isGroupCall(config)) {
           setCallState("CONNECTED");
           callStateRef.current = "CONNECTED";
-          // We DO NOT set callStartedAtRef.current here.
-          // The timer only starts when the first person answers (onCallAccept).
         }
       } catch (rawError: unknown) {
         const error = asSocketError(rawError);
         if (getSocketErrorStatusCode(error) === 409) {
           if (isGroupCall(config)) {
-            // Group call already active → join it directly
-            console.log("[WebRTC] Group call already active, joining...");
             try {
               await requestLocalMediaStream(config.isVideo);
             } catch (err) {
@@ -836,27 +967,18 @@ export function useWebRTC() {
               } else {
                 callStartedAtRef.current = Date.now();
               }
-            } catch (acceptErr) {
-              console.error(
-                "[WebRTC] Failed to join active group call",
-                acceptErr,
-              );
+            } catch {
               setCallError("Lỗi tham gia cuộc gọi nhóm đang diễn ra.");
               cleanup();
             }
             return;
           } else if (config.targetUserId) {
-            // 1-1 call glare: The other party initiated a call at the exact same time.
-            // A session was created by them, so we act as the callee and accept their call.
-            console.log("[WebRTC] 1-1 call glare detected, auto-accepting...");
-            
             try {
               await requestLocalMediaStream(config.isVideo);
             } catch (err) {
               console.error("[WebRTC] Local media stream failed", err);
             }
 
-            // Update config so we become the callee (caller is now the targetUserId)
             const updatedConfig = { ...config, callerId: config.targetUserId };
             setActiveConfig(updatedConfig);
             activeConfigRef.current = updatedConfig;
@@ -886,14 +1008,9 @@ export function useWebRTC() {
                 callStartedAtRef.current = Date.now();
               }
 
-              // Since we are now the callee, we wait for the offer from the actual caller
               await initiateConnectionWithPeer(config.targetUserId, updatedConfig);
               return;
-            } catch (acceptErr) {
-              console.error(
-                "[WebRTC] Failed to join active 1-1 call on glare",
-                acceptErr,
-              );
+            } catch {
               setCallError("Lỗi kết nối cuộc gọi.");
               cleanup();
               return;
@@ -901,7 +1018,6 @@ export function useWebRTC() {
           }
         }
 
-        console.error("[WebRTC] Lỗi gửi tín hiệu ở call.init", error);
         setCallError(
           getSocketErrorMessage(error, "Không thể khởi tạo cuộc gọi."),
         );
@@ -914,6 +1030,7 @@ export function useWebRTC() {
       user?.sub,
       isGroupCall,
       requestLocalMediaStream,
+      initiateConnectionWithPeer,
     ],
   );
 
@@ -958,11 +1075,7 @@ export function useWebRTC() {
         } else {
           callStartedAtRef.current = Date.now();
         }
-      } catch (acceptErr) {
-        console.error(
-          "[WebRTC] Lỗi tham gia cuộc gọi nhóm đang diễn ra",
-          acceptErr,
-        );
+      } catch {
         setCallError("Lỗi tham gia cuộc gọi nhóm đang diễn ra.");
         cleanup();
         return;
@@ -985,7 +1098,6 @@ export function useWebRTC() {
   const acceptCall = useCallback(async () => {
     if (callStateRef.current !== "INCOMING" || !activeConfigRef.current) return;
 
-    // Prevent double-clicks from emitting CALL_ACCEPT twice
     setCallState("CONNECTING");
     callStateRef.current = "CONNECTING";
 
@@ -1002,7 +1114,6 @@ export function useWebRTC() {
       await requestLocalMediaStream(config.isVideo);
     } catch (err) {
       console.error("[WebRTC] Local media stream failed", err);
-      // Proceed even if stream failed (e.g. user denied or no camera)
     }
 
     const response = parseCallAcceptAckPayload(
@@ -1013,7 +1124,7 @@ export function useWebRTC() {
     );
     if (!response) {
       setCallState("INCOMING");
-      callStateRef.current = "INCOMING"; // Revert on failure
+      callStateRef.current = "INCOMING"; 
       return;
     }
 
@@ -1023,13 +1134,11 @@ export function useWebRTC() {
         new Date(response.acceptedAt).getTime();
       callStartedAtRef.current = Date.now() - elapsedMs;
     } else {
-      // For 1-1 calls or group first-join where acceptedAt might be null/missing
       callStartedAtRef.current = Date.now();
     }
 
     setCallState("CONNECTED");
     callStateRef.current = "CONNECTED";
-    // callStartedAtRef will be set from server acceptedAt in onCallAccept broadcast.
 
     if (!isGroupCall(config)) {
       const peerId = config.callerId!;
@@ -1066,7 +1175,6 @@ export function useWebRTC() {
         userId: user?.sub,
       });
     }
-    // Always cleanup immediately: server only notifies the OTHER party.
     cleanup();
   }, [emitSignal, cleanup, resolveSignalConversationId, user?.sub]);
 
@@ -1079,14 +1187,53 @@ export function useWebRTC() {
     }
   }, [localStream, isMicOn]);
 
-  const toggleVideo = useCallback(() => {
-    if (localStream) {
-      localStream
-        .getVideoTracks()
-        .forEach((track) => (track.enabled = !track.enabled));
-      setIsVideoOn(!isVideoOn);
+  const toggleVideo = useCallback(async () => {
+    if (!localStream) return;
+
+    const videoTracks = localStream.getVideoTracks();
+    if (videoTracks.length > 0) {
+      const nextState = !isVideoOn;
+      videoTracks.forEach((track) => (track.enabled = nextState));
+      setIsVideoOn(nextState);
+    } else {
+      try {
+        const videoConstraints = {
+          facingMode: { ideal: "user" },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        };
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+        });
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          localStream.addTrack(videoTrack);
+          setLocalStream(new MediaStream(localStream.getTracks()));
+
+          if (activeConfigRef.current) {
+            const nextConfig = { ...activeConfigRef.current, isVideo: true };
+            setActiveConfig(nextConfig);
+            activeConfigRef.current = nextConfig;
+          }
+
+          peerConnectionsRef.current.forEach((pc) => {
+            const transceiver = pc.getTransceivers().find(
+              (t) => t.receiver.track.kind === "video",
+            );
+            if (transceiver) {
+              transceiver.direction = "sendrecv";
+              void transceiver.sender.replaceTrack(videoTrack);
+            }
+          });
+
+          setIsVideoOn(true);
+        }
+      } catch (err) {
+        console.error("[WebRTC] Failed to acquire video track dynamically", err);
+      }
     }
   }, [localStream, isVideoOn]);
+
   useEffect(() => {
     let mounted = true;
     let boundSocket: typeof socketClient.socket | null = null;
@@ -1109,7 +1256,6 @@ export function useWebRTC() {
 
       if (data.callerId === userIdRef.current) return;
 
-      // If already in a call, ignore new calls unless it's the SAME group
       const currentConfig = activeConfigRef.current;
       if (callStateRef.current !== "IDLE") {
         if (
@@ -1128,20 +1274,35 @@ export function useWebRTC() {
           peerName: data.callerName,
           peerAvatarUrl: data.callerAvatarUrl,
           conversationId: data.conversationId,
-          // Populate targetUserId so onCallAccept can match even when conversationId formats differ.
           targetUserId: data.callerId,
         };
         setActiveConfig(config);
         activeConfigRef.current = config;
         setCallState("INCOMING");
         callStateRef.current = "INCOMING";
+
+        socketClient
+          .safeEmitValidated(CHAT_SOCKET_EVENTS.CALL_RINGING, {
+            conversationId: data.conversationId,
+            calleeId: userIdRef.current,
+          })
+          .catch(() => {});
+      }
+    };
+
+    const onCallRinging = (rawData: unknown) => {
+      const data = rawData as ChatCallRingingPayload;
+      const config = activeConfigRef.current;
+      if (!config || callStateRef.current !== "CALLING") return;
+      if (config.conversationId === data.conversationId) {
+        setCallState("RINGING");
+        callStateRef.current = "RINGING";
       }
     };
 
     const onCallAccept = async (data: ChatCallAcceptPayload) => {
       const config = activeConfigRef.current;
 
-      // P0-A: Multi-device — same user accepted on another device → dismiss this popup.
       if (
         config &&
         callStateRef.current === "INCOMING" &&
@@ -1160,20 +1321,14 @@ export function useWebRTC() {
         return;
 
       const peerId = data.calleeId;
-      // Skip self-echo (callee receives own accept broadcast)
       if (peerId === userIdRef.current) return;
 
-      // For 1-1 calls: config.conversationId may be "dm:B" (from UI) while data.conversationId
-      // is "DM#A#B" (server conversationKey) — string comparison is unreliable across platforms.
-      // Use peer-ID matching instead:
-      //   - If we are the CALLER (callerId===self): any accept event is for our call.
-      //   - If we are the CALLEE (callerId!==self): the accept peerId must be our caller or target.
       const isDmCall = !isGroupCall(config);
       let isMatch: boolean;
       if (isDmCall) {
         const iAmCaller = config.callerId === userIdRef.current;
         isMatch = iAmCaller
-          ? true // Caller accepts any CALL_ACCEPT (only one active 1-1 call possible)
+          ? true 
           : config.callerId === peerId || config.targetUserId === peerId;
       } else {
         const normConvId = (id: string) =>
@@ -1211,7 +1366,8 @@ export function useWebRTC() {
       await initiateConnectionWithPeer(peerId, config);
     };
 
-    const onCallHeartbeat = async (data: ChatCallHeartbeatPayload) => {
+    const onCallHeartbeat = async (rawData: unknown) => {
+      const data = rawData as ChatCallHeartbeatPayload;
       const config = activeConfigRef.current;
       const conversationId = data.conversationId;
 
@@ -1220,7 +1376,6 @@ export function useWebRTC() {
         const acceptedAt = new Date(data.acceptedAt).getTime();
         const localNow = Date.now();
         const offset = localNow - serverNow;
-        // Continuous sync: update even if already set to correct any drift
         callStartedAtRef.current = acceptedAt + offset;
       }
 
@@ -1247,7 +1402,6 @@ export function useWebRTC() {
               return next;
             });
             activeGroupCallsTimeoutsRef.current.delete(conversationId);
-            // P1: 60 s > 30 s heartbeat interval — tolerates one missed packet.
           }, 60_000),
         );
       }
@@ -1266,7 +1420,6 @@ export function useWebRTC() {
     };
 
     const onCallReject = (data: { calleeId?: string } = {}) => {
-      // P1: Multi-device — same user rejected on another device → dismiss this popup.
       if (
         callStateRef.current === "INCOMING" &&
         data.calleeId === userIdRef.current
@@ -1280,8 +1433,8 @@ export function useWebRTC() {
       }
     };
 
-    const onCallEnd = (data: ChatCallEndPayload) => {
-      // Guard: ignore if no active call on this device.
+    const onCallEnd = (rawData: unknown) => {
+      const data = rawData as ChatCallEndPayload;
       if (callStateRef.current === "IDLE") return;
 
       const config = activeConfigRef.current;
@@ -1299,7 +1452,6 @@ export function useWebRTC() {
 
       if (isGroupCall(activeConfigRef.current)) {
         if (isSelfEnd) {
-          // Self-CALL_END in group: already handled locally, skip.
           return;
         }
         leftPeersRef.current.add(peerId);
@@ -1325,45 +1477,31 @@ export function useWebRTC() {
           cleanup({ remoteDurationSeconds: data.durationSeconds });
         }
       } else {
-        // 1-1 call: verify peerId belongs to the current active call to reject stale events.
         const config = activeConfigRef.current;
         const expectedPeer =
           config?.callerId === userIdRef.current
-            ? config?.targetUserId // We are caller, peer is target
-            : config?.callerId; // We are callee, peer is caller
+            ? config?.targetUserId
+            : config?.callerId;
         if (expectedPeer && peerId && peerId !== expectedPeer && !isSelfEnd) {
-          console.warn("[WebRTC] Ignored stale CALL_END from unexpected peer", {
-            peerId,
-            expectedPeer,
-          });
           return;
         }
         cleanup({ remoteDurationSeconds: data?.durationSeconds });
       }
     };
 
-    const onOffer = async (data: WebRTCOfferEvent) => {
+    const onOffer = async (rawData: unknown) => {
+      const data = rawData as WebRTCOfferEvent;
       const offerPayload = data.offer;
       if (!offerPayload || typeof offerPayload !== "object") {
-        console.warn("[WebRTC] Ignored empty WebRTC offer", {
-          conversationId: data.conversationId,
-        });
         return;
       }
 
       const actualSenderId = offerPayload.senderId || getFallbackPeerId();
-
       const actualTargetId = offerPayload.targetId || userIdRef.current;
       if (actualTargetId !== userIdRef.current || !actualSenderId) return;
 
       leftPeersRef.current.delete(actualSenderId);
-
-      // Guard: if this device has no active call (e.g. another device of the same
-      // account already accepted and dismissed this one), ignore WebRTC signals.
       if (!activeConfigRef.current) {
-        console.warn("[WebRTC] Ignored offer: no active call on this device", {
-          senderId: actualSenderId,
-        });
         return;
       }
 
@@ -1377,10 +1515,6 @@ export function useWebRTC() {
       }
 
       if (!isValidSessionDescription(offerPayload)) {
-        console.warn("[WebRTC] Ignored invalid WebRTC offer", {
-          conversationId: data.conversationId,
-          senderId: actualSenderId,
-        });
         return;
       }
 
@@ -1410,25 +1544,17 @@ export function useWebRTC() {
     const onAnswer = async (data: WebRTCAnswerEvent) => {
       const answerPayload = data.answer;
       if (!answerPayload || typeof answerPayload !== "object") {
-        console.warn("[WebRTC] Ignored empty WebRTC answer", {
-          conversationId: data.conversationId,
-        });
         return;
       }
 
       const actualSenderId = answerPayload.senderId || getFallbackPeerId();
       const actualTargetId = answerPayload.targetId || userIdRef.current;
-
       if (actualTargetId !== userIdRef.current || !actualSenderId) return;
 
       const pc = peerConnectionsRef.current.get(actualSenderId);
       if (!pc) return;
 
       if (!isValidSessionDescription(answerPayload)) {
-        console.warn("[WebRTC] Ignored invalid WebRTC answer", {
-          conversationId: data.conversationId,
-          senderId: actualSenderId,
-        });
         return;
       }
 
@@ -1444,7 +1570,6 @@ export function useWebRTC() {
 
       const actualSenderId = candidatePayload.senderId || getFallbackPeerId();
       const actualTargetId = candidatePayload.targetId || userIdRef.current;
-
       if (actualTargetId !== userIdRef.current || !actualSenderId) return;
 
       const pc = peerConnectionsRef.current.get(actualSenderId);
@@ -1480,6 +1605,7 @@ export function useWebRTC() {
       boundSocket.on(CHAT_SOCKET_EVENTS.CALL_REJECT, onCallReject);
       boundSocket.on(CHAT_SOCKET_EVENTS.CALL_END, onCallEnd);
       boundSocket.on(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT, onCallHeartbeat);
+      boundSocket.on(CHAT_SOCKET_EVENTS.CALL_RINGING, onCallRinging);
       boundSocket.on(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, onOffer);
       boundSocket.on(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, onAnswer);
       boundSocket.on(CHAT_SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIceCandidate);
@@ -1495,6 +1621,7 @@ export function useWebRTC() {
         boundSocket.off(CHAT_SOCKET_EVENTS.CALL_REJECT, onCallReject);
         boundSocket.off(CHAT_SOCKET_EVENTS.CALL_END, onCallEnd);
         boundSocket.off(CHAT_SOCKET_EVENTS.CALL_HEARTBEAT, onCallHeartbeat);
+        boundSocket.off(CHAT_SOCKET_EVENTS.CALL_RINGING, onCallRinging);
         boundSocket.off(CHAT_SOCKET_EVENTS.WEBRTC_OFFER, onOffer);
         boundSocket.off(CHAT_SOCKET_EVENTS.WEBRTC_ANSWER, onAnswer);
         boundSocket.off(

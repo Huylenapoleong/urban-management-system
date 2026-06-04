@@ -870,10 +870,10 @@ export class GroupOwnershipTransferResultDto {
 
 export class CallEventInfoDto {
   @ApiProperty({
-    enum: ['REJECTED', 'ENDED', 'PARTICIPANT_LEFT'],
+    enum: ['REJECTED', 'ENDED', 'PARTICIPANT_JOINED', 'PARTICIPANT_LEFT'],
     example: 'ENDED',
   })
-  status!: 'REJECTED' | 'ENDED' | 'PARTICIPANT_LEFT';
+  status!: 'REJECTED' | 'ENDED' | 'PARTICIPANT_JOINED' | 'PARTICIPANT_LEFT';
 
   @ApiProperty({ example: true })
   isVideo!: boolean;
@@ -897,6 +897,9 @@ export class CallEventInfoDto {
 
   @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
   initiatedByUserId!: string;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENB00000000' })
+  participantUserId?: string;
 
   @ApiPropertyOptional({ example: '01JPCY0000CITIZENB00000000' })
   endedByUserId?: string;
@@ -947,6 +950,9 @@ export class MessageReceiptDto {
 
   @ApiProperty({ enum: ['DELIVERED', 'READ'], example: 'READ' })
   status!: 'DELIVERED' | 'READ';
+
+  @ApiPropertyOptional({ example: '2026-03-25T10:59:30.000Z' })
+  deliveredAt?: string;
 
   @ApiPropertyOptional({ example: '2026-03-25T11:00:00.000Z' })
   readAt?: string;
@@ -1289,10 +1295,11 @@ export class RegisterRequestDto {
   @MaxLength(100)
   fullName!: string;
 
-  @ApiProperty({ example: 'VN-79-25747' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
+  @IsOptional()
   @IsString()
   @MaxLength(30)
-  locationCode!: string;
+  locationCode?: string;
 
   @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-c.jpg' })
   @IsOptional()
@@ -1672,10 +1679,11 @@ export class CreateUserRequestDto {
   @IsIn(USER_ROLES)
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-79-25747' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
+  @IsOptional()
   @IsString()
   @MaxLength(30)
-  locationCode!: string;
+  locationCode?: string;
 
   @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
   @IsOptional()
@@ -1723,10 +1731,11 @@ export class CreateGroupRequestDto {
   @IsIn(GROUP_TYPES)
   groupType!: (typeof GROUP_TYPES)[number];
 
-  @ApiProperty({ example: 'VN-79-25747' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
+  @IsOptional()
   @IsString()
   @MaxLength(30)
-  locationCode!: string;
+  locationCode?: string;
 
   @ApiPropertyOptional({
     example: 'Nhom chinh thuc trao doi ve ha tang dia ban.',
@@ -3081,4 +3090,41 @@ export class PresignDownloadResultDto {
 
   @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
   expiresAt!: string;
+}
+
+export class SocialGraphDto {
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+    description: 'Map of group conversation IDs to arrays of member user IDs.',
+  })
+  groupMembersMap!: Record<string, string[]>;
+
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: {
+      $ref: '#/components/schemas/UserDirectoryItemDto',
+    },
+    description: 'Map of user IDs to their directory profile items.',
+  })
+  profiles!: Record<string, any>;
+}
+
+export class GlobalMessageSearchResultDto {
+  @ApiProperty({
+    type: 'array',
+    items: { $ref: '#/components/schemas/MessageItemDto' },
+    description: 'Text messages matching the keyword.',
+  })
+  messages!: any[];
+
+  @ApiProperty({
+    type: 'array',
+    items: { $ref: '#/components/schemas/MessageItemDto' },
+    description: 'Messages with attachments matching the keyword.',
+  })
+  files!: any[];
 }

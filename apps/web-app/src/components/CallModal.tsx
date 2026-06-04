@@ -147,7 +147,7 @@ function RemotePeerVideo({ peerId, stream, fallbackName, fallbackAvatar, onSpeak
               <AvatarImage src={fallbackAvatar} alt={displayName} />
             )}
             <AvatarFallback className="bg-slate-800 text-lg font-semibold text-slate-100">
-              {displayName.slice(0, 2).toUpperCase()}
+              <img src="/default-avatar.png" alt={displayName} className="w-full h-full object-cover rounded-full" />
             </AvatarFallback>
           </Avatar>
         </div>
@@ -233,7 +233,7 @@ export function CallModal({ rtc }: CallModalProps) {
   }, [callState]);
 
   const title =
-    callState === "CALLING"
+    callState === "CALLING" || callState === "RINGING"
       ? "Đang gọi"
       : callState === "INCOMING"
         ? "Cuộc gọi đến"
@@ -399,9 +399,11 @@ export function CallModal({ rtc }: CallModalProps) {
   const badgeLabel =
     callState === "CALLING"
       ? "Đang kết nối"
-      : callState === "INCOMING"
+      : callState === "RINGING"
         ? "Đang đổ chuông"
-        : "Đã kết nối";
+        : callState === "INCOMING"
+          ? "Đang đổ chuông"
+          : "Đã kết nối";
   const formatCallDuration = (totalSeconds: number): string => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
     return `${Math.floor(safeSeconds / 60)
@@ -534,14 +536,23 @@ export function CallModal({ rtc }: CallModalProps) {
 
         {remoteEntries.length === 0 && callState !== "INCOMING" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-            <Avatar className="h-20 w-20 mb-4 border border-slate-700 bg-slate-800/80">
-              {primaryPeerAvatar ? (
-                <AvatarImage src={primaryPeerAvatar} alt={peerName} />
-              ) : null}
-              <AvatarFallback>
-                {peerName.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
+            <div className="relative mb-4 flex h-20 w-20 items-center justify-center">
+              {callState === "RINGING" && (
+                <>
+                  <div className="absolute inset-0 rounded-full bg-emerald-500/40 animate-ping" style={{ animationDuration: '2s' }}></div>
+                  <div className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping" style={{ animationDuration: '2s', animationDelay: '0.4s' }}></div>
+                  <div className="absolute inset-0 rounded-full bg-emerald-500/10 animate-ping" style={{ animationDuration: '2s', animationDelay: '0.8s' }}></div>
+                </>
+              )}
+              <Avatar className="relative z-10 h-20 w-20 border border-slate-700 bg-slate-800/80">
+                {primaryPeerAvatar ? (
+                  <AvatarImage src={primaryPeerAvatar} alt={peerName} />
+                ) : null}
+                <AvatarFallback className="bg-slate-800 text-sm font-semibold text-slate-100">
+                  <img src="/default-avatar.png" alt={peerName} className="w-full h-full object-cover rounded-full" />
+                </AvatarFallback>
+              </Avatar>
+            </div>
             <p className="text-sm">Chờ mọi người tham gia...</p>
           </div>
         )}
@@ -563,7 +574,7 @@ export function CallModal({ rtc }: CallModalProps) {
                     <AvatarImage src={localAvatarUrl} alt={localDisplayName} />
                   ) : null}
                   <AvatarFallback className="bg-slate-800 text-sm font-semibold text-slate-100">
-                    {localDisplayName.slice(0, 2).toUpperCase()}
+                    <img src="/default-avatar.png" alt={localDisplayName} className="w-full h-full object-cover rounded-full" />
                   </AvatarFallback>
                 </Avatar>
               </div>
@@ -609,16 +620,14 @@ export function CallModal({ rtc }: CallModalProps) {
             >
               {isMicOn ? <Mic size={20} /> : <MicOff size={20} />}
             </Button>
-            {activeConfig?.isVideo && (
-              <Button
-                variant={isVideoOn ? "secondary" : "destructive"}
-                size="icon"
-                className="h-10 w-10 rounded-full border border-slate-600 bg-slate-700/60 hover:bg-slate-600 text-white"
-                onClick={toggleVideo}
-              >
-                {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
-              </Button>
-            )}
+            <Button
+              variant={isVideoOn ? "secondary" : "destructive"}
+              size="icon"
+              className="h-10 w-10 rounded-full border border-slate-600 bg-slate-700/60 hover:bg-slate-600 text-white"
+              onClick={toggleVideo}
+            >
+              {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
+            </Button>
             <Button
               variant="destructive"
               size="icon"

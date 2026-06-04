@@ -237,13 +237,14 @@ export interface GroupOwnershipTransferResult {
 }
 
 export interface CallEventInfo {
-  status: "REJECTED" | "ENDED" | "PARTICIPANT_LEFT";
+  status: "REJECTED" | "ENDED" | "PARTICIPANT_JOINED" | "PARTICIPANT_LEFT";
   isVideo: boolean;
   startedAt: string;
   acceptedAt?: string | null;
   endedAt: string;
   durationSeconds: number;
   initiatedByUserId: string;
+  participantUserId?: string;
   endedByUserId?: string;
 }
 
@@ -269,6 +270,7 @@ export interface ReadWatermark {
 export interface MessageReceipt {
   userId: string;
   status: "DELIVERED" | "READ";
+  deliveredAt?: string;
   readAt?: string;
 }
 
@@ -496,6 +498,11 @@ export interface ChatCallHeartbeatPayload extends ChatConversationCommandPayload
   serverTimestamp?: string;
 }
 
+export interface ChatCallRingingPayload extends ChatConversationCommandPayload {
+  calleeId: string;
+  serverTimestamp?: string;
+}
+
 export interface ChatWebRTCOfferPayload extends ChatConversationCommandPayload {
   senderId?: string;
   offer: any;
@@ -528,6 +535,10 @@ export interface ChatMessageUpdatePayload extends ChatConversationCommandPayload
 }
 
 export interface ChatMessageDeletePayload extends ChatConversationCommandPayload {
+  messageId: string;
+}
+
+export interface ChatMessageDeliveredPayload extends ChatConversationCommandPayload {
   messageId: string;
 }
 
@@ -575,6 +586,13 @@ export interface ChatMessageDeletedAccepted {
   conversationKey: string;
   messageId: string;
   deletedAt: string;
+}
+
+export interface ChatMessageDeliveredAccepted {
+  conversationId: string;
+  conversationKey: string;
+  messageId: string;
+  deliveredAt: string;
 }
 
 export interface RecallMessageResult {
@@ -687,4 +705,14 @@ export interface ChatPresenceUpdatedEvent {
   conversationKey: string;
   presence: ChatPresenceState;
   occurredAt: string;
+}
+
+export interface SocialGraphDto {
+  groupMembersMap: Record<string, string[]>;
+  profiles: Record<string, UserDirectoryItem>;
+}
+
+export interface GlobalMessageSearchResultDto {
+  messages: MessageItem[];
+  files: MessageItem[];
 }

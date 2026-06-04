@@ -25,6 +25,7 @@ import type {
   ConversationAliasRemovalResult,
   ConversationHistoryClearedResult,
   ConversationSummary,
+  ChatMessageUpdatedEvent,
   MediaAsset,
   MessageItem,
   MessageReplyReference,
@@ -61,6 +62,7 @@ import type {
   StoredDirectMessageRequest,
   StoredMessage,
   StoredMessageDedup,
+  StoredMessageDeliveryReceipt,
   StoredMessagePin,
   StoredMessageRef,
   StoredMessageSearchRecord,
@@ -185,6 +187,8 @@ export class ConversationsService {
       parseBooleanQuery(query.unreadOnly, 'unreadOnly') ?? false;
     const includeArchived =
       parseBooleanQuery(query.includeArchived, 'includeArchived') ?? false;
+    const matchIds =
+      typeof query.matchIds === 'string' ? query.matchIds.split(',') : [];
     const limit = parseLimit(query.limit);
     const items = await this.repository.queryByPk<StoredConversation>(
       this.config.dynamodbConversationsTableName,
@@ -247,6 +251,10 @@ export class ConversationsService {
       if (!keyword) {
         return true;
       }
+
+      if (matchIds.includes(item.conversationId)) {
+        return true;
+      }
       const counterpartId = this.getDmCounterpartId(actor.id, item);
       const alias = counterpartId
         ? aliasByConversationTargetForSearch.get(
@@ -295,6 +303,108 @@ export class ConversationsService {
       ),
       page.nextCursor,
     );
+  }
+
+  async getSocialGraph(actor: AuthenticatedUser) {
+    const actorMemberships = await this.groupsService.listMembershipsForUser(
+      actor.id,
+    );
+    const activeGroupIds = actorMemberships
+      .filter((m) => !m.deletedAt)
+      .map((m) => m.groupId);
+
+    const groupMembersMap: Record<string, string[]> = {};
+    const allUserIds = new Set<string>();
+
+    await Promise.all(
+      activeGroupIds.map(async (groupId) => {
+        try {
+          const members = await this.groupsService.listMembers(actor, groupId);
+          const activeMembers = members.map((m) => m.userId);
+          groupMembersMap[groupId] = activeMembers;
+          for (const userId of activeMembers) {
+            allUserIds.add(userId);
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to fetch members for group ${groupId}: ${error}`,
+          );
+        }
+      }),
+    );
+
+    const profilesList = await this.usersService.getProfilesForSocialGraph(
+      actor.id,
+      Array.from(allUserIds),
+    );
+
+    const profiles: Record<string, any> = {};
+    for (const p of profilesList) {
+      profiles[p.userId] = p;
+    }
+
+    return {
+      groupMembersMap,
+      profiles,
+    };
+  }
+
+  async globalSearchMessages(actor: AuthenticatedUser, q: string) {
+    if (!q || q.trim().length === 0) {
+      return { messages: [], files: [] };
+    }
+
+    const items = await this.repository.queryByPk<StoredConversation>(
+      this.config.dynamodbConversationsTableName,
+      makeInboxPk(actor.id),
+      { beginsWith: 'CONV#' },
+    );
+
+    const uniqueItemsMap = new Map<string, StoredConversation>();
+    for (const item of items) {
+      if (item.deletedAt || item.archivedAt || item.requestStatus) continue;
+      const existing = uniqueItemsMap.get(item.conversationId);
+      if (!existing || item.updatedAt > existing.updatedAt) {
+        uniqueItemsMap.set(item.conversationId, item);
+      }
+    }
+
+    const deduplicatedItems = Array.from(uniqueItemsMap.values())
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 30);
+
+    const messages: MessageItem[] = [];
+    const files: MessageItem[] = [];
+
+    await Promise.all(
+      deduplicatedItems.map(async (item) => {
+        try {
+          const res = await this.listMessages(actor, item.conversationId, {
+            q,
+            limit: 20,
+          });
+
+          for (const msg of res.data) {
+            messages.push(msg);
+            if (msg.attachmentUrl || msg.attachmentAsset) {
+              files.push(msg);
+            }
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to search messages in ${item.conversationId}: ${error}`,
+          );
+        }
+      }),
+    );
+
+    messages.sort((a, b) => b.id.localeCompare(a.id));
+    files.sort((a, b) => b.id.localeCompare(a.id));
+
+    return {
+      messages: messages.slice(0, 100),
+      files: files.slice(0, 100),
+    };
   }
 
   async listDirectRequests(
@@ -1500,14 +1610,17 @@ export class ConversationsService {
       );
     }
 
-    const summariesArray = await Promise.all(
-      access.participants.map((userId) =>
-        this.conversationSummaryService.getConversationSummary(
-          userId,
-          access.conversationKey,
+    const [summariesArray, deliveredByUser] = await Promise.all([
+      Promise.all(
+        access.participants.map((userId) =>
+          this.conversationSummaryService.getConversationSummary(
+            userId,
+            access.conversationKey,
+          ),
         ),
       ),
-    );
+      this.getMessageDeliveryReceiptMap(access.conversationKey, messageId),
+    ]);
     const summaries = new Map(
       summariesArray
         .filter((s): s is NonNullable<typeof s> => s !== undefined)
@@ -1517,6 +1630,7 @@ export class ConversationsService {
     const receipts: {
       userId: string;
       status: 'DELIVERED' | 'READ';
+      deliveredAt?: string;
       readAt?: string;
     }[] = [];
 
@@ -1534,17 +1648,116 @@ export class ConversationsService {
         receipts.push({
           userId,
           status: 'READ',
+          deliveredAt: deliveredByUser.get(userId),
           readAt: summary.lastReadAt,
         });
-      } else {
+      } else if (deliveredByUser.has(userId)) {
         receipts.push({
           userId,
           status: 'DELIVERED',
+          deliveredAt: deliveredByUser.get(userId),
         });
       }
     }
 
     return receipts;
+  }
+
+  async markMessageDelivered(
+    actor: AuthenticatedUser,
+    conversationId: string,
+    messageId: string,
+  ): Promise<{
+    conversationId: string;
+    conversationKey: string;
+    messageId: string;
+    deliveredAt: string;
+  }> {
+    const access = await this.resolveConversationAccess(actor, conversationId);
+    const message = await this.getMessageOrThrow(
+      access.conversationKey,
+      messageId,
+    );
+
+    if (message.senderId === actor.id) {
+      return {
+        conversationId: access.conversationId,
+        conversationKey: access.conversationKey,
+        messageId: message.messageId,
+        deliveredAt: message.sentAt,
+      };
+    }
+
+    if (
+      !(await this.isMessageVisibleToActor(
+        actor.id,
+        access.conversationKey,
+        message,
+      ))
+    ) {
+      throw new NotFoundException('Message not found.');
+    }
+
+    const existingReceipt = await this.getMessageDeliveryReceipt(
+      access.conversationKey,
+      message.messageId,
+      actor.id,
+    );
+
+    if (existingReceipt) {
+      return {
+        conversationId: access.conversationId,
+        conversationKey: access.conversationKey,
+        messageId: message.messageId,
+        deliveredAt: existingReceipt.deliveredAt,
+      };
+    }
+
+    const receipt = this.buildMessageDeliveryReceiptRecord(
+      access.conversationKey,
+      message.messageId,
+      actor.id,
+      nowIso(),
+    );
+
+    try {
+      await this.repository.transactPut([
+        {
+          tableName: this.config.dynamodbMessagesTableName,
+          item: receipt,
+          conditionExpression:
+            'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        },
+      ]);
+    } catch (error) {
+      if (this.isConditionalWriteConflict(error)) {
+        const currentReceipt = await this.getMessageDeliveryReceipt(
+          access.conversationKey,
+          message.messageId,
+          actor.id,
+        );
+
+        if (currentReceipt) {
+          return {
+            conversationId: access.conversationId,
+            conversationKey: access.conversationKey,
+            messageId: message.messageId,
+            deliveredAt: currentReceipt.deliveredAt,
+          };
+        }
+      }
+
+      throw error;
+    }
+
+    await this.emitMessageDeliveryUpdated(actor.id, access, message, receipt);
+
+    return {
+      conversationId: access.conversationId,
+      conversationKey: access.conversationKey,
+      messageId: message.messageId,
+      deliveredAt: receipt.deliveredAt,
+    };
   }
 
   async markAsRead(
@@ -4124,6 +4337,135 @@ export class ConversationsService {
     return `MSGREF#${messageId}`;
   }
 
+  private makeMessageDeliveryReceiptPrefix(messageId?: string): string {
+    return messageId ? `MSGDLV#${messageId}#` : 'MSGDLV#';
+  }
+
+  private makeMessageDeliveryReceiptSk(
+    messageId: string,
+    userId: string,
+  ): string {
+    return `${this.makeMessageDeliveryReceiptPrefix(messageId)}${userId}`;
+  }
+
+  private buildMessageDeliveryReceiptRecord(
+    conversationId: string,
+    messageId: string,
+    userId: string,
+    deliveredAt: string,
+  ): StoredMessageDeliveryReceipt {
+    return {
+      PK: makeConversationPk(conversationId),
+      SK: this.makeMessageDeliveryReceiptSk(messageId, userId),
+      entityType: 'MESSAGE_DELIVERY_RECEIPT',
+      conversationId,
+      messageId,
+      userId,
+      deliveredAt,
+    };
+  }
+
+  private async getMessageDeliveryReceipt(
+    conversationId: string,
+    messageId: string,
+    userId: string,
+  ): Promise<StoredMessageDeliveryReceipt | undefined> {
+    const receipt = await this.repository.get<StoredMessageDeliveryReceipt>(
+      this.config.dynamodbMessagesTableName,
+      makeConversationPk(conversationId),
+      this.makeMessageDeliveryReceiptSk(messageId, userId),
+    );
+
+    return receipt?.entityType === 'MESSAGE_DELIVERY_RECEIPT'
+      ? receipt
+      : undefined;
+  }
+
+  private async getMessageDeliveryReceiptMap(
+    conversationId: string,
+    messageId: string,
+  ): Promise<Map<string, string>> {
+    const receipts =
+      await this.repository.queryByPk<StoredMessageDeliveryReceipt>(
+        this.config.dynamodbMessagesTableName,
+        makeConversationPk(conversationId),
+        {
+          beginsWith: this.makeMessageDeliveryReceiptPrefix(messageId),
+        },
+      );
+
+    return new Map(
+      receipts
+        .filter(
+          (receipt): receipt is StoredMessageDeliveryReceipt =>
+            receipt.entityType === 'MESSAGE_DELIVERY_RECEIPT' &&
+            receipt.messageId === messageId,
+        )
+        .map((receipt) => [receipt.userId, receipt.deliveredAt]),
+    );
+  }
+
+  private async getConversationDeliveryReceiptMap(
+    conversationId: string,
+  ): Promise<Map<string, Map<string, string>>> {
+    const receipts =
+      await this.repository.queryByPk<StoredMessageDeliveryReceipt>(
+        this.config.dynamodbMessagesTableName,
+        makeConversationPk(conversationId),
+        {
+          beginsWith: this.makeMessageDeliveryReceiptPrefix(),
+        },
+      );
+    const deliveredByMessageId = new Map<string, Map<string, string>>();
+
+    for (const receipt of receipts) {
+      if (receipt.entityType !== 'MESSAGE_DELIVERY_RECEIPT') {
+        continue;
+      }
+
+      const current =
+        deliveredByMessageId.get(receipt.messageId) ??
+        new Map<string, string>();
+      current.set(receipt.userId, receipt.deliveredAt);
+      deliveredByMessageId.set(receipt.messageId, current);
+    }
+
+    return deliveredByMessageId;
+  }
+
+  private async emitMessageDeliveryUpdated(
+    deliveredByUserId: string,
+    access: ResolvedConversationAccess,
+    message: StoredMessage,
+    receipt: StoredMessageDeliveryReceipt,
+  ): Promise<void> {
+    const deliveryContext = await this.buildMessageDeliveryContext(
+      access.participants,
+      access.conversationKey,
+    );
+    const payload: ChatMessageUpdatedEvent = {
+      eventId: createUlid(),
+      conversationId: this.toPublicConversationId(
+        message.senderId,
+        access.conversationKey,
+      ),
+      conversationKey: access.conversationKey,
+      message: await this.serializeMessage(
+        message.senderId,
+        message,
+        deliveryContext,
+      ),
+      updatedByUserId: deliveredByUserId,
+      occurredAt: receipt.deliveredAt,
+    };
+
+    this.chatRealtimeService.emitToUser(
+      message.senderId,
+      CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
+      payload,
+    );
+  }
+
   private makeMessagePinSk(pinnedAt: string, messageId: string): string {
     return `PIN#${pinnedAt}#${messageId}`;
   }
@@ -4391,9 +4733,13 @@ export class ConversationsService {
       }
     }
 
+    const deliveredByMessageId =
+      await this.getConversationDeliveryReceiptMap(conversationId);
+
     return {
       participantIds,
       summariesByUser,
+      deliveredByMessageId,
     };
   }
 

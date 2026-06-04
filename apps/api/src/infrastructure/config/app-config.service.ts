@@ -367,7 +367,7 @@ export class AppConfigService {
   readonly uploadKeyPrefix = process.env.UPLOAD_KEY_PREFIX ?? 'uploads';
   readonly uploadMaxFileSizeBytes = readNumber(
     'UPLOAD_MAX_FILE_SIZE_BYTES',
-    10 * 1024 * 1024,
+    500 * 1024 * 1024,
   );
   readonly uploadAllowedMimeTypes = (
     process.env.UPLOAD_ALLOWED_MIME_TYPES ??
@@ -378,6 +378,7 @@ export class AppConfigService {
       'image/gif',
       'video/mp4',
       'video/quicktime',
+      'video/webm',
       'audio/mpeg',
       'audio/mp4',
       'audio/aac',
@@ -386,6 +387,13 @@ export class AppConfigService {
       'application/pdf',
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/x-rar-compressed',
+      'text/plain',
+      'text/csv',
     ].join(',')
   )
     .split(',')

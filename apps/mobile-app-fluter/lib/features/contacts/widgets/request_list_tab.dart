@@ -31,8 +31,9 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      final received = await widget.userService.listFriendRequests(direction: "incoming");
-      final sent = await widget.userService.listFriendRequests(direction: "outgoing");
+      // API uses uppercase: INCOMING / OUTGOING
+      final received = await widget.userService.listFriendRequests(direction: "INCOMING");
+      final sent = await widget.userService.listFriendRequests(direction: "OUTGOING");
       if (mounted) {
         setState(() {
           _receivedRequests = received;
@@ -41,13 +42,23 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      debugPrint("Error loading friend requests: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Lỗi tải danh sách yêu cầu: $e"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentList = _showSent ? _sentRequests : _receivedRequests;
 
     return Column(
@@ -56,11 +67,24 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
           padding: const EdgeInsets.all(16),
           child: Container(
             padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Row(
               children: [
-                _buildToggleOption("Đã nhận", !_showSent, () => setState(() => _showSent = false)),
-                _buildToggleOption("Đã gửi", _showSent, () => setState(() => _showSent = true)),
+                _buildToggleOption(
+                  "Đã nhận${_receivedRequests.isNotEmpty ? ' (${_receivedRequests.length})' : ''}",
+                  !_showSent,
+                  () => setState(() => _showSent = false),
+                  isDark,
+                ),
+                _buildToggleOption(
+                  "Đã gửi${_sentRequests.isNotEmpty ? ' (${_sentRequests.length})' : ''}",
+                  _showSent,
+                  () => setState(() => _showSent = true),
+                  isDark,
+                ),
               ],
             ),
           ),
@@ -72,15 +96,15 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
             child: Skeletonizer(
               enabled: _isLoading,
               child: currentList.isEmpty && !_isLoading
-                  ? _buildEmptyState()
+                  ? _buildEmptyState(_showSent)
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       itemCount: _isLoading ? 5 : currentList.length,
                       itemBuilder: (context, index) {
                         if (_isLoading) return _buildSkeletonItem();
                         final requestData = currentList[index];
-                        final otherUser = UserProfile.fromJson(requestData);
-                        return _buildRequestItem(otherUser, requestData, !_showSent);
+                        final user = UserProfile.fromJson(requestData);
+                        return _buildRequestItem(user, requestData, !_showSent);
                       },
                     ),
             ),
@@ -90,7 +114,7 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
     );
   }
 
-  Widget _buildToggleOption(String label, bool isSelected, VoidCallback onTap) {
+  Widget _buildToggleOption(String label, bool isSelected, VoidCallback onTap, bool isDark) {
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -98,12 +122,21 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: isSelected ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F172A) : Colors.white) : Colors.transparent,
+            color: isSelected ? (isDark ? const Color(0xFF0F172A) : Colors.white) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: isSelected ? [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))] : [],
+            boxShadow: isSelected
+                ? [BoxShadow(color: isDark ? Colors.transparent : Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))]
+                : [],
           ),
           child: Center(
-            child: Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, color: isSelected ? const Color(0xFF7C3AED) : const Color(0xFF64748B))),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                color: isSelected ? const Color(0xFF7C3AED) : const Color(0xFF64748B),
+                fontSize: 13,
+              ),
+            ),
           ),
         ),
       ),
@@ -111,11 +144,35 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
   }
 
   Widget _buildRequestItem(UserProfile user, Map<String, dynamic> data, bool isIncoming) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final requestedAt = data['requestedAt'] as String?;
+    String? timeAgo;
+    if (requestedAt != null) {
+      try {
+        final dt = DateTime.parse(requestedAt).toLocal();
+        final diff = DateTime.now().difference(dt);
+        if (diff.inDays > 0) {
+          timeAgo = "${diff.inDays} ngày trước";
+        } else if (diff.inHours > 0) {
+          timeAgo = "${diff.inHours} giờ trước";
+        } else if (diff.inMinutes > 0) {
+          timeAgo = "${diff.inMinutes} phút trước";
+        } else {
+          timeAgo = "Vừa xong";
+        }
+      } catch (_) {}
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Theme.of(context).cardTheme.color ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.white), borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Theme.of(context).brightness == Brightness.dark ? Colors.transparent : Colors.black.withOpacity(0.02), blurRadius: 5)]),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color ?? (isDark ? const Color(0xFF1E293B) : Colors.white),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: isDark ? Colors.transparent : Colors.black.withOpacity(0.02), blurRadius: 5)],
+      ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           UserAvatar(
             userId: user.id,
@@ -129,16 +186,57 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(user.fullName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B))),
-                Text(isIncoming ? "Muốn kết bạn với bạn" : "Chờ phản hồi...", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                Text(
+                  user.fullName,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isDark ? Colors.white : const Color(0xFF1E1B4B)),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isIncoming ? "Muốn kết bạn với bạn" : "Đang chờ phản hồi...",
+                  style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                ),
+                if (timeAgo != null) ...[
+                  const SizedBox(height: 2),
+                  Text(timeAgo, style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+                ],
               ],
             ),
           ),
           if (isIncoming) ...[
-            IconButton(icon: const Icon(Icons.check_circle, color: Colors.green, size: 32), onPressed: () => _handleRequest(user.id, "accept")),
-            IconButton(icon: const Icon(Icons.cancel, color: Colors.redAccent, size: 32), onPressed: () => _handleRequest(user.id, "reject")),
+            // Accept button
+            GestureDetector(
+              onTap: () => _handleRequest(user.id, "accept"),
+              child: Container(
+                margin: const EdgeInsets.only(left: 6),
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF22C55E),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check, color: Colors.white, size: 22),
+              ),
+            ),
+            const SizedBox(width: 6),
+            // Reject button
+            GestureDetector(
+              onTap: () => _handleRequest(user.id, "reject"),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.close, color: Colors.grey[600], size: 22),
+              ),
+            ),
           ] else
-            TextButton(onPressed: () => _handleRequest(user.id, "cancel"), child: const Text("Hủy", style: TextStyle(color: Colors.redAccent))),
+            TextButton(
+              onPressed: () => _handleRequest(user.id, "cancel"),
+              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+              child: const Text("Hủy"),
+            ),
         ],
       ),
     );
@@ -146,20 +244,66 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
 
   Future<void> _handleRequest(String userId, String action) async {
     try {
-      if (action == "accept") await widget.userService.acceptFriendRequest(userId);
-      else if (action == "reject") await widget.userService.rejectFriendRequest(userId);
-      else if (action == "cancel") await widget.userService.cancelFriendRequest(userId);
+      if (action == "accept") {
+        await widget.userService.acceptFriendRequest(userId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Đã chấp nhận kết bạn!"), backgroundColor: Color(0xFF22C55E)),
+          );
+        }
+      } else if (action == "reject") {
+        await widget.userService.rejectFriendRequest(userId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Đã từ chối yêu cầu")),
+          );
+        }
+      } else if (action == "cancel") {
+        await widget.userService.cancelFriendRequest(userId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Đã hủy yêu cầu kết bạn")),
+          );
+        }
+      }
       _loadRequests();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      }
     }
   }
 
   Widget _buildSkeletonItem() {
-    return Card(elevation: 0, margin: const EdgeInsets.only(bottom: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), child: const ListTile(leading: CircleAvatar(radius: 28), title: Bone.text(width: 100), subtitle: Bone.text(width: 150)));
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: const ListTile(
+        leading: CircleAvatar(radius: 28),
+        title: Bone.text(width: 100),
+        subtitle: Bone.text(width: 150),
+      ),
+    );
   }
 
-  Widget _buildEmptyState() {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.mail_outline, size: 80, color: Colors.grey[200]), const SizedBox(height: 16), Text("Không có yêu cầu nào", style: TextStyle(color: Colors.grey[400], fontSize: 16))]));
+  Widget _buildEmptyState(bool isSent) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            isSent ? Icons.send_outlined : Icons.mail_outline,
+            size: 80,
+            color: Colors.grey[300],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            isSent ? "Chưa gửi yêu cầu kết bạn nào" : "Chưa có yêu cầu kết bạn nào",
+            style: TextStyle(color: Colors.grey[400], fontSize: 15),
+          ),
+        ],
+      ),
+    );
   }
 }

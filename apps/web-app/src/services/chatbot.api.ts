@@ -6,6 +6,7 @@ export type ChatbotMessageRequest = {
     type: "GROUP" | "USER";
     id: string;
   };
+  matchIds?: string[];
 };
 
 export type ChatbotSource = {

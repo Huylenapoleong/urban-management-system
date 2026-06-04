@@ -359,7 +359,13 @@ describe('ConversationsGateway', () => {
       shouldEmit: true,
       session: {
         acceptedAt: '2026-04-22T14:00:08.000Z',
+        createdAt: '2026-04-22T14:00:00.000Z',
+        initiatedByUserId: 'user-2',
+        isVideo: true,
       },
+    });
+    conversationsService.sendConversationSystemMessage.mockResolvedValue({
+      id: 'msg-call-join',
     });
 
     const result = await gateway.handleCallAccept(client, {
@@ -381,6 +387,27 @@ describe('ConversationsGateway', () => {
       },
     );
     expect(chatRealtimeService.emitToConversation).not.toHaveBeenCalled();
+    expect(
+      conversationsService.sendConversationSystemMessage,
+    ).toHaveBeenCalledWith(
+      actor,
+      {
+        conversationId: 'group:group-1',
+        conversationKey: 'GRP#group-1',
+        participants: ['user-1', 'user-2', 'user-3'],
+        isGroup: true,
+      },
+      'Citizen One đã tham gia cuộc gọi.',
+      expect.objectContaining({
+        callEvent: expect.objectContaining({
+          status: 'PARTICIPANT_JOINED',
+          initiatedByUserId: 'user-2',
+          participantUserId: actor.id,
+          durationSeconds: 0,
+          isVideo: true,
+        }),
+      }),
+    );
     expect(disconnect).not.toHaveBeenCalled();
   });
 

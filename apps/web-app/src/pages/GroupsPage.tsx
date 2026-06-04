@@ -1,30 +1,29 @@
 import { useAuth } from "@/providers/auth-context";
 import { listMyFriends } from "@/services/friends.api";
 import {
-    addGroupMember,
-    createGroup,
-    getGroups,
-    joinGroup,
-    joinGroupByInvite,
-    leaveGroup,
-    listGroupMembers,
+  createGroup,
+  getGroups,
+  joinGroup,
+  joinGroupByInvite,
+  leaveGroup,
+  listGroupMembers,
 } from "@/services/group.api";
 import type { GroupMembership } from "@urban/shared-types";
-import { resolveLocationCode } from "@/services/location.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GroupType } from "@urban/shared-constants";
 import {
-    Check,
-    Loader2,
-    LogOut,
-    MessageCircle,
-    Plus,
-    ShieldCheck,
-    UserPlus,
-    Users,
-    X,
+  Check,
+  Loader2,
+  LogOut,
+  MessageCircle,
+  Plus,
+  ShieldCheck,
+  UserPlus,
+  Users,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "react-hot-toast";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -32,15 +31,13 @@ type GroupFormState = {
   groupName: string;
   description: string;
   groupType: GroupType;
-  locationCode: string;
 };
 
 export default function GroupsPage() {
   const queryClient = useQueryClient();
-   const { code } = useParams<{ code?: string }>();
-   const navigate = useNavigate();
+  const { code } = useParams<{ code?: string }>();
+  const navigate = useNavigate();
   const { user } = useAuth();
-  const accountLocationCode = user?.locationCode?.trim() ?? "";
   const canCreateOfficialGroup =
     user?.role === "PROVINCE_OFFICER" || user?.role === "ADMIN";
   const allowedCreateGroupTypes = useMemo(() => {
@@ -59,13 +56,11 @@ export default function GroupsPage() {
   const [isLeaving, setIsLeaving] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [inviteCodeInput, setInviteCodeInput] = useState("");
-  const [locationLabel, setLocationLabel] = useState("");
   const [selectedFriendIds, setSelectedFriendIds] = useState<Set<string>>(new Set());
   const [formState, setFormState] = useState<GroupFormState>({
     groupName: "",
     description: "",
     groupType: "AREA",
-    locationCode: user?.locationCode ?? "",
   });
 
   const { data: joinedGroups = [] } = useQuery({
@@ -138,21 +133,7 @@ export default function GroupsPage() {
 
   const createGroupMutation = useMutation({
     mutationFn: createGroup,
-    onSuccess: async (group) => {
-      // Add selected friends as members (min 2 required for PRIVATE)
-      const friendIds = [...selectedFriendIds];
-      if (friendIds.length > 0) {
-        const results = await Promise.allSettled(
-          friendIds.map((uid) =>
-            addGroupMember(group.id, { userId: uid, roleInGroup: "MEMBER" }),
-          ),
-        );
-        const failed = results.filter((r) => r.status === "rejected").length;
-        if (failed > 0) {
-          toast.error(`Thêm ${failed} thành viên thất bại. Bạn có thể thêm lại trong trang quản lý nhóm.`);
-        }
-      }
-
+    onSuccess: (group) => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Tạo nhóm thành công!");
@@ -182,7 +163,7 @@ export default function GroupsPage() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Đã tham gia nhóm bằng link mời");
       setInviteCodeInput("");
-      
+
       // Navigate to chat of the joined group
       navigate("/chat", {
         state: {
@@ -198,18 +179,17 @@ export default function GroupsPage() {
     },
   });
 
-   useEffect(() => {
-     if (code) {
-       joinByInviteMutation.mutate(code);
-     }
-   }, [code, joinByInviteMutation]);
+  useEffect(() => {
+    if (code) {
+      joinByInviteMutation.mutate(code);
+    }
+  }, [code, joinByInviteMutation]);
 
-   const handleOpenCreate = () => {
+  const handleOpenCreate = () => {
     setFormState({
       groupName: "",
       description: "",
       groupType: allowedCreateGroupTypes[0] ?? "PRIVATE",
-      locationCode: user?.locationCode ?? "",
     });
     setSelectedFriendIds(new Set());
     setIsCreateOpen(true);
@@ -231,43 +211,11 @@ export default function GroupsPage() {
   const isPrivateGroup = formState.groupType === "PRIVATE";
   const friendRequirementMet = !isPrivateGroup || selectedFriendIds.size >= 2;
 
-  useEffect(() => {
-    if (!accountLocationCode) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadLocationLabel() {
-      try {
-        const resolved = await resolveLocationCode(accountLocationCode);
-        if (!cancelled) {
-          setLocationLabel(resolved.displayName);
-        }
-      } catch {
-        if (!cancelled) {
-          setLocationLabel("");
-        }
-      }
-    }
-
-    void loadLocationLabel();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accountLocationCode]);
-
   const handleCreateGroup = (event: React.FormEvent) => {
     event.preventDefault();
 
     if (!formState.groupName.trim()) {
       toast.error("Vui lòng nhập tên nhóm.");
-      return;
-    }
-
-    if (!accountLocationCode) {
-      toast.error("Vui lòng nhập mã khu vực.");
       return;
     }
 
@@ -291,7 +239,7 @@ export default function GroupsPage() {
       groupName: formState.groupName.trim(),
       description: formState.description.trim() || undefined,
       groupType: formState.groupType,
-      locationCode: accountLocationCode,
+      userIds: [...selectedFriendIds],
     });
   };
 
@@ -360,162 +308,152 @@ export default function GroupsPage() {
         </button>
       </header>
 
-      {isCreateOpen ? (
-        <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-              Tạo nhóm mới
-            </h2>
-            <button
-              type="button"
-              onClick={() => setIsCreateOpen(false)}
-              className="rounded-md p-1 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <form
-            className="grid gap-3 sm:grid-cols-2"
-            onSubmit={handleCreateGroup}
-          >
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Tên nhóm
-              </label>
-              <input
-                value={formState.groupName}
-                onChange={(event) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    groupName: event.target.value,
-                  }))
-                }
-                placeholder="Ví dụ: Hạ tầng phường 1"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Loại nhóm
-              </label>
-              <select
-                value={formState.groupType}
-                onChange={(event) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    groupType: event.target.value as GroupType,
-                  }))
-                }
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-              >
-                {allowedCreateGroupTypes.map((groupType) => (
-                  <option key={groupType} value={groupType}>
-                    {groupType}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Mã khu vực
-              </label>
-              <input
-                value={locationLabel}
-                placeholder="Gan theo pham vi tai khoan"
-                readOnly
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                {accountLocationCode
-                  ? locationLabel || "Dia ban cua tai khoan hien tai"
-                  : "Nhom se duoc tao theo dia ban hien tai cua tai khoan."}
-              </p>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Mô tả
-              </label>
-              <textarea
-                value={formState.description}
-                onChange={(event) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    description: event.target.value,
-                  }))
-                }
-                rows={3}
-                placeholder="Mô tả mục tiêu nhóm"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-              />
-            </div>
-            {isPrivateGroup && (
-              <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <span className="flex items-center gap-1">
-                    <UserPlus className="h-3.5 w-3.5" />
-                    Thêm bạn bè vào nhóm
-                    <span className="ml-1 text-red-500">*</span>
-                    <span className="ml-auto font-normal normal-case text-slate-400">
-                      Chọn ít nhất 2 bạn ({selectedFriendIds.size}/2 tối thiểu)
-                    </span>
-                  </span>
-                </label>
-                {myFriends.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-xs text-slate-500">
-                    Bạn chưa có bạn bè nào. Hãy thêm bạn bè trước khi tạo nhóm PRIVATE.
-                  </p>
-                ) : (
-                  <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                    {myFriends.map((friend) => {
-                      const id = friend.userId;
-                      const name = friend.fullName;
-                      const selected = selectedFriendIds.has(id);
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => toggleFriend(id)}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 ${
-                            selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                          }`}
-                        >
-                          <span
-                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                              selected
-                                ? "border-blue-600 bg-blue-600 text-white"
-                                : "border-slate-300 bg-white dark:bg-slate-800"
-                            }`}
-                          >
-                            {selected && <Check className="h-2.5 w-2.5" />}
-                          </span>
-                          <span className="truncate font-medium text-slate-800 dark:text-slate-100">{name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="sm:col-span-2 flex justify-end gap-2">
+      {/* Modal tạo nhóm */}
+      {isCreateOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={(e) => { if (e.target === e.currentTarget) setIsCreateOpen(false); }}
+        >
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Plus className="w-5 h-5 text-blue-600" />
+                Tạo nhóm mới
+              </h2>
               <button
                 type="button"
                 onClick={() => setIsCreateOpen(false)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <form
+              id="create-group-form"
+              className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
+              onSubmit={handleCreateGroup}
+            >
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Tên nhóm <span className="text-red-500">*</span>
+                </label>
+                <input
+                  value={formState.groupName}
+                  onChange={(event) =>
+                    setFormState((prev) => ({ ...prev, groupName: event.target.value }))
+                  }
+                  placeholder="Ví dụ: Hạ tầng phường 1"
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Loại nhóm
+                </label>
+                <select
+                  value={formState.groupType}
+                  onChange={(event) =>
+                    setFormState((prev) => ({ ...prev, groupType: event.target.value as GroupType }))
+                  }
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {allowedCreateGroupTypes.map((groupType) => (
+                    <option key={groupType} value={groupType}>{groupType}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Mô tả
+                </label>
+                <textarea
+                  value={formState.description}
+                  onChange={(event) =>
+                    setFormState((prev) => ({ ...prev, description: event.target.value }))
+                  }
+                  rows={3}
+                  placeholder="Mô tả mục tiêu nhóm"
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+
+              {isPrivateGroup && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <span className="flex items-center gap-1.5">
+                      <UserPlus className="h-3.5 w-3.5" />
+                      Thêm bạn bè vào nhóm
+                      <span className="text-red-500">*</span>
+                      <span className="ml-auto font-normal normal-case text-slate-400">
+                        {selectedFriendIds.size}/2 tối thiểu
+                      </span>
+                    </span>
+                  </label>
+                  {myFriends.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 px-3 py-4 text-center text-xs text-slate-500">
+                      Bạn chưa có bạn bè nào. Hãy thêm bạn bè trước khi tạo nhóm PRIVATE.
+                    </p>
+                  ) : (
+                    <div className="max-h-44 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                      {myFriends.map((friend) => {
+                        const id = friend.userId;
+                        const name = friend.fullName;
+                        const selected = selectedFriendIds.has(id);
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => toggleFriend(id)}
+                            className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 ${selected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                              }`}
+                          >
+                            <span
+                              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${selected
+                                ? "border-blue-600 bg-blue-600 text-white"
+                                : "border-slate-300 bg-white dark:bg-slate-800"
+                                }`}
+                            >
+                              {selected && <Check className="h-2.5 w-2.5" />}
+                            </span>
+                            <span className="truncate font-medium text-slate-800 dark:text-slate-100">{name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </form>
+
+            {/* Footer */}
+            <div className="flex gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(false)}
+                className="flex-1 h-11 rounded-xl font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
               >
                 Hủy
               </button>
               <button
                 type="submit"
+                form="create-group-form"
                 disabled={createGroupMutation.isPending || !friendRequirementMet}
-                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                 title={!friendRequirementMet ? "Chọn ít nhất 2 bạn bè để tiếp tục" : undefined}
+                className="flex-1 h-11 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
+                {createGroupMutation.isPending && <Loader2 className="animate-spin" size={16} />}
                 {createGroupMutation.isPending ? "Đang tạo..." : "Tạo nhóm"}
               </button>
             </div>
-          </form>
-        </div>
-      ) : null}
+          </div>
+        </div>,
+        document.body
+      )}
 
       <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 dark:border-slate-700 dark:bg-slate-900">
         <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
@@ -624,8 +562,8 @@ export default function GroupsPage() {
       </div>
 
       {/* Modal chọn người kế nhiệm khi rời nhóm (dành cho Owner) */}
-      {leaveGroupId && groupToLeave && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      {leaveGroupId && groupToLeave && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -701,7 +639,7 @@ export default function GroupsPage() {
             </div>
           </div>
         </div>
-      )}
+        , document.body)}
     </div>
   );
 }

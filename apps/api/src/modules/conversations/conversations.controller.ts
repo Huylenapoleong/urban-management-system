@@ -57,6 +57,8 @@ import {
   SendMessageRequestDto,
   UpdateConversationPreferencesRequestDto,
   UpdateMessageRequestDto,
+  SocialGraphDto,
+  GlobalMessageSearchResultDto,
 } from '../../common/openapi/swagger.models';
 import { ConversationsService } from './conversations.service';
 
@@ -101,6 +103,36 @@ export class ConversationsController {
       user,
       query as Record<string, unknown>,
     );
+  }
+
+  @Get('social-graph')
+  @ApiOperation({
+    summary: 'Get the social graph of the current user',
+    description:
+      'Returns a map of all groups the user is in and their members, plus profiles of those members, to support fast local searching.',
+  })
+  @ApiOkEnvelopeResponse(SocialGraphDto, {
+    description: 'The complete social graph for the user.',
+  })
+  getSocialGraph(@CurrentUser() user: AuthenticatedUser) {
+    return this.conversationsService.getSocialGraph(user);
+  }
+
+  @Get('global-search-messages')
+  @ApiOperation({
+    summary: 'Global message search',
+    description:
+      'Search messages and files across the user 30 most recently active conversations.',
+  })
+  @ApiQuery({ name: 'q', required: true, type: String })
+  @ApiOkEnvelopeResponse(GlobalMessageSearchResultDto, {
+    description: 'Matching messages and files.',
+  })
+  globalSearchMessages(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('q') q: string,
+  ) {
+    return this.conversationsService.globalSearchMessages(user, q);
   }
 
   @Get('direct-requests')

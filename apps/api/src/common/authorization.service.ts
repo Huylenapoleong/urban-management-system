@@ -181,7 +181,8 @@ export class AuthorizationService {
     _actor: AuthenticatedUser,
     roleInGroup?: GroupMemberRole | 'OFFICER',
   ): boolean {
-    return normalizeGroupMemberRole(roleInGroup) === 'OWNER';
+    const role = normalizeGroupMemberRole(roleInGroup);
+    return role === 'OWNER' || role === 'DEPUTY';
   }
 
   canTransferGroupOwnership(

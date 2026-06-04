@@ -230,7 +230,7 @@ export default function GroupsScreen() {
   };
 
   const handleCreateGroup = async () => {
-    if (!groupName.trim() || !user?.locationCode) {
+    if (!groupName.trim()) {
       return;
     }
 
@@ -248,7 +248,6 @@ export default function GroupsScreen() {
       const createdGroup = await createGroup({
         groupName: groupName.trim(),
         groupType: PRIVATE_GROUP_TYPE,
-        locationCode: user.locationCode,
         description: description.trim() || undefined,
       });
 
@@ -587,13 +586,13 @@ export default function GroupsScreen() {
               <Pressable
                 style={[
                   styles.modalPrimaryButton,
-                  (!groupName.trim() || !user?.locationCode || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE) &&
+                  (!groupName.trim() || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE) &&
                     styles.modalPrimaryDisabled,
                 ]}
                 onPress={() => void handleCreateGroup()}
-                disabled={!groupName.trim() || !user?.locationCode || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE}
+                disabled={!groupName.trim() || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE}
               >
-                {!groupName.trim() || !user?.locationCode || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE ? null : (
+                {!groupName.trim() || saving || selectedFriendIds.size < MIN_MEMBERS_FOR_PRIVATE ? null : (
                   <LinearGradient
                     colors={colors.gradient.primary}
                     start={colors.gradient.start}

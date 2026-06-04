@@ -28,6 +28,8 @@ import type {
   ChatMessageAccepted,
   ChatMessageDeletedAccepted,
   ChatMessageDeletePayload,
+  ChatMessageDeliveredAccepted,
+  ChatMessageDeliveredPayload,
   ChatMessageRecallPayload,
   ChatMessageSendPayload,
   ChatMessageUpdatedAccepted,
@@ -416,6 +418,35 @@ export class ConversationsGateway
     );
   }
 
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED)
+  async markMessageDelivered(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: ChatMessageDeliveredPayload,
+  ): Promise<ChatSocketAck<ChatMessageDeliveredAccepted>> {
+    return this.withAck(
+      async () => {
+        const user = await this.getSocketUser(client);
+        const body = ensureObject(payload as unknown);
+        const conversationId = requiredString(body, 'conversationId', {
+          minLength: 1,
+          maxLength: 200,
+        });
+        const messageId = requiredString(body, 'messageId', {
+          minLength: 5,
+          maxLength: 50,
+        });
+
+        return this.conversationsService.markMessageDelivered(
+          user,
+          conversationId,
+          messageId,
+        );
+      },
+      'CHAT_MESSAGE_DELIVERED_FAILED',
+      CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED,
+    );
+  }
+
   @SubscribeMessage(CHAT_SOCKET_EVENTS.MESSAGE_RECALL)
   async recallMessage(
     @ConnectedSocket() client: AuthenticatedSocket,
@@ -607,6 +638,40 @@ export class ConversationsGateway
     );
   }
 
+  @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_RINGING)
+  async handleCallRinging(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: unknown,
+  ): Promise<ChatSocketAck<{ success: true }>> {
+    return this.withAck(
+      async () => {
+        const { access, user } = await this.resolveSignalAccess(
+          client,
+          payload,
+          true,
+        );
+
+        this.emitSignal(
+          access,
+          CHAT_SOCKET_EVENTS.CALL_RINGING,
+          {
+            conversationId: access.conversationKey,
+            calleeId: user.id,
+            serverTimestamp: nowIso(),
+          },
+          client.id,
+          user.id,
+          undefined,
+          true,
+        );
+
+        return { success: true };
+      },
+      'CHAT_CALL_RINGING_FAILED',
+      CHAT_SOCKET_EVENTS.CALL_RINGING,
+    );
+  }
+
   @SubscribeMessage(CHAT_SOCKET_EVENTS.CALL_ACCEPT)
   async handleCallAccept(
     @ConnectedSocket() client: AuthenticatedSocket,
@@ -628,6 +693,14 @@ export class ConversationsGateway
           result.session,
           user,
         );
+        const callEvent =
+          access.isGroup && result.session
+            ? this.buildCallEventInfo(
+                result.session,
+                'PARTICIPANT_JOINED',
+                user.id,
+              )
+            : undefined;
 
         if (result.shouldEmit) {
           this.clearCallTimeout(access.conversationKey);
@@ -640,6 +713,15 @@ export class ConversationsGateway
             undefined,
             true,
           );
+          if (callEvent) {
+            void this.persistBestEffortCallSystemMessage(
+              user,
+              access,
+              this.buildCallSystemMessageText(callEvent, user.fullName),
+              CHAT_SOCKET_EVENTS.CALL_ACCEPT,
+              callEvent,
+            );
+          }
         }
 
         return {
@@ -1148,10 +1230,7 @@ export class ConversationsGateway
   ): Promise<void> {
     this.callTimeouts.delete(access.conversationKey);
 
-    const result = await this.chatCallSessionService.endCall(
-      access,
-      callerUser.id,
-    );
+    const result = await this.chatCallSessionService.timeoutCall(access);
     if (result.shouldEmit) {
       const callEvent = result.session
         ? this.buildCallEventInfo(result.session, 'ENDED', callerUser.id)
@@ -1192,13 +1271,17 @@ export class ConversationsGateway
       isVideo: boolean;
     },
     status: CallEventInfo['status'],
-    endedByUserId: string,
+    actorUserId: string,
   ): CallEventInfo {
     const endedAt = nowIso();
-    const durationSeconds = this.computeCallDurationSeconds(
-      session.acceptedAt,
-      endedAt,
-    );
+    const durationSeconds =
+      status === 'PARTICIPANT_JOINED'
+        ? 0
+        : this.computeCallDurationSeconds(session.acceptedAt, endedAt);
+    const participantUserId =
+      status === 'PARTICIPANT_JOINED' || status === 'PARTICIPANT_LEFT'
+        ? actorUserId
+        : undefined;
 
     return {
       status,
@@ -1208,7 +1291,10 @@ export class ConversationsGateway
       endedAt,
       durationSeconds,
       initiatedByUserId: session.initiatedByUserId,
-      endedByUserId,
+      ...(participantUserId ? { participantUserId } : {}),
+      ...(status !== 'PARTICIPANT_JOINED'
+        ? { endedByUserId: actorUserId }
+        : {}),
     };
   }
 
@@ -1259,6 +1345,10 @@ export class ConversationsGateway
 
     if (callEvent.status === 'REJECTED') {
       return `${callLabel} bị từ chối.`;
+    }
+
+    if (callEvent.status === 'PARTICIPANT_JOINED') {
+      return `${actorName} đã tham gia cuộc gọi.`;
     }
 
     if (callEvent.status === 'PARTICIPANT_LEFT') {

@@ -26,6 +26,7 @@ export type SupportedMessageType = (typeof MESSAGE_TYPES)[number];
 export interface MessageDeliveryContext {
   participantIds: string[];
   summariesByUser: Map<string, StoredConversation>;
+  deliveredByMessageId?: Map<string, Map<string, string>>;
 }
 
 @Injectable()
@@ -373,10 +374,10 @@ export class ConversationStateService {
     const recipientIds = context.participantIds.filter(
       (participantId) => participantId !== message.senderId,
     );
-    const deliveredRecipients = recipientIds.filter((participantId) =>
-      context.summariesByUser.has(participantId),
-    );
-    const readAtValues = deliveredRecipients
+    const deliveredByUser =
+      context.deliveredByMessageId?.get(message.messageId) ??
+      new Map<string, string>();
+    const readAtValues = recipientIds
       .map(
         (participantId) =>
           context.summariesByUser.get(participantId)?.lastReadAt,
@@ -386,6 +387,14 @@ export class ConversationStateService {
           typeof value === 'string' && value >= message.sentAt,
       )
       .sort((left, right) => right.localeCompare(left));
+    const deliveredRecipients = recipientIds.filter((participantId) => {
+      if (deliveredByUser.has(participantId)) {
+        return true;
+      }
+
+      const lastReadAt = context.summariesByUser.get(participantId)?.lastReadAt;
+      return typeof lastReadAt === 'string' && lastReadAt >= message.sentAt;
+    });
     const recipientCount = recipientIds.length;
     const deliveredCount = deliveredRecipients.length;
     const readByCount = readAtValues.length;

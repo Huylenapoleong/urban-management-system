@@ -48,6 +48,7 @@ type WindowWithLegacyAudioContext = Window & {
 
 type ChatNotificationMessage = {
   conversationId: string;
+  id?: string;
   senderId: string;
   senderName?: string;
   type?: string;
@@ -114,13 +115,6 @@ export function Sidebar({
   );
   const avatarSrc = profile?.avatarAsset?.resolvedUrl || profile?.avatarUrl;
   const displayName = profile?.fullName || user?.sub || "User";
-  const initials =
-    displayName
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part.charAt(0).toUpperCase())
-      .join("") || "U";
 
   const navItems = [
     { to: "/", icon: Home, label: "Trang chủ" },
@@ -201,7 +195,7 @@ export function Sidebar({
           <AvatarFallback
             className={`${isDarkMode ? "bg-slate-700 text-slate-100" : "bg-white text-slate-700"} text-xs font-semibold`}
           >
-            {initials}
+            <img src="/default-avatar.png" alt={displayName} className="w-full h-full object-cover" />
           </AvatarFallback>
         </Avatar>
       </div>
@@ -414,6 +408,15 @@ export function MainLayout() {
       if (!msg || !msg.conversationId || !msg.senderId) return;
 
       if (user?.sub && msg.senderId !== user.sub) {
+        if (msg.id) {
+          void socketClient
+            .safeEmitValidated(CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED, {
+              conversationId: msg.conversationId,
+              messageId: msg.id,
+            })
+            .catch(() => {});
+        }
+
         let isMuted = false;
         try {
           const rawMuted = localStorage.getItem("web-app-muted-conversations");

@@ -4,6 +4,8 @@ import { ApiClient } from "@/lib/api-client";
 import AsyncStorageShim from "@/lib/async-storage-shim";
 import { socketClient } from "@/lib/socket-client";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
+import { CHAT_SOCKET_EVENTS } from "@urban/shared-constants";
+import type { ChatMessageCreatedEvent } from "@urban/shared-types";
 import { queryKeys } from "@/services/query-keys";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
@@ -424,6 +426,60 @@ function SocketLifecycleManager() {
   return null;
 }
 
+function MessageDeliveryAckManager() {
+  const { user, isLoading } = useAuth();
+  const currentUserId = user?.sub ?? "";
+
+  React.useEffect(() => {
+    if (isLoading || !currentUserId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const handleMessageCreated = (event: ChatMessageCreatedEvent) => {
+      const message = event?.message;
+      if (
+        !message?.id ||
+        !event?.conversationId ||
+        message.senderId === currentUserId
+      ) {
+        return;
+      }
+
+      void socketClient
+        .emitWithAck(CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED, {
+          conversationId: event.conversationId,
+          messageId: message.id,
+        })
+        .catch(() => {});
+    };
+
+    const bind = async () => {
+      try {
+        await socketClient.connect();
+      } catch {
+        return;
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      socketClient.on(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
+    };
+
+    void bind();
+
+    return () => {
+      cancelled = true;
+      socketClient.off(CHAT_SOCKET_EVENTS.MESSAGE_CREATED, handleMessageCreated);
+    };
+  }, [currentUserId, isLoading]);
+
+  return null;
+}
+
 function WebRuntimeSafetyManager() {
   React.useEffect(() => {
     installWebRuntimeGuards();
@@ -503,6 +559,7 @@ export default function RootLayout() {
       <PaperProvider theme={paperTheme}>
         <AuthProvider>
           <SplashPreloadManager queryHydrated={queryHydrated} />
+          <MessageDeliveryAckManager />
           <WebRTCProvider>
             <Stack screenOptions={{ headerShown: false }} />
             <FloatingAiChatbot />

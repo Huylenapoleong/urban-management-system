@@ -317,7 +317,7 @@ export class UsersController {
       await this.conversationsService.sendConversationSystemMessage(
         user,
         {
-          conversationKey: `DM#${conversationId}`,
+          conversationKey: conversationId,
           conversationId,
           participants: [user.id, userId],
           isGroup: false,
