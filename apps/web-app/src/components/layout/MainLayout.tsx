@@ -115,13 +115,6 @@ export function Sidebar({
   );
   const avatarSrc = profile?.avatarAsset?.resolvedUrl || profile?.avatarUrl;
   const displayName = profile?.fullName || user?.sub || "User";
-  const initials =
-    displayName
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part.charAt(0).toUpperCase())
-      .join("") || "U";
 
   const navItems = [
     { to: "/", icon: Home, label: "Trang chủ" },
@@ -202,7 +195,7 @@ export function Sidebar({
           <AvatarFallback
             className={`${isDarkMode ? "bg-slate-700 text-slate-100" : "bg-white text-slate-700"} text-xs font-semibold`}
           >
-            {initials}
+            <img src="/default-avatar.png" alt={displayName} className="w-full h-full object-cover" />
           </AvatarFallback>
         </Avatar>
       </div>

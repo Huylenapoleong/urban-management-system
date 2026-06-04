@@ -13,7 +13,7 @@ import {
   type LocationWard,
 } from "@/services/location.api";
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 function buildWardLocationCode(provinceCode: string, wardCode: string) {
@@ -41,6 +41,7 @@ export function RegisterPage() {
   });
   const [step, setStep] = useState<"register" | "otp">("register");
   const [otpCode, setOtpCode] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [otpMessage, setOtpMessage] = useState("");
   const [error, setError] = useState("");
   const [locationError, setLocationError] = useState("");
@@ -50,15 +51,6 @@ export function RegisterPage() {
   const [selectedWardCode, setSelectedWardCode] = useState("");
   const [isLoadingProvinces, setIsLoadingProvinces] = useState(true);
   const [isLoadingWards, setIsLoadingWards] = useState(false);
-
-  const selectedProvince = useMemo(
-    () => provinces.find((province) => province.code === selectedProvinceCode),
-    [provinces, selectedProvinceCode],
-  );
-  const selectedWard = useMemo(
-    () => wards.find((ward) => ward.code === selectedWardCode),
-    [selectedWardCode, wards],
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +189,10 @@ export function RegisterPage() {
       setError("Vui lòng nhập đầy đủ thông tin bắt buộc (*)");
       return;
     }
+    if (formData.password !== confirmPassword) {
+      setError("Mật khẩu nhập lại không khớp.");
+      return;
+    }
     if (!selectedProvinceCode || !selectedWardCode || !formData.locationCode) {
       setError("Vui lòng chọn đầy đủ Tỉnh/Thành và Phường/Xã.");
       return;
@@ -239,70 +235,78 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-slate-100 flex items-center justify-center p-4 py-10 overflow-y-auto">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden mt-8 mb-8">
-        <div className="bg-blue-600 p-6 text-center text-white">
-          <h1 className="text-2xl font-bold">Urban Management System</h1>
-          <p className="text-blue-100 mt-2 text-sm">
+    <div className="min-h-screen w-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 flex items-center justify-center p-4 py-10 overflow-y-auto relative overflow-hidden">
+      {/* Ambient background glows */}
+      <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-80 h-80 rounded-full bg-violet-600/15 blur-[100px] animate-pulse pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 w-96 h-96 rounded-full bg-indigo-500/15 blur-[120px] animate-pulse pointer-events-none [animation-delay:2s]" />
+
+      <div className="max-w-2xl w-full bg-slate-900/95 backdrop-blur-2xl rounded-2xl premium-shadow-lg overflow-hidden animate-slide-up relative z-10 border border-white/10 mt-4 mb-4">
+        <div className="p-6 text-center border-b border-white/5 bg-white/5">
+          <h1 className="text-2xl font-bold tracking-tight gradient-text-purple bg-gradient-to-r from-violet-400 to-indigo-300">
+            Urban Management System
+          </h1>
+          <p className="text-slate-300 mt-1.5 text-sm font-medium">
             {step === "register"
               ? "Đăng ký tài khoản hệ thống"
               : "Xác thực mã OTP đăng ký"}
           </p>
         </div>
 
-        <div className="p-6">
+        <div className="p-8">
           {error && (
-            <div className="bg-red-50 text-red-500 p-3 rounded-lg text-sm mb-4">
+            <div className="bg-red-950/50 border border-red-500/30 text-red-400 p-3 rounded-xl text-sm mb-4 font-medium animate-fade-in">
               {error}
             </div>
           )}
 
           {locationError && (
-            <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-sm mb-4">
+            <div className="bg-amber-950/50 border border-amber-500/30 text-amber-400 p-3 rounded-xl text-sm mb-4 font-medium animate-fade-in">
               {locationError}
             </div>
           )}
 
           {otpMessage && (
-            <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm mb-4">
+            <div className="bg-emerald-950/50 border border-emerald-500/30 text-emerald-400 p-3 rounded-xl text-sm mb-4 font-medium animate-fade-in">
               {otpMessage}
             </div>
           )}
 
           {step === "register" ? (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
-                  Họ và tên (*)
-                </label>
-                <Input
-                  type="text"
-                  placeholder="Nguyễn Văn A"
-                  value={formData.fullName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, fullName: e.target.value })
-                  }
-                  className="w-full"
-                />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-white">
+                    Họ và tên (*)
+                  </label>
+                  <Input
+                    type="text"
+                    placeholder="Nguyễn Văn A"
+                    value={formData.fullName}
+                    onChange={(e) =>
+                      setFormData({ ...formData, fullName: e.target.value })
+                    }
+                    className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-white">
+                    Số điện thoại
+                  </label>
+                  <Input
+                    type="tel"
+                    placeholder="09xx xxx xxx"
+                    value={formData.phone}
+                    onChange={(e) =>
+                      setFormData({ ...formData, phone: e.target.value })
+                    }
+                    className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
-                  Số điện thoại
-                </label>
-                <Input
-                  type="tel"
-                  placeholder="09xx xxx xxx"
-                  value={formData.phone}
-                  onChange={(e) =>
-                    setFormData({ ...formData, phone: e.target.value })
-                  }
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Email (*)
                 </label>
                 <Input
@@ -312,13 +316,13 @@ export function RegisterPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, email: e.target.value })
                   }
-                  className="w-full"
+                  className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
                 />
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-semibold text-white">
                     Tỉnh / Thành (*)
                   </label>
                   <select
@@ -328,13 +332,13 @@ export function RegisterPage() {
                       setSelectedWardCode("");
                     }}
                     disabled={isLoadingProvinces}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-12 w-full rounded-xl border border-white/15 bg-slate-950/60 text-white px-3 py-2 text-sm focus:outline-none focus:border-violet-500 focus:ring-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <option value="">
+                    <option value="" className="bg-slate-950 text-slate-400">
                       {isLoadingProvinces ? "Đang tải..." : "Chọn tỉnh/thành"}
                     </option>
                     {provinces.map((province) => (
-                      <option key={province.code} value={province.code}>
+                      <option key={province.code} value={province.code} className="bg-slate-950 text-white">
                         {province.fullName}
                       </option>
                     ))}
@@ -342,16 +346,16 @@ export function RegisterPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-semibold text-white">
                     Phường / Xã (*)
                   </label>
                   <select
                     value={selectedWardCode}
                     onChange={(e) => setSelectedWardCode(e.target.value)}
                     disabled={!selectedProvinceCode || isLoadingWards}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-12 w-full rounded-xl border border-white/15 bg-slate-950/60 text-white px-3 py-2 text-sm focus:outline-none focus:border-violet-500 focus:ring-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <option value="">
+                    <option value="" className="bg-slate-950 text-slate-400">
                       {!selectedProvinceCode
                         ? "Chọn tỉnh/thành trước"
                         : isLoadingWards
@@ -359,7 +363,7 @@ export function RegisterPage() {
                           : "Chọn phường/xã"}
                     </option>
                     {wards.map((ward) => (
-                      <option key={ward.code} value={ward.code}>
+                      <option key={ward.code} value={ward.code} className="bg-slate-950 text-white">
                         {ward.fullName}
                       </option>
                     ))}
@@ -367,45 +371,57 @@ export function RegisterPage() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                <p className="font-medium text-slate-700">
-                  Địa bàn sẽ gửi lên hệ thống
-                </p>
-                <p className="mt-1 text-xs">
-                  {selectedWard?.fullName ||
-                    selectedProvince?.fullName ||
-                    "Sẽ được xác định sau khi chọn đầy đủ tỉnh/thành và phường/xã"}
-                </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-white">
+                    Mật khẩu (*)
+                  </label>
+                  <Input
+                    type="password"
+                    placeholder="Nhập mật khẩu"
+                    value={formData.password}
+                    onChange={(e) =>
+                      setFormData({ ...formData, password: e.target.value })
+                    }
+                    className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-white">
+                    Nhập lại mật khẩu (*)
+                  </label>
+                  <Input
+                    type="password"
+                    placeholder="Xác nhận lại mật khẩu"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
-                  Mật khẩu (*)
-                </label>
-                <Input
-                  type="password"
-                  placeholder="Nhập mật khẩu"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
-                  className="w-full"
-                />
+              <div className="text-[11px] text-slate-400 space-y-1 bg-slate-950/40 p-3 rounded-xl border border-white/5 font-medium leading-relaxed mt-1">
+                <p className="text-slate-300 font-semibold mb-0.5">Yêu cầu mật khẩu:</p>
+                <ul className="list-disc pl-3.5 space-y-1 text-slate-300">
+                  <li>Độ dài 10 - 64 ký tự; gồm ít nhất 3 nhóm: chữ thường, chữ hoa, số hoặc ký tự đặc biệt</li>
+                  <li>Không chứa khoảng trắng, ký tự lặp liên tiếp hơn 3 lần hoặc chứa thông tin cá nhân</li>
+                </ul>
               </div>
 
               <Button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-4"
+                className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white mt-4 h-12 rounded-xl shadow-lg shadow-violet-500/10 custom-button-pulse font-semibold text-sm"
                 disabled={requestOtpMutation.isPending}
               >
                 {requestOtpMutation.isPending ? "Đang gửi OTP..." : "Đăng ký"}
               </Button>
 
-              <div className="text-center text-sm text-gray-500 mt-4">
+              <div className="text-center text-xs text-slate-400 mt-3.5">
                 Đã có tài khoản?{" "}
                 <Link
                   to="/login"
-                  className="text-blue-600 font-medium hover:underline"
+                  className="text-violet-400 font-semibold hover:text-violet-300 hover:underline"
                 >
                   Đăng nhập
                 </Link>
@@ -414,7 +430,7 @@ export function RegisterPage() {
           ) : (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Mã xác thực OTP
                 </label>
                 <Input
@@ -423,13 +439,13 @@ export function RegisterPage() {
                   placeholder="Nhập mã OTP 6 chữ số"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value)}
-                  className="w-full text-center text-lg tracking-widest font-bold"
+                  className="w-full text-center text-lg tracking-widest font-bold bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-4"
+                className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white mt-4 rounded-xl shadow-lg shadow-violet-500/10 custom-button-pulse font-semibold"
                 disabled={verifyOtpMutation.isPending}
               >
                 {verifyOtpMutation.isPending ? "Đang xác minh..." : "Xác nhận"}
@@ -440,7 +456,7 @@ export function RegisterPage() {
                   type="button"
                   onClick={handleResendOtp}
                   disabled={requestOtpMutation.isPending}
-                  className="text-sm text-blue-600 hover:underline font-medium"
+                  className="text-sm text-violet-400 hover:text-violet-300 hover:underline font-semibold"
                 >
                   Gửi lại mã OTP
                 </button>
@@ -451,7 +467,7 @@ export function RegisterPage() {
                     setError("");
                     setOtpMessage("");
                   }}
-                  className="text-xs text-gray-500 hover:underline"
+                  className="text-xs text-slate-400 hover:text-slate-300 hover:underline"
                 >
                   Quay lại chỉnh sửa thông tin
                 </button>

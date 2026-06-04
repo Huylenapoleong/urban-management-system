@@ -320,8 +320,8 @@ export function SettingsPage() {
                     src={profile.avatarAsset?.resolvedUrl || profile.avatarUrl}
                   />
                 ) : null}
-                <AvatarFallback className="bg-blue-100 text-blue-700 text-3xl font-semibold">
-                  {profile?.fullName?.charAt(0).toUpperCase() || "U"}
+                <AvatarFallback className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-semibold">
+                  <img src="/default-avatar.png" alt={profile?.fullName || "Avatar"} className="w-full h-full object-cover" />
                 </AvatarFallback>
               </Avatar>
               <Button

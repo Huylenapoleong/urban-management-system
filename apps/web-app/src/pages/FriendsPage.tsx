@@ -29,17 +29,6 @@ import { useNavigate } from "react-router-dom";
 
 type FriendsTab = "discover" | "incoming" | "outgoing" | "friends" | "blocked";
 
-function initials(name: string): string {
-  return (
-    name
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() ?? "")
-      .join("") || "U"
-  );
-}
-
 function UserRow({
   name,
   subtitle,
@@ -57,7 +46,7 @@ function UserRow({
         <Avatar className="h-10 w-10 border border-gray-100 dark:border-slate-700">
           {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
           <AvatarFallback className="bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-100 text-xs font-semibold">
-            {initials(name)}
+            <img src="/default-avatar.png" alt={name} className="w-full h-full object-cover" />
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0">

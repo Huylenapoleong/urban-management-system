@@ -116,9 +116,10 @@ export class GroupsService {
       maxLength: 100,
     });
     const groupType = requiredEnum(body, 'groupType', GROUP_TYPES);
-    const locationCode = this.locationsService.ensureKnownLocationCode(
-      requiredString(body, 'locationCode'),
-    );
+    const locationCodeInput =
+      optionalString(body, 'locationCode') ?? actor.locationCode;
+    const locationCode =
+      this.locationsService.ensureKnownLocationCode(locationCodeInput);
     const description = optionalString(body, 'description', { maxLength: 500 });
     const isOfficial = optionalBoolean(body, 'isOfficial') ?? false;
     const messagePolicy =
@@ -504,7 +505,7 @@ export class GroupsService {
       !this.authorizationService.canRenameGroup(actor, roleInGroup)
     ) {
       throw new ForbiddenException(
-        'Chỉ Trưởng nhóm mới có quyền đổi tên nhóm.',
+        'Chỉ Trưởng nhóm hoặc Phó nhóm mới có quyền đổi tên nhóm.',
       );
     }
 
