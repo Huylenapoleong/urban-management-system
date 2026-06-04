@@ -644,7 +644,7 @@ export class AppConfigService {
     }
 
     if (!ALLOWED_PUSH_PROVIDERS.has(this.pushProvider)) {
-      throw new Error('PUSH_PROVIDER must be one of: disabled, log, webhook.');
+      throw new Error('PUSH_PROVIDER must be one of: disabled, log, webhook, sns.');
     }
 
     if (this.isProduction && !this.groqApiKey.trim()) {
