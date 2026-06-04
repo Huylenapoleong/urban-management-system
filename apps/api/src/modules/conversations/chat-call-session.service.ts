@@ -88,7 +88,7 @@ export class ChatCallSessionService {
     const createdAt = nowIso();
     const session: ChatCallSession = {
       acceptedByUserIds: access.isGroup ? [callerUserId] : [],
-      acceptedAt: access.isGroup ? createdAt : null,
+      acceptedAt: null,
       conversationId: access.conversationId,
       conversationKey: access.conversationKey,
       createdAt,
@@ -292,6 +292,35 @@ export class ChatCallSessionService {
       shouldEmit: true,
       session,
     };
+  }
+
+  async timeoutCall(
+    access: ResolvedConversationAccess,
+  ): Promise<ChatCallTransitionResult> {
+    const session = await this.getSession(access.conversationKey);
+
+    // If the session is ACTIVE, someone answered.
+    if (session?.status === 'ACTIVE') {
+      return { shouldEmit: false };
+    }
+
+    // If the session is missing, it likely just expired in Redis.
+    // We still need to emit CALL_END to notify the clients.
+    if (!session) {
+      return { shouldEmit: !access.isGroup };
+    }
+
+    if (!session.isGroup) {
+      await this.deleteSession(access.conversationKey);
+
+      return {
+        shouldEmit: true,
+        session,
+      };
+    }
+
+    // Group calls don't timeout the whole session for everyone
+    return { shouldEmit: false };
   }
 
   async touchSignalingSession(

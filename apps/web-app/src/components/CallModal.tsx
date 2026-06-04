@@ -233,7 +233,7 @@ export function CallModal({ rtc }: CallModalProps) {
   }, [callState]);
 
   const title =
-    callState === "CALLING"
+    callState === "CALLING" || callState === "RINGING"
       ? "Đang gọi"
       : callState === "INCOMING"
         ? "Cuộc gọi đến"
@@ -399,9 +399,11 @@ export function CallModal({ rtc }: CallModalProps) {
   const badgeLabel =
     callState === "CALLING"
       ? "Đang kết nối"
-      : callState === "INCOMING"
+      : callState === "RINGING"
         ? "Đang đổ chuông"
-        : "Đã kết nối";
+        : callState === "INCOMING"
+          ? "Đang đổ chuông"
+          : "Đã kết nối";
   const formatCallDuration = (totalSeconds: number): string => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
     return `${Math.floor(safeSeconds / 60)
@@ -534,14 +536,23 @@ export function CallModal({ rtc }: CallModalProps) {
 
         {remoteEntries.length === 0 && callState !== "INCOMING" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-            <Avatar className="h-20 w-20 mb-4 border border-slate-700 bg-slate-800/80">
-              {primaryPeerAvatar ? (
-                <AvatarImage src={primaryPeerAvatar} alt={peerName} />
-              ) : null}
-              <AvatarFallback>
-                {peerName.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
+            <div className="relative mb-4 flex h-20 w-20 items-center justify-center">
+              {callState === "RINGING" && (
+                <>
+                  <div className="absolute inset-0 rounded-full bg-emerald-500/40 animate-ping" style={{ animationDuration: '2s' }}></div>
+                  <div className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping" style={{ animationDuration: '2s', animationDelay: '0.4s' }}></div>
+                  <div className="absolute inset-0 rounded-full bg-emerald-500/10 animate-ping" style={{ animationDuration: '2s', animationDelay: '0.8s' }}></div>
+                </>
+              )}
+              <Avatar className="relative z-10 h-20 w-20 border border-slate-700 bg-slate-800/80">
+                {primaryPeerAvatar ? (
+                  <AvatarImage src={primaryPeerAvatar} alt={peerName} />
+                ) : null}
+                <AvatarFallback>
+                  {peerName.slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+            </div>
             <p className="text-sm">Chờ mọi người tham gia...</p>
           </div>
         )}

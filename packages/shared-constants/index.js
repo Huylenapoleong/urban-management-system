@@ -106,6 +106,7 @@ const CHAT_SOCKET_EVENTS = Object.freeze({
   CALL_REJECT: "call.reject",
   CALL_END: "call.end",
   CALL_HEARTBEAT: "call.heartbeat",
+  CALL_RINGING: "call.ringing",
   WEBRTC_OFFER: "webrtc.offer",
   WEBRTC_ANSWER: "webrtc.answer",
   WEBRTC_ICE_CANDIDATE: "webrtc.ice-candidate",

@@ -72,7 +72,16 @@ describe('ChatCallSessionService', () => {
   });
 
   it('preserves the original acceptedAt when additional group participants join later', async () => {
-    await service.initiateCall(groupAccess, 'user-1', true);
+    const initiated = await service.initiateCall(groupAccess, 'user-1', true);
+
+    expect(initiated.session?.acceptedAt).toBeNull();
+    await expect(
+      service.touchSignalingSession(groupAccess, 'user-1'),
+    ).resolves.toMatchObject({
+      acceptedByUserIds: ['user-1'],
+      acceptedAt: null,
+      status: 'ACTIVE',
+    });
 
     const firstAccept = await service.acceptCall(groupAccess, 'user-2');
     const secondAccept = await service.acceptCall(groupAccess, 'user-3');
