@@ -5,7 +5,7 @@ loadEnvFiles();
 
 const DEFAULT_ACCESS_SECRET = 'dev-access-secret-change-me';
 const DEFAULT_REFRESH_SECRET = 'dev-refresh-secret-change-me';
-const ALLOWED_PUSH_PROVIDERS = new Set(['disabled', 'log', 'webhook']);
+const ALLOWED_PUSH_PROVIDERS = new Set(['disabled', 'log', 'webhook', 'sns']);
 const ALLOWED_AUTH_OTP_PROVIDERS = new Set([
   'disabled',
   'log',
@@ -200,6 +200,10 @@ export class AppConfigService {
     .toLowerCase();
   readonly pushWebhookUrl = process.env.PUSH_WEBHOOK_URL || undefined;
   readonly pushWebhookTimeoutMs = readNumber('PUSH_WEBHOOK_TIMEOUT_MS', 5000);
+  readonly pushSnsAndroidPlatformApplicationArn =
+    process.env.PUSH_SNS_ANDROID_PLATFORM_APPLICATION_ARN || undefined;
+  readonly pushSnsIosPlatformApplicationArn =
+    process.env.PUSH_SNS_IOS_PLATFORM_APPLICATION_ARN || undefined;
   readonly authOtpProvider = (process.env.AUTH_OTP_PROVIDER ?? 'log')
     .trim()
     .toLowerCase();
@@ -651,6 +655,17 @@ export class AppConfigService {
       throw new Error(
         'PUSH_WEBHOOK_URL is required when PUSH_PROVIDER=webhook.',
       );
+    }
+
+    if (this.pushProvider === 'sns') {
+      if (
+        !this.pushSnsAndroidPlatformApplicationArn &&
+        !this.pushSnsIosPlatformApplicationArn
+      ) {
+        throw new Error(
+          'At least one of PUSH_SNS_ANDROID_PLATFORM_APPLICATION_ARN or PUSH_SNS_IOS_PLATFORM_APPLICATION_ARN must be set when PUSH_PROVIDER=sns.',
+        );
+      }
     }
 
     if (!ALLOWED_AUTH_OTP_PROVIDERS.has(this.authOtpProvider)) {

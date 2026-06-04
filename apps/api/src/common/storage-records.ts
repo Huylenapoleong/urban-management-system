@@ -201,6 +201,7 @@ export interface StoredPushDevice
   userId: string;
   deviceId: string;
   pushToken: string;
+  endpointArn?: string;
 }
 
 export interface StoredPushTokenLookup extends TableItemBase {

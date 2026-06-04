@@ -3158,6 +3158,9 @@ class ChatMessageBubble extends StatelessWidget {
       );
     }
 
+    final hasAttachment = message.resolvedAttachmentUrl != null;
+    final hasText = message.contentText.isNotEmpty;
+
     return Column(
       crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -3179,7 +3182,7 @@ class ChatMessageBubble extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
               ],
-              _buildBubble(context),
+              _buildMessageContent(context, hasText, hasAttachment),
             ],
           ),
         ),
@@ -3200,7 +3203,66 @@ class ChatMessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildBubble(BuildContext context) {
+  Widget _buildMessageContent(BuildContext context, bool hasText, bool hasAttachment) {
+    if (hasAttachment) {
+      if (hasText) {
+        return ConstrainedBox(
+          constraints:
+              BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+          child: Column(
+            crossAxisAlignment:
+                isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildBubble(context, showMeta: false),
+              const SizedBox(height: 4),
+              _buildAttachmentOnly(context),
+            ],
+          ),
+        );
+      } else {
+        return _buildAttachmentOnly(context);
+      }
+    } else {
+      return _buildBubble(context);
+    }
+  }
+
+  Widget _buildAttachmentOnly(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ConstrainedBox(
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+      child: Column(
+        crossAxisAlignment:
+            isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _AttachmentView(message: message, isMine: isMine),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _formatTime(message.sentAtDate),
+                style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600]),
+              ),
+              if (isMine) ...[
+                const SizedBox(width: 4),
+                _buildDeliveryStatusIcon(outside: true, context: context),
+              ],
+            ],
+          ),
+          if (reactions.isNotEmpty)
+            _buildReactionsDisplay(context, isMine, outside: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBubble(BuildContext context, {bool showMeta = true}) {
     return ConstrainedBox(
       constraints:
           BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
@@ -3238,43 +3300,46 @@ class ChatMessageBubble extends StatelessWidget {
             else ...[
               if (message.replyTo != null) _buildReplyHeader(context),
               if (message.contentText.isNotEmpty) _buildContentBody(context),
-              if (message.resolvedAttachmentUrl != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: _AttachmentView(message: message, isMine: isMine),
-                ),
             ],
-            const SizedBox(height: 4),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatTime(message.sentAtDate),
-                  style: TextStyle(
-                      fontSize: 10,
-                      color: isMine
-                          ? Colors.white.withOpacity(0.7)
-                          : Colors.grey[500]),
-                ),
-                if (isMine) ...[
-                  const SizedBox(width: 4),
-                  _buildDeliveryStatusIcon(),
+            if (showMeta) ...[
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _formatTime(message.sentAtDate),
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: isMine
+                            ? Colors.white.withOpacity(0.7)
+                            : Colors.grey[500]),
+                  ),
+                  if (isMine) ...[
+                    const SizedBox(width: 4),
+                    _buildDeliveryStatusIcon(),
+                  ],
                 ],
-              ],
-            ),
-            if (reactions.isNotEmpty) _buildReactionsDisplay(context, isMine),
+              ),
+              if (reactions.isNotEmpty) _buildReactionsDisplay(context, isMine),
+            ],
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDeliveryStatusIcon() {
+  Widget _buildDeliveryStatusIcon({bool outside = false, BuildContext? context}) {
+    Color iconColor = Colors.white70;
+    if (outside && context != null) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      iconColor = isDark ? Colors.grey[400]! : Colors.grey[600]!;
+    }
+
     if (message.isPending) {
-      return const Icon(
+      return Icon(
         Icons.access_time,
         size: 11,
-        color: Colors.white70,
+        color: iconColor,
       );
     }
 
@@ -3282,16 +3347,16 @@ class ChatMessageBubble extends StatelessWidget {
     if (state == 'READ') {
       return const SizedBox.shrink();
     } else if (state == 'DELIVERED') {
-      return const Icon(
+      return Icon(
         Icons.done_all,
         size: 13,
-        color: Colors.white70,
+        color: iconColor,
       );
     } else {
-      return const Icon(
+      return Icon(
         Icons.check,
         size: 13,
-        color: Colors.white70,
+        color: iconColor,
       );
     }
   }
@@ -3558,8 +3623,12 @@ class ChatMessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildReactionsDisplay(BuildContext context, bool isMine) {
+  Widget _buildReactionsDisplay(BuildContext context, bool isMine, {bool outside = false}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final containerColor = (outside || !isMine)
+        ? (isDark ? const Color(0xFF334155) : Colors.grey[200])
+        : Colors.white.withOpacity(0.2);
+
     return Container(
       margin: const EdgeInsets.only(top: 4),
       child: Wrap(
@@ -3569,11 +3638,7 @@ class ChatMessageBubble extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isMine
-                        ? Colors.white.withOpacity(0.2)
-                        : (isDark
-                            ? const Color(0xFF334155)
-                            : Colors.grey[100]),
+                    color: containerColor,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(emoji,
@@ -3795,8 +3860,8 @@ class _AttachmentView extends StatelessWidget {
             color: message.isVideo
                 ? Colors.black87
                 : (isMine
-                    ? Colors.white24
-                    : (isDark ? const Color(0xFF334155) : Colors.grey[100])),
+                    ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
+                    : (isDark ? const Color(0xFF334155) : Colors.grey[200])),
             borderRadius: BorderRadius.circular(10),
           ),
           child: message.isVideo
@@ -3809,7 +3874,7 @@ class _AttachmentView extends StatelessWidget {
                     Icon(
                       Icons.insert_drive_file,
                       color: isMine
-                          ? Colors.white
+                          ? (isDark ? Colors.white : const Color(0xFF7C3AED))
                           : (isDark ? Colors.white70 : Colors.black54),
                     ),
                     const SizedBox(width: 8),
@@ -3820,7 +3885,7 @@ class _AttachmentView extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             color: isMine
-                                ? Colors.white
+                                ? (isDark ? Colors.white : const Color(0xFF6D28D9))
                                 : (isDark ? Colors.white70 : Colors.black87)),
                       ),
                     ),
@@ -3879,7 +3944,7 @@ class _VoicePlayerState extends State<_VoicePlayer> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: widget.isMine
-            ? Colors.white.withOpacity(0.2)
+            ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
             : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -3888,7 +3953,9 @@ class _VoicePlayerState extends State<_VoicePlayer> {
           IconButton(
             icon: Icon(
               _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-              color: widget.isMine ? Colors.white : const Color(0xFF7C3AED),
+              color: widget.isMine
+                  ? (isDark ? Colors.white : const Color(0xFF7C3AED))
+                  : const Color(0xFF7C3AED),
               size: 32,
             ),
             onPressed: _togglePlay,
@@ -3908,9 +3975,11 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                     max: _duration.inMilliseconds.toDouble() > 0 
                         ? _duration.inMilliseconds.toDouble() 
                         : 1.0,
-                    activeColor: widget.isMine ? Colors.white : const Color(0xFF7C3AED),
+                    activeColor: widget.isMine
+                        ? (isDark ? Colors.white : const Color(0xFF7C3AED))
+                        : const Color(0xFF7C3AED),
                     inactiveColor: widget.isMine
-                        ? Colors.white38
+                        ? (isDark ? Colors.white38 : const Color(0xFFDDD6FE))
                         : (isDark ? Colors.grey[600] : Colors.grey[300]),
                     onChanged: (val) {
                       _audioPlayer.seek(Duration(milliseconds: val.toInt()));
@@ -3927,7 +3996,7 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                         style: TextStyle(
                             fontSize: 10,
                             color: widget.isMine
-                                ? Colors.white70
+                                ? (isDark ? Colors.white70 : const Color(0xFF6D28D9))
                                 : (isDark ? Colors.grey[400] : Colors.grey)),
                       ),
                       Text(
@@ -3935,7 +4004,7 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                         style: TextStyle(
                             fontSize: 10,
                             color: widget.isMine
-                                ? Colors.white70
+                                ? (isDark ? Colors.white70 : const Color(0xFF6D28D9))
                                 : (isDark ? Colors.grey[400] : Colors.grey)),
                       ),
                     ],
