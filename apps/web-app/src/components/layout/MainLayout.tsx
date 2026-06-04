@@ -1,5 +1,8 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useConversations } from "@/hooks/shared/useChatData";
+import {
+  useConversationList,
+  useConversationRealtimeBridge,
+} from "@/hooks/shared/useChatData";
 import { useIncomingFriendRequests } from "@/hooks/useFriendsData";
 import { readAccessToken } from "@/lib/api-client";
 import { preloadChatPage } from "@/lib/route-preload";
@@ -84,14 +87,15 @@ export function Sidebar({
   onOpenChatbot,
   isDarkMode,
   onToggleTheme,
+  conversations,
 }: {
   onOpenChatbot: () => void;
   isDarkMode: boolean;
   onToggleTheme: () => void;
+  conversations: ConversationSummary[];
 }) {
   const navigate = useNavigate();
   const { user, logout, isLoading: loadingAuth } = useAuth();
-  const { data: conversations = [] } = useConversations();
   const { data: incomingRequestsData } = useIncomingFriendRequests(50);
   const hasToken = Boolean(readAccessToken());
   const { data: profile } = useQuery({
@@ -336,7 +340,8 @@ export function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data: conversations = [] } = useConversations();
+  const { data: conversations = [] } = useConversationList();
+  useConversationRealtimeBridge(conversations);
 
   const [activeNotification, setActiveNotification] = useState<{
     conversationId: string;
@@ -684,6 +689,7 @@ export function MainLayout() {
           onOpenChatbot={() => setIsChatbotOpen(true)}
           isDarkMode={isDarkMode}
           onToggleTheme={handleToggleTheme}
+          conversations={conversations}
         />
         <main className="flex-1 flex min-h-0 overflow-y-auto overflow-x-hidden order-1 md:order-2">
           <Suspense
