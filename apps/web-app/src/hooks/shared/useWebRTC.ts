@@ -471,7 +471,7 @@ export function useWebRTC() {
     if (callState !== "CALLING") return;
     const config = activeConfigRef.current;
     const isGroup = isGroupCall(config);
-    const timeoutMs = isGroup ? 45_000 : 15_000;
+    const timeoutMs = isGroup ? 45_000 : 30_000;
 
     const timer = window.setTimeout(() => {
       if (callStateRef.current === "CALLING") {
@@ -616,7 +616,7 @@ export function useWebRTC() {
             handlePeerConnectionLost(peerId);
           }
         }
-      }, 15_000);
+      }, 5_000); // Wait 5 seconds before triggering ICE restart
       peerDisconnectTimersRef.current.set(peerId, timerId);
     },
     [
