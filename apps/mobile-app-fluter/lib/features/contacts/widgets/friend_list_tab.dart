@@ -1,3 +1,4 @@
+import "dart:async";
 import "package:flutter/material.dart";
 import "package:skeletonizer/skeletonizer.dart";
 import "../../../services/user_service.dart";
@@ -24,6 +25,11 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
   String _searchQuery = "";
   UserProfile? _currentUser;
 
+  StreamSubscription? _presenceSub;
+  StreamSubscription? _snapshotSub;
+  StreamSubscription? _readySub;
+  Map<String, dynamic> _userPresence = {};
+
   @override
   bool get wantKeepAlive => true;
 
@@ -31,6 +37,52 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
   void initState() {
     super.initState();
     _loadFriends();
+
+    final socketService = context.read<AppServices>().socketService;
+
+    _presenceSub = socketService.onPresenceUpdated.listen((data) {
+      final presence = data["presence"] ?? data;
+      final userId = presence["userId"]?.toString();
+      if (mounted && userId != null) {
+        setState(() {
+          _userPresence = Map<String, dynamic>.from(_userPresence);
+          _userPresence[userId] = presence;
+        });
+      }
+    });
+
+    _snapshotSub = socketService.onPresenceSnapshot.listen((data) {
+      final participants = data["participants"];
+      if (mounted && participants is List) {
+        setState(() {
+          _userPresence = Map<String, dynamic>.from(_userPresence);
+          for (var p in participants) {
+            if (p is Map) {
+              final userId = p["userId"]?.toString();
+              if (userId != null) {
+                _userPresence[userId] = p;
+              }
+            }
+          }
+        });
+      }
+    });
+
+    _readySub = socketService.onChatReady.listen((_) {
+      if (mounted) {
+        for (final f in _friends) {
+          socketService.joinConversation("dm:${f.id}");
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _presenceSub?.cancel();
+    _snapshotSub?.cancel();
+    _readySub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadFriends() async {
@@ -44,11 +96,29 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
           .toList();
       if (mounted) {
         final session = context.read<SessionController>();
+        final socketService = context.read<AppServices>().socketService;
         setState(() {
           _friends = friends;
           _isLoading = false;
           _currentUser = session.user;
         });
+
+        // Join conversation room for each friend to receive updates
+        for (final f in friends) {
+          socketService.joinConversation("dm:${f.id}");
+
+          // Proactively fetch initial presence
+          if (!_userPresence.containsKey(f.id)) {
+            widget.userService.getUserPresence(f.id).then((presence) {
+              if (mounted) {
+                setState(() {
+                  _userPresence = Map<String, dynamic>.from(_userPresence);
+                  _userPresence[f.id] = presence;
+                });
+              }
+            }).catchError((_) {});
+          }
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
@@ -111,6 +181,9 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
   }
 
   Widget _buildFriendItem(UserProfile friend) {
+    final presence = _userPresence[friend.id];
+    final isActive = (presence is Map && presence["isActive"] == true) || (presence == true);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -120,24 +193,14 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Stack(
-          children: [
-            UserAvatar(
-              userId: friend.id,
-              initialAvatarUrl: friend.avatarUrl,
-              initialDisplayName: friend.fullName,
-              radius: 28,
-              userService: widget.userService,
-            ),
-            Positioned(
-              bottom: 2,
-              right: 2,
-              child: Container(
-                width: 12, height: 12,
-                decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle, border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? (Theme.of(context).cardTheme.color ?? const Color(0xFF1E293B)) : Colors.white, width: 2)),
-              ),
-            ),
-          ],
+        leading: UserAvatar(
+          userId: friend.id,
+          initialAvatarUrl: friend.avatarUrl,
+          initialDisplayName: friend.fullName,
+          radius: 28,
+          showStatus: true,
+          isActive: isActive,
+          userService: widget.userService,
         ),
         title: Text(friend.fullName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF1E1B4B))),
         subtitle: Text(friend.email ?? "Citizen", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
