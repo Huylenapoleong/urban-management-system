@@ -48,6 +48,14 @@ export class AuthenticatedChatbotAskDto {
   @ValidateNested()
   @Type(() => ChatbotSelectedTargetDto)
   selectedTarget?: ChatbotSelectedTargetDto;
+
+  @ApiPropertyOptional({
+    description: 'Mảng conversation ids match từ alias cục bộ ở frontend',
+    type: [String],
+  })
+  @IsOptional()
+  @IsString({ each: true })
+  matchIds?: string[];
 }
 
 export interface ChatbotConversationTargetDto {

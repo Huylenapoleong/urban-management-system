@@ -870,10 +870,10 @@ export class GroupOwnershipTransferResultDto {
 
 export class CallEventInfoDto {
   @ApiProperty({
-    enum: ['REJECTED', 'ENDED', 'PARTICIPANT_LEFT'],
+    enum: ['REJECTED', 'ENDED', 'PARTICIPANT_JOINED', 'PARTICIPANT_LEFT'],
     example: 'ENDED',
   })
-  status!: 'REJECTED' | 'ENDED' | 'PARTICIPANT_LEFT';
+  status!: 'REJECTED' | 'ENDED' | 'PARTICIPANT_JOINED' | 'PARTICIPANT_LEFT';
 
   @ApiProperty({ example: true })
   isVideo!: boolean;
@@ -897,6 +897,9 @@ export class CallEventInfoDto {
 
   @ApiProperty({ example: '01JPCY0000CITIZENA00000000' })
   initiatedByUserId!: string;
+
+  @ApiPropertyOptional({ example: '01JPCY0000CITIZENB00000000' })
+  participantUserId?: string;
 
   @ApiPropertyOptional({ example: '01JPCY0000CITIZENB00000000' })
   endedByUserId?: string;
@@ -3084,4 +3087,41 @@ export class PresignDownloadResultDto {
 
   @ApiProperty({ example: '2026-03-20T10:10:00.000Z' })
   expiresAt!: string;
+}
+
+export class SocialGraphDto {
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+    description: 'Map of group conversation IDs to arrays of member user IDs.',
+  })
+  groupMembersMap!: Record<string, string[]>;
+
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: {
+      $ref: '#/components/schemas/UserDirectoryItemDto',
+    },
+    description: 'Map of user IDs to their directory profile items.',
+  })
+  profiles!: Record<string, any>;
+}
+
+export class GlobalMessageSearchResultDto {
+  @ApiProperty({
+    type: 'array',
+    items: { $ref: '#/components/schemas/MessageItemDto' },
+    description: 'Text messages matching the keyword.',
+  })
+  messages!: any[];
+
+  @ApiProperty({
+    type: 'array',
+    items: { $ref: '#/components/schemas/MessageItemDto' },
+    description: 'Messages with attachments matching the keyword.',
+  })
+  files!: any[];
 }

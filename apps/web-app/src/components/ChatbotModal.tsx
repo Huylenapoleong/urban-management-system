@@ -52,7 +52,9 @@ function formatBotMessage(text: string): BotMessageLine[] {
     rawLines.length === 1 && /\s-\s/.test(rawLines[0])
       ? rawLines[0]
           .split(/\s-\s/)
-          .map((part, index) => (index === 0 ? part.trim() : `- ${part.trim()}`))
+          .map((part, index) =>
+            index === 0 ? part.trim() : `- ${part.trim()}`,
+          )
       : rawLines;
 
   return lines.map((line) => {
@@ -144,10 +146,14 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
   const clampPosition = (x: number, y: number) => {
     const width =
       modalRef.current?.offsetWidth ??
-      (typeof window === "undefined" ? 520 : Math.min(window.innerWidth * 0.92, 520));
+      (typeof window === "undefined"
+        ? 520
+        : Math.min(window.innerWidth * 0.92, 520));
     const height =
       modalRef.current?.offsetHeight ??
-      (typeof window === "undefined" ? 620 : Math.min(window.innerHeight * 0.78, 620));
+      (typeof window === "undefined"
+        ? 620
+        : Math.min(window.innerHeight * 0.78, 620));
 
     const maxX = Math.max(16, window.innerWidth - width - 16);
     const maxY = Math.max(16, window.innerHeight - height - 16);
@@ -241,7 +247,34 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
       ...prev,
       { id: Date.now().toString(), sender: "user", text: inputText },
     ]);
-    chatbotMutation.mutate({ question: inputText });
+
+    const normalizedInput = inputText.toLowerCase();
+    let matchIds: string[] = [];
+    try {
+      const storedAliases = localStorage.getItem("chat_conversation_aliases");
+      if (storedAliases) {
+        const parsedAliases = JSON.parse(storedAliases) as Record<
+          string,
+          string
+        >;
+        matchIds = Object.entries(parsedAliases)
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          .filter(([_convId, alias]) =>
+            normalizedInput.includes(alias.toLowerCase()),
+          )
+          .map(([id]) => id);
+      }
+    } catch (e) {
+      console.error(
+        "Failed to parse conversation aliases from local storage",
+        e,
+      );
+    }
+
+    chatbotMutation.mutate({
+      question: inputText,
+      ...(matchIds.length > 0 ? { matchIds } : {}),
+    });
     setInputText("");
   };
 
@@ -296,7 +329,9 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const handleHeaderPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handleHeaderPointerDown = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
     if ((event.target as HTMLElement).closest("button")) {
       return;
     }
@@ -342,7 +377,9 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
             </div>
             <div>
               <h2 className="font-semibold text-sm">Trợ lý AI</h2>
-              <p className="text-xs text-blue-100">Hỗ trợ tác vụ quản trị đô thị</p>
+              <p className="text-xs text-blue-100">
+                Hỗ trợ tác vụ quản trị đô thị
+              </p>
             </div>
           </div>
           <button
@@ -358,7 +395,9 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
           <div className="flex flex-col gap-4">
             {messages.map((msg) => {
               const isUser = msg.sender === "user";
-              const formattedBotLines = isUser ? [] : formatBotMessage(msg.text);
+              const formattedBotLines = isUser
+                ? []
+                : formatBotMessage(msg.text);
               return (
                 <div
                   key={msg.id}
@@ -382,7 +421,9 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
                     }`}
                   >
                     {isUser ? (
-                      <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
+                      <p className="leading-relaxed whitespace-pre-wrap break-words">
+                        {msg.text}
+                      </p>
                     ) : (
                       <div className="space-y-1.5">
                         {formattedBotLines.map((line, index) => {
@@ -399,24 +440,39 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
 
                           if (line.kind === "numbered") {
                             return (
-                              <p key={`${msg.id}-${index}`} className="leading-relaxed break-words flex gap-2">
-                                <span className="font-semibold text-slate-700 dark:text-slate-200">{line.marker}</span>
-                                <span className="whitespace-pre-wrap">{renderInlineText(line.text)}</span>
+                              <p
+                                key={`${msg.id}-${index}`}
+                                className="leading-relaxed break-words flex gap-2"
+                              >
+                                <span className="font-semibold text-slate-700 dark:text-slate-200">
+                                  {line.marker}
+                                </span>
+                                <span className="whitespace-pre-wrap">
+                                  {renderInlineText(line.text)}
+                                </span>
                               </p>
                             );
                           }
 
                           if (line.kind === "bullet") {
                             return (
-                              <p key={`${msg.id}-${index}`} className="leading-relaxed break-words flex gap-2">
+                              <p
+                                key={`${msg.id}-${index}`}
+                                className="leading-relaxed break-words flex gap-2"
+                              >
                                 <span className="font-semibold">•</span>
-                                <span className="whitespace-pre-wrap">{renderInlineText(line.text)}</span>
+                                <span className="whitespace-pre-wrap">
+                                  {renderInlineText(line.text)}
+                                </span>
                               </p>
                             );
                           }
 
                           return (
-                            <p key={`${msg.id}-${index}`} className="leading-relaxed whitespace-pre-wrap break-words">
+                            <p
+                              key={`${msg.id}-${index}`}
+                              className="leading-relaxed whitespace-pre-wrap break-words"
+                            >
                               {renderInlineText(line.text)}
                             </p>
                           );
@@ -446,7 +502,10 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <form onSubmit={handleSend} className="relative p-3 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-700 flex gap-2 shrink-0">
+        <form
+          onSubmit={handleSend}
+          className="relative p-3 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-700 flex gap-2 shrink-0"
+        >
           {showSlashSuggestions && (
             <div
               className="absolute left-3 right-3 bottom-[64px] rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden"
@@ -500,7 +559,10 @@ export function ChatbotModal({ onClose }: { onClose: () => void }) {
             disabled={!inputText.trim() || chatbotMutation.isPending}
             className="h-10 w-10 rounded-full bg-blue-600 hover:bg-blue-700 p-0 flex items-center justify-center shrink-0"
           >
-            <Send size={16} className={inputText.trim() ? "text-white" : "text-blue-200"} />
+            <Send
+              size={16}
+              className={inputText.trim() ? "text-white" : "text-blue-200"}
+            />
           </Button>
         </form>
       </div>

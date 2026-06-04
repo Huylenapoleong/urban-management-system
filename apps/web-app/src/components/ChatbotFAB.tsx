@@ -59,7 +59,34 @@ export function ChatbotFAB() {
       ...prev,
       { id: Date.now().toString(), sender: "user", text: inputText },
     ]);
-    chatbotMutation.mutate({ question: inputText });
+
+    const normalizedInput = inputText.toLowerCase();
+    let matchIds: string[] = [];
+    try {
+      const storedAliases = localStorage.getItem("chat_conversation_aliases");
+      if (storedAliases) {
+        const parsedAliases = JSON.parse(storedAliases) as Record<
+          string,
+          string
+        >;
+        matchIds = Object.entries(parsedAliases)
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          .filter(([_convId, alias]) =>
+            normalizedInput.includes(alias.toLowerCase()),
+          )
+          .map(([id]) => id);
+      }
+    } catch (e) {
+      console.error(
+        "Failed to parse conversation aliases from local storage",
+        e,
+      );
+    }
+
+    chatbotMutation.mutate({
+      question: inputText,
+      ...(matchIds.length > 0 ? { matchIds } : {}),
+    });
     setInputText("");
   };
 
@@ -116,7 +143,7 @@ export function ChatbotFAB() {
                           </AvatarFallback>
                         </Avatar>
                       )}
-                      
+
                       <div
                         className={`px-4 py-2.5 rounded-2xl text-sm shadow-sm ${
                           isUser
@@ -164,7 +191,10 @@ export function ChatbotFAB() {
                 disabled={!inputText.trim() || chatbotMutation.isPending}
                 className="h-10 w-10 rounded-full bg-blue-600 hover:bg-blue-700 p-0 flex items-center justify-center shrink-0"
               >
-                <Send size={16} className={inputText.trim() ? "text-white" : "text-blue-200"} />
+                <Send
+                  size={16}
+                  className={inputText.trim() ? "text-white" : "text-blue-200"}
+                />
               </Button>
             </form>
           </div>

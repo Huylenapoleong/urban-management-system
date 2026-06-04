@@ -35,6 +35,7 @@ export class AuthenticatedChatbotService {
     actor: AuthenticatedUser,
     question: string,
     selectedTarget?: ChatbotSelectedTargetDto,
+    matchIds?: string[],
   ): Promise<AuthenticatedChatbotResultDto> {
     const trimmedQuestion = question.trim();
 
@@ -47,7 +48,7 @@ export class AuthenticatedChatbotService {
       ? this.extractSummaryTargetQuery(trimmedQuestion)
       : trimmedQuestion;
     const matches = targetQuery
-      ? await this.findConversationTargets(actor, targetQuery)
+      ? await this.findConversationTargets(actor, targetQuery, matchIds)
       : [];
 
     if (matches.length === 1) {
@@ -170,6 +171,7 @@ export class AuthenticatedChatbotService {
   private async findConversationTargets(
     actor: AuthenticatedUser,
     targetQuery: string,
+    matchIds?: string[],
   ): Promise<MatchedConversationTarget[]> {
     const normalizedQuery = this.normalizeText(targetQuery);
 
@@ -177,16 +179,16 @@ export class AuthenticatedChatbotService {
       return [];
     }
 
-    const conversations = await this.listVisibleConversations(actor);
-    const matches = conversations.filter((conversation) => {
-      const normalizedName = this.normalizeText(conversation.groupName);
-
-      return (
-        normalizedName === normalizedQuery ||
-        normalizedName.includes(normalizedQuery) ||
-        normalizedQuery.includes(normalizedName)
-      );
+    const response = await this.conversationsService.listConversations(actor, {
+      q: targetQuery,
+      matchIds: matchIds?.join(','),
+      limit: String(MAX_CONVERSATION_CANDIDATES),
+      includeArchived: 'true',
     });
+
+    const matches = response.data.filter(
+      (conversation) => !conversation.deletedAt,
+    );
 
     return matches.map((conversation) => ({
       ...this.toTarget(conversation),

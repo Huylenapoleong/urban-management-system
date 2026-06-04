@@ -153,6 +153,7 @@ export class ChatbotController {
       user,
       dto.question,
       dto.selectedTarget,
+      dto.matchIds,
     );
   }
 

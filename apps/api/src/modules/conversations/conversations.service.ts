@@ -187,6 +187,8 @@ export class ConversationsService {
       parseBooleanQuery(query.unreadOnly, 'unreadOnly') ?? false;
     const includeArchived =
       parseBooleanQuery(query.includeArchived, 'includeArchived') ?? false;
+    const matchIds =
+      typeof query.matchIds === 'string' ? query.matchIds.split(',') : [];
     const limit = parseLimit(query.limit);
     const items = await this.repository.queryByPk<StoredConversation>(
       this.config.dynamodbConversationsTableName,
@@ -249,6 +251,10 @@ export class ConversationsService {
       if (!keyword) {
         return true;
       }
+
+      if (matchIds.includes(item.conversationId)) {
+        return true;
+      }
       const counterpartId = this.getDmCounterpartId(actor.id, item);
       const alias = counterpartId
         ? aliasByConversationTargetForSearch.get(
@@ -297,6 +303,108 @@ export class ConversationsService {
       ),
       page.nextCursor,
     );
+  }
+
+  async getSocialGraph(actor: AuthenticatedUser) {
+    const actorMemberships = await this.groupsService.listMembershipsForUser(
+      actor.id,
+    );
+    const activeGroupIds = actorMemberships
+      .filter((m) => !m.deletedAt)
+      .map((m) => m.groupId);
+
+    const groupMembersMap: Record<string, string[]> = {};
+    const allUserIds = new Set<string>();
+
+    await Promise.all(
+      activeGroupIds.map(async (groupId) => {
+        try {
+          const members = await this.groupsService.listMembers(actor, groupId);
+          const activeMembers = members.map((m) => m.userId);
+          groupMembersMap[groupId] = activeMembers;
+          for (const userId of activeMembers) {
+            allUserIds.add(userId);
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to fetch members for group ${groupId}: ${error}`,
+          );
+        }
+      }),
+    );
+
+    const profilesList = await this.usersService.getProfilesForSocialGraph(
+      actor.id,
+      Array.from(allUserIds),
+    );
+
+    const profiles: Record<string, any> = {};
+    for (const p of profilesList) {
+      profiles[p.userId] = p;
+    }
+
+    return {
+      groupMembersMap,
+      profiles,
+    };
+  }
+
+  async globalSearchMessages(actor: AuthenticatedUser, q: string) {
+    if (!q || q.trim().length === 0) {
+      return { messages: [], files: [] };
+    }
+
+    const items = await this.repository.queryByPk<StoredConversation>(
+      this.config.dynamodbConversationsTableName,
+      makeInboxPk(actor.id),
+      { beginsWith: 'CONV#' },
+    );
+
+    const uniqueItemsMap = new Map<string, StoredConversation>();
+    for (const item of items) {
+      if (item.deletedAt || item.archivedAt || item.requestStatus) continue;
+      const existing = uniqueItemsMap.get(item.conversationId);
+      if (!existing || item.updatedAt > existing.updatedAt) {
+        uniqueItemsMap.set(item.conversationId, item);
+      }
+    }
+
+    const deduplicatedItems = Array.from(uniqueItemsMap.values())
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 30);
+
+    const messages: MessageItem[] = [];
+    const files: MessageItem[] = [];
+
+    await Promise.all(
+      deduplicatedItems.map(async (item) => {
+        try {
+          const res = await this.listMessages(actor, item.conversationId, {
+            q,
+            limit: 20,
+          });
+
+          for (const msg of res.data) {
+            messages.push(msg);
+            if (msg.attachmentUrl || msg.attachmentAsset) {
+              files.push(msg);
+            }
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to search messages in ${item.conversationId}: ${error}`,
+          );
+        }
+      }),
+    );
+
+    messages.sort((a, b) => b.id.localeCompare(a.id));
+    files.sort((a, b) => b.id.localeCompare(a.id));
+
+    return {
+      messages: messages.slice(0, 100),
+      files: files.slice(0, 100),
+    };
   }
 
   async listDirectRequests(

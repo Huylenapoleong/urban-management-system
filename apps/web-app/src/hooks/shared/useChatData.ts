@@ -110,7 +110,7 @@ function isMessageItem(value: unknown): value is MessageItem {
   );
 }
 
-export function useConversations(searchTerm?: string) {
+export function useConversations(searchTerm?: string, matchIds?: string[]) {
   const queryClient = useQueryClient();
   const joinedConversationIdsRef = useRef<Set<string>>(new Set());
   const lastConversationRefreshAtRef = useRef(0);
@@ -244,8 +244,8 @@ export function useConversations(searchTerm?: string) {
   }, [queryClient, scheduleConversationsRefresh]);
 
   const query = useQuery({
-    queryKey: ["conversations", searchTerm?.trim() ?? ""],
-    queryFn: () => listConversations(searchTerm),
+    queryKey: ["conversations", searchTerm?.trim() ?? "", matchIds?.join(",") ?? ""],
+    queryFn: () => listConversations(searchTerm, matchIds),
     staleTime: 10 * 1000,
     refetchOnMount: false,
     refetchOnReconnect: false,
