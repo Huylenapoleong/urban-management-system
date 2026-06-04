@@ -21,6 +21,8 @@ class SocketService {
   final _connectionStatusController = StreamController<bool>.broadcast();
   final _conversationUpdatedController =
       StreamController<ConversationSummary>.broadcast();
+  final _conversationReadController =
+      StreamController<Map<String, dynamic>>.broadcast();
   final _presenceUpdatedController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _typingStateController =
@@ -52,6 +54,8 @@ class SocketService {
   Stream<bool> get onConnectionStatus => _connectionStatusController.stream;
   Stream<ConversationSummary> get onConversationUpdated =>
       _conversationUpdatedController.stream;
+  Stream<Map<String, dynamic>> get onConversationRead =>
+      _conversationReadController.stream;
   Stream<Map<String, dynamic>> get onPresenceUpdated =>
       _presenceUpdatedController.stream;
   Stream<Map<String, dynamic>> get onTypingState =>
@@ -177,6 +181,13 @@ class SocketService {
       }
     });
 
+    socket.on("conversation.read", (data) {
+      _logger.d("Socket event conversation.read: $data");
+      if (data is Map) {
+        _conversationReadController.add(data.cast<String, dynamic>());
+      }
+    });
+
     socket.on("presence.updated", (data) {
       if (data is Map<String, dynamic>) {
         _presenceUpdatedController.add(data);
@@ -270,6 +281,15 @@ class SocketService {
   void markAsRead(String conversationId) {
     if (isConnected) {
       _socket?.emit("conversation.read", {"conversationId": conversationId});
+    }
+  }
+
+  void markMessageDelivered(String conversationId, String messageId) {
+    if (isConnected) {
+      _socket?.emit("message.delivered", {
+        "conversationId": conversationId,
+        "messageId": messageId,
+      });
     }
   }
 
@@ -410,6 +430,7 @@ class SocketService {
     _messageUpdatedController.close();
     _messageDeletedController.close();
     _conversationUpdatedController.close();
+    _conversationReadController.close();
     _presenceUpdatedController.close();
     _typingStateController.close();
     _presenceSnapshotController.close();

@@ -97,23 +97,29 @@ export function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-slate-100 flex items-center justify-center p-4 py-10 overflow-y-auto">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="bg-blue-600 p-6 text-center text-white">
-          <h1 className="text-2xl font-bold">Quên mật khẩu</h1>
-          <p className="text-blue-100 mt-2 text-sm">
+    <div className="min-h-screen w-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 flex items-center justify-center p-4 py-10 overflow-y-auto relative overflow-hidden">
+      {/* Ambient background glows */}
+      <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-80 h-80 rounded-full bg-violet-600/15 blur-[100px] animate-pulse pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 w-96 h-96 rounded-full bg-indigo-500/15 blur-[120px] animate-pulse pointer-events-none [animation-delay:2s]" />
+
+      <div className="max-w-md w-full bg-slate-900/95 backdrop-blur-2xl rounded-2xl premium-shadow-lg overflow-hidden animate-slide-up relative z-10 border border-white/10">
+        <div className="p-8 text-center border-b border-white/5 bg-white/5">
+          <h1 className="text-2xl font-bold tracking-tight gradient-text-purple bg-gradient-to-r from-violet-400 to-indigo-300">
+            Quên mật khẩu
+          </h1>
+          <p className="text-slate-300 mt-2 text-sm font-medium">
             Lấy lại quyền truy cập tài khoản
           </p>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-8 space-y-4">
           {message && (
-            <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm">
+            <div className="bg-emerald-950/50 border border-emerald-500/30 text-emerald-400 p-3 rounded-xl text-sm font-medium">
               {message}
             </div>
           )}
           {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+            <div className="bg-red-950/50 border border-red-500/30 text-red-400 p-3 rounded-xl text-sm font-medium">
               {error}
             </div>
           )}
@@ -121,7 +127,7 @@ export function ForgotPasswordPage() {
           {!otpRequested ? (
             <form onSubmit={handleRequestOtp} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Email hoặc số điện thoại
                 </label>
                 <Input
@@ -129,12 +135,13 @@ export function ForgotPasswordPage() {
                   placeholder="Nhập email hoặc số điện thoại"
                   value={requestForm.login}
                   onChange={(e) => setRequestForm({ login: e.target.value })}
+                  className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white mt-4 h-12 rounded-xl shadow-lg shadow-violet-500/10 custom-button-pulse font-semibold text-sm"
                 disabled={requestOtpMutation.isPending}
               >
                 {requestOtpMutation.isPending ? "Đang gửi OTP..." : "Gửi OTP"}
@@ -143,7 +150,7 @@ export function ForgotPasswordPage() {
           ) : (
             <form onSubmit={handleConfirm} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Email hoặc số điện thoại
                 </label>
                 <Input
@@ -152,11 +159,12 @@ export function ForgotPasswordPage() {
                   onChange={(e) =>
                     setConfirmForm({ ...confirmForm, login: e.target.value })
                   }
+                  className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Mã OTP
                 </label>
                 <Input
@@ -166,11 +174,12 @@ export function ForgotPasswordPage() {
                   onChange={(e) =>
                     setConfirmForm({ ...confirmForm, otpCode: e.target.value })
                   }
+                  className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Mật khẩu mới
                 </label>
                 <Input
@@ -183,12 +192,13 @@ export function ForgotPasswordPage() {
                       newPassword: e.target.value,
                     })
                   }
+                  className="w-full bg-slate-950/60 border-white/15 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white mt-4 h-12 rounded-xl shadow-lg shadow-violet-500/10 custom-button-pulse font-semibold text-sm"
                 disabled={confirmMutation.isPending}
               >
                 {confirmMutation.isPending
@@ -199,7 +209,7 @@ export function ForgotPasswordPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="w-full"
+                className="w-full border-white/10 bg-transparent text-slate-300 hover:bg-white/5 hover:text-white rounded-xl mt-2 h-12 text-sm font-semibold"
                 onClick={() => {
                   setOtpRequested(false);
                   setError("");
@@ -211,11 +221,11 @@ export function ForgotPasswordPage() {
             </form>
           )}
 
-          <div className="text-center text-sm text-gray-500 mt-4">
+          <div className="text-center text-sm text-slate-400 mt-4">
             Quay lại{" "}
             <Link
               to="/login"
-              className="text-blue-600 font-medium hover:underline"
+              className="text-violet-400 font-semibold hover:text-violet-300 hover:underline"
             >
               Đăng nhập
             </Link>

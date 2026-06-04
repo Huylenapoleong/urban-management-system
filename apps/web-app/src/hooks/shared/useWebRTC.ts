@@ -466,11 +466,15 @@ export function useWebRTC() {
     };
   }, [callState, resolveSignalConversationId, cleanup]);
 
+  // CALLING timeout: auto-hangup if no answer within 45s (group) or 15s (1-1).
   useEffect(() => {
     if (callState !== "CALLING") return;
+    const config = activeConfigRef.current;
+    const isGroup = isGroupCall(config);
+    const timeoutMs = isGroup ? 45_000 : 15_000;
+
     const timer = window.setTimeout(() => {
       if (callStateRef.current === "CALLING") {
-        const config = activeConfigRef.current;
         const signalConvId = resolveSignalConversationId(config);
         if (signalConvId) {
           void emitSignal(CHAT_SOCKET_EVENTS.CALL_END, {
@@ -479,10 +483,22 @@ export function useWebRTC() {
           });
         }
         cleanup();
+
+        // Play Vietnamese TTS voice announcement for 1-1 call timeout
+        if (!isGroup && typeof window !== "undefined" && "speechSynthesis" in window) {
+          try {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance("Người nhận tạm thời không liên lạc được. Vui lòng gọi lại sau.");
+            utterance.lang = "vi-VN";
+            window.speechSynthesis.speak(utterance);
+          } catch (e) {
+            console.error("Speech synthesis failed", e);
+          }
+        }
       }
-    }, 20_000);
+    }, timeoutMs);
     return () => clearTimeout(timer);
-  }, [callState, cleanup, emitSignal, resolveSignalConversationId]);
+  }, [callState, cleanup, emitSignal, resolveSignalConversationId, isGroupCall]);
 
   const flushQueuedIceSignals = useCallback(() => {
     if (iceSignalTimerRef.current !== null) return;
@@ -773,7 +789,8 @@ export function useWebRTC() {
 
           stream.getTracks().forEach((track) => pc!.addTrack(track, stream));
 
-          if (config.isVideo && stream.getVideoTracks().length === 0) {
+          // Ensure video is negotiated for all calls, so camera can be toggled on/off dynamically.
+          if (stream.getVideoTracks().length === 0) {
             try {
               pc.addTransceiver("video", { direction: "recvonly" });
             } catch (e) {
@@ -1170,12 +1187,50 @@ export function useWebRTC() {
     }
   }, [localStream, isMicOn]);
 
-  const toggleVideo = useCallback(() => {
-    if (localStream) {
-      localStream
-        .getVideoTracks()
-        .forEach((track) => (track.enabled = !track.enabled));
-      setIsVideoOn(!isVideoOn);
+  const toggleVideo = useCallback(async () => {
+    if (!localStream) return;
+
+    const videoTracks = localStream.getVideoTracks();
+    if (videoTracks.length > 0) {
+      const nextState = !isVideoOn;
+      videoTracks.forEach((track) => (track.enabled = nextState));
+      setIsVideoOn(nextState);
+    } else {
+      try {
+        const videoConstraints = {
+          facingMode: { ideal: "user" },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        };
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+        });
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          localStream.addTrack(videoTrack);
+          setLocalStream(new MediaStream(localStream.getTracks()));
+
+          if (activeConfigRef.current) {
+            const nextConfig = { ...activeConfigRef.current, isVideo: true };
+            setActiveConfig(nextConfig);
+            activeConfigRef.current = nextConfig;
+          }
+
+          peerConnectionsRef.current.forEach((pc) => {
+            const transceiver = pc.getTransceivers().find(
+              (t) => t.receiver.track.kind === "video",
+            );
+            if (transceiver) {
+              transceiver.direction = "sendrecv";
+              void transceiver.sender.replaceTrack(videoTrack);
+            }
+          });
+
+          setIsVideoOn(true);
+        }
+      } catch (err) {
+        console.error("[WebRTC] Failed to acquire video track dynamically", err);
+      }
     }
   }, [localStream, isVideoOn]);
 

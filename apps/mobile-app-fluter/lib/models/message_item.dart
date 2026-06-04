@@ -21,6 +21,11 @@ class MessageItem {
     this.attachmentAsset,
     this.clientMessageId,
     this.isPending = false,
+    this.deliveryState,
+    this.recipientCount,
+    this.deliveredCount,
+    this.readByCount,
+    this.lastReadAt,
   });
 
   MessageItem copyWith({
@@ -41,6 +46,11 @@ class MessageItem {
     String? senderAvatarUrl,
     bool? isPending,
     String? clientMessageId,
+    String? deliveryState,
+    int? recipientCount,
+    int? deliveredCount,
+    int? readByCount,
+    String? lastReadAt,
     // Add these purely for local UI override since contentText/resolvedAttachmentUrl use getters
     String? contentText,
     String? resolvedAttachmentUrl,
@@ -77,6 +87,11 @@ class MessageItem {
       attachmentAsset: attachmentAsset ?? this.attachmentAsset,
       clientMessageId: clientMessageId ?? this.clientMessageId,
       isPending: isPending ?? this.isPending,
+      deliveryState: deliveryState ?? this.deliveryState,
+      recipientCount: recipientCount ?? this.recipientCount,
+      deliveredCount: deliveredCount ?? this.deliveredCount,
+      readByCount: readByCount ?? this.readByCount,
+      lastReadAt: lastReadAt ?? this.lastReadAt,
     );
   }
 
@@ -97,6 +112,11 @@ class MessageItem {
   final MediaAsset? attachmentAsset;
   final String? clientMessageId;
   final bool isPending;
+  final String? deliveryState;
+  final int? recipientCount;
+  final int? deliveredCount;
+  final int? readByCount;
+  final String? lastReadAt;
 
   factory MessageItem.fromJson(Map<String, dynamic> json) {
     final assetRaw = json["attachmentAsset"];
@@ -119,6 +139,17 @@ class MessageItem {
       attachmentAsset: assetRaw is Map<String, dynamic>
           ? MediaAsset.fromJson(assetRaw)
           : null,
+      deliveryState: json["deliveryState"]?.toString(),
+      recipientCount: json["recipientCount"] is int
+          ? json["recipientCount"] as int
+          : int.tryParse(json["recipientCount"]?.toString() ?? ""),
+      deliveredCount: json["deliveredCount"] is int
+          ? json["deliveredCount"] as int
+          : int.tryParse(json["deliveredCount"]?.toString() ?? ""),
+      readByCount: json["readByCount"] is int
+          ? json["readByCount"] as int
+          : int.tryParse(json["readByCount"]?.toString() ?? ""),
+      lastReadAt: json["lastReadAt"]?.toString(),
     );
   }
 
@@ -139,7 +170,11 @@ class MessageItem {
       "attachmentUrl": attachmentUrl,
       "attachmentKey": attachmentKey,
       "clientMessageId": clientMessageId,
-      // "attachmentAsset": attachmentAsset?.toJson(),
+      "deliveryState": deliveryState,
+      "recipientCount": recipientCount,
+      "deliveredCount": deliveredCount,
+      "readByCount": readByCount,
+      "lastReadAt": lastReadAt,
     };
   }
 

@@ -1295,10 +1295,11 @@ export class RegisterRequestDto {
   @MaxLength(100)
   fullName!: string;
 
-  @ApiProperty({ example: 'VN-79-25747' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
+  @IsOptional()
   @IsString()
   @MaxLength(30)
-  locationCode!: string;
+  locationCode?: string;
 
   @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar-c.jpg' })
   @IsOptional()
@@ -1678,10 +1679,11 @@ export class CreateUserRequestDto {
   @IsIn(USER_ROLES)
   role!: (typeof USER_ROLES)[number];
 
-  @ApiProperty({ example: 'VN-79-25747' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
+  @IsOptional()
   @IsString()
   @MaxLength(30)
-  locationCode!: string;
+  locationCode?: string;
 
   @ApiPropertyOptional({ example: 'Ward 1 People Committee' })
   @IsOptional()
@@ -1729,10 +1731,11 @@ export class CreateGroupRequestDto {
   @IsIn(GROUP_TYPES)
   groupType!: (typeof GROUP_TYPES)[number];
 
-  @ApiProperty({ example: 'VN-79-25747' })
+  @ApiPropertyOptional({ example: 'VN-79-25747' })
+  @IsOptional()
   @IsString()
   @MaxLength(30)
-  locationCode!: string;
+  locationCode?: string;
 
   @ApiPropertyOptional({
     example: 'Nhom chinh thuc trao doi ve ha tang dia ban.',

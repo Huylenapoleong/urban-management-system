@@ -833,13 +833,13 @@ describe('GroupsService', () => {
     expect(repository.transactPut).not.toHaveBeenCalled();
   });
 
-  it('blocks non-owners from renaming the group', async () => {
+  it('blocks non-managers from renaming the group', async () => {
     authorizationService.canManageGroup.mockReturnValue(true);
     authorizationService.canCreateGroup.mockReturnValue(true);
     authorizationService.canRenameGroup.mockReturnValue(false);
     currentActorMembership = {
       ...currentActorMembership,
-      roleInGroup: 'DEPUTY',
+      roleInGroup: 'MEMBER',
     };
 
     await expect(
@@ -847,7 +847,9 @@ describe('GroupsService', () => {
         groupName: 'Renamed group',
       }),
     ).rejects.toThrow(
-      new ForbiddenException('Chỉ Trưởng nhóm mới có quyền đổi tên nhóm.'),
+      new ForbiddenException(
+        'Chỉ Trưởng nhóm hoặc Phó nhóm mới có quyền đổi tên nhóm.',
+      ),
     );
     expect(repository.transactPut).not.toHaveBeenCalled();
   });

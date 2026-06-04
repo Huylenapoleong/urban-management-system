@@ -31,7 +31,15 @@ class _NotificationListenerWidgetState
   AppServices? _services;
   LocalNotificationService? _notif;
   final List<StreamSubscription> _subs = [];
-  String? _currentUserId;
+
+  String? get _currentUserId {
+    if (!mounted) return null;
+    try {
+      return context.read<SessionController>().user?.id;
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -41,8 +49,6 @@ class _NotificationListenerWidgetState
       _cancelSubs();
       _services = services;
       _notif = services.localNotificationService;
-      _currentUserId =
-          context.read<SessionController>().user?.id;
       _setupListeners(services);
     }
   }
@@ -70,10 +76,11 @@ class _NotificationListenerWidgetState
         } else if (msg.type == 'video') {
           preview = '\u{1F3AC} Đã gửi một video';
         } else {
-          preview = msg.content.isNotEmpty
-              ? (msg.content.length > 100
-                  ? '${msg.content.substring(0, 100)}...'
-                  : msg.content)
+          final text = msg.contentText;
+          preview = text.isNotEmpty
+              ? (text.length > 100
+                  ? '${text.substring(0, 100)}...'
+                  : text)
               : 'Tin nhắn mới';
         }
 

@@ -125,26 +125,32 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-slate-100 flex items-center justify-center p-4 py-10 overflow-y-auto">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="bg-blue-600 p-6 text-center text-white">
-          <h1 className="text-2xl font-bold">Urban Management System</h1>
-          <p className="text-blue-100 mt-2 text-sm">
+    <div className="min-h-screen w-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 flex items-center justify-center p-4 py-10 overflow-y-auto relative overflow-hidden">
+      {/* Ambient background glows */}
+      <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-80 h-80 rounded-full bg-violet-600/15 blur-[100px] animate-pulse pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 w-96 h-96 rounded-full bg-indigo-500/15 blur-[120px] animate-pulse pointer-events-none [animation-delay:2s]" />
+
+      <div className="max-w-md w-full bg-slate-900/95 backdrop-blur-2xl rounded-2xl premium-shadow-lg overflow-hidden animate-slide-up relative z-10 border border-white/10">
+        <div className="p-8 text-center border-b border-white/5 bg-white/5">
+          <h1 className="text-2xl font-bold tracking-tight gradient-text-purple bg-gradient-to-r from-violet-400 to-indigo-300">
+            Urban Management System
+          </h1>
+          <p className="text-slate-300 mt-2 text-sm font-medium">
             {step === "login"
               ? "Đăng nhập tài khoản của bạn"
               : "Xác thực mã OTP đăng nhập"}
           </p>
         </div>
 
-        <div className="p-6">
+        <div className="p-8">
           {error && (
-            <div className="bg-red-50 text-red-500 p-3 rounded-lg text-sm mb-4">
+            <div className="bg-red-950/50 border border-red-500/30 text-red-400 p-3 rounded-xl text-sm mb-4 font-medium">
               {error}
             </div>
           )}
 
           {otpMessage && (
-            <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm mb-4">
+            <div className="bg-emerald-950/50 border border-emerald-500/30 text-emerald-400 p-3 rounded-xl text-sm mb-4 font-medium">
               {otpMessage}
             </div>
           )}
@@ -152,7 +158,7 @@ export function LoginPage() {
           {step === "login" ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Tên đăng nhập / Email
                 </label>
                 <Input
@@ -162,18 +168,18 @@ export function LoginPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, login: e.target.value })
                   }
-                  className="w-full"
+                  className="w-full bg-slate-950/60 border-white/10 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
                 />
               </div>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-semibold text-white">
                     Mật khẩu
                   </label>
                   <Link
                     to="/forgot-password"
-                    className="text-xs font-medium text-blue-600 hover:underline"
+                    className="text-xs font-semibold text-violet-400 hover:text-violet-300 hover:underline"
                   >
                     Quên mật khẩu?
                   </Link>
@@ -185,23 +191,23 @@ export function LoginPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, password: e.target.value })
                   }
-                  className="w-full"
+                  className="w-full bg-slate-950/60 border-white/10 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12 text-sm"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-4"
+                className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white mt-4 h-12 rounded-xl shadow-lg shadow-violet-500/10 custom-button-pulse font-semibold text-sm"
                 disabled={requestOtpMutation.isPending}
               >
                 {requestOtpMutation.isPending ? "Đang xử lý..." : "Đăng nhập"}
               </Button>
 
-              <div className="text-center text-sm text-gray-500 mt-4">
+              <div className="text-center text-sm text-slate-400 mt-4">
                 Chưa có tài khoản?{" "}
                 <Link
                   to="/register"
-                  className="text-blue-600 font-medium hover:underline"
+                  className="text-violet-400 font-semibold hover:text-violet-300 hover:underline"
                 >
                   Đăng ký ngay
                 </Link>
@@ -210,7 +216,7 @@ export function LoginPage() {
           ) : (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-sm font-semibold text-white">
                   Mã xác thực OTP
                 </label>
                 <Input
@@ -219,13 +225,13 @@ export function LoginPage() {
                   placeholder="Nhập mã OTP 6 chữ số"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value)}
-                  className="w-full text-center text-lg tracking-widest font-bold"
+                  className="w-full text-center text-lg tracking-widest font-bold bg-slate-950/60 border-white/10 focus:bg-slate-950/80 focus:border-violet-500 focus:ring-violet-500/20 text-white rounded-xl placeholder:text-slate-400 h-12"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-4"
+                className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white mt-4 h-12 rounded-xl shadow-lg shadow-violet-500/10 custom-button-pulse font-semibold text-sm"
                 disabled={verifyOtpMutation.isPending}
               >
                 {verifyOtpMutation.isPending ? "Đang xác minh..." : "Xác nhận"}
@@ -236,7 +242,7 @@ export function LoginPage() {
                   type="button"
                   onClick={handleResendOtp}
                   disabled={requestOtpMutation.isPending}
-                  className="text-sm text-blue-600 hover:underline font-medium"
+                  className="text-sm text-violet-400 hover:text-violet-300 hover:underline font-semibold"
                 >
                   Gửi lại mã OTP
                 </button>
@@ -247,7 +253,7 @@ export function LoginPage() {
                     setError("");
                     setOtpMessage("");
                   }}
-                  className="text-xs text-gray-500 hover:underline"
+                  className="text-xs text-slate-400 hover:text-slate-300 hover:underline"
                 >
                   Quay lại đăng nhập bằng mật khẩu
                 </button>
