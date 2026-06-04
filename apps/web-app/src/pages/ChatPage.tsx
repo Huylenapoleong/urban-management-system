@@ -4485,7 +4485,7 @@ export function ChatPage() {
                         />
                       ) : null}
                       <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
-                        {resolveConversationDisplayName(chat)
+                        {(resolveConversationDisplayName(chat).trim() || "?")
                           .charAt(0)
                           .toUpperCase()}
                       </AvatarFallback>
@@ -4592,7 +4592,7 @@ export function ChatPage() {
                       />
                     ) : null}
                     <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
-                      {activeConversationDisplayName.charAt(0).toUpperCase()}
+                      {(activeConversationDisplayName.trim() || "?").charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   {!activeContact?.isGroup && activePresence?.isActive ? (
@@ -4922,9 +4922,7 @@ export function ChatPage() {
                           />
                         ) : null}
                         <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold text-lg">
-                          {activeConversationDisplayName
-                            .charAt(0)
-                            .toUpperCase()}
+                          {(activeConversationDisplayName.trim() || "?").charAt(0).toUpperCase()}
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0 flex-1">
@@ -4976,9 +4974,7 @@ export function ChatPage() {
                             />
                           ) : null}
                           <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold text-2xl">
-                            {activeConversationDisplayName
-                              .charAt(0)
-                              .toUpperCase()}
+                            {(activeConversationDisplayName.trim() || "?").charAt(0).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
                         {activePresence?.isActive && (
@@ -5830,9 +5826,9 @@ export function ChatPage() {
                             {!summaryIsOutgoing ? (
                               <div className="relative h-8 w-8 shrink-0">
                                 <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
-                                  {activeContact?.avatarUrl ? (
+                                  {activeContactAvatarUrl ? (
                                     <AvatarImage
-                                      src={activeContact.avatarUrl}
+                                      src={activeContactAvatarUrl}
                                       alt={activeConversationDisplayName}
                                     />
                                   ) : null}
@@ -6499,7 +6495,8 @@ export function ChatPage() {
                                 const avatarUrl =
                                   groupMemberAvatarByUserId.get(userId) ||
                                   dmAvatarMap[userId] ||
-                                  friendAvatarByUserId[userId];
+                                  friendAvatarByUserId[userId] ||
+                                  (!activeContact?.isGroup && userId === activeDmUserId ? activeContactAvatarUrl : undefined);
 
                                 return avatarUrl ? (
                                   <img
