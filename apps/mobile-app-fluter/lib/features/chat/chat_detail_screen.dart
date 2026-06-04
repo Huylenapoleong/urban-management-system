@@ -667,6 +667,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  void _scrollToMessage(String messageId) {
+    final items = _pagingController.itemList ?? [];
+    final idx = items.indexWhere((m) => m.id == messageId);
+    if (idx != -1) {
+      final targetOffset = (idx * 110.0).clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
+      _scrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutQuad,
+      );
+    }
+  }
+
   void _handleCallStateChange() {
     if (widget.webRTCService.callState.value != CallState.idle && mounted) {
       // Check if this screen is already showing the call screen
@@ -2352,6 +2368,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             peerId: peerId,
             peerAvatarUrl: peerAvatarUrl,
             peerDisplayName: peerDisplayName,
+            onReplyTap: message.replyTo != null
+                ? () => _scrollToMessage(message.replyTo!)
+                : null,
           );
         },
         firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
@@ -2442,6 +2461,13 @@ class _ChatComposerState extends State<ChatComposer> {
   String _previousText = "";
   List<_InviteCandidate> _groupMembers = [];
   bool _loadingMembers = false;
+
+  AudioPlayer? _voiceAudioPlayer;
+  bool _isConfirmingVoice = false;
+  String? _voicePath;
+  bool _isVoicePlaying = false;
+  Duration _voicePlayDuration = Duration.zero;
+  Duration _voicePlayPosition = Duration.zero;
 
   @override
   void initState() {
@@ -2561,6 +2587,34 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  void _applyAllMention() {
+    final text = _textController.text;
+    final selection = _textController.selection;
+    if (!selection.isValid) return;
+
+    final cursorPosition = selection.baseOffset;
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    final textAfterCursor = text.substring(cursorPosition);
+
+    final lastAtSignIndex = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSignIndex == -1) return;
+
+    const newMention = "@all ";
+    final newTextBeforeCursor = textBeforeCursor.replaceRange(
+      lastAtSignIndex,
+      cursorPosition,
+      newMention,
+    );
+
+    final newText = newTextBeforeCursor + textAfterCursor;
+    final newCursorPosition = lastAtSignIndex + newMention.length;
+
+    _textController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newCursorPosition),
+    );
+  }
+
   Widget _buildMentionSuggestions() {
     final query = _getMentionQuery() ?? "";
     final filtered = _groupMembers.where((member) {
@@ -2568,9 +2622,15 @@ class _ChatComposerState extends State<ChatComposer> {
       return name.contains(query.toLowerCase());
     }).toList();
 
-    if (filtered.isEmpty) return const SizedBox.shrink();
+    final showAllOption = query.isEmpty ||
+        "all".startsWith(query.toLowerCase()) ||
+        "tất cả".startsWith(query.toLowerCase()) ||
+        "everyone".startsWith(query.toLowerCase());
+
+    if (filtered.isEmpty && !showAllOption) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final totalCount = filtered.length + (showAllOption ? 1 : 0);
 
     return Container(
       constraints: const BoxConstraints(maxHeight: 200),
@@ -2594,13 +2654,45 @@ class _ChatComposerState extends State<ChatComposer> {
         child: ListView.separated(
           shrinkWrap: true,
           padding: EdgeInsets.zero,
-          itemCount: filtered.length,
+          itemCount: totalCount,
           separatorBuilder: (_, __) => Divider(
             height: 1,
             color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
           ),
           itemBuilder: (context, index) {
-            final member = filtered[index];
+            if (showAllOption && index == 0) {
+              return ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  radius: 14,
+                  backgroundColor: isDark
+                      ? const Color(0xFF7C3AED).withOpacity(0.2)
+                      : const Color(0xFF7C3AED).withOpacity(0.1),
+                  child: const Icon(
+                    Icons.groups_outlined,
+                    size: 16,
+                    color: Color(0xFF7C3AED),
+                  ),
+                ),
+                title: Text(
+                  "Tất cả mọi người (@all)",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                subtitle: Text(
+                  "Nhắc tên cả nhóm",
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  ),
+                ),
+                onTap: _applyAllMention,
+              );
+            }
+
+            final member = filtered[showAllOption ? index - 1 : index];
             return ListTile(
               dense: true,
               leading: UserAvatar(
@@ -2661,6 +2753,7 @@ class _ChatComposerState extends State<ChatComposer> {
     _audioRecorder.dispose();
     _timer?.cancel();
     _typingTimer?.cancel();
+    _voiceAudioPlayer?.dispose();
     super.dispose();
   }
 
@@ -2692,14 +2785,25 @@ class _ChatComposerState extends State<ChatComposer> {
     setState(() => _isRecording = false);
     
     if (path != null) {
-      final name = path.split("/").last;
       setState(() {
-        _attachments.add(_PendingAttachment(
-          path: path,
-          name: name,
-          type: "AUDIO",
-          mimeType: "audio/mp4",
-        ));
+        _isConfirmingVoice = true;
+        _voicePath = path;
+        _isVoicePlaying = false;
+        _voicePlayDuration = Duration.zero;
+        _voicePlayPosition = Duration.zero;
+      });
+
+      _voiceAudioPlayer?.dispose();
+      _voiceAudioPlayer = AudioPlayer();
+
+      _voiceAudioPlayer!.onDurationChanged.listen((d) {
+        if (mounted) setState(() => _voicePlayDuration = d);
+      });
+      _voiceAudioPlayer!.onPositionChanged.listen((p) {
+        if (mounted) setState(() => _voicePlayPosition = p);
+      });
+      _voiceAudioPlayer!.onPlayerComplete.listen((_) {
+        if (mounted) setState(() => _isVoicePlaying = false);
       });
     }
   }
@@ -2717,6 +2821,143 @@ class _ChatComposerState extends State<ChatComposer> {
     final mins = (seconds / 60).floor();
     final secs = seconds % 60;
     return "${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}";
+  }
+
+  void _togglePreviewPlay() async {
+    if (_voicePath == null || _voiceAudioPlayer == null) return;
+    
+    if (_isVoicePlaying) {
+      await _voiceAudioPlayer!.pause();
+      setState(() => _isVoicePlaying = false);
+    } else {
+      await _voiceAudioPlayer!.play(DeviceFileSource(_voicePath!));
+      setState(() => _isVoicePlaying = true);
+    }
+  }
+
+  void _discardVoicePreview() async {
+    if (_voiceAudioPlayer != null) {
+      await _voiceAudioPlayer!.stop();
+      _voiceAudioPlayer!.dispose();
+      _voiceAudioPlayer = null;
+    }
+    
+    if (_voicePath != null) {
+      final file = File(_voicePath!);
+      if (await file.exists()) {
+        try {
+          await file.delete();
+        } catch (_) {}
+      }
+    }
+    
+    setState(() {
+      _isConfirmingVoice = false;
+      _voicePath = null;
+      _isVoicePlaying = false;
+      _voicePlayDuration = Duration.zero;
+      _voicePlayPosition = Duration.zero;
+    });
+  }
+
+  void _sendVoicePreview() async {
+    if (_voicePath == null) return;
+    
+    if (_voiceAudioPlayer != null) {
+      await _voiceAudioPlayer!.stop();
+      _voiceAudioPlayer!.dispose();
+      _voiceAudioPlayer = null;
+    }
+
+    final path = _voicePath!;
+    final name = path.split("/").last;
+    
+    final attachment = _PendingAttachment(
+      path: path,
+      name: name,
+      type: "AUDIO",
+      mimeType: "audio/mp4",
+    );
+
+    try {
+      await widget.onSend(text: "", attachments: [attachment]);
+    } catch (_) {}
+
+    setState(() {
+      _isConfirmingVoice = false;
+      _voicePath = null;
+      _isVoicePlaying = false;
+      _voicePlayDuration = Duration.zero;
+      _voicePlayPosition = Duration.zero;
+    });
+  }
+
+  Widget _buildVoiceConfirmationRow(BuildContext context, bool isDark) {
+    final remainingTime = _voicePlayDuration - _voicePlayPosition;
+    final displayDuration = remainingTime > Duration.zero ? remainingTime : _voicePlayDuration;
+
+    return Container(
+      height: 56,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              _isVoicePlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+              color: const Color(0xFF7C3AED),
+              size: 36,
+            ),
+            onPressed: _togglePreviewPlay,
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                trackHeight: 3,
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                activeTrackColor: const Color(0xFF7C3AED),
+                inactiveTrackColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                thumbColor: const Color(0xFF7C3AED),
+              ),
+              child: Slider(
+                value: _voicePlayPosition.inMilliseconds.toDouble(),
+                max: _voicePlayDuration.inMilliseconds.toDouble() > 0
+                    ? _voicePlayDuration.inMilliseconds.toDouble()
+                    : 1.0,
+                onChanged: (val) {
+                  _voiceAudioPlayer?.seek(Duration(milliseconds: val.toInt()));
+                },
+              ),
+            ),
+          ),
+          Text(
+            _formatDuration(displayDuration.inSeconds),
+            style: TextStyle(
+              color: isDark ? Colors.grey[400] : Colors.grey[700],
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: _discardVoicePreview,
+            child: const Text("Hủy", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.send_rounded, color: Color(0xFF7C3AED), size: 28),
+            onPressed: _sendVoicePreview,
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -2906,228 +3147,232 @@ class _ChatComposerState extends State<ChatComposer> {
           children: [
             if (widget.isGroup && _getMentionQuery() != null)
               _buildMentionSuggestions(),
-            if (_attachments.isNotEmpty)
-              Container(
-                height: 90,
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _attachments.length,
-                  itemBuilder: (context, index) {
-                    final att = _attachments[index];
-                    final isImage = att.type == "IMAGE" && !att.path.startsWith("http");
-                    
-                    return Container(
-                      width: 80,
-                      margin: const EdgeInsets.only(right: 8),
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                                  border: Border.all(
-                                    color: isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0),
+            if (_isConfirmingVoice)
+              _buildVoiceConfirmationRow(context, isDark)
+            else ...[
+              if (_attachments.isNotEmpty)
+                Container(
+                  height: 90,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _attachments.length,
+                    itemBuilder: (context, index) {
+                      final att = _attachments[index];
+                      final isImage = att.type == "IMAGE" && !att.path.startsWith("http");
+                      
+                      return Container(
+                        width: 80,
+                        margin: const EdgeInsets.only(right: 8),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                                    border: Border.all(
+                                      color: isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0),
+                                    ),
+                                  ),
+                                  child: isImage
+                                      ? Image.file(
+                                          File(att.path),
+                                          fit: BoxFit.cover,
+                                        )
+                                      : Center(
+                                          child: Icon(
+                                            att.type == "VIDEO"
+                                                ? Icons.videocam
+                                                : att.type == "AUDIO"
+                                                    ? Icons.mic
+                                                    : Icons.insert_drive_file,
+                                            color: const Color(0xFF7C3AED),
+                                            size: 28,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ),
+                            if (att.type == "VIDEO")
+                              const Positioned(
+                                bottom: 4,
+                                right: 4,
+                                child: Icon(
+                                  Icons.play_circle_fill,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                              ),
+                            Positioned(
+                              top: 2,
+                              right: 2,
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _attachments.removeAt(index);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                    size: 14,
                                   ),
                                 ),
-                                child: isImage
-                                    ? Image.file(
-                                        File(att.path),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : Center(
-                                        child: Icon(
-                                          att.type == "VIDEO"
-                                              ? Icons.videocam
-                                              : att.type == "AUDIO"
-                                                  ? Icons.mic
-                                                  : Icons.insert_drive_file,
-                                          color: const Color(0xFF7C3AED),
-                                          size: 28,
-                                        ),
-                                      ),
                               ),
                             ),
-                          ),
-                          if (att.type == "VIDEO")
-                            const Positioned(
-                              bottom: 4,
-                              right: 4,
-                              child: Icon(
-                                Icons.play_circle_fill,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                            ),
-                          Positioned(
-                            top: 2,
-                            right: 2,
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _attachments.removeAt(index);
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.close,
-                                  color: Colors.white,
-                                  size: 14,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            Row(
-              children: [
-                if (!_isRecording) ...[
-                  _buildComposerButton(
-                    icon: const Icon(Icons.add_circle_outline,
-                        color: Color(0xFF64748B), size: 28),
-                    onTap: widget.sending ? null : _showPicker,
-                  ),
-                  _buildComposerButton(
-                    icon: const Icon(Icons.gif_box_outlined,
-                        color: Color(0xFF7C3AED), size: 28),
-                    onTap: widget.sending ? null : _showGifPicker,
-                  ),
-                  _buildComposerButton(
-                    icon: const Icon(Icons.sticky_note_2_outlined,
-                        color: Color(0xFF7C3AED), size: 28),
-                    onTap: widget.sending ? null : _showStickerPicker,
-                  ),
-                ],
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _isRecording
-                      ? Container(
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.mic, color: Colors.red, size: 20),
-                              const SizedBox(width: 8),
-                              Text(_formatDuration(_recordDuration),
-                                  style: const TextStyle(
-                                      color: Colors.red,
-                                      fontWeight: FontWeight.bold)),
-                              const Spacer(),
-                              const Text("Đang ghi âm...",
-                                  style: TextStyle(
-                                      color: Colors.red, fontSize: 12)),
-                              const Spacer(),
-                              TextButton(
-                                onPressed: _cancelRecording,
-                                child: const Text("Hủy",
-                                    style: TextStyle(color: Colors.grey)),
-                              ),
-                            ],
-                          ),
-                        )
-                      : Container(
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF0F172A)
-                                : const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(28),
-                            border: Border.all(
-                                color: isDark
-                                    ? Colors.grey.shade800
-                                    : Colors.grey.shade200),
-                          ),
-                          child: TextField(
-                            controller: _textController,
-                            maxLines: 5,
-                            minLines: 1,
-                            style: TextStyle(
-                                fontSize: 16,
-                                color: isDark ? Colors.white : Colors.black87),
-                            onChanged: (_) => setState(() {}),
-                            decoration: InputDecoration(
-                              hintText: "Nhắn tin...",
-                              hintStyle: TextStyle(
-                                  color: isDark
-                                      ? Colors.grey[500]
-                                      : Colors.grey[600]),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 12),
-                            ),
-                          ),
+                          ],
                         ),
+                      );
+                    },
+                  ),
                 ),
-                const SizedBox(width: 8),
-                if (widget.sending)
-                  const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: Icon(Icons.access_time_rounded, size: 24, color: Color(0xFF7C3AED)))
-                else ...[
-                  if (_isRecording)
+              Row(
+                children: [
+                  if (!_isRecording) ...[
                     _buildComposerButton(
-                      icon: const Icon(Icons.check_circle,
-                          color: Color(0xFF7C3AED), size: 28),
-                      onTap: _stopRecording,
-                    )
-                  else if (_textController.text.trim().isEmpty &&
-                      _attachments.isEmpty) ...[
-                    _buildComposerButton(
-                      icon: const Icon(Icons.mic_none_outlined,
-                          color: Color(0xFF7C3AED), size: 28),
-                      onTap: () {
-                        print("DEBUG: Mic button pressed");
-                        _startRecording();
-                      },
+                      icon: const Icon(Icons.add_circle_outline,
+                          color: Color(0xFF64748B), size: 28),
+                      onTap: widget.sending ? null : _showPicker,
                     ),
                     _buildComposerButton(
-                      icon: const Icon(Icons.thumb_up_rounded,
+                      icon: const Icon(Icons.gif_box_outlined,
                           color: Color(0xFF7C3AED), size: 28),
-                      onTap: () =>
-                          widget.onSend(text: "👍", attachments: const []),
+                      onTap: widget.sending ? null : _showGifPicker,
                     ),
-                  ] else
                     _buildComposerButton(
-                      icon: const Icon(Icons.send_rounded,
+                      icon: const Icon(Icons.sticky_note_2_outlined,
                           color: Color(0xFF7C3AED), size: 28),
-                      onTap: () async {
-                        final text = _textController.text.trim();
-                        if (text.isNotEmpty || _attachments.isNotEmpty) {
-                          final prevText = text;
-                          final prevAttachments = List<_PendingAttachment>.from(_attachments);
-                          _textController.clear();
-                          setState(() => _attachments.clear());
-                          try {
-                            await widget.onSend(text: text, attachments: prevAttachments);
-                          } catch (e) {
-                            if (mounted) {
-                              _textController.text = prevText;
-                              setState(() {
-                                _attachments.addAll(prevAttachments);
-                              });
+                      onTap: widget.sending ? null : _showStickerPicker,
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _isRecording
+                        ? Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.mic, color: Colors.red, size: 20),
+                                const SizedBox(width: 8),
+                                Text(_formatDuration(_recordDuration),
+                                    style: const TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.bold)),
+                                const Spacer(),
+                                const Text("Đang ghi âm...",
+                                    style: TextStyle(
+                                        color: Colors.red, fontSize: 12)),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: _cancelRecording,
+                                  child: const Text("Hủy",
+                                      style: TextStyle(color: Colors.grey)),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Container(
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF0F172A)
+                                  : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                  color: isDark
+                                      ? Colors.grey.shade800
+                                      : Colors.grey.shade200),
+                            ),
+                            child: TextField(
+                              controller: _textController,
+                              maxLines: 5,
+                              minLines: 1,
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  color: isDark ? Colors.white : Colors.black87),
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                hintText: "Nhắn tin...",
+                                hintStyle: TextStyle(
+                                    color: isDark
+                                        ? Colors.grey[500]
+                                        : Colors.grey[600]),
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 12),
+                              ),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (widget.sending)
+                    const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Icon(Icons.access_time_rounded, size: 24, color: Color(0xFF7C3AED)))
+                  else ...[
+                    if (_isRecording)
+                      _buildComposerButton(
+                        icon: const Icon(Icons.check_circle,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: _stopRecording,
+                      )
+                    else if (_textController.text.trim().isEmpty &&
+                        _attachments.isEmpty) ...[
+                      _buildComposerButton(
+                        icon: const Icon(Icons.mic_none_outlined,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: () {
+                          print("DEBUG: Mic button pressed");
+                          _startRecording();
+                        },
+                      ),
+                      _buildComposerButton(
+                        icon: const Icon(Icons.thumb_up_rounded,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: () =>
+                            widget.onSend(text: "👍", attachments: const []),
+                      ),
+                    ] else
+                      _buildComposerButton(
+                        icon: const Icon(Icons.send_rounded,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: () async {
+                          final text = _textController.text.trim();
+                          if (text.isNotEmpty || _attachments.isNotEmpty) {
+                            final prevText = text;
+                            final prevAttachments = List<_PendingAttachment>.from(_attachments);
+                            _textController.clear();
+                            setState(() => _attachments.clear());
+                            try {
+                              await widget.onSend(text: text, attachments: prevAttachments);
+                            } catch (e) {
+                              if (mounted) {
+                                _textController.text = prevText;
+                                setState(() {
+                                  _attachments.addAll(prevAttachments);
+                                });
+                              }
                             }
                           }
-                        }
-                      },
-                    ),
+                        },
+                      ),
+                  ],
                 ],
-              ],
-            ),
+              ),
+            ],
           ],
         ),
       ),
@@ -3148,6 +3393,8 @@ class ChatMessageBubble extends StatelessWidget {
   final String? peerAvatarUrl;
   final String? peerDisplayName;
 
+  final VoidCallback? onReplyTap;
+
   const ChatMessageBubble({
     super.key,
     required this.message,
@@ -3161,6 +3408,7 @@ class ChatMessageBubble extends StatelessWidget {
     this.peerId,
     this.peerAvatarUrl,
     this.peerDisplayName,
+    this.onReplyTap,
   });
 
   @override
@@ -3419,20 +3667,11 @@ class ChatMessageBubble extends StatelessWidget {
       }
 
       final tagText = match.group(0)!;
-      final tagName = tagText.substring(1).trim();
-
-      final bool isCurrentUserTagged = currentUserName != null &&
-          (currentUserName!.toLowerCase() == tagName.toLowerCase() ||
-           tagName.toLowerCase().contains(currentUserName!.toLowerCase()) ||
-           currentUserName!.toLowerCase().contains(tagName.toLowerCase()));
 
       spans.add(TextSpan(
         text: tagText,
         style: defaultStyle.copyWith(
           fontWeight: FontWeight.bold,
-          color: isCurrentUserTagged
-              ? (isMine ? Colors.amber.shade200 : Colors.red.shade400)
-              : (isMine ? Colors.white.withOpacity(0.95) : const Color(0xFF7C3AED)),
         ),
       ));
 
@@ -3684,22 +3923,47 @@ class ChatMessageBubble extends StatelessWidget {
 
   Widget _buildReplyHeader(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isMine
-            ? Colors.white12
-            : (isDark
-                ? const Color(0xFF334155)
-                : Colors.grey[100]),
-        borderRadius: BorderRadius.circular(8),
-        border: Border(
-            left: BorderSide(
-                color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
-                width: 3)),
-      ),
-      child: Text("Đang trả lời...",
+    
+    // Lấy nội dung tin nhắn được trả lời
+    String replyText = "Xem tin nhắn đã trả lời";
+    if (message.replyMessage != null) {
+      final text = message.replyMessage!.contentText;
+      if (text.isNotEmpty) {
+        replyText = text;
+      } else {
+        if (message.replyMessage!.type == 'image') {
+          replyText = "📷 Hình ảnh";
+        } else if (message.replyMessage!.type == 'file') {
+          replyText = "📁 Tệp đính kèm";
+        } else if (message.replyMessage!.type == 'audio') {
+          replyText = "🎵 Tin nhắn thoại";
+        } else if (message.replyMessage!.type == 'video') {
+          replyText = "🎥 Video";
+        } else {
+          replyText = "Tin nhắn";
+        }
+      }
+    }
+
+    return GestureDetector(
+      onTap: onReplyTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isMine
+              ? Colors.white12
+              : (isDark
+                  ? const Color(0xFF334155)
+                  : Colors.grey[100]),
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+              left: BorderSide(
+                  color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
+                  width: 3)),
+        ),
+        child: Text(
+          replyText,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -3709,7 +3973,9 @@ class ChatMessageBubble extends StatelessWidget {
                   ? Colors.white70
                   : (isDark
                       ? Colors.grey[300]
-                      : Colors.grey[700]))),
+                      : Colors.grey[700])),
+        ),
+      ),
     );
   }
 

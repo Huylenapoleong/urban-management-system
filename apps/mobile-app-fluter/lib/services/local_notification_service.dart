@@ -120,6 +120,7 @@ class LocalNotificationService {
     required String conversationId,
     required String preview,
     String? groupName,
+    bool playSound = true,
   }) async {
     if (!_initialized) await initialize();
 
@@ -136,18 +137,20 @@ class LocalNotificationService {
           _channelMessage,
           'Tin nhắn',
           channelDescription: 'Thông báo tin nhắn mới',
-          importance: Importance.high,
-          priority: Priority.high,
+          importance: playSound ? Importance.high : Importance.low,
+          priority: playSound ? Priority.high : Priority.low,
           icon: '@mipmap/ic_launcher',
           groupKey: conversationId,
           setAsGroupSummary: false,
           styleInformation: BigTextStyleInformation(preview),
           ticker: title,
+          playSound: playSound,
+          enableVibration: playSound,
         ),
-        iOS: const DarwinNotificationDetails(
+        iOS: DarwinNotificationDetails(
           presentAlert: true,
           presentBadge: true,
-          presentSound: true,
+          presentSound: playSound,
         ),
       ),
       payload: 'chat:$conversationId',

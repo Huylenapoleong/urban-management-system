@@ -238,7 +238,12 @@ class _UserAvatarState extends State<UserAvatar> {
               decoration: BoxDecoration(
                 color: widget.isActive ? Colors.green : Colors.grey,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
+                border: Border.all(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? (Theme.of(context).cardTheme.color ?? const Color(0xFF1E293B))
+                      : Colors.white,
+                  width: 2,
+                ),
               ),
             ),
           ),
