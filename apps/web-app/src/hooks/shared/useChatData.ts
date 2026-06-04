@@ -303,6 +303,7 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
   );
   const messageRefreshTimerRef = useRef<number | null>(null);
   const conversationRefreshTimerRef = useRef<number | null>(null);
+  const typingTimeoutsRef = useRef<Record<string, number>>({});
   const typingUsers = conversationId
     ? (typingUsersByConversation[conversationId] ?? {})
     : {};
@@ -413,6 +414,12 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
         return;
       }
 
+      const timeoutKey = `${conversationId}_${payload.userId}`;
+      if (typingTimeoutsRef.current[timeoutKey]) {
+        window.clearTimeout(typingTimeoutsRef.current[timeoutKey]);
+        delete typingTimeoutsRef.current[timeoutKey];
+      }
+
       setTypingUsersByConversation((prev) => {
         const currentTypingUsers = prev[conversationId] ?? {};
         if (!payload.isTyping) {
@@ -428,6 +435,20 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
             [conversationId]: nextTypingUsers,
           };
         }
+
+        typingTimeoutsRef.current[timeoutKey] = window.setTimeout(() => {
+          setTypingUsersByConversation((prevInner) => {
+            const currentInner = prevInner[conversationId] ?? {};
+            if (!currentInner[payload.userId]) return prevInner;
+            const nextInner = { ...currentInner };
+            delete nextInner[payload.userId];
+            return {
+              ...prevInner,
+              [conversationId]: nextInner,
+            };
+          });
+          delete typingTimeoutsRef.current[timeoutKey];
+        }, 8000);
 
         return {
           ...prev,
@@ -519,6 +540,44 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       scheduleConversationsRefresh();
     };
 
+    const handleMessageDelivered = (payload: { conversationId?: string; messageId?: string }) => {
+      const messageId = payload?.messageId;
+      
+      if (messageId) {
+        queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(
+          messageQueryKey,
+          (oldData) => {
+            if (!oldData) return oldData;
+            return {
+              ...oldData,
+              pages: oldData.pages.map((page) => ({
+                ...page,
+                items: page.items.map((item) => {
+                  if (item.id === messageId) {
+                    const currentCount = item.deliveredCount ?? 0;
+                    const nextCount = currentCount + 1;
+                    const nextState =
+                      item.deliveryState === "READ"
+                        ? "READ"
+                        : nextCount > 0
+                          ? "DELIVERED"
+                          : item.deliveryState;
+
+                    return {
+                      ...item,
+                      deliveredCount: nextCount,
+                      deliveryState: nextState,
+                    };
+                  }
+                  return item;
+                }),
+              })),
+            };
+          }
+        );
+      }
+    };
+
     socketClient.socket?.on(
       CHAT_SOCKET_EVENTS.MESSAGE_CREATED,
       handleMessageCreated,
@@ -526,6 +585,10 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
     socketClient.socket?.on(
       CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
       handleMessageUpdated,
+    );
+    socketClient.socket?.on(
+      CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED,
+      handleMessageDelivered,
     );
     socketClient.socket?.on(CHAT_SOCKET_EVENTS.TYPING_STATE, handleTypingState);
     socketClient.socket?.on(
@@ -550,6 +613,10 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       socketClient.socket?.off(
         CHAT_SOCKET_EVENTS.MESSAGE_UPDATED,
         handleMessageUpdated,
+      );
+      socketClient.socket?.off(
+        CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED,
+        handleMessageDelivered,
       );
       socketClient.socket?.off(
         CHAT_SOCKET_EVENTS.TYPING_STATE,

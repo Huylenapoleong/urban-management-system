@@ -401,9 +401,9 @@ export class ConversationStateService {
 
     return {
       deliveryState:
-        recipientCount > 0 && readByCount >= recipientCount
+        recipientCount > 0 && readByCount > 0
           ? 'READ'
-          : recipientCount > 0 && deliveredCount >= recipientCount
+          : recipientCount > 0 && deliveredCount > 0
             ? 'DELIVERED'
             : 'SENT',
       recipientCount,

@@ -71,6 +71,8 @@ import {
   Ban,
   Bell,
   BellOff,
+  Check,
+  CheckCheck,
   ChevronDown,
   Copy,
   Download,
@@ -6697,9 +6699,20 @@ export function ChatPage() {
                         ) : null}
                         {endsSenderBlock ? (
                           <span
-                            className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right pr-10" : "text-left"} ${!isMe ? "pl-10" : ""}`}
+                            className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 flex items-center gap-1 ${isMe ? "justify-end pr-10" : "justify-start"} ${!isMe ? "pl-10" : ""}`}
                           >
                             {format(new Date(msg.sentAt), "HH:mm")}
+                            {isMe && (
+                              <span className="inline-flex">
+                                {msg.deliveryState === "READ" ? (
+                                  <CheckCheck size={14} className="text-blue-500" />
+                                ) : msg.deliveryState === "DELIVERED" ? (
+                                  <CheckCheck size={14} />
+                                ) : (
+                                  <Check size={14} />
+                                )}
+                              </span>
+                            )}
                           </span>
                         ) : null}
                         {messageActionError &&
