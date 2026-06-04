@@ -44,7 +44,7 @@ import {
 } from '../../common/openapi/swagger.models';
 import { UploadsService } from './uploads.service';
 
-const ABSOLUTE_MAX_UPLOAD_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+const ABSOLUTE_MAX_UPLOAD_FILE_SIZE_BYTES = 500 * 1024 * 1024;
 
 interface UploadedBinaryFile {
   buffer: Buffer;
