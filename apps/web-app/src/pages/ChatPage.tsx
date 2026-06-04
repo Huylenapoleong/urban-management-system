@@ -5826,13 +5826,16 @@ export function ChatPage() {
                   </div>
                 ) : null}
                 {/* Đảo ngược array nếu API trả về tin mới nhất trước (thường thấy nếu limit offset) */}
-                {[...filteredMessages]
-                  .reverse()
-                  .map((msg, index, orderedMessages) => {
-                    const isMe = msg.senderId === user?.sub;
-                    const previousMessage = orderedMessages[index - 1];
-                    const nextMessage = orderedMessages[index + 1];
-                    const isGroupMessage = Boolean(activeContact?.isGroup);
+                {(() => {
+                  const latestMessageByMe = filteredMessages.find(m => m.senderId === user?.sub);
+                  return [...filteredMessages]
+                    .reverse()
+                    .map((msg, index, orderedMessages) => {
+                      const isMe = msg.senderId === user?.sub;
+                      const isLatestMessageByMe = latestMessageByMe ? msg.id === latestMessageByMe.id : false;
+                      const previousMessage = orderedMessages[index - 1];
+                      const nextMessage = orderedMessages[index + 1];
+                      const isGroupMessage = Boolean(activeContact?.isGroup);
                     const messageSentAtMs = new Date(msg.sentAt).getTime();
                     const previousSentAtMs = previousMessage
                       ? new Date(previousMessage.sentAt).getTime()
@@ -6702,11 +6705,9 @@ export function ChatPage() {
                             className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 flex items-center gap-1 ${isMe ? "justify-end pr-10" : "justify-start"} ${!isMe ? "pl-10" : ""}`}
                           >
                             {format(new Date(msg.sentAt), "HH:mm")}
-                            {isMe && (
+                            {isMe && isLatestMessageByMe && msg.deliveryState !== "READ" && !Object.entries(readWatermarks).some(([userId, readAt]) => userId !== user?.sub && new Date(readAt).getTime() >= new Date(msg.sentAt).getTime()) && (
                               <span className="inline-flex">
-                                {msg.deliveryState === "READ" ? (
-                                  <CheckCheck size={14} className="text-blue-500" />
-                                ) : msg.deliveryState === "DELIVERED" ? (
+                                {msg.deliveryState === "DELIVERED" ? (
                                   <CheckCheck size={14} />
                                 ) : (
                                   <Check size={14} />
@@ -6774,7 +6775,7 @@ export function ChatPage() {
                         ) : null}
                       </div>
                     );
-                  })}
+                  })})()}
 
                 {activeContact?.isGroup &&
                 activeChat &&
