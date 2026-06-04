@@ -127,7 +127,9 @@ class MessageItem {
       senderName: (json["senderName"] ?? "Unknown").toString(),
       senderAvatarUrl: json["senderAvatarUrl"]?.toString() ?? json["senderAvatar"]?.toString(),
       type: (json["type"] ?? "TEXT").toString(),
-      content: (json["content"] ?? "").toString(),
+      content: json["content"] is Map
+          ? jsonEncode(json["content"])
+          : (json["content"] ?? "").toString(),
       sentAt: (json["sentAt"] ?? json["createdAt"] ?? "").toString(),
       updatedAt: json["updatedAt"]?.toString(),
       replyTo: json["replyTo"]?.toString(),

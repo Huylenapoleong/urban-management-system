@@ -76,6 +76,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   StreamSubscription? _readSub;
   StreamSubscription? _presenceSub;
   StreamSubscription? _snapshotSub;
+  StreamSubscription? _updateSub;
   Map<String, dynamic> _userPresence = {};
   bool _sending = false;
   MessageItem? _replyingTo;
@@ -428,7 +429,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       }
     });
 
-    widget.socketService.onMessageUpdated.listen((msg) {
+    _updateSub = widget.socketService.onMessageUpdated.listen((msg) {
       if (mounted && msg.conversationId == widget.conversation.conversationId) {
         final items = _pagingController.itemList;
         if (items != null) {
@@ -436,7 +437,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           if (idx != -1) {
             final newList = List<MessageItem>.from(items);
             newList[idx] = msg;
-            _pagingController.itemList = newList;
+            setState(() {
+              _pagingController.itemList = newList;
+            });
           }
         }
       }
@@ -460,7 +463,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 if (m.senderId == widget.currentUser.id.toString()) {
                   final mSentAt = DateTime.tryParse(m.sentAt);
                   if (mSentAt != null && !mSentAt.isAfter(readAt) && m.deliveryState != 'READ') {
-                    newList[i] = m.copyWith(deliveryState: 'READ');
+                    newList[i] = m.copyWith(
+                      deliveryState: 'READ',
+                      lastReadAt: readAtStr,
+                    );
                     updatedAny = true;
                   }
                 }
@@ -518,6 +524,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _presenceSub?.cancel();
     _snapshotSub?.cancel();
     _typingSub?.cancel();
+    _updateSub?.cancel();
     for (final timer in _typingTimers.values) {
       timer.cancel();
     }
@@ -1201,6 +1208,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   Clipboard.setData(ClipboardData(text: message.contentText));
                   ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text("Đã sao chép")));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: Color(0xFF7C3AED)),
+                title: Text("Thông tin tin nhắn", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMessageInfoDialog(message);
                 },
               ),
               ListTile(
@@ -2251,8 +2266,49 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       builderDelegate: PagedChildBuilderDelegate<MessageItem>(
         itemBuilder: (context, message, index) {
-          final isMine = message.senderId == widget.currentUser.id;
+          final items = _pagingController.itemList ?? [];
+          final isMine = message.senderId == widget.currentUser.id.toString();
           final senderAlias = _aliases[message.senderId];
+          
+          // Determine if we should show the read receipt avatar under this message
+          bool showReadReceipt = false;
+          String? peerId;
+          String? peerAvatarUrl;
+          String? peerDisplayName;
+          
+          if (isMine && !widget.conversation.isGroup) {
+            peerId = widget.conversation.getPeerId(widget.currentUser.id.toString());
+            if (peerId != null) {
+              peerAvatarUrl = widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl;
+              peerDisplayName = widget.conversation.title;
+              
+              if (_conversationMembers.isNotEmpty) {
+                try {
+                  final peerMember = _conversationMembers.firstWhere(
+                    (m) => m["userId"]?.toString() == peerId,
+                    orElse: () => null,
+                  );
+                  if (peerMember != null) {
+                    peerAvatarUrl = peerMember["avatarUrl"]?.toString() ?? peerAvatarUrl;
+                    peerDisplayName = peerMember["displayName"]?.toString() ?? peerDisplayName;
+                  }
+                } catch (_) {}
+              }
+              
+              // Find the index of the most recent read message sent by me
+              int latestReadIdx = -1;
+              for (int i = 0; i < items.length; i++) {
+                final m = items[i];
+                if (m.senderId == widget.currentUser.id.toString() && m.deliveryState?.toUpperCase() == 'READ') {
+                  latestReadIdx = i;
+                  break;
+                }
+              }
+              
+              showReadReceipt = latestReadIdx == index;
+            }
+          }
+          
           return ChatMessageBubble(
             message: message,
             isMine: isMine,
@@ -2261,6 +2317,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             userService: widget.userService,
             onLongPress: () => _showMessageActions(message),
             currentUserName: widget.currentUser.fullName,
+            showReadReceipt: showReadReceipt,
+            peerId: peerId,
+            peerAvatarUrl: peerAvatarUrl,
+            peerDisplayName: peerDisplayName,
           );
         },
         firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
@@ -2294,6 +2354,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         noItemsFoundIndicatorBuilder: (_) => const Center(
             child: Text("Chưa có tin nhắn nào",
                 style: TextStyle(color: Colors.grey))),
+      ),
+    );
+  }
+
+  void _showMessageInfoDialog(MessageItem message) {
+    showDialog(
+      context: context,
+      builder: (context) => _MessageInfoDialog(
+        messageId: message.id,
+        pagingController: _pagingController,
+        conversation: widget.conversation,
+        currentUser: widget.currentUser,
       ),
     );
   }
@@ -3040,6 +3112,10 @@ class ChatMessageBubble extends StatelessWidget {
   final UserService? userService;
   final VoidCallback? onLongPress;
   final String? currentUserName;
+  final bool showReadReceipt;
+  final String? peerId;
+  final String? peerAvatarUrl;
+  final String? peerDisplayName;
 
   const ChatMessageBubble({
     super.key,
@@ -3050,6 +3126,10 @@ class ChatMessageBubble extends StatelessWidget {
     this.userService,
     this.onLongPress,
     this.currentUserName,
+    this.showReadReceipt = false,
+    this.peerId,
+    this.peerAvatarUrl,
+    this.peerDisplayName,
   });
 
   @override
@@ -3078,26 +3158,45 @@ class ChatMessageBubble extends StatelessWidget {
       );
     }
 
-    return GestureDetector(
-      onLongPress: onLongPress,
-      child: Row(
-        mainAxisAlignment:
-            isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (!isMine) ...[
-            UserAvatar(
-              userId: message.senderId,
-              initialAvatarUrl: message.senderAvatarUrl,
-              initialDisplayName: senderAlias ?? message.senderName,
-              radius: 14,
+    return Column(
+      crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onLongPress: onLongPress,
+          child: Row(
+            mainAxisAlignment:
+                isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!isMine) ...[
+                UserAvatar(
+                  userId: message.senderId,
+                  initialAvatarUrl: message.senderAvatarUrl,
+                  initialDisplayName: senderAlias ?? message.senderName,
+                  radius: 14,
+                  userService: userService,
+                ),
+                const SizedBox(width: 8),
+              ],
+              _buildBubble(context),
+            ],
+          ),
+        ),
+        if (isMine && showReadReceipt && peerId != null) ...[
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: UserAvatar(
+              userId: peerId!,
+              initialAvatarUrl: peerAvatarUrl,
+              initialDisplayName: peerDisplayName ?? "User",
+              radius: 8,
               userService: userService,
             ),
-            const SizedBox(width: 8),
-          ],
-          _buildBubble(context),
+          ),
         ],
-      ),
+      ],
     );
   }
 
@@ -3181,11 +3280,7 @@ class ChatMessageBubble extends StatelessWidget {
 
     final state = message.deliveryState?.toUpperCase();
     if (state == 'READ') {
-      return const Icon(
-        Icons.done_all,
-        size: 13,
-        color: Colors.lightBlueAccent,
-      );
+      return const SizedBox.shrink();
     } else if (state == 'DELIVERED') {
       return const Icon(
         Icons.done_all,
@@ -3921,3 +4016,233 @@ class _InviteCandidate {
     );
   }
 }
+
+class _MessageInfoDialog extends StatefulWidget {
+  final String messageId;
+  final PagingController<String?, MessageItem> pagingController;
+  final ConversationSummary conversation;
+  final dynamic currentUser;
+
+  const _MessageInfoDialog({
+    required this.messageId,
+    required this.pagingController,
+    required this.conversation,
+    required this.currentUser,
+  });
+
+  @override
+  State<_MessageInfoDialog> createState() => _MessageInfoDialogState();
+}
+
+class _MessageInfoDialogState extends State<_MessageInfoDialog> {
+  void _onPagingControllerChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.pagingController.addListener(_onPagingControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.pagingController.removeListener(_onPagingControllerChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final items = widget.pagingController.itemList ?? [];
+    final messageIdx = items.indexWhere((m) => m.id == widget.messageId);
+
+    if (messageIdx == -1) {
+      return AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: const Text("Không tìm thấy tin nhắn"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Đóng", style: TextStyle(color: Color(0xFF7C3AED))),
+          )
+        ],
+      );
+    }
+
+    final message = items[messageIdx];
+    final sentDate = DateTime.tryParse(message.sentAt)?.toLocal();
+    final formattedSent = sentDate != null
+        ? DateFormat("dd/MM/yyyy HH:mm:ss").format(sentDate)
+        : "Không rõ";
+
+    final readDate = message.lastReadAt != null
+        ? DateTime.tryParse(message.lastReadAt!)?.toLocal()
+        : null;
+    final formattedRead = readDate != null
+        ? DateFormat("dd/MM/yyyy HH:mm:ss").format(readDate)
+        : null;
+
+    final isMine = message.senderId == widget.currentUser.id.toString();
+    final isGroup = widget.conversation.isGroup;
+
+    return AlertDialog(
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(
+        children: [
+          const Icon(Icons.info_outline, color: Color(0xFF7C3AED)),
+          const SizedBox(width: 8),
+          Text(
+            "Thông tin tin nhắn",
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Nội dung:",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                message.isDeleted ? "Tin nhắn đã thu hồi" : message.contentText,
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontStyle: message.isDeleted ? FontStyle.italic : null,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Icon(Icons.send_outlined, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "Đã gửi: $formattedSent",
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (isMine) ...[
+              if (isGroup) ...[
+                Row(
+                  children: [
+                    Icon(Icons.remove_red_eye_outlined, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Đã xem: ${message.readByCount ?? 0} / ${message.recipientCount ?? 0} người",
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(Icons.done_all, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Đã nhận: ${message.deliveredCount ?? 0} / ${message.recipientCount ?? 0} người",
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                Row(
+                  children: [
+                    Icon(
+                      message.deliveryState == 'READ'
+                          ? Icons.remove_red_eye_outlined
+                          : (message.deliveryState == 'DELIVERED' ? Icons.done_all : Icons.check),
+                      size: 16,
+                      color: message.deliveryState == 'READ' ? Colors.blue : (isDark ? Colors.grey.shade400 : Colors.grey),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        message.deliveryState == 'READ'
+                            ? "Trạng thái: Đã xem"
+                            : (message.deliveryState == 'DELIVERED'
+                                ? "Trạng thái: Đã nhận"
+                                : "Trạng thái: Đã gửi thành công"),
+                        style: TextStyle(
+                          color: message.deliveryState == 'READ'
+                              ? Colors.blue
+                              : (isDark ? Colors.white : Colors.black87),
+                          fontSize: 13,
+                          fontWeight: message.deliveryState == 'READ' ? FontWeight.bold : null,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (formattedRead != null) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(Icons.access_time_outlined, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Xem lúc: $formattedRead",
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Đóng", style: TextStyle(color: Color(0xFF7C3AED))),
+        ),
+      ],
+    );
+  }
+}
+
