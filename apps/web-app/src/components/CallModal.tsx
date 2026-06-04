@@ -147,7 +147,7 @@ function RemotePeerVideo({ peerId, stream, fallbackName, fallbackAvatar, onSpeak
               <AvatarImage src={fallbackAvatar} alt={displayName} />
             )}
             <AvatarFallback className="bg-slate-800 text-lg font-semibold text-slate-100">
-              {displayName.slice(0, 2).toUpperCase()}
+              <img src="/default-avatar.png" alt={displayName} className="w-full h-full object-cover rounded-full" />
             </AvatarFallback>
           </Avatar>
         </div>
@@ -538,8 +538,8 @@ export function CallModal({ rtc }: CallModalProps) {
               {primaryPeerAvatar ? (
                 <AvatarImage src={primaryPeerAvatar} alt={peerName} />
               ) : null}
-              <AvatarFallback>
-                {peerName.slice(0, 2).toUpperCase()}
+              <AvatarFallback className="bg-slate-800 text-sm font-semibold text-slate-100">
+                <img src="/default-avatar.png" alt={peerName} className="w-full h-full object-cover rounded-full" />
               </AvatarFallback>
             </Avatar>
             <p className="text-sm">Chờ mọi người tham gia...</p>
@@ -563,7 +563,7 @@ export function CallModal({ rtc }: CallModalProps) {
                     <AvatarImage src={localAvatarUrl} alt={localDisplayName} />
                   ) : null}
                   <AvatarFallback className="bg-slate-800 text-sm font-semibold text-slate-100">
-                    {localDisplayName.slice(0, 2).toUpperCase()}
+                    <img src="/default-avatar.png" alt={localDisplayName} className="w-full h-full object-cover rounded-full" />
                   </AvatarFallback>
                 </Avatar>
               </div>
@@ -609,16 +609,14 @@ export function CallModal({ rtc }: CallModalProps) {
             >
               {isMicOn ? <Mic size={20} /> : <MicOff size={20} />}
             </Button>
-            {activeConfig?.isVideo && (
-              <Button
-                variant={isVideoOn ? "secondary" : "destructive"}
-                size="icon"
-                className="h-10 w-10 rounded-full border border-slate-600 bg-slate-700/60 hover:bg-slate-600 text-white"
-                onClick={toggleVideo}
-              >
-                {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
-              </Button>
-            )}
+            <Button
+              variant={isVideoOn ? "secondary" : "destructive"}
+              size="icon"
+              className="h-10 w-10 rounded-full border border-slate-600 bg-slate-700/60 hover:bg-slate-600 text-white"
+              onClick={toggleVideo}
+            >
+              {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
+            </Button>
             <Button
               variant="destructive"
               size="icon"

@@ -26,10 +26,11 @@ export interface GroupListParams {
 export interface CreateGroupInput {
   groupName: string;
   groupType: GroupType;
-  locationCode: string;
+  locationCode?: string;
   description?: string;
   isOfficial?: boolean;
   messagePolicy?: GroupMessagePolicy;
+  userIds?: string[];
 }
 
 export interface UpdateGroupInput {
