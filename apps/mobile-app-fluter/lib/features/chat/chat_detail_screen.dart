@@ -73,6 +73,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       PagingController(firstPageKey: null);
   final ScrollController _scrollController = ScrollController();
   StreamSubscription? _msgSub;
+  StreamSubscription? _readSub;
   StreamSubscription? _presenceSub;
   StreamSubscription? _snapshotSub;
   Map<String, dynamic> _userPresence = {};
@@ -288,11 +289,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         });
       }
     });
+    // Mark as read on entry
+    widget.socketService.markAsRead(widget.conversation.conversationId);
+    widget.conversationService.markConversationAsRead(widget.conversation.conversationId).catchError((_) {});
 
     _msgSub = widget.socketService.onMessageCreated.listen((msg) {
       if (mounted && msg.conversationId == widget.conversation.conversationId) {
         if (msg.type == "SYSTEM" && msg.contentText.contains("left the call")) {
           return;
+        }
+
+        final myId = widget.currentUser.id.toString();
+        if (msg.senderId != myId) {
+          widget.socketService.markMessageDelivered(msg.conversationId, msg.id);
+          widget.socketService.markAsRead(widget.conversation.conversationId);
+          widget.conversationService.markConversationAsRead(widget.conversation.conversationId).catchError((_) {});
         }
 
         // Save socket message to local cache
@@ -372,7 +383,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           _pagingController.itemList = [msg];
         }
         // Remove from typing if message arrived
-        final myId = widget.currentUser.id.toString();
         if (msg.senderId != myId) {
           setState(() {
             _typingUsers.remove(msg.senderId);
@@ -432,6 +442,40 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       }
     });
 
+    _readSub = widget.socketService.onConversationRead.listen((data) {
+      if (mounted &&
+          (data["conversationId"] == widget.conversation.conversationId ||
+           data["conversationKey"] == _conversationKey)) {
+        final readByUserId = data["readByUserId"]?.toString() ?? data["userId"]?.toString();
+        final readAtStr = data["readAt"]?.toString() ?? data["lastReadAt"]?.toString();
+        if (readByUserId != null && readAtStr != null && readByUserId != widget.currentUser.id.toString()) {
+          final readAt = DateTime.tryParse(readAtStr);
+          if (readAt != null) {
+            final items = _pagingController.itemList;
+            if (items != null) {
+              final newList = List<MessageItem>.from(items);
+              bool updatedAny = false;
+              for (int i = 0; i < newList.length; i++) {
+                final m = newList[i];
+                if (m.senderId == widget.currentUser.id.toString()) {
+                  final mSentAt = DateTime.tryParse(m.sentAt);
+                  if (mSentAt != null && !mSentAt.isAfter(readAt) && m.deliveryState != 'READ') {
+                    newList[i] = m.copyWith(deliveryState: 'READ');
+                    updatedAny = true;
+                  }
+                }
+              }
+              if (updatedAny) {
+                setState(() {
+                  _pagingController.itemList = newList;
+                });
+              }
+            }
+          }
+        }
+      }
+    });
+
     _presenceSub = widget.socketService.onPresenceUpdated.listen((data) {
       final presence = data["presence"] ?? data;
       final userId = presence["userId"]?.toString();
@@ -470,6 +514,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     widget.socketService.leaveConversation(widget.conversation.conversationId);
     widget.webRTCService.callState.removeListener(_handleCallStateChange);
     _msgSub?.cancel();
+    _readSub?.cancel();
     _presenceSub?.cancel();
     _snapshotSub?.cancel();
     _typingSub?.cancel();
@@ -864,6 +909,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         return !(msg.type == "SYSTEM" && msg.contentText.contains("left the call"));
       }).toList();
 
+      final myId = widget.currentUser.id.toString();
+      for (final msg in filteredItems) {
+        if (msg.senderId != myId && msg.deliveryState != 'DELIVERED' && msg.deliveryState != 'READ') {
+          widget.socketService.markMessageDelivered(msg.conversationId, msg.id);
+        }
+      }
+
       if (pageKey == null) {
         // Cache the first page messages locally
         final messagesJson = filteredItems.map((m) => m.toJson()).toList();
@@ -1021,6 +1073,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             fileName: attachment.name,
             mimeType: attachment.mimeType,
             target: "MESSAGE",
+            entityId: widget.conversation.conversationId,
           );
 
           final actualMsg = await widget.conversationService.sendMessage(
@@ -3093,19 +3146,59 @@ class ChatMessageBubble extends StatelessWidget {
                 ),
             ],
             const SizedBox(height: 4),
-            Text(
-              _formatTime(message.sentAtDate),
-              style: TextStyle(
-                  fontSize: 10,
-                  color: isMine
-                      ? Colors.white.withOpacity(0.7)
-                      : Colors.grey[500]),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _formatTime(message.sentAtDate),
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: isMine
+                          ? Colors.white.withOpacity(0.7)
+                          : Colors.grey[500]),
+                ),
+                if (isMine) ...[
+                  const SizedBox(width: 4),
+                  _buildDeliveryStatusIcon(),
+                ],
+              ],
             ),
             if (reactions.isNotEmpty) _buildReactionsDisplay(context, isMine),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildDeliveryStatusIcon() {
+    if (message.isPending) {
+      return const Icon(
+        Icons.access_time,
+        size: 11,
+        color: Colors.white70,
+      );
+    }
+
+    final state = message.deliveryState?.toUpperCase();
+    if (state == 'READ') {
+      return const Icon(
+        Icons.done_all,
+        size: 13,
+        color: Colors.lightBlueAccent,
+      );
+    } else if (state == 'DELIVERED') {
+      return const Icon(
+        Icons.done_all,
+        size: 13,
+        color: Colors.white70,
+      );
+    } else {
+      return const Icon(
+        Icons.check,
+        size: 13,
+        color: Colors.white70,
+      );
+    }
   }
 
   List<InlineSpan> _buildTextSpans(BuildContext context, String text) {
