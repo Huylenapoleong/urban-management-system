@@ -153,7 +153,8 @@ export class PushNotificationService
       let platformApplicationArn: string | undefined;
 
       if (normalizedPlatform.includes('android')) {
-        platformApplicationArn = this.config.pushSnsAndroidPlatformApplicationArn;
+        platformApplicationArn =
+          this.config.pushSnsAndroidPlatformApplicationArn;
       } else if (
         normalizedPlatform.includes('ios') ||
         normalizedPlatform.includes('apple') ||
@@ -181,13 +182,14 @@ export class PushNotificationService
           }),
         );
         endpointArn = res.EndpointArn;
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const err = error as Error & { code?: string };
         if (
-          (error.name === 'InvalidParameterException' ||
-            error.code === 'InvalidParameterException') &&
-          error.message?.includes('already exists')
+          (err.name === 'InvalidParameterException' ||
+            err.code === 'InvalidParameterException') &&
+          err.message?.includes('already exists')
         ) {
-          const match = error.message.match(/arn:aws:sns:[^ ]+/);
+          const match = err.message.match(/arn:aws:sns:[^ ]+/);
           endpointArn = match ? match[0] : undefined;
           if (!endpointArn) {
             throw error;
@@ -637,7 +639,8 @@ export class PushNotificationService
           userId,
           deviceId: device.deviceId,
         };
-        if (event.conversationId) customData.conversationId = event.conversationId;
+        if (event.conversationId)
+          customData.conversationId = event.conversationId;
         if (event.messageId) customData.messageId = event.messageId;
         if (event.reportId) customData.reportId = event.reportId;
 
@@ -679,14 +682,15 @@ export class PushNotificationService
               MessageStructure: 'json',
             }),
           );
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const err = error as Error & { code?: string };
           this.logger.warn(
-            `SNS push dispatch failed for user ${userId}, device ${device.deviceId}: ${error.message}`,
+            `SNS push dispatch failed for user ${userId}, device ${device.deviceId}: ${err.message}`,
           );
           if (
-            error.name === 'EndpointDisabledException' ||
-            error.code === 'EndpointDisabled' ||
-            error.message?.includes('EndpointDisabled')
+            err.name === 'EndpointDisabledException' ||
+            err.code === 'EndpointDisabled' ||
+            err.message?.includes('EndpointDisabled')
           ) {
             try {
               const disabledDevice: StoredPushDevice = {
