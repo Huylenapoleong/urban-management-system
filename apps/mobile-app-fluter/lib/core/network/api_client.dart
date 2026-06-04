@@ -18,6 +18,9 @@ class ApiClient {
                 connectTimeout: const Duration(seconds: 15),
                 receiveTimeout: const Duration(seconds: 20),
                 sendTimeout: const Duration(seconds: 30),
+                headers: {
+                  "x-app-variant": "mobile-app",
+                },
               ),
             ) {
     _dio.interceptors.add(
@@ -38,7 +41,14 @@ class ApiClient {
             if (refreshToken != null && refreshToken.isNotEmpty) {
               try {
                 // Use a separate dio instance to avoid interceptor loop
-                final refreshDio = Dio(BaseOptions(baseUrl: AppConfig.apiBaseUrl));
+                final refreshDio = Dio(
+                  BaseOptions(
+                    baseUrl: AppConfig.apiBaseUrl,
+                    headers: {
+                      "x-app-variant": "mobile-app",
+                    },
+                  ),
+                );
                 final refreshResponse = await refreshDio.post(
                   "/auth/refresh", 
                   data: {"refreshToken": refreshToken},
