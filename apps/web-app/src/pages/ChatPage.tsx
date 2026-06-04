@@ -1,6 +1,9 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { MessageBubbleContainer } from "@/components/chat/MessageBubble";
+import { MessageComposer } from "@/components/chat/MessageComposer";
+import { MessageList } from "@/components/chat/MessageList";
 import { Input } from "@/components/ui/input";
-import { useConversations, useMessages } from "@/hooks/shared/useChatData";
+import { useConversationList, useMessages } from "@/hooks/shared/useChatData";
 import type { CallEndedSummary } from "@/hooks/shared/useWebRTC";
 import { socketClient } from "@/lib/socket-client";
 import { useAuth } from "@/providers/auth-context";
@@ -53,6 +56,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CHAT_SOCKET_EVENTS, type GroupMemberRole } from "@urban/shared-constants";
 import type {
+  ConversationSummary,
   GroupInviteLink,
   MessageItem,
   MessageReplyReference,
@@ -62,13 +66,14 @@ import type {
   UserFriendRequestItem,
 } from "@urban/shared-types";
 import { format } from "date-fns";
-import EmojiPicker, { Theme, type EmojiClickData } from "emoji-picker-react";
+import type { EmojiClickData, Theme } from "emoji-picker-react";
 import {
   AlertTriangle,
   Ban,
   Bell,
   BellOff,
   ChevronDown,
+  ChevronsDown,
   Copy,
   Download,
   Eraser,
@@ -84,6 +89,8 @@ import {
   Info,
   KeyRound,
   Link2,
+  ListChecks,
+  Mic,
   MoreHorizontal,
   Paperclip,
   Pencil,
@@ -99,7 +106,7 @@ import {
   Shield,
   ShieldAlert,
   Smile,
-  SmilePlus,
+  Star,
   Sticker,
   ThumbsUp,
   Trash2,
@@ -111,6 +118,8 @@ import {
 } from "lucide-react";
 import React, {
   Fragment,
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -121,6 +130,11 @@ import React, {
 import { toast } from "react-hot-toast";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MessageInfoModal } from "@/components/MessageInfoModal";
+
+const EmojiPicker = lazy(async () => {
+  const module = await import("emoji-picker-react");
+  return { default: module.default };
+});
 
 const formatFileSize = (bytes?: number) => {
   if (!bytes || bytes <= 0) return "0 KB";
@@ -160,6 +174,22 @@ const cleanFileName = (name: string) => {
   return name;
 };
 
+const resolveMessageAttachmentUrl = (
+  message: Pick<MessageItem, "attachmentAsset" | "attachmentUrl">,
+) => {
+  const candidates = [
+    message.attachmentUrl,
+    message.attachmentAsset?.resolvedUrl,
+  ];
+
+  return candidates
+    .map((value) => value?.trim())
+    .find(
+      (value): value is string =>
+        Boolean(value) && value !== "null" && value !== "undefined",
+    );
+};
+
 const getFileIcon = (fileName: string, size: number = 24) => {
   const ext = fileName.split(".").pop()?.toLowerCase();
   const props = { size };
@@ -190,6 +220,8 @@ const getFileIcon = (fileName: string, size: number = 24) => {
     case "webp":
       return <FileImage className="text-pink-500" {...props} />;
     case "mp3":
+    case "m4a":
+    case "aac":
     case "wav":
     case "ogg":
       return <FileAudio className="text-emerald-500" {...props} />;
@@ -249,6 +281,22 @@ const MANAGE_GROUP_TABS: Array<{
 type RecallScope = "SELF" | "EVERYONE";
 
 const CALL_SUMMARY_STORAGE_KEY = "urban:web-app:call-summaries:v2";
+
+const AUDIO_RECORDING_MIME_TYPES = [
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/aac",
+  "audio/mpeg",
+];
+
+const AUDIO_RECORDING_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
+  "audio/webm": "webm",
+  "audio/ogg": "ogg",
+  "audio/mp4": "m4a",
+  "audio/aac": "aac",
+  "audio/mpeg": "mp3",
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -663,6 +711,7 @@ const QUICK_LIKE_EMOJI = "👍";
 const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
 const URL_PATTERN = /(https?:\/\/[^\s]+)/gi;
 const MESSAGE_BLOCK_GAP_MS = 10 * 60 * 1000;
+const SCROLL_DOWN_BUTTON_THRESHOLD_PX = 180;
 const USER_ID_PATTERN = /\b[0-9A-Z]{20,32}\b/g;
 const GIPHY_PAGE_SIZE = 20;
 
@@ -875,13 +924,20 @@ export function ChatPage() {
   const failedPresenceUserIdsRef = useRef<Set<string>>(new Set());
   const [inputText, setInputText] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
+  const [conversationListFilter, setConversationListFilter] = useState<
+    "all" | "unread"
+  >("all");
   const [queuedAttachments, setQueuedAttachments] = useState<
     QueuedAttachment[]
   >([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isVoiceUploading, setIsVoiceUploading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [showSyncNotification, setShowSyncNotification] = useState(true);
   const [messageSearch, setMessageSearch] = useState("");
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>("");
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(
@@ -943,9 +999,10 @@ export function ChatPage() {
   const [isManageGroupModalOpen, setIsManageGroupModalOpen] = useState(false);
   const [manageGroupActiveTab, setManageGroupActiveTab] =
     useState<ManageGroupTab>("members");
-  const [reactionPickerMessageId, setReactionPickerMessageId] = useState<
-    string | null
-  >(null);
+  const [
+    inlineReactionPickerMessageId,
+    setInlineReactionPickerMessageId,
+  ] = useState<string | null>(null);
   const [successorSearchText, setSuccessorSearchText] = useState("");
   const [convContextMenu, setConvContextMenu] = useState<{
     x: number;
@@ -1118,8 +1175,13 @@ export function ChatPage() {
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const groupAvatarInputRef = useRef<HTMLInputElement>(null);
-  const composerInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef<number>(0);
   const typingStopTimerRef = useRef<number | null>(null);
   const isTypingRef = useRef(false);
   const requestedDmAvatarIdsRef = useRef<Set<string>>(new Set());
@@ -1276,7 +1338,7 @@ export function ChatPage() {
 
   // Data fetching
   const { data: conversations = [], isLoading: loadingConversations } =
-    useConversations(conversationSearch);
+    useConversationList(conversationSearch);
   const {
     data: messages = [],
     isLoading: loadingMessages,
@@ -1285,7 +1347,7 @@ export function ChatPage() {
     loadMore,
     sendMessageAsync,
     isSending,
-    markAsRead,
+    markAsReadAsync,
     updateMessageAsync,
     deleteMessageAsync,
     forwardMessageAsync,
@@ -1295,6 +1357,7 @@ export function ChatPage() {
     typingUsers,
     sendTyping,
   } = useMessages(activeChat || undefined, messageSearch, messageTypeFilter);
+  const markReadInFlightConversationRef = useRef<string | null>(null);
 
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [showAllPinned, setShowAllPinned] = useState(false);
@@ -1522,21 +1585,43 @@ export function ChatPage() {
     }
   };
 
-  const syntheticConversation = useMemo(
-    () =>
-      chatState.conversationId
-        ? {
-          conversationId: chatState.conversationId,
-          groupName: chatState.displayName || "Đang tải...",
-          avatarUrl: chatState.avatarUrl,
-          updatedAt: new Date().toISOString(),
-          unreadCount: 0,
-          lastMessagePreview: "Bạn đã tham gia nhóm",
-          lastSenderName: "",
-          isGroup: chatState.conversationId.includes("group:"),
-        }
-        : null,
-    [chatState.avatarUrl, chatState.conversationId, chatState.displayName],
+  const syntheticConversation = useMemo<ConversationSummary | null>(
+    () => {
+      if (!chatState.conversationId) {
+        return null;
+      }
+
+      const existingConversation = conversations.find(
+        (conversation) =>
+          conversation.conversationId === chatState.conversationId,
+      );
+
+      return {
+        ...existingConversation,
+        conversationId: chatState.conversationId,
+        groupName:
+          chatState.displayName ||
+          existingConversation?.groupName ||
+          "Đang tải...",
+        avatarUrl: chatState.avatarUrl || existingConversation?.avatarUrl,
+        updatedAt:
+          existingConversation?.updatedAt || new Date(0).toISOString(),
+        unreadCount: existingConversation?.unreadCount ?? 0,
+        lastMessagePreview:
+          existingConversation?.lastMessagePreview || "Bạn đã tham gia nhóm",
+        lastSenderName: existingConversation?.lastSenderName || "",
+        isGroup:
+          existingConversation?.isGroup ??
+          chatState.conversationId.includes("group:"),
+        deletedAt: existingConversation?.deletedAt ?? null,
+      };
+    },
+    [
+      chatState.avatarUrl,
+      chatState.conversationId,
+      chatState.displayName,
+      conversations,
+    ],
   );
 
   const mergedConversations = useMemo(
@@ -1554,9 +1639,48 @@ export function ChatPage() {
     [conversations, syntheticConversation],
   );
 
+  const conversationSortTieOrderRef = useRef<Map<string, number>>(new Map());
+  const nextConversationSortTieOrderRef = useRef(0);
+
+  const sortedConversations = useMemo(() => {
+    const tieOrder = conversationSortTieOrderRef.current;
+
+    for (const conversation of mergedConversations) {
+      if (!tieOrder.has(conversation.conversationId)) {
+        tieOrder.set(
+          conversation.conversationId,
+          nextConversationSortTieOrderRef.current,
+        );
+        nextConversationSortTieOrderRef.current += 1;
+      }
+    }
+
+    return [...mergedConversations].sort((left, right) => {
+      const pinnedSort = Number(Boolean(right.isPinned)) - Number(Boolean(left.isPinned));
+      if (pinnedSort !== 0) {
+        return pinnedSort;
+      }
+
+      const leftTime = Date.parse(left.updatedAt || "");
+      const rightTime = Date.parse(right.updatedAt || "");
+      const safeLeftTime = Number.isNaN(leftTime) ? 0 : leftTime;
+      const safeRightTime = Number.isNaN(rightTime) ? 0 : rightTime;
+
+      if (safeLeftTime !== safeRightTime) {
+        return safeRightTime - safeLeftTime;
+      }
+
+      const leftOrder =
+        tieOrder.get(left.conversationId) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder =
+        tieOrder.get(right.conversationId) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
+  }, [mergedConversations]);
+
   const normalizedSearch = conversationSearch.trim().toLowerCase();
-  const renderedConversations = normalizedSearch
-    ? mergedConversations.filter((conversation) => {
+  const searchedConversations = normalizedSearch
+    ? sortedConversations.filter((conversation) => {
       const alias = conversationAliases[conversation.conversationId];
       const haystack = [
         alias,
@@ -1570,7 +1694,13 @@ export function ChatPage() {
         .toLowerCase();
       return haystack.includes(normalizedSearch);
     })
-    : mergedConversations;
+    : sortedConversations;
+  const renderedConversations =
+    conversationListFilter === "unread"
+      ? searchedConversations.filter(
+        (conversation) => (conversation.unreadCount ?? 0) > 0,
+      )
+      : searchedConversations;
 
   const activeContact = mergedConversations.find(
     (c) => c.conversationId === activeChat,
@@ -1694,6 +1824,7 @@ export function ChatPage() {
 
     return "Nhiều người đang soạn tin...";
   })();
+  const typingIndicatorLabel = typingIndicatorText.replace(/\.{3}$/, "").trim();
   const normalizedForwardSearch = forwardSearch.trim().toLowerCase();
   const activeMessageReactions = useMemo(
     () => (activeChat ? messageReactionsByConversation[activeChat] || {} : {}),
@@ -1793,6 +1924,16 @@ export function ChatPage() {
   const hasInitialScrolledRef = useRef(false);  // chỉ scroll xuống 1 lần khi vào chat
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const container = messagesContainerRef.current;
+    if (!container) {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+      return;
+    }
+
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    setShowScrollDown(false);
+  }, []);
   const {
     data: activeGroupMembers = [],
     isLoading: isLoadingGroupMembers,
@@ -2732,7 +2873,8 @@ export function ChatPage() {
   // Thay thế toàn bộ useEffect từ dòng 2713 đến 2756
   useEffect(() => {
     const container = messagesContainerRef.current;
-    let timerId: number | undefined;
+    let timeoutId: number | undefined;
+    let frameId: number | undefined;
 
     // Reset khi đổi conversation
     if (lastActiveChatRef.current !== activeChat) {
@@ -2764,22 +2906,34 @@ export function ChatPage() {
     }
 
     const previousCount = previousMessageCountRef.current;
-    const isFirstLoad = previousCount === 0 && messages.length > 0;
+    const hasActiveChatMessages =
+      !activeChat ||
+      messages.length === 0 ||
+      messages.some((message) => message.conversationId === activeChat);
+    const isFirstLoad =
+      Boolean(activeChat) &&
+      !loadingMessages &&
+      hasActiveChatMessages &&
+      previousCount === 0;
 
     // Chỉ auto-scroll xuống duy nhất 1 lần khi vừa vào chat
     if (isFirstLoad && !hasInitialScrolledRef.current) {
       hasInitialScrolledRef.current = true;
-      timerId = window.setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-      }, 50);
+      frameId = window.requestAnimationFrame(() => {
+        scrollMessagesToBottom();
+        timeoutId = window.setTimeout(scrollMessagesToBottom, 80);
+      });
     }
 
-    previousMessageCountRef.current = messages.length;
+    if (hasActiveChatMessages) {
+      previousMessageCountRef.current = messages.length;
+    }
 
     return () => {
-      if (timerId !== undefined) window.clearTimeout(timerId);
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [messages, activeChat]);
+  }, [activeChat, loadingMessages, messages, scrollMessagesToBottom]);
 
   const handleLoadMoreMessages = useCallback(async () => {
     const container = messagesContainerRef.current;
@@ -2811,6 +2965,11 @@ export function ChatPage() {
     const container = messagesContainerRef.current;
     if (!container) return;
 
+    if (!hasInitialScrolledRef.current) {
+      setShowScrollDown(false);
+      return;
+    }
+
     if (container.scrollTop <= 50) {
       if (hasMoreRef.current && !isLoadingMoreRef.current) {
         void handleLoadMoreMessages();
@@ -2820,16 +2979,34 @@ export function ChatPage() {
     // Hiện nút scroll down khi user đang ở cách cuối > 300px
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
-    setShowScrollDown(distanceFromBottom > 300);
+    setShowScrollDown(distanceFromBottom > SCROLL_DOWN_BUTTON_THRESHOLD_PX);
   }, [handleLoadMoreMessages]);
 
   useEffect(() => {
     if (!activeChat) {
+      markReadInFlightConversationRef.current = null;
       return;
     }
 
-    markAsRead();
-  }, [activeChat, markAsRead]);
+    if ((activeContact?.unreadCount ?? 0) <= 0) {
+      if (markReadInFlightConversationRef.current === activeChat) {
+        markReadInFlightConversationRef.current = null;
+      }
+      return;
+    }
+
+    if (markReadInFlightConversationRef.current === activeChat) {
+      return;
+    }
+
+    const conversationId = activeChat;
+    markReadInFlightConversationRef.current = conversationId;
+    void markAsReadAsync().finally(() => {
+      if (markReadInFlightConversationRef.current === conversationId) {
+        markReadInFlightConversationRef.current = null;
+      }
+    });
+  }, [activeChat, activeContact?.unreadCount, markAsReadAsync]);
 
   useEffect(() => {
     setLocalFailedMessages([]);
@@ -2917,7 +3094,7 @@ export function ChatPage() {
   }, [messageReactionsByConversation]);
 
   useEffect(() => {
-    setReactionPickerMessageId(null);
+    setInlineReactionPickerMessageId(null);
   }, [activeChat]);
 
   useEffect(() => {
@@ -3432,6 +3609,20 @@ export function ChatPage() {
     syncMentionContext(nextValue, cursorPosition);
   };
 
+  const resizeComposerTextarea = useCallback(() => {
+    const input = composerInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+  }, []);
+
+  useEffect(() => {
+    resizeComposerTextarea();
+  }, [inputText, isRecording, resizeComposerTextarea]);
+
   const handleInsertMention = (candidate: MentionCandidate) => {
     const input = composerInputRef.current;
     if (!input || mentionStartIndex === null) {
@@ -3461,7 +3652,7 @@ export function ChatPage() {
   };
 
   const handleComposerKeyDown = (
-    event: React.KeyboardEvent<HTMLInputElement>,
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
   ) => {
     if (!isMentionMenuOpen) {
       return;
@@ -3485,10 +3676,13 @@ export function ChatPage() {
   useEffect(() => {
     const handleClickOutside = () => {
       setActiveMessageMenuId(null);
-      setReactionPickerMessageId(null);
+      setInlineReactionPickerMessageId(null);
     };
 
-    if (!activeMessageMenuId && !reactionPickerMessageId) {
+    if (
+      !activeMessageMenuId &&
+      !inlineReactionPickerMessageId
+    ) {
       return;
     }
 
@@ -3496,7 +3690,10 @@ export function ChatPage() {
     return () => {
       window.removeEventListener("click", handleClickOutside);
     };
-  }, [activeMessageMenuId, reactionPickerMessageId]);
+  }, [
+    activeMessageMenuId,
+    inlineReactionPickerMessageId,
+  ]);
 
   const handleStartCall = (isVideo: boolean) => {
     if (!activeContact) return;
@@ -3533,6 +3730,8 @@ export function ChatPage() {
       return "TEXT";
     }
 
+    const extension = file.name.split(".").pop()?.toLowerCase() || "";
+
     if (file.type.startsWith("image/")) {
       return "IMAGE";
     }
@@ -3542,6 +3741,18 @@ export function ChatPage() {
     }
 
     if (file.type.startsWith("audio/")) {
+      return "AUDIO";
+    }
+
+    if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(extension)) {
+      return "IMAGE";
+    }
+
+    if (["mp4", "webm", "ogg", "mov", "m4v", "avi"].includes(extension)) {
+      return "VIDEO";
+    }
+
+    if (["mp3", "m4a", "aac", "oga", "wav"].includes(extension)) {
       return "AUDIO";
     }
 
@@ -3566,6 +3777,38 @@ export function ChatPage() {
       return true;
     }
     return /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(url);
+  };
+
+  const isAudioUrl = (url?: string, type?: string): boolean => {
+    if (!url) {
+      return false;
+    }
+    if (type === "AUDIO") {
+      return true;
+    }
+    if (type === "VIDEO" || type === "IMAGE") {
+      return false;
+    }
+    return /\.(mp3|m4a|aac|oga|ogg|webm)(\?.*)?$/i.test(url);
+  };
+
+  const resolveSupportedAudioMimeType = (): string => {
+    if (typeof MediaRecorder === "undefined") {
+      return "";
+    }
+
+    return (
+      AUDIO_RECORDING_MIME_TYPES.find((mimeType) =>
+        MediaRecorder.isTypeSupported(mimeType),
+      ) || ""
+    );
+  };
+
+  const normalizeAudioMimeType = (mimeType?: string): string => {
+    const normalized = (mimeType || "").split(";")[0].trim().toLowerCase();
+    return AUDIO_RECORDING_MIME_TYPES.includes(normalized)
+      ? normalized
+      : "audio/webm";
   };
 
   const replaceMentionIdsWithNames = useCallback(
@@ -3875,6 +4118,24 @@ export function ChatPage() {
       );
     });
   }, [extractMessageText, messages, normalizedMessageSearch]);
+  const orderedMessages = useMemo(
+    () => [...filteredMessages].reverse(),
+    [filteredMessages],
+  );
+  const latestIncomingMessageId = useMemo(() => {
+    for (let index = orderedMessages.length - 1; index >= 0; index -= 1) {
+      const candidate = orderedMessages[index];
+      if (
+        candidate.senderId !== user?.sub &&
+        candidate.type !== "SYSTEM" &&
+        !candidate.recalledAt
+      ) {
+        return candidate.id;
+      }
+    }
+
+    return undefined;
+  }, [orderedMessages, user?.sub]);
 
   const formatCallDuration = (totalSeconds: number): string => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
@@ -3986,14 +4247,14 @@ export function ChatPage() {
     setEditingMessageId(messageId);
     setEditingText(extractMessageText(content));
     setActiveMessageMenuId(null);
-    setReactionPickerMessageId(null);
+    setInlineReactionPickerMessageId(null);
     setMessageActionError("");
   };
 
   const handleStartReplyMessage = (message: MessageItem) => {
     setReplyingMessage(normalizeQuotedMessage(message));
     setActiveMessageMenuId(null);
-    setReactionPickerMessageId(null);
+    setInlineReactionPickerMessageId(null);
     setMessageActionError("");
 
     // Focus the chat input bar after setting reply message
@@ -4244,7 +4505,7 @@ export function ChatPage() {
     }
   };
 
-  const handleComposerPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handleComposerPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = Array.from(e.clipboardData.items || []);
     const pastedFiles = items
       .filter((item) => item.kind === "file")
@@ -4399,9 +4660,195 @@ export function ChatPage() {
     enqueueAttachments(e.dataTransfer.files);
   };
 
+  const clearRecordingTimer = useCallback(() => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  }, []);
+
+  const cleanupVoiceRecording = useCallback((resetChunks = true) => {
+    clearRecordingTimer();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
+    mediaRecorderRef.current = null;
+    recordingStartedAtRef.current = 0;
+    if (resetChunks) {
+      audioChunksRef.current = [];
+    }
+    setIsRecording(false);
+    setRecordingTime(0);
+  }, [clearRecordingTimer]);
+
+  const stopVoiceRecorder = (): Promise<Blob> => {
+    const recorder = mediaRecorderRef.current;
+
+    if (!recorder) {
+      const fallbackBlob = new Blob(audioChunksRef.current, {
+        type: "audio/webm",
+      });
+      cleanupVoiceRecording();
+      return Promise.resolve(fallbackBlob);
+    }
+
+    const mimeType = normalizeAudioMimeType(recorder.mimeType);
+
+    return new Promise<Blob>((resolve, reject) => {
+      const handleStop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mimeType,
+        });
+        cleanupVoiceRecording();
+        resolve(audioBlob);
+      };
+
+      const handleError = () => {
+        cleanupVoiceRecording();
+        reject(new Error("Recording failed."));
+      };
+
+      recorder.addEventListener("stop", handleStop, { once: true });
+      recorder.addEventListener("error", handleError, { once: true });
+
+      if (recorder.state === "inactive") {
+        handleStop();
+        return;
+      }
+
+      if (recorder.state === "recording") {
+        recorder.requestData();
+      }
+      recorder.stop();
+    });
+  };
+
+  const handleStartVoiceRecording = async () => {
+    if (!activeChat || isSending || isUploading || isVoiceUploading || isRecording) {
+      return;
+    }
+
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      toast.error("Trinh duyet khong ho tro ghi am.");
+      return;
+    }
+
+    try {
+      closeMentionMenu();
+      setIsEmojiPickerOpen(false);
+      setIsGifPickerOpen(false);
+      stopTyping();
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = resolveSupportedAudioMimeType();
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined,
+      );
+
+      audioChunksRef.current = [];
+      recordingStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      });
+
+      recorder.start();
+      recordingStartedAtRef.current = Date.now();
+      setRecordingTime(0);
+      setIsRecording(true);
+
+      clearRecordingTimer();
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingTime(
+          Math.floor((Date.now() - recordingStartedAtRef.current) / 1000),
+        );
+      }, 250);
+    } catch (error: unknown) {
+      cleanupVoiceRecording();
+      toast.error(
+        getErrorMessage(error, "Khong the bat dau ghi am. Hay kiem tra quyen microphone."),
+      );
+    }
+  };
+
+  const handleCancelVoiceRecording = async () => {
+    try {
+      await stopVoiceRecorder();
+    } catch {
+      cleanupVoiceRecording();
+    }
+  };
+
+  const handleSendVoiceRecording = async () => {
+    if (!activeChat || isVoiceUploading) {
+      return;
+    }
+
+    const conversationId = activeChat;
+    const replyTo = replyingMessage?.id;
+    setIsVoiceUploading(true);
+
+    try {
+      const audioBlob = await stopVoiceRecorder();
+      if (!audioBlob.size) {
+        toast.error("Doan ghi am khong co du lieu.");
+        return;
+      }
+
+      const contentType = normalizeAudioMimeType(audioBlob.type);
+      const extension =
+        AUDIO_RECORDING_EXTENSION_BY_MIME_TYPE[contentType] || "webm";
+      const audioFile = new File(
+        [audioBlob],
+        `voice-message-${Date.now()}.${extension}`,
+        { type: contentType },
+      );
+
+      const uploaded = await uploadMedia({
+        file: audioFile,
+        target: "MESSAGE",
+        entityId: conversationId,
+      });
+
+      await sendMessageAsync({
+        attachmentKey: uploaded.key,
+        type: "AUDIO",
+        replyTo,
+      });
+
+      setReplyingMessage(null);
+      stopTyping();
+      focusComposer();
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Khong the gui tin nhan thoai."));
+    } finally {
+      setIsVoiceUploading(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearRecordingTimer();
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state !== "inactive"
+      ) {
+        mediaRecorderRef.current.stop();
+      }
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, [clearRecordingTimer]);
+
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!activeChat || isSending || isUploading) return;
+    if (!activeChat || isSending || isUploading || isVoiceUploading || isRecording) return;
 
     const hasText = Boolean(inputText.trim());
     const hasAttachment = queuedAttachments.length > 0;
@@ -4542,7 +4989,9 @@ export function ChatPage() {
   };
 
   const hasComposerText = Boolean(inputText.trim());
-  const isQuickLikeMode = !hasComposerText && queuedAttachments.length === 0;
+  const isComposerBusy = isUploading || isSending || isVoiceUploading;
+  const isQuickLikeMode =
+    !isRecording && !hasComposerText && queuedAttachments.length === 0;
   const composerActionLabel = isQuickLikeMode ? "Gửi nhanh 👍" : "Gửi";
 
   return (
@@ -4564,20 +5013,81 @@ export function ChatPage() {
       <div
         className={`${activeChat ? "hidden md:flex" : "flex"} w-full md:w-[340px] md:flex-shrink-0 border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex-col h-full overflow-hidden`}
       >
-        <div className="h-16 border-b border-gray-100 dark:border-slate-700 glass flex items-center justify-between px-4 shrink-0">
-          <div className="relative w-full">
+        <div className="shrink-0 border-b border-gray-100 bg-white px-3 pb-3 pt-4 dark:border-slate-700 dark:bg-slate-900">
+          <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500 dark:text-slate-400" />
             <Input
               type="text"
               placeholder="Tìm kiếm danh bạ, tin nhắn..."
-              className="pl-9 h-9 bg-gray-100 border-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              className="h-9 rounded-md border-none bg-gray-100 pl-9 pr-3 text-sm focus-visible:ring-1 focus-visible:ring-blue-500 dark:bg-slate-800"
               value={conversationSearch}
               onChange={(e) => setConversationSearch(e.target.value)}
             />
           </div>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setConversationListFilter("all")}
+                className={`border-b-2 pb-2 text-sm font-semibold transition ${conversationListFilter === "all" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-blue-600 dark:text-slate-300"}`}
+              >
+                Tất cả
+              </button>
+              <button
+                type="button"
+                onClick={() => setConversationListFilter("unread")}
+                className={`border-b-2 pb-2 text-sm font-semibold transition ${conversationListFilter === "unread" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-blue-600 dark:text-slate-300"}`}
+              >
+                Chưa đọc
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Phân loại
+                <ChevronDown size={15} />
+              </button>
+              <button
+                type="button"
+                className="rounded-md p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Tùy chọn hội thoại"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+            </div>
+          </div>
+          {showSyncNotification && (
+            <div className="mt-3 flex items-start gap-3 rounded-lg bg-blue-50 px-3 py-3 text-sm text-slate-700 dark:bg-blue-950/30 dark:text-slate-200 animate-in fade-in duration-200">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-blue-600">
+                <Loader2 size={18} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">Đồng bộ tin nhắn gần đây</p>
+                <p className="mt-1 leading-5">
+                  Zalo Web của bạn hiện chưa có đầy đủ tin nhắn gần đây
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 font-semibold text-blue-600 hover:underline"
+                >
+                  Nhấn để đồng bộ ngay
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSyncNotification(false)}
+                className="rounded-md p-1 text-slate-500 hover:bg-blue-100 hover:text-slate-700 dark:hover:bg-slate-800 transition-colors"
+                aria-label="Ẩn thông báo đồng bộ"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 overflow-y-auto min-h-0 hide-scrollbar">
+        <div className="flex-1 overflow-y-auto min-h-0 hide-scrollbar [overflow-anchor:none] [scrollbar-gutter:stable]">
           {loadingConversations && (
             <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">
               Đang tải cuộc trò chuyện...
@@ -4644,16 +5154,20 @@ export function ChatPage() {
               return (
                 <div
                   key={chat.conversationId}
-                  onClick={() => setActiveChat(chat.conversationId)}
+                  onClick={() => {
+                    if (chat.conversationId !== activeChat) {
+                      setActiveChat(chat.conversationId);
+                    }
+                  }}
                   onContextMenu={(e) =>
                     handleConvContextMenu(e, chat.conversationId)
                   }
-                  className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-lg cursor-pointer transition-all duration-300 hover:scale-[1.02] active:scale-95 animate-in fade-in ${activeChat === chat.conversationId
+                  className={`flex min-h-[76px] items-center gap-3 px-3 py-2.5 mx-2 my-1 rounded-lg cursor-pointer transition-colors duration-150 ${activeChat === chat.conversationId
                     ? "bg-blue-50 dark:bg-blue-950/40 shadow-sm"
                     : "hover:bg-gray-50 dark:hover:bg-slate-800"
                     }`}
                 >
-                  <div className="relative">
+                  <div className="relative h-12 w-12 shrink-0">
                     {chat.isGroup && !chatAvatarUrl ? (
                       <GroupAvatar
                         groupId={chatGroupId || ""}
@@ -4680,20 +5194,20 @@ export function ChatPage() {
                     ) : null}
                   </div>
                   <div className="flex-1 min-w-0 pr-1">
-                    <div className="flex justify-between items-baseline mb-1">
-                      <span className="font-medium text-[15px] truncate">
+                    <div className="flex h-5 items-center justify-between gap-2">
+                      <span className="truncate text-[15px] font-semibold leading-5 text-slate-900 dark:text-slate-100">
                         {resolveConversationDisplayName(chat)}
                       </span>
-                      <span className="text-xs text-gray-500 dark:text-slate-400 flex-shrink-0">
+                      <span className="shrink-0 text-xs text-gray-500 dark:text-slate-400">
                         {chat.updatedAt
                           ? format(new Date(chat.updatedAt), "HH:mm")
                           : ""}
                       </span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="mt-1 flex h-5 items-center justify-between gap-2">
                       <span
                         className={
-                          "text-sm truncate " +
+                          "min-w-0 truncate text-sm leading-5 " +
                           (effectiveUnreadCount > 0
                             ? "font-semibold text-slate-800 dark:text-slate-100"
                             : "text-gray-500 dark:text-slate-400")
@@ -4702,7 +5216,7 @@ export function ChatPage() {
                         {chat.lastMessagePreview || "Chưa có tin nhắn"}
                       </span>
                       {effectiveUnreadCount > 0 && (
-                        <span className="bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
                           {effectiveUnreadCount}
                         </span>
                       )}
@@ -5437,7 +5951,9 @@ export function ChatPage() {
                                 </div>
                                 {member.userId !== user?.sub ? (
                                   <div className="ml-2 flex flex-col items-end gap-1.5">
-                                    <div className="relative">
+                                    <div
+                                      className="relative"
+                                    >
                                       <button
                                         type="button"
                                         onClick={(event) => {
@@ -5835,11 +6351,12 @@ export function ChatPage() {
             </aside>
 
             {/* Nội dung tin nhắn */}
-            <div
-              ref={messagesContainerRef}
-              onScroll={handleScroll}
-              className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar"
-            >
+            <div className="relative flex-1 min-h-0 bg-slate-50 dark:bg-slate-950">
+              <div
+                ref={messagesContainerRef}
+                onScroll={handleScroll}
+                className="h-full overflow-y-auto p-4 hide-scrollbar"
+              >
               {loadingMessages && (
                 <div className="text-center py-4 text-sm text-gray-500 dark:text-slate-400">
                   Đang tải tin nhắn...
@@ -5867,9 +6384,10 @@ export function ChatPage() {
                   </div>
                 ) : null}
                 {/* Đảo ngược array nếu API trả về tin mới nhất trước (thường thấy nếu limit offset) */}
-                {[...filteredMessages]
-                  .reverse()
-                  .map((msg, index, orderedMessages) => {
+                <MessageList
+                  messages={orderedMessages}
+                  containerRef={messagesContainerRef}
+                  renderMessage={(msg, index, orderedMessages) => {
                     const isMe = msg.senderId === user?.sub;
                     const previousMessage = orderedMessages[index - 1];
                     const nextMessage = orderedMessages[index + 1];
@@ -6108,20 +6626,40 @@ export function ChatPage() {
                       msg.content === "Tin nhắn đã bị thu hồi";
 
                     const parsedTextContent = parseMessageText(msg.content).trim();
+                    const attachmentUrl = resolveMessageAttachmentUrl(msg);
+                    const hasAttachment = Boolean(
+                      attachmentUrl || msg.attachmentAsset?.key,
+                    );
                     const isEmojiOnly = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u.test(parsedTextContent);
-                    const isMediaOnly = !isRecalledMessage && ((!!msg.attachmentUrl && (!parsedTextContent || parsedTextContent === msg.attachmentUrl)) || (isEmojiOnly && !msg.attachmentUrl && parsedTextContent.length > 0));
+                    const isMediaOnly =
+                      !isRecalledMessage &&
+                      ((hasAttachment &&
+                        (!parsedTextContent ||
+                          parsedTextContent === attachmentUrl ||
+                          parsedTextContent === msg.attachmentUrl)) ||
+                        (isEmojiOnly &&
+                          !hasAttachment &&
+                          parsedTextContent.length > 0));
+                    const isInlineReactionPickerOpen =
+                      inlineReactionPickerMessageId === msg.id;
+                    const shouldPersistInlineLike =
+                      !isMe && msg.id === latestIncomingMessageId;
+                    const shouldShowInlineLike =
+                      !isEditing && !isRecalledMessage;
 
                     return (
-                      <div
+                      <MessageBubbleContainer
                         key={msg.id}
                         ref={(element) => {
                           messageItemRefs.current[msg.id] = element;
                         }}
-                        className={`group relative flex max-w-[70%] ${isMe ? "self-end" : "self-start"} flex-col rounded-2xl transition-all animate-in fade-in slide-in-from-bottom-2 duration-300 ${focusedMessageId === msg.id ? "ring-2 ring-amber-300/80 ring-offset-2 ring-offset-slate-100 dark:ring-amber-400/70 dark:ring-offset-slate-950" : ""} ${!startsSenderBlock ? "-mt-2" : ""}`}
+                        focused={focusedMessageId === msg.id}
+                        isMe={isMe}
+                        startsSenderBlock={startsSenderBlock}
                       >
                         {shouldShowSenderMeta ? (
                           <p
-                            className={`mb-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 ${isMe ? "text-right pr-10" : "ml-10"}`}
+                            className={`mb-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 ${isMe ? "text-right" : "ml-10"}`}
                           >
                             {senderDisplayName}
                             {!isRecalledMessage && msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
@@ -6133,7 +6671,7 @@ export function ChatPage() {
                         ) : (
                           !isRecalledMessage && msg.updatedAt && msg.sentAt && new Date(msg.updatedAt).getTime() - new Date(msg.sentAt).getTime() > 1000 ? (
                             <p
-                              className={`mb-1 text-[10px] text-slate-400 dark:text-slate-500 italic ${isMe ? "text-right pr-10" : "ml-10"}`}
+                              className={`mb-1 text-[10px] text-slate-400 dark:text-slate-500 italic ${isMe ? "text-right" : "ml-10"}`}
                             >
                               (đã chỉnh sửa)
                             </p>
@@ -6170,10 +6708,10 @@ export function ChatPage() {
                             onClick={(event) => event.stopPropagation()}
                             className={
                               isRecalledMessage
-                                ? `relative px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-transparent text-slate-500 dark:text-slate-400 italic shadow-none max-w-[70%] break-words ${isMe ? (endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl") : (endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl")}`
+                                ? `relative px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-transparent text-slate-500 dark:text-slate-400 italic shadow-none max-w-full break-words [overflow-wrap:anywhere] ${isMe ? (endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl") : (endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl")}`
                                 : isMediaOnly
-                                  ? `relative max-w-[70%]`
-                                  : `relative px-4 py-2 rounded-2xl shadow-sm max-w-[70%] break-words ${isMe
+                                  ? `relative max-w-full`
+                                  : `relative px-4 py-2 rounded-2xl shadow-sm max-w-full break-words [overflow-wrap:anywhere] ${isMe
                                     ? `bg-blue-600 text-white ${endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl"}`
                                     : `bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 ${endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl"}`
                                   }`
@@ -6181,16 +6719,18 @@ export function ChatPage() {
                           >
                             {!isEditing && !isRecalledMessage ? (
                               <div
-                                className={`absolute ${isMe ? "right-full mr-2" : "left-full ml-2"} top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${activeMessageMenuId === msg.id
-                                  ? "opacity-100"
-                                  : "opacity-0 group-hover:opacity-100"
+                                className={`absolute ${isMe ? "right-full mr-2" : "left-full ml-2"} bottom-1 z-30 flex items-center gap-1 transition-opacity ${isInlineReactionPickerOpen
+                                  ? "pointer-events-none opacity-0"
+                                  : activeMessageMenuId === msg.id
+                                    ? "opacity-100"
+                                    : "opacity-0 group-hover:opacity-100"
                                   }`}
                               >
                                 {(!msg.recalledAt && msg.content !== "Message was recalled." && msg.content !== "Message was recalled" && msg.content !== "Tin nhắn đã bị thu hồi") && (
                                   <>
                                     <button
                                       type="button"
-                                      className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                      className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:scale-110 hover:bg-slate-50 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
                                       title="Trả lời"
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -6201,7 +6741,7 @@ export function ChatPage() {
                                     </button>
                                     <button
                                       type="button"
-                                      className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                      className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:scale-110 hover:bg-slate-50 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
                                       title="Chuyển tiếp"
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -6211,25 +6751,38 @@ export function ChatPage() {
                                       <Share2 size={14} />
                                     </button>
 
-                                    <div className="relative">
+                                    <div
+                                      className="hidden"
+                                      onMouseEnter={() =>
+                                        setInlineReactionPickerMessageId(msg.id)
+                                      }
+                                      onMouseLeave={() =>
+                                        setInlineReactionPickerMessageId((prev) =>
+                                          prev === msg.id ? null : prev,
+                                        )
+                                      }
+                                    >
                                       <button
                                         type="button"
-                                        className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                        className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                                        onMouseEnter={() =>
+                                          setInlineReactionPickerMessageId(msg.id)
+                                        }
                                         title="Bày tỏ cảm xúc"
                                         onClick={(event) => {
                                           event.stopPropagation();
                                           setActiveMessageMenuId(null);
-                                          setReactionPickerMessageId((prev) =>
+                                          setInlineReactionPickerMessageId((prev) =>
                                             prev === msg.id ? null : msg.id,
                                           );
                                         }}
                                       >
-                                        <SmilePlus size={14} />
+                                        <ThumbsUp size={14} />
                                       </button>
 
-                                      {reactionPickerMessageId === msg.id ? (
+                                      {inlineReactionPickerMessageId === msg.id ? (
                                         <div
-                                          className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}
+                                          className={`absolute ${isMe ? "right-0" : "left-0"} -top-14 z-40 flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xl shadow-xl dark:border-slate-700 dark:bg-slate-900`}
                                         >
                                           {QUICK_REACTION_EMOJIS.map((emoji) => (
                                             <button
@@ -6241,9 +6794,9 @@ export function ChatPage() {
                                                   msg.id,
                                                   emoji,
                                                 );
-                                                setReactionPickerMessageId(null);
+                                                setInlineReactionPickerMessageId(null);
                                               }}
-                                              className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                                              className="rounded-full transition hover:-translate-y-1 hover:scale-125"
                                             >
                                               {emoji}
                                             </button>
@@ -6257,13 +6810,13 @@ export function ChatPage() {
                                         type="button"
                                         onClick={(event) => {
                                           event.stopPropagation();
-                                          setReactionPickerMessageId(null);
+                                          setInlineReactionPickerMessageId(null);
                                           setMessageMenuPlacement("up");
                                           setActiveMessageMenuId((prev) =>
                                             prev === msg.id ? null : msg.id,
                                           );
                                         }}
-                                        className="rounded-full p-1.5 text-white/90 transition hover:bg-white/20 hover:text-white"
+                                        className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-blue-600 shadow-sm transition hover:scale-110 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                                         title="Tùy chọn tin nhắn"
                                       >
                                         <MoreHorizontal size={14} />
@@ -6271,12 +6824,35 @@ export function ChatPage() {
 
                                       {activeMessageMenuId === msg.id ? (
                                         <div
-                                          className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}
+                                          className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-10"} z-40 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white py-2 text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100`}
                                         >
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                                            onClick={async () => {
+                                              const copyText =
+                                                parsedTextContent ||
+                                                msg.attachmentUrl ||
+                                                "";
+                                              if (
+                                                copyText &&
+                                                navigator.clipboard?.writeText
+                                              ) {
+                                                await navigator.clipboard.writeText(
+                                                  copyText,
+                                                );
+                                                toast.success("Đã sao chép tin nhắn");
+                                              }
+                                              setActiveMessageMenuId(null);
+                                            }}
+                                          >
+                                            <Copy size={18} />
+                                            Copy tin nhắn
+                                          </button>
                                           {isMe && canEditMessage ? (
                                             <button
                                               type="button"
-                                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
                                               onClick={() =>
                                                 handleStartEditMessage(
                                                   msg.id,
@@ -6291,7 +6867,7 @@ export function ChatPage() {
                                           {isMe ? (
                                             <button
                                               type="button"
-                                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
                                               onClick={() => {
                                                 setSelectedMessageForInfo(msg);
                                                 setActiveMessageMenuId(null);
@@ -6305,7 +6881,7 @@ export function ChatPage() {
                                             <>
                                               <button
                                                 type="button"
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
                                                 onClick={() =>
                                                   handleOpenForwardDialog(msg.id)
                                                 }
@@ -6315,7 +6891,7 @@ export function ChatPage() {
                                               </button>
                                               <button
                                                 type="button"
-                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
                                                 onClick={() => handleTogglePin(msg)}
                                               >
                                                 {(() => {
@@ -6354,12 +6930,48 @@ export function ChatPage() {
                                             </>
                                           )}
 
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                                            onClick={() => toast("Chức năng đánh dấu sẽ được bổ sung sau.")}
+                                          >
+                                            <Star size={18} />
+                                            Đánh dấu tin nhắn
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                                            onClick={() => toast("Chức năng chọn nhiều sẽ được bổ sung sau.")}
+                                          >
+                                            <ListChecks size={18} />
+                                            Chọn nhiều tin nhắn
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                                            onClick={() => {
+                                              setSelectedMessageForInfo(msg);
+                                              setActiveMessageMenuId(null);
+                                            }}
+                                          >
+                                            <Info size={18} />
+                                            Xem chi tiết
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                                            onClick={() => toast("Tùy chọn khác sẽ được bổ sung sau.")}
+                                          >
+                                            <span>Tùy chọn khác</span>
+                                            <ChevronDown size={16} className="-rotate-90" />
+                                          </button>
+
                                           <div className="border-t border-slate-100 dark:border-slate-800" />
 
                                           {canRecallEveryone ? (
                                             <button
                                               type="button"
-                                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                                               onClick={() =>
                                                 void handleDeleteMessage(
                                                   msg.id,
@@ -6373,7 +6985,7 @@ export function ChatPage() {
                                           ) : null}
                                           <button
                                             type="button"
-                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                                             onClick={() =>
                                               void handleDeleteMessage(msg.id, "SELF")
                                             }
@@ -6460,8 +7072,11 @@ export function ChatPage() {
                                   </div>
                                 </div>
                               ) : (
-                                (!msg.attachmentUrl || (parsedTextContent && parsedTextContent !== msg.attachmentUrl)) ? (
-                                  <div className={`break-words ${isEmojiOnly && !msg.attachmentUrl ? "text-5xl leading-none" : ""}`}>
+                                (!hasAttachment ||
+                                  (parsedTextContent &&
+                                    parsedTextContent !== attachmentUrl &&
+                                    parsedTextContent !== msg.attachmentUrl)) ? (
+                                  <div className={`whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${isEmojiOnly && !hasAttachment ? "text-5xl leading-none" : ""}`}>
                                     {renderMessageTextWithMentions(
                                       parsedTextContent,
                                       isMe,
@@ -6470,19 +7085,19 @@ export function ChatPage() {
                                 ) : null
                               )}
                             </div>
-                            {msg.attachmentUrl ? (
-                              isImageUrl(msg.attachmentUrl, msg.type) ? (
+                            {hasAttachment ? (
+                              attachmentUrl && isImageUrl(attachmentUrl, msg.type) ? (
                                 (() => {
-                                  const isGif = msg.attachmentUrl.toLowerCase().includes(".gif") || msg.attachmentUrl.toLowerCase().includes("gif-");
+                                  const isGif = attachmentUrl.toLowerCase().includes(".gif") || attachmentUrl.toLowerCase().includes("gif-");
                                   return (
                                     <a
-                                      href={msg.attachmentUrl}
+                                      href={attachmentUrl}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="mt-2 block"
                                     >
                                       <img
-                                        src={msg.attachmentUrl}
+                                        src={attachmentUrl}
                                         alt="Tin nhan dinh kem"
                                         className={
                                           isGif
@@ -6493,17 +7108,31 @@ export function ChatPage() {
                                     </a>
                                   );
                                 })()
-                              ) : isVideoUrl(msg.attachmentUrl, msg.type) ? (
+                              ) : attachmentUrl && isAudioUrl(attachmentUrl, msg.type) ? (
+                                <div
+                                  className={`mt-2 w-full max-w-[320px] rounded-xl border px-3 py-2 ${isMe
+                                    ? "border-blue-500 bg-blue-600"
+                                    : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+                                    }`}
+                                >
+                                  <audio
+                                    controls
+                                    preload="metadata"
+                                    src={attachmentUrl}
+                                    className="w-full min-w-[220px] max-w-full"
+                                  />
+                                </div>
+                              ) : attachmentUrl && isVideoUrl(attachmentUrl, msg.type) ? (
                                 <video
                                   controls
                                   preload="metadata"
-                                  src={msg.attachmentUrl}
+                                  src={attachmentUrl}
                                   className="mt-2 max-h-72 w-full max-w-[320px] rounded-lg border border-black/10 bg-black"
                                 />
                               ) : (
                                 <div
                                   className={`mt-2 flex w-full max-w-[320px] items-center gap-3 rounded-xl border p-3 transition-all ${isMe
-                                    ? "border-white/20 bg-white/10 text-white"
+                                    ? "border-blue-500 bg-blue-600 text-white shadow-sm"
                                     : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm"
                                     }`}
                                 >
@@ -6526,7 +7155,7 @@ export function ChatPage() {
                                           return original;
                                         }
                                         const urlPart =
-                                          msg.attachmentUrl
+                                          (attachmentUrl || msg.attachmentAsset?.key || "")
                                             .split("/")
                                             .pop()
                                             ?.split("?")[0] || "";
@@ -6553,7 +7182,7 @@ export function ChatPage() {
                                               return original;
                                             }
                                             const urlPart =
-                                              msg.attachmentUrl
+                                              (attachmentUrl || msg.attachmentAsset?.key || "")
                                                 .split("/")
                                                 .pop()
                                                 ?.split("?")[0] || "";
@@ -6587,7 +7216,7 @@ export function ChatPage() {
 
                                   <div className="flex gap-1">
                                     <a
-                                      href={msg.attachmentUrl}
+                                      href={attachmentUrl}
                                       target="_blank"
                                       rel="noreferrer"
                                       className={`p-2 rounded-lg transition-colors ${isMe
@@ -6634,33 +7263,72 @@ export function ChatPage() {
                                 </div>
                               </a>
                             ) : null}
-                          </div>
-                          {isMe ? (
-                            shouldShowMessageAvatar ? (
-                              <div className="relative h-8 w-8 shrink-0">
-                                <Avatar className="h-8 w-8 border border-blue-200 dark:border-blue-800">
-                                  {senderAvatarUrl ? (
-                                    <AvatarImage
-                                      src={senderAvatarUrl}
-                                      alt={senderDisplayName}
-                                    />
-                                  ) : null}
-                                  <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100 text-xs font-semibold">
-                                    {(senderDisplayName || "B")
-                                      .charAt(0)
-                                      .toUpperCase()}
-                                  </AvatarFallback>
-                                </Avatar>
-                                {renderGroupRoleKeyBadge(msg.senderId)}
+                            {shouldShowInlineLike ? (
+                              <div
+                                className={`absolute ${isMe ? "-bottom-2 -left-2" : "-bottom-2 -right-2"} z-30 transition-opacity ${shouldPersistInlineLike || isInlineReactionPickerOpen
+                                  ? "opacity-100"
+                                  : "opacity-0 group-hover:opacity-100"
+                                  }`}
+                                onMouseEnter={() => {
+                                  setActiveMessageMenuId(null);
+                                  setInlineReactionPickerMessageId(
+                                    msg.id,
+                                  );
+                                }}
+                                onMouseLeave={() =>
+                                  setInlineReactionPickerMessageId(
+                                    (prev) => (prev === msg.id ? null : prev),
+                                  )
+                                }
+                              >
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleToggleMessageReaction(
+                                    msg.id,
+                                    QUICK_LIKE_EMOJI,
+                                  );
+                                }}
+                                className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md transition hover:scale-110 hover:bg-slate-50 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                                title="Thả thích"
+                                aria-label="Thả thích"
+                              >
+                                <ThumbsUp size={13} />
+                              </button>
+                              {inlineReactionPickerMessageId ===
+                              msg.id ? (
+                                <div
+                                  className={`absolute ${isMe ? "right-0" : "left-0"} bottom-6 z-[80] flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xl shadow-xl dark:border-slate-700 dark:bg-slate-900`}
+                                >
+                                  {QUICK_REACTION_EMOJIS.map((emoji) => (
+                                    <button
+                                      key={`${msg.id}-latest-${emoji}`}
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleToggleMessageReaction(
+                                          msg.id,
+                                          emoji,
+                                        );
+                                        setInlineReactionPickerMessageId(
+                                          null,
+                                        );
+                                      }}
+                                      className="rounded-full transition duration-150 hover:-translate-y-1 hover:scale-125"
+                                    >
+                                      {emoji}
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
                               </div>
-                            ) : (
-                              <div className="h-8 w-8 shrink-0" />
-                            )
-                          ) : null}
+                            ) : null}
+                          </div>
                         </div>
                         {reactionSummary.length > 0 ? (
                           <div
-                            className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end pr-10" : "justify-start"} ${!isMe ? "pl-10" : ""}`}
+                            className={`mt-1 flex flex-wrap gap-1 ${isMe ? "justify-end" : "justify-start"} ${!isMe ? "pl-10" : ""}`}
                           >
                             {reactionSummary.map(([emoji, count]) => (
                               <button
@@ -6680,7 +7348,7 @@ export function ChatPage() {
                         ) : null}
                         {endsSenderBlock ? (
                           <span
-                            className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right pr-10" : "text-left"} ${!isMe ? "pl-10" : ""}`}
+                            className={`text-[10px] text-gray-400 dark:text-slate-500 mt-1 ${isMe ? "text-right" : "text-left"} ${!isMe ? "pl-10" : ""}`}
                           >
                             {format(new Date(msg.sentAt), "HH:mm")}
                           </span>
@@ -6698,7 +7366,7 @@ export function ChatPage() {
                           </span>
                         ) : null}
                         {isMe && index === orderedMessages.length - 1 && Object.keys(readWatermarks).length > 0 ? (
-                          <div className="flex items-center justify-end gap-1 mt-1 pr-10">
+                          <div className="flex items-center justify-end gap-1 mt-1">
                             {Object.entries(readWatermarks)
                               .filter(([userId, readAt]) => userId !== user?.sub && new Date(readAt).getTime() >= new Date(msg.sentAt).getTime())
                               .map(([userId]) => {
@@ -6728,9 +7396,10 @@ export function ChatPage() {
                               })}
                           </div>
                         ) : null}
-                      </div>
+                      </MessageBubbleContainer>
                     );
-                  })}
+                  }}
+                />
 
                 {activeContact?.isGroup &&
                   activeChat &&
@@ -6798,53 +7467,74 @@ export function ChatPage() {
 
                 <div ref={messagesEndRef} />
               </div>
+              </div>
 
               {showScrollDown && (
                 <button
                   type="button"
-                  onClick={() => {
-                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-                  }}
-                  className="absolute bottom-24 right-6 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
+                  aria-label="Cuon xuong tin nhan moi nhat"
+                  onClick={() => scrollMessagesToBottom("smooth")}
+                  className="absolute bottom-5 right-5 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg shadow-slate-900/10 transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:text-blue-600 active:translate-y-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 sm:right-6"
                   title="Cuộn xuống tin nhắn mới nhất"
                 >
-                  <ChevronDown size={18} />
+                  <ChevronsDown size={22} />
                 </button>
               )}
             </div>
 
             {isForwardDialogOpen ? (
               <div
-                className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/55 p-4"
+                className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4"
                 onClick={handleCloseForwardDialog}
               >
                 <div
-                  className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl"
+                  className="w-full max-w-2xl rounded-md border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 px-4 py-3">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+                    <h3 className="relative min-w-32 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                      <span className="absolute inset-0 bg-white dark:bg-slate-900">
+                        Chia sẻ
+                      </span>
                       Chuyển tiếp tin nhắn
                     </h3>
                     <button
                       type="button"
                       onClick={handleCloseForwardDialog}
-                      className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                       disabled={isForwardingMessage}
                     >
                       Đóng
                     </button>
                   </div>
 
-                  <div className="space-y-3 p-4">
+                  <div className="space-y-3 px-5 py-4">
                     <Input
                       value={forwardSearch}
                       onChange={(event) => setForwardSearch(event.target.value)}
                       placeholder="Tìm cuộc trò chuyện đích..."
-                      className="bg-slate-50 dark:bg-slate-800 dark:border-slate-700"
+                      className="h-12 rounded-md bg-white text-base dark:bg-slate-800 dark:border-slate-700"
                     />
 
-                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 hide-scrollbar">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-4 text-sm">
+                        <button type="button" className="border-b-2 border-blue-600 pb-2 font-semibold text-blue-600">
+                          Gần đây
+                        </button>
+                        <button type="button" className="border-b-2 border-transparent pb-2 text-slate-700 hover:text-blue-600 dark:text-slate-300">
+                          Nhóm trò chuyện
+                        </button>
+                        <button type="button" className="border-b-2 border-transparent pb-2 text-slate-700 hover:text-blue-600 dark:text-slate-300">
+                          Bạn bè
+                        </button>
+                      </div>
+                      <button type="button" className="inline-flex items-center gap-1 pb-2 text-sm text-slate-700 dark:text-slate-300">
+                        Phân loại
+                        <ChevronDown size={15} />
+                      </button>
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto hide-scrollbar">
                       {forwardDestinationConversations.length === 0 ? (
                         <div className="p-3 text-sm text-slate-500 dark:text-slate-400">
                           Không có cuộc trò chuyện phù hợp.
@@ -6859,7 +7549,7 @@ export function ChatPage() {
                                 );
                               return (
                                 <li key={conversation.conversationId}>
-                                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800">
                                     <input
                                       type="checkbox"
                                       checked={checked}
@@ -6870,6 +7560,11 @@ export function ChatPage() {
                                       }
                                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                     />
+                                    <Avatar className="h-10 w-10 shrink-0">
+                                      <AvatarFallback className="bg-blue-100 text-blue-600">
+                                        {(resolveConversationDisplayName(conversation).charAt(0) || "?").toUpperCase()}
+                                      </AvatarFallback>
+                                    </Avatar>
                                     <div className="min-w-0">
                                       <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
                                         {conversation.groupName ||
@@ -6893,13 +7588,34 @@ export function ChatPage() {
                         {forwardActionError}
                       </p>
                     ) : null}
+                    <div className="rounded-md bg-slate-100 px-4 py-3 dark:bg-slate-800">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        Chia sẻ tin nhắn
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-sm text-slate-700 dark:text-slate-300">
+                        {(() => {
+                          const message = messages.find(
+                            (item) => item.id === forwardingMessageId,
+                          );
+                          return message
+                            ? parseMessageText(message.content) ||
+                              message.attachmentAsset?.originalFileName ||
+                              "Tin nhắn"
+                            : "Tin nhắn";
+                        })()}
+                      </p>
+                    </div>
+                    <Input
+                      placeholder="Nhập tin nhắn..."
+                      className="h-12 bg-white dark:bg-slate-800 dark:border-slate-700"
+                    />
                   </div>
 
-                  <div className="flex items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-700 px-4 py-3">
+                  <div className="flex items-center justify-end gap-4 border-t border-slate-200 px-5 py-4 dark:border-slate-700">
                     <button
                       type="button"
                       onClick={handleCloseForwardDialog}
-                      className="rounded-md bg-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-300"
+                      className="rounded-md bg-slate-200 px-6 py-3 text-base font-semibold text-slate-800 hover:bg-slate-300"
                       disabled={isForwardingMessage}
                     >
                       Hủy
@@ -6907,8 +7623,8 @@ export function ChatPage() {
                     <button
                       type="button"
                       onClick={() => void handleConfirmForwardMessage()}
-                      className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                      disabled={isForwardingMessage}
+                      className="rounded-md bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      disabled={isForwardingMessage || selectedForwardConversationIds.length === 0}
                     >
                       {isForwardingMessage
                         ? "Đang chuyển tiếp..."
@@ -7149,10 +7865,7 @@ export function ChatPage() {
                 </button>
               </div>
             ) : (
-              <form
-                onSubmit={handleSend}
-                className="p-2 sm:p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2"
-              >
+              <MessageComposer onSubmit={handleSend}>
                 {replyingMessage ? (
                   <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                     <div className="min-w-0">
@@ -7177,9 +7890,20 @@ export function ChatPage() {
                   </div>
                 ) : null}
                 {typingIndicatorText ? (
-                  <p className="px-1 text-xs text-slate-500 dark:text-slate-400 italic">
-                    {typingIndicatorText}
-                  </p>
+                  <div
+                    className="chat-typing-indicator"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="chat-typing-label">
+                      {typingIndicatorLabel}
+                    </span>
+                    <span className="chat-typing-dots" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                  </div>
                 ) : null}
                 {queuedAttachments.length > 0 ? (
                   <div className="space-y-2 max-h-36 overflow-y-auto pr-1 hide-scrollbar">
@@ -7225,14 +7949,26 @@ export function ChatPage() {
                 ) : null}
 
                 {/* Thanh công cụ tiện ích */}
-                <div className="flex items-center gap-1 pb-1 animate-in slide-in-from-bottom-1 duration-300">
+                <div className="flex h-6 items-center gap-1 animate-in slide-in-from-bottom-1 duration-300">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 rounded-lg transition-all"
+                    disabled={isComposerBusy || isRecording}
+                    className="flex h-6 w-7 items-center justify-center rounded-lg text-slate-500 transition-all hover:bg-blue-50 hover:text-blue-600 dark:text-slate-400 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
                     title="Gửi file"
                   >
                     <Paperclip size={18} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleStartVoiceRecording()}
+                    disabled={!activeChat || isComposerBusy || isRecording}
+                    className="flex h-6 w-7 items-center justify-center rounded-lg text-slate-500 transition-all hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+                    title="Ghi am"
+                    aria-label="Ghi am"
+                  >
+                    <Mic size={18} />
                   </button>
 
                   <button
@@ -7245,7 +7981,7 @@ export function ChatPage() {
                         setGifPickerTab("gif");
                       }
                     }}
-                    className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "gif"
+                    className={`flex h-6 w-7 items-center justify-center rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "gif"
                       ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
                       : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
                       }`}
@@ -7278,7 +8014,7 @@ export function ChatPage() {
                         setGifPickerTab("sticker");
                       }
                     }}
-                    className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "sticker"
+                    className={`flex h-6 w-7 items-center justify-center rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "sticker"
                       ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
                       : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
                       }`}
@@ -7286,18 +8022,18 @@ export function ChatPage() {
                   >
                     <Sticker size={18} />
                   </button>
-                  <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
+                  <div className="mx-1 h-3.5 w-px bg-slate-200/80 dark:bg-slate-800" />
                   <button
                     type="button"
                     onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
-                    className={`p-2 rounded-lg transition-all ${isEmojiPickerOpen ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"}`}
+                    className={`flex h-6 w-7 items-center justify-center rounded-lg transition-all ${isEmojiPickerOpen ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"}`}
                     title="Emoji"
                   >
                     <Smile size={18} />
                   </button>
                 </div>
 
-                <div className="flex gap-2 items-end">
+                <div className="flex items-end gap-2.5">
                   <div className="relative flex-1 min-w-0">
                     {isEmojiPickerOpen && (
                       <div
@@ -7305,16 +8041,26 @@ export function ChatPage() {
                         ref={emojiPickerRef}
                       >
                         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-                          <EmojiPicker
-                            onEmojiClick={handleEmojiSelect}
-                            theme={
-                              document.documentElement.classList.contains("dark")
-                                ? Theme.DARK
-                                : Theme.LIGHT
+                          <Suspense
+                            fallback={
+                              <div className="flex h-[400px] w-[320px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                                Dang tai emoji...
+                              </div>
                             }
-                            width={320}
-                            height={400}
-                          />
+                          >
+                            <EmojiPicker
+                              onEmojiClick={handleEmojiSelect}
+                              theme={
+                                (document.documentElement.classList.contains(
+                                  "dark",
+                                )
+                                  ? "dark"
+                                  : "light") as Theme
+                              }
+                              width={320}
+                              height={400}
+                            />
+                          </Suspense>
                         </div>
                       </div>
                     )}
@@ -7417,12 +8163,51 @@ export function ChatPage() {
                       className="hidden"
                       onChange={(e) => enqueueAttachments(e.target.files)}
                     />
-                    <Input
-                      type="text"
+                    {isRecording ? (
+                      <div className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200 sm:h-11">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+                          <span className="text-sm font-semibold tabular-nums">
+                            {formatCallDuration(recordingTime)}
+                          </span>
+                          <span className="truncate text-xs font-medium opacity-80">
+                            Dang ghi am
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleCancelVoiceRecording()}
+                            disabled={isVoiceUploading}
+                            className="flex h-8 w-8 items-center justify-center rounded-md text-red-700 hover:bg-red-100 disabled:opacity-50 dark:text-red-200 dark:hover:bg-red-900/40"
+                            title="Huy ghi am"
+                            aria-label="Huy ghi am"
+                          >
+                            <X size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleSendVoiceRecording()}
+                            disabled={isVoiceUploading}
+                            className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                            title="Gui ghi am"
+                            aria-label="Gui ghi am"
+                          >
+                            {isVoiceUploading ? (
+                              <span className="text-xs">...</span>
+                            ) : (
+                              <Send size={15} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    <textarea
+                      rows={1}
                       placeholder={
                         activeGroupId ? "Nhập tin nhắn..." : "Nhập tin nhắn..."
                       }
-                      className={`w-full bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-10 sm:h-11 ${highlightComposer ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950" : ""}`}
+                      className={`block w-full min-h-11 max-h-28 resize-none overflow-y-auto rounded-[15px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-[15px] leading-5 text-slate-900 outline-none [overflow-wrap:anywhere] placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:bg-slate-800 ${isRecording ? "hidden" : ""} ${highlightComposer ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950" : ""}`}
                       ref={composerInputRef}
                       value={inputText}
                       onChange={(e) => {
@@ -7431,6 +8216,7 @@ export function ChatPage() {
                           nextValue,
                           e.target.selectionStart,
                         );
+                        window.requestAnimationFrame(resizeComposerTextarea);
 
                         if (!activeChat) {
                           return;
@@ -7461,7 +8247,7 @@ export function ChatPage() {
                         )
                       }
                       onKeyDown={handleComposerKeyDown}
-                      disabled={isUploading}
+                      disabled={isComposerBusy}
                       onPaste={handleComposerPaste}
                     />
                     {isMentionMenuOpen ? (
@@ -7481,26 +8267,28 @@ export function ChatPage() {
                       </div>
                     ) : null}
                   </div>
-                  <button
-                    type="submit"
-                    disabled={isUploading || isSending}
-                    className="h-10 w-10 sm:h-11 sm:w-11 shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
-                    title={composerActionLabel}
-                    aria-label={composerActionLabel}
-                  >
-                    {isUploading || isSending ? (
-                      <span className="text-xs">...</span>
-                    ) : isQuickLikeMode ? (
-                      <ThumbsUp
-                        size={16}
-                        className="sm:w-[18px] sm:h-[18px]"
-                      />
-                    ) : (
-                      <Send size={16} className="sm:w-[18px] sm:h-[18px]" />
-                    )}
-                  </button>
+                  {!isRecording ? (
+                    <button
+                      type="submit"
+                      disabled={isComposerBusy}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                      title={composerActionLabel}
+                      aria-label={composerActionLabel}
+                    >
+                      {isComposerBusy ? (
+                        <span className="text-xs">...</span>
+                      ) : isQuickLikeMode ? (
+                        <ThumbsUp
+                          size={16}
+                          className="sm:w-[18px] sm:h-[18px]"
+                        />
+                      ) : (
+                        <Send size={16} className="sm:w-[18px] sm:h-[18px]" />
+                      )}
+                    </button>
+                  ) : null}
                 </div>
-              </form>
+              </MessageComposer>
             )}
 
             {pendingRemoveMemberUserId ? (

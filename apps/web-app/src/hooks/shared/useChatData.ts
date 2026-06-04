@@ -101,6 +101,62 @@ function extractConversationUpdate(
   };
 }
 
+function normalizeConversationToken(value?: string | null): string {
+  return (value || "").trim().toLowerCase();
+}
+
+function conversationKeyBelongsToConversation(
+  conversationId: string,
+  eventConversationKey?: string,
+): boolean {
+  const active = conversationId.trim();
+  const eventKey = eventConversationKey?.trim();
+
+  if (!active || !eventKey) {
+    return false;
+  }
+
+  const normalizedActive = normalizeConversationToken(active);
+  const normalizedEventKey = normalizeConversationToken(eventKey);
+
+  if (normalizedActive === normalizedEventKey) {
+    return true;
+  }
+
+  if (/^group:/i.test(active)) {
+    const groupId = active.replace(/^group:/i, "").trim();
+    return normalizeConversationToken(`GRP#${groupId}`) === normalizedEventKey;
+  }
+
+  if (/^grp#/i.test(active)) {
+    const groupId = active.replace(/^grp#/i, "").trim();
+    return normalizeConversationToken(`group:${groupId}`) === normalizedEventKey;
+  }
+
+  if (/^dm:/i.test(active)) {
+    const peerId = normalizeConversationToken(active.replace(/^dm:/i, ""));
+    const dmParticipants = normalizedEventKey.startsWith("dm#")
+      ? normalizedEventKey.replace(/^dm#/i, "").split("#")
+      : [];
+    return Boolean(peerId && dmParticipants.includes(peerId));
+  }
+
+  if (/^dm#/i.test(active)) {
+    const activeParticipants = normalizedActive.replace(/^dm#/i, "").split("#");
+    const eventParticipants = normalizedEventKey.startsWith("dm#")
+      ? normalizedEventKey.replace(/^dm#/i, "").split("#")
+      : [];
+    return (
+      activeParticipants.length > 0 &&
+      activeParticipants.every((participant) =>
+        eventParticipants.includes(participant),
+      )
+    );
+  }
+
+  return normalizedEventKey === normalizeConversationToken(`GRP#${active}`);
+}
+
 function isMessageItem(value: unknown): value is MessageItem {
   return (
     typeof value === "object" &&
@@ -110,11 +166,122 @@ function isMessageItem(value: unknown): value is MessageItem {
   );
 }
 
-export function useConversations(searchTerm?: string) {
+type ConversationUpdateReason = ChatConversationUpdatedEvent["reason"];
+
+type ConversationActivitySnapshot = Pick<
+  ConversationSummary,
+  "lastMessagePreview" | "lastSenderName" | "unreadCount" | "updatedAt"
+>;
+
+const conversationActivitySnapshots = new Map<
+  string,
+  ConversationActivitySnapshot
+>();
+
+function getConversationTimestamp(value?: string | null): number {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function compareConversationSummaries(
+  left: ConversationSummary,
+  right: ConversationSummary,
+): number {
+  const pinnedSort = Number(Boolean(right.isPinned)) - Number(Boolean(left.isPinned));
+  if (pinnedSort !== 0) {
+    return pinnedSort;
+  }
+
+  const timeSort =
+    getConversationTimestamp(right.updatedAt) -
+    getConversationTimestamp(left.updatedAt);
+  if (timeSort !== 0) {
+    return timeSort;
+  }
+
+  return left.conversationId.localeCompare(right.conversationId);
+}
+
+function isMessageActivityReason(
+  reason?: ConversationUpdateReason,
+): boolean {
+  return (
+    reason === "message.created" ||
+    reason === "message.updated" ||
+    reason === "message.deleted" ||
+    reason === "conversation.history.cleared"
+  );
+}
+
+function stabilizeConversationActivity(
+  summary: ConversationSummary,
+  reason?: ConversationUpdateReason,
+): ConversationSummary {
+  const previous = conversationActivitySnapshots.get(summary.conversationId);
+  let activityAt = summary.updatedAt;
+
+  if (previous && !isMessageActivityReason(reason)) {
+    const previewChanged =
+      previous.lastMessagePreview !== summary.lastMessagePreview ||
+      previous.lastSenderName !== summary.lastSenderName;
+    const unreadIncreased = summary.unreadCount > previous.unreadCount;
+    const movedToOlderMessage =
+      getConversationTimestamp(summary.updatedAt) <
+      getConversationTimestamp(previous.updatedAt);
+
+    if (!previewChanged && !unreadIncreased && !movedToOlderMessage) {
+      activityAt = previous.updatedAt;
+    }
+  }
+
+  const normalized =
+    activityAt === summary.updatedAt ? summary : { ...summary, updatedAt: activityAt };
+
+  conversationActivitySnapshots.set(summary.conversationId, {
+    lastMessagePreview: normalized.lastMessagePreview,
+    lastSenderName: normalized.lastSenderName,
+    unreadCount: normalized.unreadCount,
+    updatedAt: normalized.updatedAt,
+  });
+
+  return normalized;
+}
+
+function normalizeConversationList(
+  conversations: ConversationSummary[],
+): ConversationSummary[] {
+  return conversations
+    .map((conversation) => stabilizeConversationActivity(conversation))
+    .sort(compareConversationSummaries);
+}
+
+export function useConversationList(searchTerm?: string) {
+  return useQuery({
+    queryKey: ["conversations", searchTerm?.trim() ?? ""],
+    queryFn: async () =>
+      normalizeConversationList(await listConversations(searchTerm)),
+    staleTime: 10 * 1000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+  });
+}
+
+export function useConversationRealtimeBridge(
+  conversations: ConversationSummary[] = [],
+) {
   const queryClient = useQueryClient();
   const joinedConversationIdsRef = useRef<Set<string>>(new Set());
   const lastConversationRefreshAtRef = useRef(0);
   const scheduledConversationRefreshRef = useRef<number | null>(null);
+  const conversationIds = useMemo(
+    () =>
+      conversations
+        .map((item) => item.conversationId)
+        .filter((conversationId): conversationId is string =>
+          Boolean(conversationId),
+        ),
+    [conversations],
+  );
 
   const scheduleConversationsRefresh = useCallback(() => {
     const minIntervalMs = 1200;
@@ -142,8 +309,39 @@ export function useConversations(searchTerm?: string) {
   }, [queryClient]);
 
   useEffect(() => {
-    const handleNewMessage = () => {
-      // payload probably has conversationId
+    const handleNewMessage = (payload: ChatMessageCreatedEvent | MessageItem) => {
+      const summary = "summary" in payload ? payload.summary : undefined;
+
+      if (summary) {
+        queryClient.setQueriesData(
+          { queryKey: ["conversations"] },
+          (oldData: unknown) => {
+            if (!Array.isArray(oldData)) {
+              return oldData;
+            }
+
+            const normalizedSummary = stabilizeConversationActivity(
+              summary,
+              "message.created",
+            );
+            let didUpdate = false;
+            const next = (oldData as ConversationSummary[]).map((item) => {
+              if (item.conversationId !== normalizedSummary.conversationId) {
+                return item;
+              }
+
+              didUpdate = true;
+              return normalizedSummary;
+            });
+
+            return normalizeConversationList(
+              didUpdate ? next : [normalizedSummary, ...next],
+            );
+          },
+        );
+        return;
+      }
+
       scheduleConversationsRefresh();
     };
 
@@ -171,35 +369,40 @@ export function useConversations(searchTerm?: string) {
     };
 
     const handleConversationUpdated = (payload: ConversationUpdatedPayload) => {
-      const { conversationId, summary } = extractConversationUpdate(payload);
-      clearConversationListCache();
-
-      if (conversationId && summary) {
-        queryClient.setQueriesData(
-          { queryKey: ["conversations"] },
-          (oldData: unknown) => {
-            if (!Array.isArray(oldData)) {
-              return oldData;
-            }
-
-            let didUpdate = false;
-            const next = oldData.map((item) => {
-              if (
-                (item as ConversationSummary).conversationId !== conversationId
-              ) {
-                return item;
-              }
-
-              didUpdate = true;
-              return summary;
-            });
-
-            return didUpdate ? next : oldData;
-          },
-        );
+      const { conversationId, reason, summary } =
+        extractConversationUpdate(payload);
+      if (!conversationId || !summary) {
+        clearConversationListCache();
+        scheduleConversationsRefresh();
+        return;
       }
 
-      scheduleConversationsRefresh();
+      queryClient.setQueriesData(
+        { queryKey: ["conversations"] },
+        (oldData: unknown) => {
+          if (!Array.isArray(oldData)) {
+            return oldData;
+          }
+
+          const normalizedSummary = stabilizeConversationActivity(
+            summary,
+            reason,
+          );
+          let didUpdate = false;
+          const next = (oldData as ConversationSummary[]).map((item) => {
+            if (item.conversationId !== normalizedSummary.conversationId) {
+              return item;
+            }
+
+            didUpdate = true;
+            return normalizedSummary;
+          });
+
+          return normalizeConversationList(
+            didUpdate ? next : [normalizedSummary, ...next],
+          );
+        },
+      );
     };
 
     const handleSocketConnect = () => {
@@ -243,19 +446,7 @@ export function useConversations(searchTerm?: string) {
     };
   }, [queryClient, scheduleConversationsRefresh]);
 
-  const query = useQuery({
-    queryKey: ["conversations", searchTerm?.trim() ?? ""],
-    queryFn: () => listConversations(searchTerm),
-    staleTime: 10 * 1000,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-  });
-
   useEffect(() => {
-    const conversationIds = (query.data ?? [])
-      .map((item) => item.conversationId)
-      .filter(Boolean);
-
     if (conversationIds.length === 0) {
       return;
     }
@@ -287,9 +478,11 @@ export function useConversations(searchTerm?: string) {
     };
 
     void joinKnownConversations();
-  }, [query.data]);
+  }, [conversationIds]);
+}
 
-  return query;
+export function useConversations(searchTerm?: string) {
+  return useConversationList(searchTerm);
 }
 
 export function useMessages(conversationId?: string, searchTerm?: string, messageType?: string) {
@@ -303,9 +496,40 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
   );
   const messageRefreshTimerRef = useRef<number | null>(null);
   const conversationRefreshTimerRef = useRef<number | null>(null);
+  const typingExpiryTimersRef = useRef<Record<string, number>>({});
   const typingUsers = conversationId
     ? (typingUsersByConversation[conversationId] ?? {})
     : {};
+
+  const clearTypingExpiryTimer = useCallback((typingKey: string) => {
+    const timerId = typingExpiryTimersRef.current[typingKey];
+    if (timerId === undefined) {
+      return;
+    }
+
+    window.clearTimeout(timerId);
+    delete typingExpiryTimersRef.current[typingKey];
+  }, []);
+
+  const clearConversationTypingState = useCallback(
+    (targetConversationId: string) => {
+      const prefix = `${targetConversationId}::`;
+      Object.keys(typingExpiryTimersRef.current)
+        .filter((typingKey) => typingKey.startsWith(prefix))
+        .forEach(clearTypingExpiryTimer);
+
+      setTypingUsersByConversation((prev) => {
+        if (!prev[targetConversationId]) {
+          return prev;
+        }
+
+        const next = { ...prev };
+        delete next[targetConversationId];
+        return next;
+      });
+    },
+    [clearTypingExpiryTimer],
+  );
 
   const upsertMessageInCache = useCallback(
     (message: MessageItem) => {
@@ -390,7 +614,10 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
     refetchOnReconnect: false,
   });
 
-  const messages = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const messages = useMemo(
+    () => query.data?.pages.flatMap((page) => page.items) ?? [],
+    [query.data],
+  );
 
   useEffect(() => {
     if (!conversationId) return;
@@ -409,9 +636,18 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
     joinRoom();
 
     const handleTypingState = (payload: ChatTypingStateEvent) => {
-      if (!payload?.userId) {
+      if (
+        !payload?.userId ||
+        !conversationKeyBelongsToConversation(
+          conversationId,
+          payload.conversationKey,
+        )
+      ) {
         return;
       }
+
+      const typingKey = `${conversationId}::${payload.userId}`;
+      clearTypingExpiryTimer(typingKey);
 
       setTypingUsersByConversation((prev) => {
         const currentTypingUsers = prev[conversationId] ?? {};
@@ -437,6 +673,26 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
           },
         };
       });
+
+      if (payload.isTyping) {
+        typingExpiryTimersRef.current[typingKey] = window.setTimeout(() => {
+          delete typingExpiryTimersRef.current[typingKey];
+          setTypingUsersByConversation((prev) => {
+            const currentTypingUsers = prev[conversationId] ?? {};
+            if (!currentTypingUsers[payload.userId]) {
+              return prev;
+            }
+
+            const nextTypingUsers = { ...currentTypingUsers };
+            delete nextTypingUsers[payload.userId];
+
+            return {
+              ...prev,
+              [conversationId]: nextTypingUsers,
+            };
+          });
+        }, 4500);
+      }
     };
 
     const handleMessageCreated = (
@@ -498,8 +754,8 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
         return;
       }
 
-      clearConversationListCache();
       if (reason === "conversation.history.cleared") {
+        clearConversationListCache();
         queryClient.setQueryData<InfiniteData<CursorPage<MessageItem>>>(
           messageQueryKey,
           (oldData) =>
@@ -513,10 +769,13 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
                 }
               : oldData,
         );
+        scheduleConversationsRefresh();
+        return;
       }
 
-      scheduleMessageRefresh();
-      scheduleConversationsRefresh();
+      if (reason === "message.deleted") {
+        scheduleMessageRefresh();
+      }
     };
 
     socketClient.socket?.on(
@@ -538,6 +797,18 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
     );
 
     return () => {
+      if (messageRefreshTimerRef.current !== null) {
+        window.clearTimeout(messageRefreshTimerRef.current);
+        messageRefreshTimerRef.current = null;
+      }
+
+      if (conversationRefreshTimerRef.current !== null) {
+        window.clearTimeout(conversationRefreshTimerRef.current);
+        conversationRefreshTimerRef.current = null;
+      }
+
+      clearConversationTypingState(conversationId);
+
       socketClient
         .safeEmitValidated(CHAT_SOCKET_EVENTS.CONVERSATION_LEAVE, {
           conversationId,
@@ -565,6 +836,8 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       );
     };
   }, [
+    clearConversationTypingState,
+    clearTypingExpiryTimer,
     conversationId,
     messageQueryKey,
     queryClient,
@@ -686,6 +959,11 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
       if (conversationRefreshTimerRef.current !== null) {
         window.clearTimeout(conversationRefreshTimerRef.current);
       }
+
+      Object.values(typingExpiryTimersRef.current).forEach((timerId) =>
+        window.clearTimeout(timerId),
+      );
+      typingExpiryTimersRef.current = {};
     };
   }, []);
 
@@ -700,6 +978,8 @@ export function useMessages(conversationId?: string, searchTerm?: string, messag
     sendMessageAsync: sendMutation.mutateAsync,
     isSending: sendMutation.isPending,
     markAsRead: readMutation.mutate,
+    markAsReadAsync: readMutation.mutateAsync,
+    isMarkingAsRead: readMutation.isPending,
     updateMessageAsync: updateMutation.mutateAsync,
     deleteMessageAsync: deleteMutation.mutateAsync,
     forwardMessageAsync: forwardMutation.mutateAsync,
