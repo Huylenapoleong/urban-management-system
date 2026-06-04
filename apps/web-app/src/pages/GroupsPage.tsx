@@ -1,7 +1,6 @@
 import { useAuth } from "@/providers/auth-context";
 import { listMyFriends } from "@/services/friends.api";
 import {
-    addGroupMember,
     createGroup,
     getGroups,
     joinGroup,
@@ -10,7 +9,6 @@ import {
     listGroupMembers,
 } from "@/services/group.api";
 import type { GroupMembership } from "@urban/shared-types";
-import { resolveLocationCode } from "@/services/location.api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GroupType } from "@urban/shared-constants";
 import {
@@ -32,7 +30,6 @@ type GroupFormState = {
   groupName: string;
   description: string;
   groupType: GroupType;
-  locationCode: string;
 };
 
 export default function GroupsPage() {
@@ -40,7 +37,6 @@ export default function GroupsPage() {
    const { code } = useParams<{ code?: string }>();
    const navigate = useNavigate();
   const { user } = useAuth();
-  const accountLocationCode = user?.locationCode?.trim() ?? "";
   const canCreateOfficialGroup =
     user?.role === "PROVINCE_OFFICER" || user?.role === "ADMIN";
   const allowedCreateGroupTypes = useMemo(() => {
@@ -59,13 +55,11 @@ export default function GroupsPage() {
   const [isLeaving, setIsLeaving] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [inviteCodeInput, setInviteCodeInput] = useState("");
-  const [locationLabel, setLocationLabel] = useState("");
   const [selectedFriendIds, setSelectedFriendIds] = useState<Set<string>>(new Set());
   const [formState, setFormState] = useState<GroupFormState>({
     groupName: "",
     description: "",
     groupType: "AREA",
-    locationCode: user?.locationCode ?? "",
   });
 
   const { data: joinedGroups = [] } = useQuery({
@@ -138,21 +132,7 @@ export default function GroupsPage() {
 
   const createGroupMutation = useMutation({
     mutationFn: createGroup,
-    onSuccess: async (group) => {
-      // Add selected friends as members (min 2 required for PRIVATE)
-      const friendIds = [...selectedFriendIds];
-      if (friendIds.length > 0) {
-        const results = await Promise.allSettled(
-          friendIds.map((uid) =>
-            addGroupMember(group.id, { userId: uid, roleInGroup: "MEMBER" }),
-          ),
-        );
-        const failed = results.filter((r) => r.status === "rejected").length;
-        if (failed > 0) {
-          toast.error(`Thêm ${failed} thành viên thất bại. Bạn có thể thêm lại trong trang quản lý nhóm.`);
-        }
-      }
-
+    onSuccess: (group) => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Tạo nhóm thành công!");
@@ -209,7 +189,6 @@ export default function GroupsPage() {
       groupName: "",
       description: "",
       groupType: allowedCreateGroupTypes[0] ?? "PRIVATE",
-      locationCode: user?.locationCode ?? "",
     });
     setSelectedFriendIds(new Set());
     setIsCreateOpen(true);
@@ -231,43 +210,11 @@ export default function GroupsPage() {
   const isPrivateGroup = formState.groupType === "PRIVATE";
   const friendRequirementMet = !isPrivateGroup || selectedFriendIds.size >= 2;
 
-  useEffect(() => {
-    if (!accountLocationCode) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadLocationLabel() {
-      try {
-        const resolved = await resolveLocationCode(accountLocationCode);
-        if (!cancelled) {
-          setLocationLabel(resolved.displayName);
-        }
-      } catch {
-        if (!cancelled) {
-          setLocationLabel("");
-        }
-      }
-    }
-
-    void loadLocationLabel();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accountLocationCode]);
-
   const handleCreateGroup = (event: React.FormEvent) => {
     event.preventDefault();
 
     if (!formState.groupName.trim()) {
       toast.error("Vui lòng nhập tên nhóm.");
-      return;
-    }
-
-    if (!accountLocationCode) {
-      toast.error("Vui lòng nhập mã khu vực.");
       return;
     }
 
@@ -291,7 +238,7 @@ export default function GroupsPage() {
       groupName: formState.groupName.trim(),
       description: formState.description.trim() || undefined,
       groupType: formState.groupType,
-      locationCode: accountLocationCode,
+      userIds: [...selectedFriendIds],
     });
   };
 
@@ -414,22 +361,6 @@ export default function GroupsPage() {
                   </option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Mã khu vực
-              </label>
-              <input
-                value={locationLabel}
-                placeholder="Gan theo pham vi tai khoan"
-                readOnly
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                {accountLocationCode
-                  ? locationLabel || "Dia ban cua tai khoan hien tai"
-                  : "Nhom se duoc tao theo dia ban hien tai cua tai khoan."}
-              </p>
             </div>
             <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">

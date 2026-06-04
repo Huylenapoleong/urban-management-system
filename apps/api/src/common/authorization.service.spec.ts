@@ -143,9 +143,9 @@ describe('AuthorizationService', () => {
     );
   });
 
-  it('allows only the owner to rename a group', () => {
+  it('allows owner or deputy to rename a group', () => {
     expect(service.canRenameGroup(wardOfficerActor, 'OWNER')).toBe(true);
-    expect(service.canRenameGroup(wardOfficerActor, 'DEPUTY')).toBe(false);
+    expect(service.canRenameGroup(wardOfficerActor, 'DEPUTY')).toBe(true);
   });
 
   it('allows all active members to send messages when the policy is ALL_MEMBERS', () => {

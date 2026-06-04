@@ -35,7 +35,7 @@ class GroupService {
   Future<Map<String, dynamic>> createGroup({
     required String groupName,
     required String groupType,
-    required String locationCode,
+    String? locationCode,
     String? description,
     List<String>? userIds,
   }) async {
@@ -44,7 +44,8 @@ class GroupService {
       data: {
         "groupName": groupName,
         "groupType": groupType,
-        "locationCode": locationCode,
+        if (locationCode != null && locationCode.trim().isNotEmpty)
+          "locationCode": locationCode,
         if (description != null && description.trim().isNotEmpty)
           "description": description,
         if (userIds != null && userIds.isNotEmpty) "userIds": userIds,

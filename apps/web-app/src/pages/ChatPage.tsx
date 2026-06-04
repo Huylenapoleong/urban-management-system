@@ -389,6 +389,184 @@ function resolveDmAvatarFromFriendMap(
   return friendAvatarByUserId[peerUserId];
 }
 
+const GroupAvatar = ({
+  groupId,
+  groupName,
+  size = 48,
+}: {
+  groupId: string;
+  groupName: string;
+  size?: number;
+}) => {
+  const { data: members = [] } = useQuery({
+    queryKey: ["group-members", groupId],
+    queryFn: () => listGroupMembers(groupId),
+    enabled: Boolean(groupId),
+    staleTime: 10 * 1000,
+  });
+
+  const memberIds = members.map((m) => m.userId).join("|");
+  const queryClient = useQueryClient();
+
+  const { data: profiles = {} } = useQuery({
+    queryKey: ["group-members-profiles", groupId, memberIds],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        members.slice(0, 4).map(async (member) => {
+          try {
+            const profile = await queryClient.ensureQueryData({
+              queryKey: ["user-profile", member.userId],
+              queryFn: () => getUserById(member.userId),
+              staleTime: 5 * 60 * 1000,
+            });
+            return [member.userId, profile] as const;
+          } catch {
+            return [member.userId, undefined] as const;
+          }
+        }),
+      );
+      return Object.fromEntries(entries) as Record<string, UserProfile | undefined>;
+    },
+    enabled: members.length > 0,
+    staleTime: 30 * 1000,
+  });
+
+  const validAvatars = members
+    .slice(0, 4)
+    .map((m) => {
+      const profile = profiles[m.userId];
+      return profile?.avatarAsset?.resolvedUrl || profile?.avatarUrl || "/default-avatar.png";
+    });
+
+  const displayNames = members
+    .map((m) => profiles[m.userId]?.fullName || "?")
+    .filter((n) => n !== "?");
+
+  if (validAvatars.length === 0) {
+    return (
+      <div
+        className="rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 font-semibold flex items-center justify-center border border-slate-150 dark:border-slate-800"
+        style={{ width: size, height: size, fontSize: size * 0.4 }}
+      >
+        {groupName.charAt(0).toUpperCase()}
+      </div>
+    );
+  }
+
+  const count = Math.min(validAvatars.length, 4);
+  const isSingleOrEmpty = count <= 1;
+
+  return (
+    <div
+      className={`relative rounded-full flex items-center justify-center ${isSingleOrEmpty
+        ? "overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-800"
+        : ""
+        }`}
+      style={{ width: size, height: size }}
+    >
+      {count === 1 && (
+        <img
+          src={validAvatars[0]}
+          alt={displayNames[0] || groupName}
+          className="w-full h-full object-cover"
+        />
+      )}
+      {count === 2 && (
+        <>
+          <img
+            src={validAvatars[0]}
+            alt="member-0"
+            className="absolute rounded-full object-cover border border-white dark:border-slate-900 shadow-sm"
+            style={{
+              width: `${size * 0.65}px`,
+              height: `${size * 0.65}px`,
+              top: 0,
+              left: 0,
+              zIndex: 1,
+            }}
+          />
+          <img
+            src={validAvatars[1]}
+            alt="member-1"
+            className="absolute rounded-full object-cover border border-white dark:border-slate-900 shadow-sm"
+            style={{
+              width: `${size * 0.65}px`,
+              height: `${size * 0.65}px`,
+              bottom: 0,
+              right: 0,
+              zIndex: 2,
+            }}
+          />
+        </>
+      )}
+      {count === 3 && (
+        <>
+          <img
+            src={validAvatars[0]}
+            alt="member-0"
+            className="absolute rounded-full object-cover border border-white dark:border-slate-900 shadow-sm"
+            style={{
+              width: `${size * 0.55}px`,
+              height: `${size * 0.55}px`,
+              top: 0,
+              left: `${size * 0.225}px`,
+              zIndex: 1,
+            }}
+          />
+          <img
+            src={validAvatars[1]}
+            alt="member-1"
+            className="absolute rounded-full object-cover border border-white dark:border-slate-900 shadow-sm"
+            style={{
+              width: `${size * 0.55}px`,
+              height: `${size * 0.55}px`,
+              bottom: 0,
+              left: 0,
+              zIndex: 2,
+            }}
+          />
+          <img
+            src={validAvatars[2]}
+            alt="member-2"
+            className="absolute rounded-full object-cover border border-white dark:border-slate-900 shadow-sm"
+            style={{
+              width: `${size * 0.55}px`,
+              height: `${size * 0.55}px`,
+              bottom: 0,
+              right: 0,
+              zIndex: 3,
+            }}
+          />
+        </>
+      )}
+      {count >= 4 && (
+        <div className="grid grid-cols-2 gap-[1px] w-full h-full p-[1px]">
+          <img
+            src={validAvatars[0]}
+            alt="member-0"
+            className="w-full h-full object-cover border-[0.5px] border-white dark:border-slate-900 rounded-full"
+          />
+          <img
+            src={validAvatars[1]}
+            alt="member-1"
+            className="w-full h-full object-cover border-[0.5px] border-white dark:border-slate-900 rounded-full"
+          />
+          <img
+            src={validAvatars[2]}
+            alt="member-2"
+            className="w-full h-full object-cover border-[0.5px] border-white dark:border-slate-900 rounded-full"
+          />
+          <img
+            src={validAvatars[3]}
+            alt="member-3"
+            className="w-full h-full object-cover border-[0.5px] border-white dark:border-slate-900 rounded-full"
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -666,7 +844,8 @@ export function ChatPage() {
     if (chatState.conversationId && chatState.conversationId !== activeChat) {
       setActiveChat(chatState.conversationId);
     }
-  }, [activeChat, chatState.conversationId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatState.conversationId]);
 
   useEffect(() => {
     if (chatState.conversationId) {
@@ -1377,7 +1556,7 @@ export function ChatPage() {
     })
     : mergedConversations;
 
-  const activeContact = renderedConversations.find(
+  const activeContact = mergedConversations.find(
     (c) => c.conversationId === activeChat,
   );
 
@@ -1593,8 +1772,11 @@ export function ChatPage() {
   const previousMessageCountRef = useRef(0);
   const loadingOlderMessagesRef = useRef(false);
   const previousScrollHeightRef = useRef(0);
-  const lastMarkedReadRef = useRef<{ id: string; count: number } | null>(null);
+  const previousScrollTopRef = useRef(0);
   const lastActiveChatRef = useRef<string | null>(null);
+  const hasInitialScrolledRef = useRef(false);  // chỉ scroll xuống 1 lần khi vào chat
+  const [showScrollDown, setShowScrollDown] = useState(false);
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const {
     data: activeGroupMembers = [],
     isLoading: isLoadingGroupMembers,
@@ -1620,7 +1802,11 @@ export function ChatPage() {
       const entries = await Promise.all(
         activeGroupMembers.map(async (member) => {
           try {
-            const profile = await getUserById(member.userId);
+            const profile = await queryClient.ensureQueryData({
+              queryKey: ["user-profile", member.userId],
+              queryFn: () => getUserById(member.userId),
+              staleTime: 5 * 60 * 1000,
+            });
             return [member.userId, profile] as const;
           } catch {
             return [member.userId, undefined] as const;
@@ -1636,11 +1822,7 @@ export function ChatPage() {
     enabled: Boolean(activeGroupId) && activeGroupMembers.length > 0,
     staleTime: 60 * 1000,
   });
-  const { data: myFriends = [] } = useQuery({
-    queryKey: ["friends", "list", "for-group-member-picker"],
-    queryFn: () => listMyFriends({ limit: 200 }),
-    staleTime: 30 * 1000,
-  });
+  const myFriends = friendsList;
   const { data: activeGroupInviteLinks = [] } = useQuery({
     queryKey: ["group-invite-links", activeGroupId],
     queryFn: () => listGroupInviteLinks(activeGroupId!),
@@ -1693,7 +1875,11 @@ export function ChatPage() {
       const entries = await Promise.all(
         bannedUserIds.map(async (userId) => {
           try {
-            const profile = await getUserById(userId);
+            const profile = await queryClient.ensureQueryData({
+              queryKey: ["user-profile", userId],
+              queryFn: () => getUserById(userId),
+              staleTime: 5 * 60 * 1000,
+            });
             return [userId, profile] as const;
           } catch {
             return [userId, undefined] as const;
@@ -1761,42 +1947,7 @@ export function ChatPage() {
 
     return map;
   }, [messages]);
-  const mentionNameByUserId = useMemo(() => {
-    const map = new Map<string, string>();
-
-    activeGroupMembers.forEach((member) => {
-      const profile = memberProfilesById[member.userId];
-      const displayName =
-        conversationAliasByUserId.get(member.userId) ||
-        profile?.fullName ||
-        myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
-        messageSenderNameByUserId.get(member.userId);
-
-      if (displayName) {
-        map.set(member.userId, displayName);
-      }
-    });
-
-    if (user?.sub) {
-      map.set(
-        user.sub,
-        conversationAliasByUserId.get(user.sub) ||
-        cachedProfile?.fullName ||
-        "Bạn",
-      );
-    }
-
-    return map;
-  }, [
-    activeGroupMembers,
-    cachedProfile?.fullName,
-    conversationAliasByUserId,
-    memberProfilesById,
-    messageSenderNameByUserId,
-    myFriends,
-    user?.sub,
-  ]);
-  const displayNameByUserId = useMemo(() => {
+  const baseDisplayNameByUserId = useMemo(() => {
     const map = new Map<string, string>();
 
     myFriends.forEach((friend) => {
@@ -1811,22 +1962,10 @@ export function ChatPage() {
       const displayName =
         alias ||
         profile?.fullName ||
-        mentionNameByUserId.get(member.userId) ||
-        messageSenderNameByUserId.get(member.userId) ||
+        myFriends.find((friend) => friend.userId === member.userId)?.fullName ||
         `Thành viên ${index + 1}`;
 
       map.set(member.userId, displayName);
-    });
-
-    messages.forEach((message) => {
-      if (message.senderId && !map.has(message.senderId)) {
-        const alias = conversationAliasByUserId.get(message.senderId);
-        if (alias) {
-          map.set(message.senderId, alias);
-        } else if (message.senderName?.trim()) {
-          map.set(message.senderId, message.senderName.trim());
-        }
-      }
     });
 
     if (user?.sub) {
@@ -1844,12 +1983,22 @@ export function ChatPage() {
     cachedProfile?.fullName,
     conversationAliasByUserId,
     memberProfilesById,
-    mentionNameByUserId,
-    messageSenderNameByUserId,
-    messages,
     myFriends,
     user?.sub,
   ]);
+
+  const displayNameByUserId = useMemo(() => {
+    const map = new Map<string, string>(baseDisplayNameByUserId);
+
+    messageSenderNameByUserId.forEach((senderName, senderId) => {
+      if (!map.has(senderId)) {
+        const alias = conversationAliasByUserId.get(senderId);
+        map.set(senderId, alias || senderName);
+      }
+    });
+
+    return map;
+  }, [baseDisplayNameByUserId, messageSenderNameByUserId, conversationAliasByUserId]);
   const groupRoleByUserId = useMemo(() => {
     const map = new Map<string, GroupMemberRole>();
 
@@ -1942,7 +2091,7 @@ export function ChatPage() {
     const keyword = mentionQuery.trim().toLowerCase();
     const candidates = activeGroupMembers
       .map((member, index) => {
-        const displayName = mentionNameByUserId.get(member.userId);
+        const displayName = displayNameByUserId.get(member.userId);
 
         return {
           userId: member.userId,
@@ -1961,7 +2110,7 @@ export function ChatPage() {
   }, [
     activeGroupId,
     activeGroupMembers,
-    mentionNameByUserId,
+    displayNameByUserId,
     mentionStartIndex,
     mentionQuery,
     user?.sub,
@@ -1983,7 +2132,7 @@ export function ChatPage() {
     activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"),
   );
   const canRenameGroup = Boolean(
-    activeGroupId && (isCurrentUserOwner || user?.role === "ADMIN"),
+    activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"),
   );
   const canManageInviteLinks = Boolean(
     activeGroupId && (canManageGroupMembers || user?.role === "ADMIN"),
@@ -2355,7 +2504,11 @@ export function ChatPage() {
     void Promise.all(
       dmTargets.map(async ({ conversationId, peerUserId }) => {
         try {
-          const profile = await getUserById(peerUserId);
+          const profile = await queryClient.ensureQueryData({
+            queryKey: ["user-profile", peerUserId],
+            queryFn: () => getUserById(peerUserId),
+            staleTime: 5 * 60 * 1000,
+          });
           const avatarUrl =
             profile.avatarAsset?.resolvedUrl || profile.avatarUrl;
           if (!avatarUrl) {
@@ -2377,7 +2530,7 @@ export function ChatPage() {
         }
       }),
     );
-  }, [mergedConversations, user?.sub]);
+  }, [mergedConversations, user?.sub, queryClient]);
 
   const dmUserIdsString = useMemo(() => {
     return Array.from(
@@ -2555,92 +2708,117 @@ export function ChatPage() {
     };
   }, [activeDmUserId]);
 
-  // Auto scroll to bottom for new messages, preserve position while loading older pages.
+  const hasMoreRef = useRef(hasMore);
+  hasMoreRef.current = hasMore;
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  isLoadingMoreRef.current = isLoadingMore;
+
+  // Thay thế toàn bộ useEffect từ dòng 2713 đến 2756
   useEffect(() => {
     const container = messagesContainerRef.current;
+    let timerId: number | undefined;
 
-    // Reset tracking if the user switched conversations
+    // Reset khi đổi conversation
     if (lastActiveChatRef.current !== activeChat) {
       lastActiveChatRef.current = activeChat;
       previousMessageCountRef.current = 0;
       loadingOlderMessagesRef.current = false;
       previousScrollHeightRef.current = 0;
+      hasInitialScrolledRef.current = false;
     }
 
-    if (loadingOlderMessagesRef.current && container) {
-      const delta = container.scrollHeight - previousScrollHeightRef.current;
-      container.scrollTop = container.scrollTop + Math.max(0, delta);
+    // Restore vị trí sau khi load tin nhắn cũ
+    if (loadingOlderMessagesRef.current) {
       loadingOlderMessagesRef.current = false;
+      const savedHeight = previousScrollHeightRef.current;
+      const savedScrollTop = previousScrollTopRef.current;   // ← lấy ra đây
       previousScrollHeightRef.current = 0;
+      previousScrollTopRef.current = 0;                      // ← reset
       previousMessageCountRef.current = messages.length;
-      return;
+
+      if (container && savedHeight > 0) {
+        requestAnimationFrame(() => {
+          const c = messagesContainerRef.current;
+          if (!c) return;
+          const delta = c.scrollHeight - savedHeight;
+          if (delta > 0) c.scrollTop = savedScrollTop + delta;  // ← dùng saved
+        });
+      }
+      return () => { };
     }
 
     const previousCount = previousMessageCountRef.current;
     const isFirstLoad = previousCount === 0 && messages.length > 0;
-    const hasNewMessage = previousCount > 0 && messages.length > previousCount;
 
-    if (isFirstLoad || hasNewMessage) {
-      // Short delay to ensure DOM is ready and animations have settled
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({
-          behavior: isFirstLoad ? "auto" : "smooth",
-          block: "end",
-        });
+    // Chỉ auto-scroll xuống duy nhất 1 lần khi vừa vào chat
+    if (isFirstLoad && !hasInitialScrolledRef.current) {
+      hasInitialScrolledRef.current = true;
+      timerId = window.setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
       }, 50);
     }
 
     previousMessageCountRef.current = messages.length;
+
+    return () => {
+      if (timerId !== undefined) window.clearTimeout(timerId);
+    };
   }, [messages, activeChat]);
 
-  const handleLoadMoreMessages = async () => {
+  const handleLoadMoreMessages = useCallback(async () => {
     const container = messagesContainerRef.current;
-    if (!container || !hasMore || isLoadingMore) {
+    if (!container || !hasMoreRef.current || isLoadingMoreRef.current || loadingOlderMessagesRef.current) {
       return;
     }
 
+    setLoadMoreFailed(false);
+
+    // Snapshot scroll position BEFORE setting the flag so React hasn't re-rendered yet.
+    // We capture both scrollHeight and scrollTop here while the DOM is stable.
     previousScrollHeightRef.current = container.scrollHeight;
+    previousScrollTopRef.current = container.scrollTop;
     loadingOlderMessagesRef.current = true;
-    await loadMore();
-  };
+
+    try {
+      await loadMore();
+    } catch (err) {
+      console.error("[ChatPage] failed to load more messages", err);
+      loadingOlderMessagesRef.current = false;
+      previousScrollHeightRef.current = 0;
+      previousScrollTopRef.current = 0;
+      setLoadMoreFailed(true);
+    }
+  }, [loadMore]);
+
+  // Thay thế handleScroll từ dòng 2775 đến 2784
+  const handleScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    if (container.scrollTop <= 50) {
+      if (hasMoreRef.current && !isLoadingMoreRef.current) {
+        void handleLoadMoreMessages();
+      }
+    }
+
+    // Hiện nút scroll down khi user đang ở cách cuối > 300px
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    setShowScrollDown(distanceFromBottom > 300);
+  }, [handleLoadMoreMessages]);
 
   useEffect(() => {
     if (!activeChat) {
       return;
     }
 
-    const unreadCount = activeContact?.unreadCount ?? 0;
-    if (unreadCount <= 0) {
-      lastMarkedReadRef.current = null;
-      return;
-    }
-
-    if (
-      lastMarkedReadRef.current?.id === activeChat &&
-      lastMarkedReadRef.current?.count === unreadCount
-    ) {
-      return;
-    }
-
-    lastMarkedReadRef.current = { id: activeChat, count: unreadCount };
     markAsRead();
-  }, [activeChat, activeContact?.unreadCount, markAsRead]);
+  }, [activeChat, markAsRead]);
 
   useEffect(() => {
     setLocalFailedMessages([]);
-    if (activeChat) {
-      if (hasMore && !isLoadingMore) {
-        setTimeout(() => {
-          if (
-            messagesContainerRef.current &&
-            messagesContainerRef.current.scrollTop === 0
-          ) {
-            void loadMore();
-          }
-        }, 100);
-      }
-    }
-  }, [activeChat, hasMore, isLoadingMore, loadMore]);
+    setLoadMoreFailed(false);
+  }, [activeChat]);
 
   useEffect(() => {
     if (!activeChat) {
@@ -3409,7 +3587,7 @@ export function ChatPage() {
 
       let nextText = text;
       mentionIds.forEach((userId) => {
-        const displayName = mentionNameByUserId.get(userId);
+        const displayName = displayNameByUserId.get(userId);
         if (!displayName) {
           return;
         }
@@ -3421,7 +3599,7 @@ export function ChatPage() {
 
       return nextText;
     },
-    [mentionNameByUserId],
+    [displayNameByUserId],
   );
 
 
@@ -3513,7 +3691,7 @@ export function ChatPage() {
 
     // 1. Pre-populate map with active group members
     activeGroupMembers.forEach((member) => {
-      const displayName = mentionNameByUserId.get(member.userId);
+      const displayName = displayNameByUserId.get(member.userId);
       if (displayName) {
         mentionNameToUserId.set(`@${displayName}`, member.userId);
       }
@@ -3528,7 +3706,7 @@ export function ChatPage() {
 
     // 3. Pre-populate map with current user
     if (user?.sub) {
-      const myName = mentionNameByUserId.get(user.sub);
+      const myName = displayNameByUserId.get(user.sub);
       if (myName) {
         mentionNameToUserId.set(`@${myName}`, user.sub);
       }
@@ -3559,7 +3737,7 @@ export function ChatPage() {
         }
 
         if (userId) {
-          const displayName = mentionNameByUserId.get(userId) || displayNameFallback;
+          const displayName = displayNameByUserId.get(userId) || displayNameFallback;
           if (displayName) {
             mentionNameToUserId.set(`@${displayName}`, userId);
           }
@@ -3595,9 +3773,8 @@ export function ChatPage() {
                 setMentionModalUserId(targetUserId);
               }
             }}
-            className={`cursor-pointer font-bold hover:underline ${
-              isMe ? "text-blue-100" : "text-blue-600 dark:text-blue-400"
-            }`}
+            className={`cursor-pointer font-bold hover:underline ${isMe ? "text-blue-100" : "text-blue-600 dark:text-blue-400"
+              }`}
           >
             {part}
           </span>
@@ -3802,7 +3979,7 @@ export function ChatPage() {
     setActiveMessageMenuId(null);
     setReactionPickerMessageId(null);
     setMessageActionError("");
-    
+
     // Focus the chat input bar after setting reply message
     setTimeout(() => {
       composerInputRef.current?.focus();
@@ -4456,24 +4633,32 @@ export function ChatPage() {
                     handleConvContextMenu(e, chat.conversationId)
                   }
                   className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-lg cursor-pointer transition-all duration-300 hover:scale-[1.02] active:scale-95 animate-in fade-in ${activeChat === chat.conversationId
-                      ? "bg-blue-50 dark:bg-blue-950/40 shadow-sm"
-                      : "hover:bg-gray-50 dark:hover:bg-slate-800"
+                    ? "bg-blue-50 dark:bg-blue-950/40 shadow-sm"
+                    : "hover:bg-gray-50 dark:hover:bg-slate-800"
                     }`}
                 >
                   <div className="relative">
-                    <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
-                      {chatAvatarUrl ? (
-                        <AvatarImage
-                          src={chatAvatarUrl}
-                          alt={resolveConversationDisplayName(chat)}
-                        />
-                      ) : null}
-                      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
-                        {resolveConversationDisplayName(chat)
-                          .charAt(0)
-                          .toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    {chat.isGroup && !chatAvatarUrl ? (
+                      <GroupAvatar
+                        groupId={chatGroupId || ""}
+                        groupName={resolveConversationDisplayName(chat)}
+                        size={48}
+                      />
+                    ) : (
+                      <Avatar className="h-12 w-12 border border-gray-100 dark:border-slate-700">
+                        {chatAvatarUrl ? (
+                          <AvatarImage
+                            src={chatAvatarUrl}
+                            alt={resolveConversationDisplayName(chat)}
+                          />
+                        ) : null}
+                        <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                          {resolveConversationDisplayName(chat)
+                            .charAt(0)
+                            .toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
                     {!chat.isGroup && chatPresence?.isActive ? (
                       <span className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
                     ) : null}
@@ -4568,17 +4753,25 @@ export function ChatPage() {
                   >
                     <X size={18} />
                   </button>
-                  <Avatar className="h-10 w-10">
-                    {activeContactAvatarUrl ? (
-                      <AvatarImage
-                        src={activeContactAvatarUrl}
-                        alt={activeConversationDisplayName}
-                      />
-                    ) : null}
-                    <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
-                      {activeConversationDisplayName.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
+                  {activeContact?.isGroup && !activeContactAvatarUrl ? (
+                    <GroupAvatar
+                      groupId={activeGroupId || ""}
+                      groupName={activeConversationDisplayName}
+                      size={40}
+                    />
+                  ) : (
+                    <Avatar className="h-10 w-10">
+                      {activeContactAvatarUrl ? (
+                        <AvatarImage
+                          src={activeContactAvatarUrl}
+                          alt={activeConversationDisplayName}
+                        />
+                      ) : null}
+                      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                        {activeConversationDisplayName.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
                   {!activeContact?.isGroup && activePresence?.isActive ? (
                     <span className="absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-slate-900" />
                   ) : null}
@@ -4760,8 +4953,8 @@ export function ChatPage() {
                       key={filter.value}
                       onClick={() => setMessageTypeFilter(filter.value)}
                       className={`px-3 py-1 rounded-full text-[10px] font-medium transition ${messageTypeFilter === filter.value
-                          ? "bg-blue-600 text-white shadow-sm"
-                          : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
                         }`}
                     >
                       {filter.label}
@@ -4898,19 +5091,27 @@ export function ChatPage() {
                       Ảnh nhóm
                     </p>
                     <div className="mt-2 flex items-center gap-3">
-                      <Avatar className="h-14 w-14">
-                        {activeContactAvatarUrl ? (
-                          <AvatarImage
-                            src={activeContactAvatarUrl}
-                            alt={activeConversationDisplayName}
-                          />
-                        ) : null}
-                        <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold text-lg">
-                          {activeConversationDisplayName
-                            .charAt(0)
-                            .toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
+                      {activeContact?.isGroup && !activeContactAvatarUrl ? (
+                        <GroupAvatar
+                          groupId={activeGroupId || ""}
+                          groupName={activeConversationDisplayName}
+                          size={56}
+                        />
+                      ) : (
+                        <Avatar className="h-14 w-14">
+                          {activeContactAvatarUrl ? (
+                            <AvatarImage
+                              src={activeContactAvatarUrl}
+                              alt={activeConversationDisplayName}
+                            />
+                          ) : null}
+                          <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold text-lg">
+                            {activeConversationDisplayName
+                              .charAt(0)
+                              .toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      )}
                       <div className="min-w-0 flex-1">
                         <p className="text-xs text-slate-500 dark:text-slate-400">
                           Tải ảnh nhóm để hiển thị ngay trong giao diện chat của
@@ -5620,6 +5821,7 @@ export function ChatPage() {
             {/* Nội dung tin nhắn */}
             <div
               ref={messagesContainerRef}
+              onScroll={handleScroll}
               className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-50 dark:bg-slate-950 relative hide-scrollbar"
             >
               {loadingMessages && (
@@ -5629,17 +5831,22 @@ export function ChatPage() {
               )}
 
               <div className="flex flex-col gap-3 pb-4">
-                {hasMore ? (
-                  <div className="flex justify-center py-1">
+                {isLoadingMore ? (
+                  <div className="flex justify-center py-2">
+                    <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent dark:border-slate-600 dark:border-t-transparent" />
+                      <span>Đang tải tin nhắn cũ...</span>
+                    </div>
+                  </div>
+                ) : loadMoreFailed ? (
+                  <div className="flex justify-center py-2">
                     <button
                       type="button"
                       onClick={() => void handleLoadMoreMessages()}
-                      disabled={isLoadingMore}
-                      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                      className="flex items-center gap-1.5 rounded-full bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
                     >
-                      {isLoadingMore
-                        ? "Đang tải thêm..."
-                        : "Tải thêm tin nhắn cũ"}
+                      <span>⚠ Tải thất bại —</span>
+                      <span className="underline">Thử lại</span>
                     </button>
                   </div>
                 ) : null}
@@ -5947,10 +6154,10 @@ export function ChatPage() {
                             onClick={(event) => event.stopPropagation()}
                             className={
                               isRecalledMessage
-                                ? `relative px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-transparent text-slate-500 dark:text-slate-400 italic shadow-none ${isMe ? (endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl") : (endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl")}`
+                                ? `relative px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-transparent text-slate-500 dark:text-slate-400 italic shadow-none max-w-[70%] break-words ${isMe ? (endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl") : (endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl")}`
                                 : isMediaOnly
-                                  ? `relative`
-                                  : `relative px-4 py-2 rounded-2xl shadow-sm ${isMe
+                                  ? `relative max-w-[70%]`
+                                  : `relative px-4 py-2 rounded-2xl shadow-sm max-w-[70%] break-words ${isMe
                                     ? `bg-blue-600 text-white ${endsSenderBlock ? "rounded-br-sm" : "rounded-br-2xl"}`
                                     : `bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 border border-gray-100 dark:border-slate-700 ${endsSenderBlock ? "rounded-bl-sm" : "rounded-bl-2xl"}`
                                   }`
@@ -5959,208 +6166,208 @@ export function ChatPage() {
                             {!isEditing && !isRecalledMessage ? (
                               <div
                                 className={`absolute ${isMe ? "right-full mr-2" : "left-full ml-2"} top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 rounded-full bg-slate-900/60 px-1 py-1 shadow-sm backdrop-blur-sm transition-opacity ${activeMessageMenuId === msg.id
-                                    ? "opacity-100"
-                                    : "opacity-0 group-hover:opacity-100"
+                                  ? "opacity-100"
+                                  : "opacity-0 group-hover:opacity-100"
                                   }`}
                               >
                                 {(!msg.recalledAt && msg.content !== "Message was recalled." && msg.content !== "Message was recalled" && msg.content !== "Tin nhắn đã bị thu hồi") && (
                                   <>
                                     <button
-                                  type="button"
-                                  className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                                  title="Trả lời"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleStartReplyMessage(msg);
-                                  }}
-                                >
-                                  <Quote size={14} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                                  title="Chuyển tiếp"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleOpenForwardDialog(msg.id);
-                                  }}
-                                >
-                                  <Share2 size={14} />
-                                </button>
-
-                                <div className="relative">
-                                  <button
-                                    type="button"
-                                    className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
-                                    title="Bày tỏ cảm xúc"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setActiveMessageMenuId(null);
-                                      setReactionPickerMessageId((prev) =>
-                                        prev === msg.id ? null : msg.id,
-                                      );
-                                    }}
-                                  >
-                                    <SmilePlus size={14} />
-                                  </button>
-
-                                  {reactionPickerMessageId === msg.id ? (
-                                    <div
-                                      className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}
+                                      type="button"
+                                      className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                      title="Trả lời"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleStartReplyMessage(msg);
+                                      }}
                                     >
-                                      {QUICK_REACTION_EMOJIS.map((emoji) => (
-                                        <button
-                                          key={`${msg.id}-${emoji}`}
-                                          type="button"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            handleToggleMessageReaction(
-                                              msg.id,
-                                              emoji,
-                                            );
-                                            setReactionPickerMessageId(null);
-                                          }}
-                                          className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
-                                        >
-                                          {emoji}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                </div>
-
-                                <div className="relative">
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setReactionPickerMessageId(null);
-                                      setMessageMenuPlacement("up");
-                                      setActiveMessageMenuId((prev) =>
-                                        prev === msg.id ? null : msg.id,
-                                      );
-                                    }}
-                                    className="rounded-full p-1.5 text-white/90 transition hover:bg-white/20 hover:text-white"
-                                    title="Tùy chọn tin nhắn"
-                                  >
-                                    <MoreHorizontal size={14} />
-                                  </button>
-
-                                  {activeMessageMenuId === msg.id ? (
-                                    <div
-                                      className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}
+                                      <Quote size={14} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                      title="Chuyển tiếp"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleOpenForwardDialog(msg.id);
+                                      }}
                                     >
-                                      {isMe && canEditMessage ? (
-                                        <button
-                                          type="button"
-                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                          onClick={() =>
-                                            handleStartEditMessage(
-                                              msg.id,
-                                              msg.content,
-                                            )
-                                          }
-                                        >
-                                          <Pencil size={14} />
-                                          Sửa tin nhắn
-                                        </button>
-                                      ) : null}
-                                      {isMe ? (
-                                        <button
-                                          type="button"
-                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                          onClick={() => {
-                                            setSelectedMessageForInfo(msg);
-                                            setActiveMessageMenuId(null);
-                                          }}
-                                        >
-                                          <Info size={14} />
-                                          Thông tin tin nhắn
-                                        </button>
-                                      ) : null}
-                                      {(!msg.recalledAt && msg.content !== "Message was recalled." && msg.content !== "Message was recalled" && msg.content !== "Tin nhắn đã bị thu hồi") && (
-                                        <>
-                                          <button
-                                            type="button"
-                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                            onClick={() =>
-                                              handleOpenForwardDialog(msg.id)
-                                            }
-                                          >
-                                            <Share2 size={14} />
-                                            Chuyển tiếp
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
-                                            onClick={() => handleTogglePin(msg)}
-                                          >
-                                            {(() => {
-                                              try {
-                                                const p = JSON.parse(msg.content);
-                                                return p.isPinned ? (
-                                                  <>
-                                                    <PinOff
-                                                      size={14}
-                                                      className="text-orange-500"
-                                                    />
-                                                    Bỏ ghim tin nhắn
-                                                  </>
-                                                ) : (
-                                                  <>
-                                                    <Pin
-                                                      size={14}
-                                                      className="text-blue-500"
-                                                    />
-                                                    Ghim tin nhắn
-                                                  </>
-                                                );
-                                              } catch {
-                                                return (
-                                                  <>
-                                                    <Pin
-                                                      size={14}
-                                                      className="text-blue-500"
-                                                    />
-                                                    Ghim tin nhắn
-                                                  </>
-                                                );
-                                              }
-                                            })()}
-                                          </button>
-                                        </>
-                                      )}
+                                      <Share2 size={14} />
+                                    </button>
 
-                                      <div className="border-t border-slate-100 dark:border-slate-800" />
-
-                                      {canRecallEveryone ? (
-                                        <button
-                                          type="button"
-                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                          onClick={() =>
-                                            void handleDeleteMessage(
-                                              msg.id,
-                                              "EVERYONE",
-                                            )
-                                          }
-                                        >
-                                          <Trash2 size={14} />
-                                          Thu hồi với mọi người
-                                        </button>
-                                      ) : null}
+                                    <div className="relative">
                                       <button
                                         type="button"
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                        onClick={() =>
-                                          void handleDeleteMessage(msg.id, "SELF")
-                                        }
+                                        className="rounded-full p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white"
+                                        title="Bày tỏ cảm xúc"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setActiveMessageMenuId(null);
+                                          setReactionPickerMessageId((prev) =>
+                                            prev === msg.id ? null : msg.id,
+                                          );
+                                        }}
                                       >
-                                        <Trash2 size={14} />
-                                        Ẩn với tôi
+                                        <SmilePlus size={14} />
                                       </button>
+
+                                      {reactionPickerMessageId === msg.id ? (
+                                        <div
+                                          className={`absolute ${isMe ? "right-0" : "left-0"} -top-12 z-30 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900`}
+                                        >
+                                          {QUICK_REACTION_EMOJIS.map((emoji) => (
+                                            <button
+                                              key={`${msg.id}-${emoji}`}
+                                              type="button"
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleToggleMessageReaction(
+                                                  msg.id,
+                                                  emoji,
+                                                );
+                                                setReactionPickerMessageId(null);
+                                              }}
+                                              className="rounded-full px-1.5 py-0.5 text-sm transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                                            >
+                                              {emoji}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      ) : null}
                                     </div>
-                                  ) : null}
-                                </div>
+
+                                    <div className="relative">
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setReactionPickerMessageId(null);
+                                          setMessageMenuPlacement("up");
+                                          setActiveMessageMenuId((prev) =>
+                                            prev === msg.id ? null : msg.id,
+                                          );
+                                        }}
+                                        className="rounded-full p-1.5 text-white/90 transition hover:bg-white/20 hover:text-white"
+                                        title="Tùy chọn tin nhắn"
+                                      >
+                                        <MoreHorizontal size={14} />
+                                      </button>
+
+                                      {activeMessageMenuId === msg.id ? (
+                                        <div
+                                          className={`absolute ${isMe ? "right-0" : "left-0"} ${messageMenuPlacement === "down" ? "top-9" : "bottom-9"} z-30 w-52 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-lg`}
+                                        >
+                                          {isMe && canEditMessage ? (
+                                            <button
+                                              type="button"
+                                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                              onClick={() =>
+                                                handleStartEditMessage(
+                                                  msg.id,
+                                                  msg.content,
+                                                )
+                                              }
+                                            >
+                                              <Pencil size={14} />
+                                              Sửa tin nhắn
+                                            </button>
+                                          ) : null}
+                                          {isMe ? (
+                                            <button
+                                              type="button"
+                                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                              onClick={() => {
+                                                setSelectedMessageForInfo(msg);
+                                                setActiveMessageMenuId(null);
+                                              }}
+                                            >
+                                              <Info size={14} />
+                                              Thông tin tin nhắn
+                                            </button>
+                                          ) : null}
+                                          {(!msg.recalledAt && msg.content !== "Message was recalled." && msg.content !== "Message was recalled" && msg.content !== "Tin nhắn đã bị thu hồi") && (
+                                            <>
+                                              <button
+                                                type="button"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                                onClick={() =>
+                                                  handleOpenForwardDialog(msg.id)
+                                                }
+                                              >
+                                                <Share2 size={14} />
+                                                Chuyển tiếp
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+                                                onClick={() => handleTogglePin(msg)}
+                                              >
+                                                {(() => {
+                                                  try {
+                                                    const p = JSON.parse(msg.content);
+                                                    return p.isPinned ? (
+                                                      <>
+                                                        <PinOff
+                                                          size={14}
+                                                          className="text-orange-500"
+                                                        />
+                                                        Bỏ ghim tin nhắn
+                                                      </>
+                                                    ) : (
+                                                      <>
+                                                        <Pin
+                                                          size={14}
+                                                          className="text-blue-500"
+                                                        />
+                                                        Ghim tin nhắn
+                                                      </>
+                                                    );
+                                                  } catch {
+                                                    return (
+                                                      <>
+                                                        <Pin
+                                                          size={14}
+                                                          className="text-blue-500"
+                                                        />
+                                                        Ghim tin nhắn
+                                                      </>
+                                                    );
+                                                  }
+                                                })()}
+                                              </button>
+                                            </>
+                                          )}
+
+                                          <div className="border-t border-slate-100 dark:border-slate-800" />
+
+                                          {canRecallEveryone ? (
+                                            <button
+                                              type="button"
+                                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                              onClick={() =>
+                                                void handleDeleteMessage(
+                                                  msg.id,
+                                                  "EVERYONE",
+                                                )
+                                              }
+                                            >
+                                              <Trash2 size={14} />
+                                              Thu hồi với mọi người
+                                            </button>
+                                          ) : null}
+                                          <button
+                                            type="button"
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                            onClick={() =>
+                                              void handleDeleteMessage(msg.id, "SELF")
+                                            }
+                                          >
+                                            <Trash2 size={14} />
+                                            Ẩn với tôi
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                    </div>
                                   </>
                                 )}
                               </div>
@@ -6280,14 +6487,14 @@ export function ChatPage() {
                               ) : (
                                 <div
                                   className={`mt-2 flex w-full max-w-[320px] items-center gap-3 rounded-xl border p-3 transition-all ${isMe
-                                      ? "border-white/20 bg-white/10 text-white"
-                                      : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm"
+                                    ? "border-white/20 bg-white/10 text-white"
+                                    : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm"
                                     }`}
                                 >
                                   <div
                                     className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg ${isMe
-                                        ? "bg-white/20"
-                                        : "bg-slate-100 dark:bg-slate-800"
+                                      ? "bg-white/20"
+                                      : "bg-slate-100 dark:bg-slate-800"
                                       }`}
                                   >
                                     {getFileIcon(
@@ -6368,8 +6575,8 @@ export function ChatPage() {
                                       target="_blank"
                                       rel="noreferrer"
                                       className={`p-2 rounded-lg transition-colors ${isMe
-                                          ? "hover:bg-white/20"
-                                          : "hover:bg-slate-100 dark:hover:bg-slate-800"
+                                        ? "hover:bg-white/20"
+                                        : "hover:bg-slate-100 dark:hover:bg-slate-800"
                                         }`}
                                       title="Tải về"
                                       download
@@ -6386,8 +6593,8 @@ export function ChatPage() {
                                 target="_blank"
                                 rel="noreferrer"
                                 className={`mt-2 block rounded-xl border px-3 py-2 text-left transition ${isMe
-                                    ? "border-white/25 bg-white/10 hover:bg-white/15"
-                                    : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+                                  ? "border-white/25 bg-white/10 hover:bg-white/15"
+                                  : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
                                   }`}
                               >
                                 <div className="flex items-start gap-2">
@@ -6575,6 +6782,19 @@ export function ChatPage() {
 
                 <div ref={messagesEndRef} />
               </div>
+
+              {showScrollDown && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+                  }}
+                  className="absolute bottom-24 right-6 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
+                  title="Cuộn xuống tin nhắn mới nhất"
+                >
+                  <ChevronDown size={18} />
+                </button>
+              )}
             </div>
 
             {isForwardDialogOpen ? (
@@ -6913,358 +7133,358 @@ export function ChatPage() {
                 </button>
               </div>
             ) : (
-            <form
-              onSubmit={handleSend}
-              className="p-2 sm:p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2"
-            >
-              {replyingMessage ? (
-                <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
-                      Đang trả lời
-                    </p>
-                    <p className="mt-1 font-medium">
-                      {replyingMessage.senderName}
-                    </p>
-                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                      {getReplyPreviewText(replyingMessage)}
-                    </p>
+              <form
+                onSubmit={handleSend}
+                className="p-2 sm:p-4 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 shrink-0 z-10 relative space-y-2"
+              >
+                {replyingMessage ? (
+                  <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                        Đang trả lời
+                      </p>
+                      <p className="mt-1 font-medium">
+                        {replyingMessage.senderName}
+                      </p>
+                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                        {getReplyPreviewText(replyingMessage)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCancelReplyMessage}
+                      className="rounded-md p-1 text-slate-500 hover:bg-blue-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                      aria-label="Huỷ trả lời"
+                    >
+                      <X size={16} />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleCancelReplyMessage}
-                    className="rounded-md p-1 text-slate-500 hover:bg-blue-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
-                    aria-label="Huỷ trả lời"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              ) : null}
-              {typingIndicatorText ? (
-                <p className="px-1 text-xs text-slate-500 dark:text-slate-400 italic">
-                  {typingIndicatorText}
-                </p>
-              ) : null}
-              {queuedAttachments.length > 0 ? (
-                <div className="space-y-2 max-h-36 overflow-y-auto pr-1 hide-scrollbar">
-                  {queuedAttachments.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
-                            {item.file.name}
-                          </p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {Math.max(1, Math.round(item.file.size / 1024))} KB
-                            {item.status === "failed" ? " • Loi upload" : ""}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeAttachment(item.id)}
-                          className="rounded-md p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-100"
-                          title="Bo tep"
-                          disabled={item.status === "uploading"}
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                      <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
-                        <div
-                          className={`h-1.5 rounded-full transition-all ${item.status === "failed"
-                              ? "bg-red-500"
-                              : "bg-blue-500"
-                            }`}
-                          style={{
-                            width: `${item.status === "failed" ? 100 : item.progress}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              {/* Thanh công cụ tiện ích */}
-              <div className="flex items-center gap-1 pb-1 animate-in slide-in-from-bottom-1 duration-300">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 rounded-lg transition-all"
-                  title="Gửi file"
-                >
-                  <Paperclip size={18} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isGifPickerOpen && gifPickerTab === "gif") {
-                      setIsGifPickerOpen(false);
-                    } else {
-                      setIsGifPickerOpen(true);
-                      setGifPickerTab("gif");
-                    }
-                  }}
-                  className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "gif"
-                      ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
-                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
-                    }`}
-                  title="Gửi GIF"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.25"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="4" />
-                    <path d="M9 10a1.5 1.5 0 0 0-1.5-1.5h-1A1.5 1.5 0 0 0 5 10v4a1.5 1.5 0 0 0 1.5 1.5h1A1.5 1.5 0 0 0 9 14v-2H7" />
-                    <path d="M12 8.5v7M11 8.5h2M11 15.5h2" />
-                    <path d="M16 15.5v-7h3.5M16 12h2.5" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isGifPickerOpen && gifPickerTab === "sticker") {
-                      setIsGifPickerOpen(false);
-                    } else {
-                      setIsGifPickerOpen(true);
-                      setGifPickerTab("sticker");
-                    }
-                  }}
-                  className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "sticker"
-                      ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
-                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
-                    }`}
-                  title="Gửi Sticker"
-                >
-                  <Sticker size={18} />
-                </button>
-                <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
-                <button
-                  type="button"
-                  onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
-                  className={`p-2 rounded-lg transition-all ${isEmojiPickerOpen ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"}`}
-                  title="Emoji"
-                >
-                  <Smile size={18} />
-                </button>
-              </div>
-
-              <div className="flex gap-2 items-end">
-                <div className="relative flex-1 min-w-0">
-                  {isEmojiPickerOpen && (
-                    <div
-                      className="absolute bottom-full mb-2 left-0 z-50 animate-in fade-in zoom-in-95 duration-200"
-                      ref={emojiPickerRef}
-                    >
-                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-                        <EmojiPicker
-                          onEmojiClick={handleEmojiSelect}
-                          theme={
-                            document.documentElement.classList.contains("dark")
-                              ? Theme.DARK
-                              : Theme.LIGHT
-                          }
-                          width={320}
-                          height={400}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {isGifPickerOpen && (
-                    <div className="absolute bottom-full mb-2 left-0 z-50 w-80 animate-in fade-in zoom-in-95 duration-200">
-                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 flex flex-col max-h-[450px]">
-                        <div className="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 px-1">
-                            {gifPickerTab === "gif" ? "Chọn GIF" : "Chọn Sticker"}
-                          </h4>
+                ) : null}
+                {typingIndicatorText ? (
+                  <p className="px-1 text-xs text-slate-500 dark:text-slate-400 italic">
+                    {typingIndicatorText}
+                  </p>
+                ) : null}
+                {queuedAttachments.length > 0 ? (
+                  <div className="space-y-2 max-h-36 overflow-y-auto pr-1 hide-scrollbar">
+                    {queuedAttachments.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+                              {item.file.name}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {Math.max(1, Math.round(item.file.size / 1024))} KB
+                              {item.status === "failed" ? " • Loi upload" : ""}
+                            </p>
+                          </div>
                           <button
-                            onClick={() => setIsGifPickerOpen(false)}
-                            className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all"
+                            type="button"
+                            onClick={() => removeAttachment(item.id)}
+                            className="rounded-md p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-100"
+                            title="Bo tep"
+                            disabled={item.status === "uploading"}
                           >
                             <X size={16} />
                           </button>
                         </div>
-                        <div className="p-3">
-                          <div className="flex-1 flex items-center gap-2 bg-slate-50 dark:bg-slate-800 rounded-lg px-2 border border-transparent focus-within:border-blue-500 transition-all">
-                            <Search size={14} className="text-slate-400" />
-                            <input
-                              value={gifSearch}
-                              onChange={handleGifSearchChange}
-                              placeholder={gifPickerTab === "gif" ? "Tìm GIF..." : "Tìm Sticker..."}
-                              className="flex-1 h-9 bg-transparent border-none focus:ring-0 text-sm dark:text-slate-200"
-                            />
-                            {gifSearch ? (
-                              <button
-                                type="button"
-                                onClick={clearGifSearch}
-                                className="p-1 rounded-full text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
-                              >
-                                <X size={14} />
-                              </button>
-                            ) : null}
-                          </div>
-                          {/* Powered by GIPHY attribution */}
-                          <div className="flex items-center justify-center gap-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 font-medium select-none">
-                            <span>Powered by</span>
-                            <span className="font-bold tracking-wider text-slate-500 dark:text-slate-400">GIPHY</span>
-                          </div>
+                        <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
+                          <div
+                            className={`h-1.5 rounded-full transition-all ${item.status === "failed"
+                              ? "bg-red-500"
+                              : "bg-blue-500"
+                              }`}
+                            style={{
+                              width: `${item.status === "failed" ? 100 : item.progress}%`,
+                            }}
+                          />
                         </div>
-                        {hasGifError ? (
-                          <p className="text-xs text-red-500 mb-2 px-3">
-                            {gifError}
-                          </p>
-                        ) : null}
-                        <div className="grid grid-cols-2 gap-2 h-64 overflow-y-auto px-3 pr-1 pb-3 hide-scrollbar">
-                          {!hasGifResults && !gifLoading ? (
-                            <div className="col-span-2 text-center text-xs text-slate-500 py-10">
-                              {gifPickerTab === "gif" ? "Không có GIF phù hợp" : "Không có Sticker phù hợp"}
-                            </div>
-                          ) : null}
-                          {gifResults.map((gif) => (
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {/* Thanh công cụ tiện ích */}
+                <div className="flex items-center gap-1 pb-1 animate-in slide-in-from-bottom-1 duration-300">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 rounded-lg transition-all"
+                    title="Gửi file"
+                  >
+                    <Paperclip size={18} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isGifPickerOpen && gifPickerTab === "gif") {
+                        setIsGifPickerOpen(false);
+                      } else {
+                        setIsGifPickerOpen(true);
+                        setGifPickerTab("gif");
+                      }
+                    }}
+                    className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "gif"
+                      ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
+                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
+                      }`}
+                    title="Gửi GIF"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="4" />
+                      <path d="M9 10a1.5 1.5 0 0 0-1.5-1.5h-1A1.5 1.5 0 0 0 5 10v4a1.5 1.5 0 0 0 1.5 1.5h1A1.5 1.5 0 0 0 9 14v-2H7" />
+                      <path d="M12 8.5v7M11 8.5h2M11 15.5h2" />
+                      <path d="M16 15.5v-7h3.5M16 12h2.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isGifPickerOpen && gifPickerTab === "sticker") {
+                        setIsGifPickerOpen(false);
+                      } else {
+                        setIsGifPickerOpen(true);
+                        setGifPickerTab("sticker");
+                      }
+                    }}
+                    className={`p-2 rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "sticker"
+                      ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
+                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
+                      }`}
+                    title="Gửi Sticker"
+                  >
+                    <Sticker size={18} />
+                  </button>
+                  <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
+                  <button
+                    type="button"
+                    onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
+                    className={`p-2 rounded-lg transition-all ${isEmojiPickerOpen ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"}`}
+                    title="Emoji"
+                  >
+                    <Smile size={18} />
+                  </button>
+                </div>
+
+                <div className="flex gap-2 items-end">
+                  <div className="relative flex-1 min-w-0">
+                    {isEmojiPickerOpen && (
+                      <div
+                        className="absolute bottom-full mb-2 left-0 z-50 animate-in fade-in zoom-in-95 duration-200"
+                        ref={emojiPickerRef}
+                      >
+                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+                          <EmojiPicker
+                            onEmojiClick={handleEmojiSelect}
+                            theme={
+                              document.documentElement.classList.contains("dark")
+                                ? Theme.DARK
+                                : Theme.LIGHT
+                            }
+                            width={320}
+                            height={400}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {isGifPickerOpen && (
+                      <div className="absolute bottom-full mb-2 left-0 z-50 w-80 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 flex flex-col max-h-[450px]">
+                          <div className="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 px-1">
+                              {gifPickerTab === "gif" ? "Chọn GIF" : "Chọn Sticker"}
+                            </h4>
                             <button
-                              key={gif.id}
-                              onClick={() => {
-                                void handleSendGif(gif.url);
-                              }}
-                              className={`rounded-lg overflow-hidden hover:ring-2 ring-blue-500 transition-all h-28 flex items-center justify-center ${gifPickerTab === "sticker"
+                              onClick={() => setIsGifPickerOpen(false)}
+                              className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                          <div className="p-3">
+                            <div className="flex-1 flex items-center gap-2 bg-slate-50 dark:bg-slate-800 rounded-lg px-2 border border-transparent focus-within:border-blue-500 transition-all">
+                              <Search size={14} className="text-slate-400" />
+                              <input
+                                value={gifSearch}
+                                onChange={handleGifSearchChange}
+                                placeholder={gifPickerTab === "gif" ? "Tìm GIF..." : "Tìm Sticker..."}
+                                className="flex-1 h-9 bg-transparent border-none focus:ring-0 text-sm dark:text-slate-200"
+                              />
+                              {gifSearch ? (
+                                <button
+                                  type="button"
+                                  onClick={clearGifSearch}
+                                  className="p-1 rounded-full text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                >
+                                  <X size={14} />
+                                </button>
+                              ) : null}
+                            </div>
+                            {/* Powered by GIPHY attribution */}
+                            <div className="flex items-center justify-center gap-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 font-medium select-none">
+                              <span>Powered by</span>
+                              <span className="font-bold tracking-wider text-slate-500 dark:text-slate-400">GIPHY</span>
+                            </div>
+                          </div>
+                          {hasGifError ? (
+                            <p className="text-xs text-red-500 mb-2 px-3">
+                              {gifError}
+                            </p>
+                          ) : null}
+                          <div className="grid grid-cols-2 gap-2 h-64 overflow-y-auto px-3 pr-1 pb-3 hide-scrollbar">
+                            {!hasGifResults && !gifLoading ? (
+                              <div className="col-span-2 text-center text-xs text-slate-500 py-10">
+                                {gifPickerTab === "gif" ? "Không có GIF phù hợp" : "Không có Sticker phù hợp"}
+                              </div>
+                            ) : null}
+                            {gifResults.map((gif) => (
+                              <button
+                                key={gif.id}
+                                onClick={() => {
+                                  void handleSendGif(gif.url);
+                                }}
+                                className={`rounded-lg overflow-hidden hover:ring-2 ring-blue-500 transition-all h-28 flex items-center justify-center ${gifPickerTab === "sticker"
                                   ? "bg-transparent hover:bg-slate-100 dark:hover:bg-slate-850"
                                   : "bg-slate-100 dark:bg-slate-800"
-                                }`}
-                            >
-                              <img
-                                src={gif.previewUrl}
-                                alt="gif"
-                                className={`w-full h-full ${gifPickerTab === "sticker" ? "object-contain p-1.5" : "object-cover"
                                   }`}
-                              />
-                            </button>
-                          ))}
-                          {gifLoading ? (
-                            <div className="col-span-2 text-center text-xs text-slate-500 py-4 animate-pulse">
-                              {gifPickerTab === "gif" ? "Đang tải GIF..." : "Đang tải Sticker..."}
+                              >
+                                <img
+                                  src={gif.previewUrl}
+                                  alt="gif"
+                                  className={`w-full h-full ${gifPickerTab === "sticker" ? "object-contain p-1.5" : "object-cover"
+                                    }`}
+                                />
+                              </button>
+                            ))}
+                            {gifLoading ? (
+                              <div className="col-span-2 text-center text-xs text-slate-500 py-4 animate-pulse">
+                                {gifPickerTab === "gif" ? "Đang tải GIF..." : "Đang tải Sticker..."}
+                              </div>
+                            ) : null}
+                          </div>
+                          {gifNext ? (
+                            <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+                              <button
+                                type="button"
+                                onClick={handleLoadMoreGifs}
+                                disabled={gifLoading}
+                                className="w-full rounded-xl bg-blue-50 py-2 text-xs font-bold text-blue-600 hover:bg-blue-100 disabled:opacity-60 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 transition-all"
+                              >
+                                {gifLoading ? "Đang tải..." : gifPickerTab === "gif" ? "Tải thêm GIF" : "Tải thêm Sticker"}
+                              </button>
                             </div>
                           ) : null}
                         </div>
-                        {gifNext ? (
-                          <div className="p-3 border-t border-slate-100 dark:border-slate-800">
-                            <button
-                              type="button"
-                              onClick={handleLoadMoreGifs}
-                              disabled={gifLoading}
-                              className="w-full rounded-xl bg-blue-50 py-2 text-xs font-bold text-blue-600 hover:bg-blue-100 disabled:opacity-60 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 transition-all"
-                            >
-                              {gifLoading ? "Đang tải..." : gifPickerTab === "gif" ? "Tải thêm GIF" : "Tải thêm Sticker"}
-                            </button>
-                          </div>
-                        ) : null}
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => enqueueAttachments(e.target.files)}
-                  />
-                  <Input
-                    type="text"
-                    placeholder={
-                      activeGroupId ? "Nhập tin nhắn..." : "Nhập tin nhắn..."
-                    }
-                    className={`w-full bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-10 sm:h-11 ${highlightComposer ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950" : ""}`}
-                    ref={composerInputRef}
-                    value={inputText}
-                    onChange={(e) => {
-                      const nextValue = e.target.value;
-                      handleComposerInputChange(
-                        nextValue,
-                        e.target.selectionStart,
-                      );
-
-                      if (!activeChat) {
-                        return;
-                      }
-
-                      if (!nextValue.trim()) {
-                        stopTyping();
-                        return;
-                      }
-
-                      if (!isTypingRef.current) {
-                        isTypingRef.current = true;
-                        void sendTyping(true);
-                      }
-
-                      scheduleTypingStop();
-                    }}
-                    onClick={(event) =>
-                      syncMentionContext(
-                        inputText,
-                        event.currentTarget.selectionStart,
-                      )
-                    }
-                    onKeyUp={(event) =>
-                      syncMentionContext(
-                        inputText,
-                        event.currentTarget.selectionStart,
-                      )
-                    }
-                    onKeyDown={handleComposerKeyDown}
-                    disabled={isUploading}
-                    onPaste={handleComposerPaste}
-                  />
-                  {isMentionMenuOpen ? (
-                    <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
-                      {mentionCandidates.map((candidate) => (
-                        <button
-                          key={candidate.userId}
-                          type="button"
-                          onClick={() => handleInsertMention(candidate)}
-                          className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                        >
-                          <span className="truncate font-medium">
-                            {candidate.displayName}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-                <button
-                  type="submit"
-                  disabled={isUploading || isSending}
-                  className="h-10 w-10 sm:h-11 sm:w-11 shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
-                  title={composerActionLabel}
-                  aria-label={composerActionLabel}
-                >
-                  {isUploading || isSending ? (
-                    <span className="text-xs">...</span>
-                  ) : isQuickLikeMode ? (
-                    <ThumbsUp
-                      size={16}
-                      className="sm:w-[18px] sm:h-[18px]"
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => enqueueAttachments(e.target.files)}
                     />
-                  ) : (
-                    <Send size={16} className="sm:w-[18px] sm:h-[18px]" />
-                  )}
-                </button>
-              </div>
-            </form>
+                    <Input
+                      type="text"
+                      placeholder={
+                        activeGroupId ? "Nhập tin nhắn..." : "Nhập tin nhắn..."
+                      }
+                      className={`w-full bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 focus-visible:ring-blue-500 h-10 sm:h-11 ${highlightComposer ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950" : ""}`}
+                      ref={composerInputRef}
+                      value={inputText}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        handleComposerInputChange(
+                          nextValue,
+                          e.target.selectionStart,
+                        );
+
+                        if (!activeChat) {
+                          return;
+                        }
+
+                        if (!nextValue.trim()) {
+                          stopTyping();
+                          return;
+                        }
+
+                        if (!isTypingRef.current) {
+                          isTypingRef.current = true;
+                          void sendTyping(true);
+                        }
+
+                        scheduleTypingStop();
+                      }}
+                      onClick={(event) =>
+                        syncMentionContext(
+                          inputText,
+                          event.currentTarget.selectionStart,
+                        )
+                      }
+                      onKeyUp={(event) =>
+                        syncMentionContext(
+                          inputText,
+                          event.currentTarget.selectionStart,
+                        )
+                      }
+                      onKeyDown={handleComposerKeyDown}
+                      disabled={isUploading}
+                      onPaste={handleComposerPaste}
+                    />
+                    {isMentionMenuOpen ? (
+                      <div className="absolute bottom-12 left-0 right-0 z-40 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900 hide-scrollbar">
+                        {mentionCandidates.map((candidate) => (
+                          <button
+                            key={candidate.userId}
+                            type="button"
+                            onClick={() => handleInsertMention(candidate)}
+                            className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                          >
+                            <span className="truncate font-medium">
+                              {candidate.displayName}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isUploading || isSending}
+                    className="h-10 w-10 sm:h-11 sm:w-11 shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors"
+                    title={composerActionLabel}
+                    aria-label={composerActionLabel}
+                  >
+                    {isUploading || isSending ? (
+                      <span className="text-xs">...</span>
+                    ) : isQuickLikeMode ? (
+                      <ThumbsUp
+                        size={16}
+                        className="sm:w-[18px] sm:h-[18px]"
+                      />
+                    ) : (
+                      <Send size={16} className="sm:w-[18px] sm:h-[18px]" />
+                    )}
+                  </button>
+                </div>
+              </form>
             )}
 
             {pendingRemoveMemberUserId ? (
@@ -7361,8 +7581,8 @@ export function ChatPage() {
                           key={tab.id}
                           onClick={() => setManageGroupActiveTab(tab.id)}
                           className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-all ${manageGroupActiveTab === tab.id
-                              ? "bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none"
-                              : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                            ? "bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none"
+                            : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
                             }`}
                         >
                           <tab.icon size={16} />
@@ -8014,85 +8234,85 @@ export function ChatPage() {
                             targetUserMembership?.roleInGroup !== "OWNER" &&
                             (isCurrentUserOwner ||
                               targetUserMembership?.roleInGroup === "MEMBER") && (
-                            <div className="w-full mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-800/50 space-y-2">
-                              <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                                Quản lý nhóm
-                              </h5>
+                              <div className="w-full mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-800/50 space-y-2">
+                                <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                  Quản lý nhóm
+                                </h5>
 
-                              {isCurrentUserOwner && (
-                                <div className="flex gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const nextRole = targetUserMembership?.roleInGroup === "DEPUTY" ? "MEMBER" : "DEPUTY";
-                                      manageGroupMemberMutation.mutate({
-                                        groupId: activeGroupId!,
-                                        userId: mentionModalUserId,
-                                        action: "update",
-                                        roleInGroup: nextRole,
-                                      });
-                                    }}
-                                    disabled={manageGroupMemberMutation.isPending}
-                                    className="flex-1 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold transition-colors disabled:opacity-50"
-                                  >
-                                    {targetUserMembership?.roleInGroup === "DEPUTY" ? "Bãi nhiệm Phó nhóm" : "Bổ nhiệm Phó nhóm"}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (confirm("Xác nhận chuyển quyền trưởng nhóm? Bạn sẽ mất quyền kiểm soát tối cao.")) {
+                                {isCurrentUserOwner && (
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextRole = targetUserMembership?.roleInGroup === "DEPUTY" ? "MEMBER" : "DEPUTY";
                                         manageGroupMemberMutation.mutate({
                                           groupId: activeGroupId!,
                                           userId: mentionModalUserId,
-                                          action: "transfer",
+                                          action: "update",
+                                          roleInGroup: nextRole,
                                         });
-                                      }
-                                    }}
-                                    disabled={manageGroupMemberMutation.isPending}
-                                    className="flex-1 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold text-amber-600 dark:text-amber-400 transition-colors disabled:opacity-50"
-                                  >
-                                    Chuyển Trưởng nhóm
-                                  </button>
-                                </div>
-                              )}
+                                      }}
+                                      disabled={manageGroupMemberMutation.isPending}
+                                      className="flex-1 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold transition-colors disabled:opacity-50"
+                                    >
+                                      {targetUserMembership?.roleInGroup === "DEPUTY" ? "Bãi nhiệm Phó nhóm" : "Bổ nhiệm Phó nhóm"}
+                                    </button>
 
-                              {/* Kick and Ban */}
-                              {/* If current viewer is Deputy, they can only kick/ban standard Members */}
-                              {(isCurrentUserOwner || targetUserMembership?.roleInGroup === "MEMBER") && (
-                                <div className="flex gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (confirm(`Xác nhận mời ${mentionUserProfile.fullName} ra khỏi nhóm?`)) {
-                                        manageGroupMemberMutation.mutate({
-                                          groupId: activeGroupId!,
-                                          userId: mentionModalUserId,
-                                          action: "remove",
-                                        });
-                                      }
-                                    }}
-                                    disabled={manageGroupMemberMutation.isPending}
-                                    className="flex-1 py-2 rounded-lg bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-xs font-bold text-red-600 dark:text-red-400 transition-colors disabled:opacity-50"
-                                  >
-                                    Mời ra khỏi nhóm
-                                  </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (confirm("Xác nhận chuyển quyền trưởng nhóm? Bạn sẽ mất quyền kiểm soát tối cao.")) {
+                                          manageGroupMemberMutation.mutate({
+                                            groupId: activeGroupId!,
+                                            userId: mentionModalUserId,
+                                            action: "transfer",
+                                          });
+                                        }
+                                      }}
+                                      disabled={manageGroupMemberMutation.isPending}
+                                      className="flex-1 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold text-amber-600 dark:text-amber-400 transition-colors disabled:opacity-50"
+                                    >
+                                      Chuyển Trưởng nhóm
+                                    </button>
+                                  </div>
+                                )}
 
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const reason = prompt("Lý do cấm (không bắt buộc):") || undefined;
-                                      banUserMutation.mutate({ userId: mentionModalUserId, reason });
-                                    }}
-                                    disabled={banUserMutation.isPending}
-                                    className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-md shadow-red-500/20 transition-all disabled:opacity-50 active:scale-[0.98]"
-                                  >
-                                    Cấm khỏi nhóm
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
+                                {/* Kick and Ban */}
+                                {/* If current viewer is Deputy, they can only kick/ban standard Members */}
+                                {(isCurrentUserOwner || targetUserMembership?.roleInGroup === "MEMBER") && (
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (confirm(`Xác nhận mời ${mentionUserProfile.fullName} ra khỏi nhóm?`)) {
+                                          manageGroupMemberMutation.mutate({
+                                            groupId: activeGroupId!,
+                                            userId: mentionModalUserId,
+                                            action: "remove",
+                                          });
+                                        }
+                                      }}
+                                      disabled={manageGroupMemberMutation.isPending}
+                                      className="flex-1 py-2 rounded-lg bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-xs font-bold text-red-600 dark:text-red-400 transition-colors disabled:opacity-50"
+                                    >
+                                      Mời ra khỏi nhóm
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const reason = prompt("Lý do cấm (không bắt buộc):") || undefined;
+                                        banUserMutation.mutate({ userId: mentionModalUserId, reason });
+                                      }}
+                                      disabled={banUserMutation.isPending}
+                                      className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-md shadow-red-500/20 transition-all disabled:opacity-50 active:scale-[0.98]"
+                                    >
+                                      Cấm khỏi nhóm
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                         </div>
                       );
                     })()
