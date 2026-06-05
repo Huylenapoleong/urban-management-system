@@ -145,8 +145,11 @@ export function MessageInfoModal({
               {error}
             </div>
           ) : currentList.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-slate-500 dark:text-slate-400 text-sm">
-              Trống
+            <div className="flex flex-col items-center justify-center h-full text-slate-500 dark:text-slate-400 text-sm gap-2 text-center px-6">
+              <span className="font-medium text-slate-600 dark:text-slate-300">Trống</span>
+              {activeTab === "DELIVERED" && (
+                <span className="text-xs">Những người đã xem tin nhắn sẽ được chuyển sang tab "Đã xem".</span>
+              )}
             </div>
           ) : (
             <ul className="space-y-1">

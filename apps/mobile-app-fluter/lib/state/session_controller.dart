@@ -19,6 +19,16 @@ class SessionController extends ChangeNotifier {
   StreamSubscription? _unreadMsgSub;
   StreamSubscription? _unreadReadSub;
   int _unreadMessagesCount = 0;
+  String? _activeConversationId;
+  int _activeTabIndex = 0;
+
+  // Cấu hình thông báo lưu trữ cục bộ
+  bool _pushNotificationEnabled = true;
+  String _oneToOnePrivacyMode = "SHOW_ALL"; // SHOW_ALL, HIDE_CONTENT, ANONYMOUS
+  bool _oneToOneSilentDebounce = true;
+  String _groupNotificationFilter = "ALL_MESSAGES"; // ALL_MESSAGES, MENTIONS_ONLY, PINNED_ONLY
+  bool _groupSoundEnabled = true;
+  bool _priorityMentionsOverride = true;
 
   UserProfile? get user => _user;
   bool get isLoading => _isLoading;
@@ -27,6 +37,97 @@ class SessionController extends ChangeNotifier {
   bool get isAuthenticated => _user != null;
   bool get isDarkMode => _isDarkMode;
   int get unreadMessagesCount => _unreadMessagesCount;
+  String? get activeConversationId => _activeConversationId;
+  int get activeTabIndex => _activeTabIndex;
+
+  bool get pushNotificationEnabled => _pushNotificationEnabled;
+  String get oneToOnePrivacyMode => _oneToOnePrivacyMode;
+  bool get oneToOneSilentDebounce => _oneToOneSilentDebounce;
+  String get groupNotificationFilter => _groupNotificationFilter;
+  bool get groupSoundEnabled => _groupSoundEnabled;
+  bool get priorityMentionsOverride => _priorityMentionsOverride;
+
+  Future<void> setPushNotificationEnabled(bool value) async {
+    _pushNotificationEnabled = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool("push_notification_enabled", value);
+    } catch (e) {
+      debugPrint("Failed to save push_notification_enabled pref: $e");
+    }
+  }
+
+  Future<void> setOneToOnePrivacyMode(String value) async {
+    _oneToOnePrivacyMode = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString("one_to_one_privacy_mode", value);
+    } catch (e) {
+      debugPrint("Failed to save one_to_one_privacy_mode pref: $e");
+    }
+  }
+
+  Future<void> setOneToOneSilentDebounce(bool value) async {
+    _oneToOneSilentDebounce = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool("one_to_one_silent_debounce", value);
+    } catch (e) {
+      debugPrint("Failed to save one_to_one_silent_debounce pref: $e");
+    }
+  }
+
+  Future<void> setGroupNotificationFilter(String value) async {
+    _groupNotificationFilter = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString("group_notification_filter", value);
+    } catch (e) {
+      debugPrint("Failed to save group_notification_filter pref: $e");
+    }
+  }
+
+  Future<void> setGroupSoundEnabled(bool value) async {
+    _groupSoundEnabled = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool("group_sound_enabled", value);
+    } catch (e) {
+      debugPrint("Failed to save group_sound_enabled pref: $e");
+    }
+  }
+
+  Future<void> setPriorityMentionsOverride(bool value) async {
+    _priorityMentionsOverride = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool("priority_mentions_override", value);
+    } catch (e) {
+      debugPrint("Failed to save priority_mentions_override pref: $e");
+    }
+  }
+
+  void setActiveConversationId(String? value, {int? unreadCount}) {
+    _activeConversationId = value;
+    if (value != null && unreadCount != null && unreadCount > 0) {
+      _unreadMessagesCount = (_unreadMessagesCount - unreadCount).clamp(0, 999999);
+      notifyListeners();
+    }
+    fetchTotalUnreadCount();
+  }
+
+  void setActiveTabIndex(int index) {
+    if (_activeTabIndex != index) {
+      _activeTabIndex = index;
+      notifyListeners();
+    }
+  }
 
   Future<void> toggleDarkMode(bool value) async {
     _isDarkMode = value;
@@ -48,8 +149,14 @@ class SessionController extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       _isDarkMode = prefs.getBool("is_dark_mode") ?? false;
+      _pushNotificationEnabled = prefs.getBool("push_notification_enabled") ?? true;
+      _oneToOnePrivacyMode = prefs.getString("one_to_one_privacy_mode") ?? "SHOW_ALL";
+      _oneToOneSilentDebounce = prefs.getBool("one_to_one_silent_debounce") ?? true;
+      _groupNotificationFilter = prefs.getString("group_notification_filter") ?? "ALL_MESSAGES";
+      _groupSoundEnabled = prefs.getBool("group_sound_enabled") ?? true;
+      _priorityMentionsOverride = prefs.getBool("priority_mentions_override") ?? true;
     } catch (e) {
-      debugPrint("Failed to load dark mode pref: $e");
+      debugPrint("Failed to load prefs: $e");
     }
 
     try {
@@ -510,8 +617,10 @@ class SessionController extends ChangeNotifier {
 
     _unreadMsgSub = _appServices.socketService.onMessageCreated.listen((msg) {
       if (_user != null && msg.senderId != _user!.id) {
-        _unreadMessagesCount++;
-        notifyListeners();
+        if (msg.conversationId != _activeConversationId) {
+          _unreadMessagesCount++;
+          notifyListeners();
+        }
       }
     });
 

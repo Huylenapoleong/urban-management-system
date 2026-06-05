@@ -16,7 +16,19 @@ function getErrorMessage(error: unknown, fallback: string): string {
   }
 
   const message = (error as { message?: string }).message;
-  return typeof message === "string" && message.trim() ? message : fallback;
+  if (typeof message === "string" && message.trim()) {
+    const msg = message.trim();
+    if (msg.includes("Invalid credential")) return "Tài khoản hoặc mật khẩu không đúng.";
+    if (msg.includes("Invalid OTP")) return "Mã OTP không hợp lệ hoặc đã hết hạn.";
+    if (msg.includes("Current password is invalid")) return "Mật khẩu hiện tại không đúng.";
+    if (msg.includes("unavailable")) return "Tài khoản đã bị khóa hoặc không tồn tại.";
+    if (msg.includes("phone already exists")) return "Số điện thoại đã được đăng ký.";
+    if (msg.includes("email already exists")) return "Email đã được đăng ký.";
+    if (msg.includes("already exists")) return "Thông tin đã tồn tại trong hệ thống.";
+    if (msg.includes("Session not found")) return "Phiên đăng nhập không tồn tại.";
+    return msg;
+  }
+  return fallback;
 }
 
 function getRedirectPath(state: unknown): string {

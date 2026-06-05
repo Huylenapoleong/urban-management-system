@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "248119537337",
+    "project_id": "urban-manage-system",
+    "storage_bucket": "urban-manage-system.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:248119537337:android:816219b72070ae232d7568",
+        "android_client_info": {
+          "package_name": "com.example.mobile_app_fluter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDS7oqDzVsPldj0YZRTzxpoaKsVFd0ZwEw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -20,6 +20,12 @@ class CitizenShell extends StatelessWidget {
     final session = context.watch<SessionController>();
     final unreadCount = session.unreadMessagesCount;
 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.mounted) {
+        context.read<SessionController>().setActiveTabIndex(idx);
+      }
+    });
+
     return NotificationListenerWidget(
       child: CallIncomingListener(
       child: Scaffold(

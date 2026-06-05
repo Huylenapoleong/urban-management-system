@@ -5,6 +5,13 @@ import {
   OnApplicationBootstrap,
   OnApplicationShutdown,
 } from '@nestjs/common';
+import {
+  SNSClient,
+  CreatePlatformEndpointCommand,
+  DeleteEndpointCommand,
+  SetEndpointAttributesCommand,
+  PublishCommand,
+} from '@aws-sdk/client-sns';
 import { PUSH_DEVICE_PROVIDERS } from '@urban/shared-constants';
 import type {
   ApiResponseMeta,
@@ -69,12 +76,21 @@ export class PushNotificationService
   private readonly logger = new Logger(PushNotificationService.name);
   private outboxTimer?: NodeJS.Timeout;
   private outboxDrainPromise?: Promise<void>;
+  private readonly snsClient?: SNSClient;
 
   constructor(
     private readonly repository: UrbanTableRepository,
     private readonly chatPresenceService: ChatPresenceService,
     private readonly config: AppConfigService,
-  ) {}
+  ) {
+    if (this.config.pushProvider === 'sns') {
+      this.snsClient = new SNSClient({
+        region: this.config.awsRegion,
+        credentials: this.config.dynamodbCredentials,
+        maxAttempts: this.config.awsMaxAttempts,
+      });
+    }
+  }
 
   onApplicationBootstrap(): void {
     if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
@@ -92,6 +108,7 @@ export class PushNotificationService
       clearInterval(this.outboxTimer);
       this.outboxTimer = undefined;
     }
+    this.snsClient?.destroy();
   }
 
   async listDevices(
@@ -130,6 +147,87 @@ export class PushNotificationService
     );
     const conflictingLookup = await this.getPushTokenLookup(pushToken);
 
+    let endpointArn: string | undefined;
+    if (this.config.pushProvider === 'sns') {
+      const normalizedPlatform = platform.toLowerCase();
+      let platformApplicationArn: string | undefined;
+
+      if (normalizedPlatform.includes('android')) {
+        platformApplicationArn =
+          this.config.pushSnsAndroidPlatformApplicationArn;
+      } else if (
+        normalizedPlatform.includes('ios') ||
+        normalizedPlatform.includes('apple') ||
+        normalizedPlatform.includes('apns')
+      ) {
+        platformApplicationArn = this.config.pushSnsIosPlatformApplicationArn;
+      }
+
+      if (!platformApplicationArn) {
+        throw new Error(
+          `No AWS SNS Platform Application ARN configured for platform: ${platform}`,
+        );
+      }
+
+      if (!this.snsClient) {
+        throw new Error('SNS Client is not initialized.');
+      }
+
+      try {
+        const res = await this.snsClient.send(
+          new CreatePlatformEndpointCommand({
+            PlatformApplicationArn: platformApplicationArn,
+            Token: pushToken,
+            CustomUserData: userId,
+          }),
+        );
+        endpointArn = res.EndpointArn;
+      } catch (err: unknown) {
+        const error = err as Error & { code?: string };
+        if (
+          (error.name === 'InvalidParameterException' ||
+            error.code === 'InvalidParameterException') &&
+          (error.message || '').includes('already exists')
+        ) {
+          const match = (error.message || '').match(/arn:aws:sns:[^ ]+/);
+          endpointArn = match ? match[0] : undefined;
+          if (!endpointArn) {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      if (endpointArn) {
+        await this.snsClient.send(
+          new SetEndpointAttributesCommand({
+            EndpointArn: endpointArn,
+            Attributes: {
+              Token: pushToken,
+              Enabled: 'true',
+              CustomUserData: userId,
+            },
+          }),
+        );
+
+        // Clean up old endpoint if it has changed
+        if (existing?.endpointArn && existing.endpointArn !== endpointArn) {
+          try {
+            await this.snsClient.send(
+              new DeleteEndpointCommand({
+                EndpointArn: existing.endpointArn,
+              }),
+            );
+          } catch (err) {
+            this.logger.warn(
+              `Failed to delete old SNS endpoint ${existing.endpointArn}: ${err}`,
+            );
+          }
+        }
+      }
+    }
+
     const nextDevice: StoredPushDevice = {
       PK: makeUserPk(userId),
       SK: makeUserPushDeviceSk(deviceId),
@@ -144,6 +242,7 @@ export class PushNotificationService
       lastSeenAt: now,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+      endpointArn,
     };
     const nextLookup: StoredPushTokenLookup = {
       PK: makePushTokenLookupPk(pushToken),
@@ -220,6 +319,27 @@ export class PushNotificationService
     if (!existing || existing.entityType !== 'USER_PUSH_DEVICE') {
       throw new NotFoundException('Push device not found.');
     }
+
+    if (
+      this.config.pushProvider === 'sns' &&
+      existing.endpointArn &&
+      this.snsClient
+    ) {
+      try {
+        await this.snsClient.send(
+          new DeleteEndpointCommand({
+            EndpointArn: existing.endpointArn,
+          }),
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to delete SNS platform endpoint ${existing.endpointArn}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     const lookup = await this.getPushTokenLookup(existing.pushToken);
     const writes: Parameters<UrbanTableRepository['transactWrite']>[0] = [
       {
@@ -497,6 +617,102 @@ export class PushNotificationService
           );
         }
 
+        return;
+      }
+      case 'sns': {
+        if (!device.endpointArn) {
+          this.logger.warn(
+            `Device ${device.deviceId} has no endpointArn; skipping SNS push dispatch`,
+          );
+          return;
+        }
+        if (!this.snsClient) {
+          this.logger.error('SNS client is not initialized');
+          return;
+        }
+
+        const customData: Record<string, string> = {
+          ...(event.data ?? {}),
+          eventName: event.eventName,
+          eventId: event.eventId,
+          createdAt: event.createdAt,
+          userId,
+          deviceId: device.deviceId,
+        };
+        if (event.conversationId)
+          customData.conversationId = event.conversationId;
+        if (event.messageId) customData.messageId = event.messageId;
+        if (event.reportId) customData.reportId = event.reportId;
+
+        const gcmPayload = {
+          fcmV1Message: {
+            message: {
+              notification: {
+                title: event.title,
+                body: event.body,
+              },
+              data: customData,
+            },
+          },
+        };
+
+        const apnsPayload = {
+          aps: {
+            alert: {
+              title: event.title,
+              body: event.body,
+            },
+            sound: 'default',
+          },
+          ...customData,
+        };
+
+        const messageObj: Record<string, string> = {
+          default: event.body,
+          GCM: JSON.stringify(gcmPayload),
+          APNS: JSON.stringify(apnsPayload),
+          APNS_SANDBOX: JSON.stringify(apnsPayload),
+        };
+
+        try {
+          await this.snsClient.send(
+            new PublishCommand({
+              TargetArn: device.endpointArn,
+              Message: JSON.stringify(messageObj),
+              MessageStructure: 'json',
+            }),
+          );
+        } catch (err: unknown) {
+          const error = err as Error & { code?: string };
+          this.logger.warn(
+            `SNS push dispatch failed for user ${userId}, device ${device.deviceId}: ${error.message || 'Unknown error'}`,
+          );
+          if (
+            error.name === 'EndpointDisabledException' ||
+            error.code === 'EndpointDisabled' ||
+            (error.message || '').includes('EndpointDisabled')
+          ) {
+            try {
+              const disabledDevice: StoredPushDevice = {
+                ...device,
+                disabledAt: nowIso(),
+                updatedAt: nowIso(),
+              };
+              await this.repository.put(
+                this.config.dynamodbUsersTableName,
+                disabledDevice,
+              );
+              this.logger.log(
+                `Disabled device ${device.deviceId} in DB due to SNS EndpointDisabled`,
+              );
+            } catch (dbErr) {
+              this.logger.error(
+                `Failed to disable device ${device.deviceId} in DB: ${dbErr}`,
+              );
+            }
+          }
+          throw error;
+        }
         return;
       }
       case 'log':

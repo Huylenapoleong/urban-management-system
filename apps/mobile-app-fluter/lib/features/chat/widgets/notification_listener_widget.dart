@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../services/app_services.dart';
 import '../../../services/local_notification_service.dart';
 import '../../../services/webrtc_service.dart';
+import '../../../services/call_sound_service.dart';
 import '../../../state/session_controller.dart';
 
 /// Widget lắng nghe các sự kiện socket và hiển thị local push notification.
@@ -53,43 +54,187 @@ class _NotificationListenerWidgetState
     }
   }
 
+  final Map<String, _ConversationDebounceState> _debounceStates = {};
+
+  bool _checkIsSilent(String conversationId) {
+    final now = DateTime.now();
+    var state = _debounceStates[conversationId];
+    if (state == null) {
+      state = _ConversationDebounceState()
+        ..messageCount = 1
+        ..windowStart = now
+        ..lastMessageTime = now
+        ..silentMode = false;
+      _debounceStates[conversationId] = state;
+      return false;
+    }
+
+    if (now.difference(state.lastMessageTime).inMilliseconds > 5000) {
+      state.messageCount = 1;
+      state.windowStart = now;
+      state.lastMessageTime = now;
+      state.silentMode = false;
+      return false;
+    }
+
+    state.lastMessageTime = now;
+    state.messageCount++;
+
+    if (now.difference(state.windowStart).inMilliseconds > 10000) {
+      state.windowStart = now;
+      state.messageCount = 1;
+      state.silentMode = false;
+      return false;
+    }
+
+    if (state.messageCount > 5) {
+      state.silentMode = true;
+    }
+
+    return state.silentMode;
+  }
+
   void _setupListeners(AppServices services) {
     // ── Tin nhắn mới ─────────────────────────────────────────────────────────
     _subs.add(
       services.socketService.onMessageCreated.listen((msg) {
+        debugPrint('[NotificationListener] Received message: id=${msg.id}, senderId=${msg.senderId}, conversationId=${msg.conversationId}, type=${msg.type}');
+        
         // Không thông báo tin nhắn của chính mình
-        if (msg.senderId == _currentUserId) return;
+        if (msg.senderId == _currentUserId) {
+          debugPrint('[NotificationListener] Ignored because message is from self');
+          return;
+        }
 
-        final senderName = msg.senderName.isNotEmpty ? msg.senderName : 'Ai đó';
+        // Nếu người dùng đang thực sự xem cuộc hội thoại này, không phát âm thanh hoặc hiện thông báo
+        try {
+          final session = context.read<SessionController>();
+          final activeConvId = session.activeConversationId;
+          debugPrint('[NotificationListener] activeConvId=$activeConvId, msg.conversationId=${msg.conversationId}');
+          
+          if (activeConvId == msg.conversationId) {
+            // Xác định xem người dùng có thực sự đang ở tab Tin nhắn và màn hình ChatDetail không bị che bởi màn hình khác (như Cài đặt)
+            final isShellVisible = ModalRoute.of(context)?.isCurrent ?? false;
+            
+            final isOfficial = session.user?.role != null &&
+                const {'ADMIN', 'PROVINCE_OFFICER', 'WARD_OFFICER', 'OFFICER'}
+                    .contains(session.user!.role!.toUpperCase());
+            final isChatTab = isOfficial
+                ? session.activeTabIndex == 2
+                : session.activeTabIndex == 1;
+
+            debugPrint('[NotificationListener] activeTabIndex=${session.activeTabIndex}, isShellVisible=$isShellVisible, isChatTab=$isChatTab');
+            if (isShellVisible && isChatTab) {
+              debugPrint('[NotificationListener] Ignored because user is actively viewing this conversation');
+              return;
+            }
+          }
+        } catch (e) {
+          debugPrint('[NotificationListener] Error checking active view status: $e');
+        }
+
+        final session = context.read<SessionController>();
+        debugPrint('[NotificationListener] pushNotificationEnabled=${session.pushNotificationEnabled}');
+        if (!session.pushNotificationEnabled) {
+          debugPrint('[NotificationListener] Ignored because pushNotificationEnabled is false');
+          return;
+        }
+
         final conversationId = msg.conversationId;
         final isGroup = conversationId.startsWith('group:') ||
             conversationId.startsWith('GRP#');
 
-        // Xác định preview nội dung
-        String preview;
+        // Xác định preview nội dung gốc
+        String originalText = '';
         if (msg.type == 'image') {
-          preview = '\u{1F5BC} Đã gửi một ảnh';
+          originalText = '\u{1F5BC} Đã gửi một ảnh';
         } else if (msg.type == 'file') {
-          preview = '\u{1F4CE} Đã gửi một tệp';
+          originalText = '\u{1F4CE} Đã gửi một tệp';
         } else if (msg.type == 'audio') {
-          preview = '\u{1F3B5} Đã gửi một đoạn âm thanh';
+          originalText = '\u{1F3B5} Đã gửi một đoạn âm thanh';
         } else if (msg.type == 'video') {
-          preview = '\u{1F3AC} Đã gửi một video';
+          originalText = '\u{1F3AC} Đã gửi một video';
         } else {
-          final text = msg.contentText;
-          preview = text.isNotEmpty
-              ? (text.length > 100
-                  ? '${text.substring(0, 100)}...'
-                  : text)
-              : 'Tin nhắn mới';
+          originalText = msg.contentText;
         }
 
-        _notif?.showMessageNotification(
-          senderName: senderName,
-          conversationId: conversationId,
-          preview: preview,
-          groupName: isGroup ? 'Nhóm chat' : null,
-        );
+        final userFullName = session.user?.fullName ?? '';
+        final hasMention = userFullName.isNotEmpty &&
+            (originalText.toLowerCase().contains('@all') ||
+                originalText.toLowerCase().contains('@${userFullName.toLowerCase()}'));
+
+        debugPrint('[NotificationListener] isGroup=$isGroup, hasMention=$hasMention');
+
+        // Áp dụng bộ lọc nhóm
+        if (isGroup) {
+          final filter = session.groupNotificationFilter;
+          debugPrint('[NotificationListener] groupNotificationFilter=$filter');
+          if (filter == 'MENTIONS_ONLY' && !hasMention) {
+            debugPrint('[NotificationListener] Ignored group message because MENTIONS_ONLY and not mentioned');
+            return;
+          }
+          if (filter == 'PINNED_ONLY' && msg.pinnedAt == null) {
+            debugPrint('[NotificationListener] Ignored group message because PINNED_ONLY and not pinned');
+            return;
+          }
+        }
+
+        // Áp dụng silent debounce 1-1
+        bool isSilent = false;
+        if (!isGroup && session.oneToOneSilentDebounce) {
+          isSilent = _checkIsSilent(conversationId);
+          debugPrint('[NotificationListener] 1-1 SilentDebounce check returned isSilent=$isSilent');
+        }
+
+        // Quyết định phát âm thanh
+        bool shouldPlaySound = true;
+        if (isGroup) {
+          if (session.groupSoundEnabled) {
+            shouldPlaySound = true;
+          } else {
+            shouldPlaySound = hasMention && session.priorityMentionsOverride;
+          }
+        } else {
+          shouldPlaySound = !isSilent;
+        }
+        debugPrint('[NotificationListener] shouldPlaySound=$shouldPlaySound');
+
+        if (shouldPlaySound) {
+          try {
+            CallSoundService().playMessageSound();
+          } catch (e) {
+            debugPrint('[NotificationListener] Error playing sound: $e');
+          }
+        }
+
+        // Áp dụng Privacy Mode cho 1-1
+        String senderName = msg.senderName.isNotEmpty ? msg.senderName : 'Ai đó';
+        String preview = originalText;
+        String? displayGroupName = isGroup ? 'Nhóm chat' : null;
+
+        if (!isGroup) {
+          final privacyMode = session.oneToOnePrivacyMode;
+          debugPrint('[NotificationListener] oneToOnePrivacyMode=$privacyMode');
+          if (privacyMode == 'HIDE_CONTENT') {
+            preview = 'Bạn có tin nhắn mới';
+          } else if (privacyMode == 'ANONYMOUS') {
+            senderName = 'Urban Management';
+            preview = 'Bạn có tin nhắn mới';
+          }
+        }
+
+        debugPrint('[NotificationListener] Showing notification: title=$senderName, preview=$preview, sound=$shouldPlaySound');
+        try {
+          _notif?.showMessageNotification(
+            senderName: senderName,
+            conversationId: conversationId,
+            preview: preview.isNotEmpty ? preview : 'Tin nhắn mới',
+            groupName: displayGroupName,
+            playSound: shouldPlaySound,
+          );
+        } catch (e) {
+          debugPrint('[NotificationListener] Error showing message notification: $e');
+        }
       }),
     );
 
@@ -191,4 +336,11 @@ extension _ValueNotifierStream<T> on ValueNotifier<T> {
     );
     return controller.stream;
   }
+}
+
+class _ConversationDebounceState {
+  int messageCount = 0;
+  DateTime windowStart = DateTime.now();
+  DateTime lastMessageTime = DateTime.now();
+  bool silentMode = false;
 }

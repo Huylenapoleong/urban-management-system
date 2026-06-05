@@ -2,6 +2,8 @@ import "dart:async";
 import "dart:io";
 import "package:file_picker/file_picker.dart";
 import "dart:convert";
+import "package:provider/provider.dart";
+import "../../state/session_controller.dart";
 
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
@@ -14,6 +16,7 @@ import "package:url_launcher/url_launcher.dart";
 import "package:record/record.dart";
 import "package:path_provider/path_provider.dart";
 import "package:audioplayers/audioplayers.dart";
+import "package:video_player/video_player.dart";
 
 import "package:shared_preferences/shared_preferences.dart";
 import "../../models/conversation_summary.dart";
@@ -35,7 +38,6 @@ import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
 import "../../core/utils/translation_helper.dart";
 
-import "models/chat_message.dart";
 import "../../services/local_cache_service.dart";
 import "package:cached_network_image/cached_network_image.dart";
 import "package:skeletonizer/skeletonizer.dart";
@@ -85,6 +87,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final Map<String, Timer> _typingTimers = {};
   StreamSubscription? _typingSub;
   String? _conversationKey;
+  Map<String, dynamic>? _activeCallInfo;
+  StreamSubscription? _callInitSub;
+  StreamSubscription? _callInviteSub;
+  StreamSubscription? _callEndSub;
   Map<String, String> _aliases = {};
   bool _loadingAliases = false;
   String? _fetchedGroupName;
@@ -247,6 +253,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        try {
+          context.read<SessionController>().setActiveConversationId(
+            widget.conversation.conversationId,
+            unreadCount: widget.conversation.unreadCount,
+          );
+        } catch (_) {}
+      }
+    });
     
     // Check synchronous in-memory cache first
     final memCached = _conversationMessagesCache[widget.conversation.conversationId];
@@ -269,6 +286,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (widget.conversation.unreadCount > 0) {
       widget.conversationService
           .markConversationAsRead(widget.conversation.conversationId)
+          .then((_) {
+            if (mounted) {
+              try {
+                context.read<SessionController>().fetchTotalUnreadCount();
+              } catch (_) {}
+            }
+          })
           .catchError((_) {});
     }
     _pagingController.addPageRequestListener((pageKey) {
@@ -287,12 +311,47 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (mounted && data != null) {
         setState(() {
           _conversationKey = data["conversationKey"];
+          if (data["activeCall"] != null) {
+            _activeCallInfo = data["activeCall"];
+          }
+        });
+      }
+    });
+
+    _callInitSub = widget.socketService.onCallInit.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = data;
+        });
+      }
+    });
+
+    _callInviteSub = widget.socketService.onCallInvite.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = data;
+        });
+      }
+    });
+
+    _callEndSub = widget.socketService.onCallEnd.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = null;
         });
       }
     });
     // Mark as read on entry
     widget.socketService.markAsRead(widget.conversation.conversationId);
-    widget.conversationService.markConversationAsRead(widget.conversation.conversationId).catchError((_) {});
+    widget.conversationService.markConversationAsRead(widget.conversation.conversationId)
+        .then((_) {
+          if (mounted) {
+            try {
+              context.read<SessionController>().fetchTotalUnreadCount();
+            } catch (_) {}
+          }
+        })
+        .catchError((_) {});
 
     _msgSub = widget.socketService.onMessageCreated.listen((msg) {
       if (mounted && msg.conversationId == widget.conversation.conversationId) {
@@ -304,7 +363,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (msg.senderId != myId) {
           widget.socketService.markMessageDelivered(msg.conversationId, msg.id);
           widget.socketService.markAsRead(widget.conversation.conversationId);
-          widget.conversationService.markConversationAsRead(widget.conversation.conversationId).catchError((_) {});
+          widget.conversationService.markConversationAsRead(widget.conversation.conversationId).ignore();
         }
 
         // Save socket message to local cache
@@ -517,6 +576,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    try {
+      context.read<SessionController>().setActiveConversationId(null);
+    } catch (_) {}
     widget.socketService.leaveConversation(widget.conversation.conversationId);
     widget.webRTCService.callState.removeListener(_handleCallStateChange);
     _msgSub?.cancel();
@@ -525,6 +587,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _snapshotSub?.cancel();
     _typingSub?.cancel();
     _updateSub?.cancel();
+    _callInitSub?.cancel();
+    _callInviteSub?.cancel();
+    _callEndSub?.cancel();
     for (final timer in _typingTimers.values) {
       timer.cancel();
     }
@@ -633,6 +698,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           type: AppToastType.error,
         );
       }
+    }
+  }
+
+  void _scrollToMessage(String messageId) {
+    final items = _pagingController.itemList ?? [];
+    final idx = items.indexWhere((m) => m.id == messageId);
+    if (idx != -1) {
+      final targetOffset = (idx * 110.0).clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
+      _scrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutQuad,
+      );
     }
   }
 
@@ -1505,46 +1586,80 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   Widget _buildActiveCallBanner() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return ValueListenableBuilder<CallState>(
       valueListenable: widget.webRTCService.callState,
       builder: (context, state, _) {
-        if (state != CallState.idle &&
-          widget.conversation.isGroup &&
+        final localCallActive = state != CallState.idle &&
             widget.webRTCService.currentConversationId ==
-                widget.conversation.conversationId) {
-          return Container(
-            color: Colors.green.withValues(alpha: 0.15),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                const Icon(Icons.group_add, color: Colors.green),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        state == CallState.ringing
-                            ? "Cuộc gọi nhóm đang chờ"
-                            : "Cuộc gọi nhóm đang diễn ra",
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.green),
+                widget.conversation.conversationId;
+                
+        final remoteCallActive = !localCallActive && _activeCallInfo != null;
+        
+        if (!localCallActive && !remoteCallActive) {
+          return const SizedBox.shrink();
+        }
+        
+        final isVideo = localCallActive 
+            ? !widget.webRTCService.isAudioOnly
+            : (_activeCallInfo?['isVideo'] ?? true);
+            
+        final bannerColor = localCallActive
+            ? Colors.green.withOpacity(0.15)
+            : const Color(0xFF7C3AED).withOpacity(0.15);
+            
+        final iconColor = localCallActive ? Colors.green : const Color(0xFF7C3AED);
+        
+        return Container(
+          color: bannerColor,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                localCallActive 
+                    ? (isVideo ? Icons.videocam : Icons.phone_in_talk)
+                    : (isVideo ? Icons.video_call : Icons.phone),
+                color: iconColor,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      localCallActive
+                          ? (state == CallState.ringing 
+                              ? "Cuộc gọi đang chờ" 
+                              : "Bạn đang trong cuộc gọi")
+                          : "Cuộc gọi đang diễn ra",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold, 
+                        color: iconColor,
                       ),
-                      Text('Nhấn để xem hoặc tham gia',
-                          style:
-                              TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.black54)),
-                    ],
+                    ),
+                    Text(
+                      localCallActive 
+                          ? 'Chạm để quay lại cuộc gọi' 
+                          : 'Nhấp để tham gia cuộc gọi',
+                      style: TextStyle(
+                        fontSize: 12, 
+                        color: isDark ? Colors.grey[400] : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: iconColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
                   ),
                 ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                  ),
-                  onPressed: () {
-                    // Navigate directly to CallScreen
+                onPressed: () {
+                  if (localCallActive) {
+                    widget.webRTCService.isCallMinimized.value = false;
                     Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => CallScreen(
@@ -1555,14 +1670,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         ),
                       ),
                     );
-                  },
-                  child: const Text('Tham gia'),
-                ),
-              ],
-            ),
-          );
-        }
-        return const SizedBox.shrink();
+                  } else {
+                    _startCall(video: isVideo);
+                  }
+                },
+                child: Text(localCallActive ? 'Quay lại' : 'Tham gia'),
+              ),
+            ],
+          ),
+        );
       },
     );
   }
@@ -2321,6 +2437,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             peerId: peerId,
             peerAvatarUrl: peerAvatarUrl,
             peerDisplayName: peerDisplayName,
+            onReplyTap: message.replyTo != null
+                ? () => _scrollToMessage(message.replyTo!)
+                : null,
           );
         },
         firstPageProgressIndicatorBuilder: (_) => Skeletonizer(
@@ -2411,6 +2530,13 @@ class _ChatComposerState extends State<ChatComposer> {
   String _previousText = "";
   List<_InviteCandidate> _groupMembers = [];
   bool _loadingMembers = false;
+
+  AudioPlayer? _voiceAudioPlayer;
+  bool _isConfirmingVoice = false;
+  String? _voicePath;
+  bool _isVoicePlaying = false;
+  Duration _voicePlayDuration = Duration.zero;
+  Duration _voicePlayPosition = Duration.zero;
 
   @override
   void initState() {
@@ -2530,6 +2656,34 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  void _applyAllMention() {
+    final text = _textController.text;
+    final selection = _textController.selection;
+    if (!selection.isValid) return;
+
+    final cursorPosition = selection.baseOffset;
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    final textAfterCursor = text.substring(cursorPosition);
+
+    final lastAtSignIndex = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSignIndex == -1) return;
+
+    const newMention = "@all ";
+    final newTextBeforeCursor = textBeforeCursor.replaceRange(
+      lastAtSignIndex,
+      cursorPosition,
+      newMention,
+    );
+
+    final newText = newTextBeforeCursor + textAfterCursor;
+    final newCursorPosition = lastAtSignIndex + newMention.length;
+
+    _textController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newCursorPosition),
+    );
+  }
+
   Widget _buildMentionSuggestions() {
     final query = _getMentionQuery() ?? "";
     final filtered = _groupMembers.where((member) {
@@ -2537,9 +2691,15 @@ class _ChatComposerState extends State<ChatComposer> {
       return name.contains(query.toLowerCase());
     }).toList();
 
-    if (filtered.isEmpty) return const SizedBox.shrink();
+    final showAllOption = query.isEmpty ||
+        "all".startsWith(query.toLowerCase()) ||
+        "tất cả".startsWith(query.toLowerCase()) ||
+        "everyone".startsWith(query.toLowerCase());
+
+    if (filtered.isEmpty && !showAllOption) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final totalCount = filtered.length + (showAllOption ? 1 : 0);
 
     return Container(
       constraints: const BoxConstraints(maxHeight: 200),
@@ -2563,13 +2723,45 @@ class _ChatComposerState extends State<ChatComposer> {
         child: ListView.separated(
           shrinkWrap: true,
           padding: EdgeInsets.zero,
-          itemCount: filtered.length,
+          itemCount: totalCount,
           separatorBuilder: (_, __) => Divider(
             height: 1,
             color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
           ),
           itemBuilder: (context, index) {
-            final member = filtered[index];
+            if (showAllOption && index == 0) {
+              return ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  radius: 14,
+                  backgroundColor: isDark
+                      ? const Color(0xFF7C3AED).withOpacity(0.2)
+                      : const Color(0xFF7C3AED).withOpacity(0.1),
+                  child: const Icon(
+                    Icons.groups_outlined,
+                    size: 16,
+                    color: Color(0xFF7C3AED),
+                  ),
+                ),
+                title: Text(
+                  "Tất cả mọi người (@all)",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                subtitle: Text(
+                  "Nhắc tên cả nhóm",
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  ),
+                ),
+                onTap: _applyAllMention,
+              );
+            }
+
+            final member = filtered[showAllOption ? index - 1 : index];
             return ListTile(
               dense: true,
               leading: UserAvatar(
@@ -2630,6 +2822,7 @@ class _ChatComposerState extends State<ChatComposer> {
     _audioRecorder.dispose();
     _timer?.cancel();
     _typingTimer?.cancel();
+    _voiceAudioPlayer?.dispose();
     super.dispose();
   }
 
@@ -2661,14 +2854,25 @@ class _ChatComposerState extends State<ChatComposer> {
     setState(() => _isRecording = false);
     
     if (path != null) {
-      final name = path.split("/").last;
       setState(() {
-        _attachments.add(_PendingAttachment(
-          path: path,
-          name: name,
-          type: "AUDIO",
-          mimeType: "audio/mp4",
-        ));
+        _isConfirmingVoice = true;
+        _voicePath = path;
+        _isVoicePlaying = false;
+        _voicePlayDuration = Duration.zero;
+        _voicePlayPosition = Duration.zero;
+      });
+
+      _voiceAudioPlayer?.dispose();
+      _voiceAudioPlayer = AudioPlayer();
+
+      _voiceAudioPlayer!.onDurationChanged.listen((d) {
+        if (mounted) setState(() => _voicePlayDuration = d);
+      });
+      _voiceAudioPlayer!.onPositionChanged.listen((p) {
+        if (mounted) setState(() => _voicePlayPosition = p);
+      });
+      _voiceAudioPlayer!.onPlayerComplete.listen((_) {
+        if (mounted) setState(() => _isVoicePlaying = false);
       });
     }
   }
@@ -2686,6 +2890,143 @@ class _ChatComposerState extends State<ChatComposer> {
     final mins = (seconds / 60).floor();
     final secs = seconds % 60;
     return "${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}";
+  }
+
+  void _togglePreviewPlay() async {
+    if (_voicePath == null || _voiceAudioPlayer == null) return;
+    
+    if (_isVoicePlaying) {
+      await _voiceAudioPlayer!.pause();
+      setState(() => _isVoicePlaying = false);
+    } else {
+      await _voiceAudioPlayer!.play(DeviceFileSource(_voicePath!));
+      setState(() => _isVoicePlaying = true);
+    }
+  }
+
+  void _discardVoicePreview() async {
+    if (_voiceAudioPlayer != null) {
+      await _voiceAudioPlayer!.stop();
+      _voiceAudioPlayer!.dispose();
+      _voiceAudioPlayer = null;
+    }
+    
+    if (_voicePath != null) {
+      final file = File(_voicePath!);
+      if (await file.exists()) {
+        try {
+          await file.delete();
+        } catch (_) {}
+      }
+    }
+    
+    setState(() {
+      _isConfirmingVoice = false;
+      _voicePath = null;
+      _isVoicePlaying = false;
+      _voicePlayDuration = Duration.zero;
+      _voicePlayPosition = Duration.zero;
+    });
+  }
+
+  void _sendVoicePreview() async {
+    if (_voicePath == null) return;
+    
+    if (_voiceAudioPlayer != null) {
+      await _voiceAudioPlayer!.stop();
+      _voiceAudioPlayer!.dispose();
+      _voiceAudioPlayer = null;
+    }
+
+    final path = _voicePath!;
+    final name = path.split("/").last;
+    
+    final attachment = _PendingAttachment(
+      path: path,
+      name: name,
+      type: "AUDIO",
+      mimeType: "audio/mp4",
+    );
+
+    try {
+      await widget.onSend(text: "", attachments: [attachment]);
+    } catch (_) {}
+
+    setState(() {
+      _isConfirmingVoice = false;
+      _voicePath = null;
+      _isVoicePlaying = false;
+      _voicePlayDuration = Duration.zero;
+      _voicePlayPosition = Duration.zero;
+    });
+  }
+
+  Widget _buildVoiceConfirmationRow(BuildContext context, bool isDark) {
+    final remainingTime = _voicePlayDuration - _voicePlayPosition;
+    final displayDuration = remainingTime > Duration.zero ? remainingTime : _voicePlayDuration;
+
+    return Container(
+      height: 56,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              _isVoicePlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+              color: const Color(0xFF7C3AED),
+              size: 36,
+            ),
+            onPressed: _togglePreviewPlay,
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                trackHeight: 3,
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                activeTrackColor: const Color(0xFF7C3AED),
+                inactiveTrackColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                thumbColor: const Color(0xFF7C3AED),
+              ),
+              child: Slider(
+                value: _voicePlayPosition.inMilliseconds.toDouble(),
+                max: _voicePlayDuration.inMilliseconds.toDouble() > 0
+                    ? _voicePlayDuration.inMilliseconds.toDouble()
+                    : 1.0,
+                onChanged: (val) {
+                  _voiceAudioPlayer?.seek(Duration(milliseconds: val.toInt()));
+                },
+              ),
+            ),
+          ),
+          Text(
+            _formatDuration(displayDuration.inSeconds),
+            style: TextStyle(
+              color: isDark ? Colors.grey[400] : Colors.grey[700],
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: _discardVoicePreview,
+            child: const Text("Hủy", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.send_rounded, color: Color(0xFF7C3AED), size: 28),
+            onPressed: _sendVoicePreview,
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -2875,228 +3216,232 @@ class _ChatComposerState extends State<ChatComposer> {
           children: [
             if (widget.isGroup && _getMentionQuery() != null)
               _buildMentionSuggestions(),
-            if (_attachments.isNotEmpty)
-              Container(
-                height: 90,
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _attachments.length,
-                  itemBuilder: (context, index) {
-                    final att = _attachments[index];
-                    final isImage = att.type == "IMAGE" && !att.path.startsWith("http");
-                    
-                    return Container(
-                      width: 80,
-                      margin: const EdgeInsets.only(right: 8),
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                                  border: Border.all(
-                                    color: isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0),
+            if (_isConfirmingVoice)
+              _buildVoiceConfirmationRow(context, isDark)
+            else ...[
+              if (_attachments.isNotEmpty)
+                Container(
+                  height: 90,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _attachments.length,
+                    itemBuilder: (context, index) {
+                      final att = _attachments[index];
+                      final isImage = att.type == "IMAGE" && !att.path.startsWith("http");
+                      
+                      return Container(
+                        width: 80,
+                        margin: const EdgeInsets.only(right: 8),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                                    border: Border.all(
+                                      color: isDark ? const Color(0xFF475569) : const Color(0xFFE2E8F0),
+                                    ),
+                                  ),
+                                  child: isImage
+                                      ? Image.file(
+                                          File(att.path),
+                                          fit: BoxFit.cover,
+                                        )
+                                      : Center(
+                                          child: Icon(
+                                            att.type == "VIDEO"
+                                                ? Icons.videocam
+                                                : att.type == "AUDIO"
+                                                    ? Icons.mic
+                                                    : Icons.insert_drive_file,
+                                            color: const Color(0xFF7C3AED),
+                                            size: 28,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ),
+                            if (att.type == "VIDEO")
+                              const Positioned(
+                                bottom: 4,
+                                right: 4,
+                                child: Icon(
+                                  Icons.play_circle_fill,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                              ),
+                            Positioned(
+                              top: 2,
+                              right: 2,
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _attachments.removeAt(index);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                    size: 14,
                                   ),
                                 ),
-                                child: isImage
-                                    ? Image.file(
-                                        File(att.path),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : Center(
-                                        child: Icon(
-                                          att.type == "VIDEO"
-                                              ? Icons.videocam
-                                              : att.type == "AUDIO"
-                                                  ? Icons.mic
-                                                  : Icons.insert_drive_file,
-                                          color: const Color(0xFF7C3AED),
-                                          size: 28,
-                                        ),
-                                      ),
                               ),
                             ),
-                          ),
-                          if (att.type == "VIDEO")
-                            const Positioned(
-                              bottom: 4,
-                              right: 4,
-                              child: Icon(
-                                Icons.play_circle_fill,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                            ),
-                          Positioned(
-                            top: 2,
-                            right: 2,
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _attachments.removeAt(index);
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.close,
-                                  color: Colors.white,
-                                  size: 14,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            Row(
-              children: [
-                if (!_isRecording) ...[
-                  _buildComposerButton(
-                    icon: const Icon(Icons.add_circle_outline,
-                        color: Color(0xFF64748B), size: 28),
-                    onTap: widget.sending ? null : _showPicker,
-                  ),
-                  _buildComposerButton(
-                    icon: const Icon(Icons.gif_box_outlined,
-                        color: Color(0xFF7C3AED), size: 28),
-                    onTap: widget.sending ? null : _showGifPicker,
-                  ),
-                  _buildComposerButton(
-                    icon: const Icon(Icons.sticky_note_2_outlined,
-                        color: Color(0xFF7C3AED), size: 28),
-                    onTap: widget.sending ? null : _showStickerPicker,
-                  ),
-                ],
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _isRecording
-                      ? Container(
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.mic, color: Colors.red, size: 20),
-                              const SizedBox(width: 8),
-                              Text(_formatDuration(_recordDuration),
-                                  style: const TextStyle(
-                                      color: Colors.red,
-                                      fontWeight: FontWeight.bold)),
-                              const Spacer(),
-                              const Text("Đang ghi âm...",
-                                  style: TextStyle(
-                                      color: Colors.red, fontSize: 12)),
-                              const Spacer(),
-                              TextButton(
-                                onPressed: _cancelRecording,
-                                child: const Text("Hủy",
-                                    style: TextStyle(color: Colors.grey)),
-                              ),
-                            ],
-                          ),
-                        )
-                      : Container(
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF0F172A)
-                                : const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(28),
-                            border: Border.all(
-                                color: isDark
-                                    ? Colors.grey.shade800
-                                    : Colors.grey.shade200),
-                          ),
-                          child: TextField(
-                            controller: _textController,
-                            maxLines: 5,
-                            minLines: 1,
-                            style: TextStyle(
-                                fontSize: 16,
-                                color: isDark ? Colors.white : Colors.black87),
-                            onChanged: (_) => setState(() {}),
-                            decoration: InputDecoration(
-                              hintText: "Nhắn tin...",
-                              hintStyle: TextStyle(
-                                  color: isDark
-                                      ? Colors.grey[500]
-                                      : Colors.grey[600]),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 12),
-                            ),
-                          ),
+                          ],
                         ),
+                      );
+                    },
+                  ),
                 ),
-                const SizedBox(width: 8),
-                if (widget.sending)
-                  const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: Icon(Icons.access_time_rounded, size: 24, color: Color(0xFF7C3AED)))
-                else ...[
-                  if (_isRecording)
+              Row(
+                children: [
+                  if (!_isRecording) ...[
                     _buildComposerButton(
-                      icon: const Icon(Icons.check_circle,
-                          color: Color(0xFF7C3AED), size: 28),
-                      onTap: _stopRecording,
-                    )
-                  else if (_textController.text.trim().isEmpty &&
-                      _attachments.isEmpty) ...[
-                    _buildComposerButton(
-                      icon: const Icon(Icons.mic_none_outlined,
-                          color: Color(0xFF7C3AED), size: 28),
-                      onTap: () {
-                        print("DEBUG: Mic button pressed");
-                        _startRecording();
-                      },
+                      icon: const Icon(Icons.add_circle_outline,
+                          color: Color(0xFF64748B), size: 28),
+                      onTap: widget.sending ? null : _showPicker,
                     ),
                     _buildComposerButton(
-                      icon: const Icon(Icons.thumb_up_rounded,
+                      icon: const Icon(Icons.gif_box_outlined,
                           color: Color(0xFF7C3AED), size: 28),
-                      onTap: () =>
-                          widget.onSend(text: "👍", attachments: const []),
+                      onTap: widget.sending ? null : _showGifPicker,
                     ),
-                  ] else
                     _buildComposerButton(
-                      icon: const Icon(Icons.send_rounded,
+                      icon: const Icon(Icons.sticky_note_2_outlined,
                           color: Color(0xFF7C3AED), size: 28),
-                      onTap: () async {
-                        final text = _textController.text.trim();
-                        if (text.isNotEmpty || _attachments.isNotEmpty) {
-                          final prevText = text;
-                          final prevAttachments = List<_PendingAttachment>.from(_attachments);
-                          _textController.clear();
-                          setState(() => _attachments.clear());
-                          try {
-                            await widget.onSend(text: text, attachments: prevAttachments);
-                          } catch (e) {
-                            if (mounted) {
-                              _textController.text = prevText;
-                              setState(() {
-                                _attachments.addAll(prevAttachments);
-                              });
+                      onTap: widget.sending ? null : _showStickerPicker,
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _isRecording
+                        ? Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.mic, color: Colors.red, size: 20),
+                                const SizedBox(width: 8),
+                                Text(_formatDuration(_recordDuration),
+                                    style: const TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.bold)),
+                                const Spacer(),
+                                const Text("Đang ghi âm...",
+                                    style: TextStyle(
+                                        color: Colors.red, fontSize: 12)),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: _cancelRecording,
+                                  child: const Text("Hủy",
+                                      style: TextStyle(color: Colors.grey)),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Container(
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF0F172A)
+                                  : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                  color: isDark
+                                      ? Colors.grey.shade800
+                                      : Colors.grey.shade200),
+                            ),
+                            child: TextField(
+                              controller: _textController,
+                              maxLines: 5,
+                              minLines: 1,
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  color: isDark ? Colors.white : Colors.black87),
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                hintText: "Nhắn tin...",
+                                hintStyle: TextStyle(
+                                    color: isDark
+                                        ? Colors.grey[500]
+                                        : Colors.grey[600]),
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 12),
+                              ),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (widget.sending)
+                    const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Icon(Icons.access_time_rounded, size: 24, color: Color(0xFF7C3AED)))
+                  else ...[
+                    if (_isRecording)
+                      _buildComposerButton(
+                        icon: const Icon(Icons.check_circle,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: _stopRecording,
+                      )
+                    else if (_textController.text.trim().isEmpty &&
+                        _attachments.isEmpty) ...[
+                      _buildComposerButton(
+                        icon: const Icon(Icons.mic_none_outlined,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: () {
+                          print("DEBUG: Mic button pressed");
+                          _startRecording();
+                        },
+                      ),
+                      _buildComposerButton(
+                        icon: const Icon(Icons.thumb_up_rounded,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: () =>
+                            widget.onSend(text: "👍", attachments: const []),
+                      ),
+                    ] else
+                      _buildComposerButton(
+                        icon: const Icon(Icons.send_rounded,
+                            color: Color(0xFF7C3AED), size: 28),
+                        onTap: () async {
+                          final text = _textController.text.trim();
+                          if (text.isNotEmpty || _attachments.isNotEmpty) {
+                            final prevText = text;
+                            final prevAttachments = List<_PendingAttachment>.from(_attachments);
+                            _textController.clear();
+                            setState(() => _attachments.clear());
+                            try {
+                              await widget.onSend(text: text, attachments: prevAttachments);
+                            } catch (e) {
+                              if (mounted) {
+                                _textController.text = prevText;
+                                setState(() {
+                                  _attachments.addAll(prevAttachments);
+                                });
+                              }
                             }
                           }
-                        }
-                      },
-                    ),
+                        },
+                      ),
+                  ],
                 ],
-              ],
-            ),
+              ),
+            ],
           ],
         ),
       ),
@@ -3117,6 +3462,8 @@ class ChatMessageBubble extends StatelessWidget {
   final String? peerAvatarUrl;
   final String? peerDisplayName;
 
+  final VoidCallback? onReplyTap;
+
   const ChatMessageBubble({
     super.key,
     required this.message,
@@ -3130,6 +3477,7 @@ class ChatMessageBubble extends StatelessWidget {
     this.peerId,
     this.peerAvatarUrl,
     this.peerDisplayName,
+    this.onReplyTap,
   });
 
   @override
@@ -3158,6 +3506,9 @@ class ChatMessageBubble extends StatelessWidget {
       );
     }
 
+    final hasAttachment = message.resolvedAttachmentUrl != null;
+    final hasText = message.contentText.isNotEmpty;
+
     return Column(
       crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -3179,7 +3530,7 @@ class ChatMessageBubble extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
               ],
-              _buildBubble(context),
+              _buildMessageContent(context, hasText, hasAttachment),
             ],
           ),
         ),
@@ -3200,7 +3551,66 @@ class ChatMessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildBubble(BuildContext context) {
+  Widget _buildMessageContent(BuildContext context, bool hasText, bool hasAttachment) {
+    if (hasAttachment) {
+      if (hasText) {
+        return ConstrainedBox(
+          constraints:
+              BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+          child: Column(
+            crossAxisAlignment:
+                isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildBubble(context, showMeta: false),
+              const SizedBox(height: 4),
+              _buildAttachmentOnly(context),
+            ],
+          ),
+        );
+      } else {
+        return _buildAttachmentOnly(context);
+      }
+    } else {
+      return _buildBubble(context);
+    }
+  }
+
+  Widget _buildAttachmentOnly(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ConstrainedBox(
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+      child: Column(
+        crossAxisAlignment:
+            isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _AttachmentView(message: message, isMine: isMine),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _formatTime(message.sentAtDate),
+                style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600]),
+              ),
+              if (isMine) ...[
+                const SizedBox(width: 4),
+                _buildDeliveryStatusIcon(outside: true, context: context),
+              ],
+            ],
+          ),
+          if (reactions.isNotEmpty)
+            _buildReactionsDisplay(context, isMine, outside: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBubble(BuildContext context, {bool showMeta = true}) {
     return ConstrainedBox(
       constraints:
           BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
@@ -3238,43 +3648,46 @@ class ChatMessageBubble extends StatelessWidget {
             else ...[
               if (message.replyTo != null) _buildReplyHeader(context),
               if (message.contentText.isNotEmpty) _buildContentBody(context),
-              if (message.resolvedAttachmentUrl != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: _AttachmentView(message: message, isMine: isMine),
-                ),
             ],
-            const SizedBox(height: 4),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatTime(message.sentAtDate),
-                  style: TextStyle(
-                      fontSize: 10,
-                      color: isMine
-                          ? Colors.white.withOpacity(0.7)
-                          : Colors.grey[500]),
-                ),
-                if (isMine) ...[
-                  const SizedBox(width: 4),
-                  _buildDeliveryStatusIcon(),
+            if (showMeta) ...[
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _formatTime(message.sentAtDate),
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: isMine
+                            ? Colors.white.withOpacity(0.7)
+                            : Colors.grey[500]),
+                  ),
+                  if (isMine) ...[
+                    const SizedBox(width: 4),
+                    _buildDeliveryStatusIcon(),
+                  ],
                 ],
-              ],
-            ),
-            if (reactions.isNotEmpty) _buildReactionsDisplay(context, isMine),
+              ),
+              if (reactions.isNotEmpty) _buildReactionsDisplay(context, isMine),
+            ],
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDeliveryStatusIcon() {
+  Widget _buildDeliveryStatusIcon({bool outside = false, BuildContext? context}) {
+    Color iconColor = Colors.white70;
+    if (outside && context != null) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      iconColor = isDark ? Colors.grey[400]! : Colors.grey[600]!;
+    }
+
     if (message.isPending) {
-      return const Icon(
+      return Icon(
         Icons.access_time,
         size: 11,
-        color: Colors.white70,
+        color: iconColor,
       );
     }
 
@@ -3282,16 +3695,16 @@ class ChatMessageBubble extends StatelessWidget {
     if (state == 'READ') {
       return const SizedBox.shrink();
     } else if (state == 'DELIVERED') {
-      return const Icon(
+      return Icon(
         Icons.done_all,
         size: 13,
-        color: Colors.white70,
+        color: iconColor,
       );
     } else {
-      return const Icon(
+      return Icon(
         Icons.check,
         size: 13,
-        color: Colors.white70,
+        color: iconColor,
       );
     }
   }
@@ -3323,20 +3736,11 @@ class ChatMessageBubble extends StatelessWidget {
       }
 
       final tagText = match.group(0)!;
-      final tagName = tagText.substring(1).trim();
-
-      final bool isCurrentUserTagged = currentUserName != null &&
-          (currentUserName!.toLowerCase() == tagName.toLowerCase() ||
-           tagName.toLowerCase().contains(currentUserName!.toLowerCase()) ||
-           currentUserName!.toLowerCase().contains(tagName.toLowerCase()));
 
       spans.add(TextSpan(
         text: tagText,
         style: defaultStyle.copyWith(
           fontWeight: FontWeight.bold,
-          color: isCurrentUserTagged
-              ? (isMine ? Colors.amber.shade200 : Colors.red.shade400)
-              : (isMine ? Colors.white.withOpacity(0.95) : const Color(0xFF7C3AED)),
         ),
       ));
 
@@ -3558,8 +3962,12 @@ class ChatMessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildReactionsDisplay(BuildContext context, bool isMine) {
+  Widget _buildReactionsDisplay(BuildContext context, bool isMine, {bool outside = false}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final containerColor = (outside || !isMine)
+        ? (isDark ? const Color(0xFF334155) : Colors.grey[200])
+        : Colors.white.withOpacity(0.2);
+
     return Container(
       margin: const EdgeInsets.only(top: 4),
       child: Wrap(
@@ -3569,11 +3977,7 @@ class ChatMessageBubble extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isMine
-                        ? Colors.white.withOpacity(0.2)
-                        : (isDark
-                            ? const Color(0xFF334155)
-                            : Colors.grey[100]),
+                    color: containerColor,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(emoji,
@@ -3588,22 +3992,47 @@ class ChatMessageBubble extends StatelessWidget {
 
   Widget _buildReplyHeader(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isMine
-            ? Colors.white12
-            : (isDark
-                ? const Color(0xFF334155)
-                : Colors.grey[100]),
-        borderRadius: BorderRadius.circular(8),
-        border: Border(
-            left: BorderSide(
-                color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
-                width: 3)),
-      ),
-      child: Text("Đang trả lời...",
+    
+    // Lấy nội dung tin nhắn được trả lời
+    String replyText = "Xem tin nhắn đã trả lời";
+    if (message.replyMessage != null) {
+      final text = message.replyMessage!.contentText;
+      if (text.isNotEmpty) {
+        replyText = text;
+      } else {
+        if (message.replyMessage!.type == 'image') {
+          replyText = "📷 Hình ảnh";
+        } else if (message.replyMessage!.type == 'file') {
+          replyText = "📁 Tệp đính kèm";
+        } else if (message.replyMessage!.type == 'audio') {
+          replyText = "🎵 Tin nhắn thoại";
+        } else if (message.replyMessage!.type == 'video') {
+          replyText = "🎥 Video";
+        } else {
+          replyText = "Tin nhắn";
+        }
+      }
+    }
+
+    return GestureDetector(
+      onTap: onReplyTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isMine
+              ? Colors.white12
+              : (isDark
+                  ? const Color(0xFF334155)
+                  : Colors.grey[100]),
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+              left: BorderSide(
+                  color: isMine ? Colors.white54 : const Color(0xFF7C3AED),
+                  width: 3)),
+        ),
+        child: Text(
+          replyText,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -3613,7 +4042,9 @@ class ChatMessageBubble extends StatelessWidget {
                   ? Colors.white70
                   : (isDark
                       ? Colors.grey[300]
-                      : Colors.grey[700]))),
+                      : Colors.grey[700])),
+        ),
+      ),
     );
   }
 
@@ -3778,7 +4209,10 @@ class _AttachmentView extends StatelessWidget {
     if (message.isAudio) {
       return _VoicePlayer(url: url, isMine: isMine);
     }
-    if (message.isVideo || message.isDocument) {
+    if (message.isVideo) {
+      return _InlineVideoPlayer(videoUrl: url);
+    }
+    if (message.isDocument) {
       final isDark = Theme.of(context).brightness == Brightness.dark;
       return InkWell(
         onTap: () async {
@@ -3788,48 +4222,183 @@ class _AttachmentView extends StatelessWidget {
           }
         },
         child: Container(
-          width: message.isVideo ? 200 : null,
-          height: message.isVideo ? 150 : null,
-          padding: message.isVideo ? null : const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: message.isVideo
-                ? Colors.black87
-                : (isMine
-                    ? Colors.white24
-                    : (isDark ? const Color(0xFF334155) : Colors.grey[100])),
+            color: isMine
+                ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
+                : (isDark ? const Color(0xFF334155) : Colors.grey[200]),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: message.isVideo
-              ? const Center(
-                  child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
-                )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.insert_drive_file,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.insert_drive_file,
+                color: isMine
+                    ? (isDark ? Colors.white : const Color(0xFF7C3AED))
+                    : (isDark ? Colors.white70 : Colors.black54),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  message.attachmentName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
                       color: isMine
-                          ? Colors.white
-                          : (isDark ? Colors.white70 : Colors.black54),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        message.attachmentName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: isMine
-                                ? Colors.white
-                                : (isDark ? Colors.white70 : Colors.black87)),
-                      ),
-                    ),
-                  ],
+                          ? (isDark ? Colors.white : const Color(0xFF6D28D9))
+                          : (isDark ? Colors.white70 : Colors.black87)),
                 ),
+              ),
+            ],
+          ),
         ),
       );
     }
     return const SizedBox.shrink();
+  }
+}
+
+class _InlineVideoPlayer extends StatefulWidget {
+  final String videoUrl;
+  const _InlineVideoPlayer({required this.videoUrl});
+
+  @override
+  State<_InlineVideoPlayer> createState() => _InlineVideoPlayerState();
+}
+
+class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
+  late VideoPlayerController _controller;
+  bool _initialized = false;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() {
+            _initialized = true;
+          });
+        }
+      }).catchError((error) {
+        debugPrint("Video initialization error: $error");
+        if (mounted) {
+          setState(() {
+            _hasError = true;
+          });
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasError) {
+      return Container(
+        width: 200,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, color: Colors.redAccent, size: 36),
+              SizedBox(height: 8),
+              Text(
+                "Không thể phát video",
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!_initialized) {
+      return Container(
+        width: 200,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 30,
+            height: 30,
+            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 200,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: AspectRatio(
+        aspectRatio: _controller.value.aspectRatio,
+        child: Stack(
+          alignment: Alignment.bottomCenter,
+          children: [
+            VideoPlayer(_controller),
+            _buildPlayPauseOverlay(),
+            VideoProgressIndicator(
+              _controller,
+              allowScrubbing: true,
+              colors: const VideoProgressColors(
+                playedColor: Color(0xFF7C3AED),
+                bufferedColor: Colors.white30,
+                backgroundColor: Colors.white12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayPauseOverlay() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        setState(() {
+          if (_controller.value.isPlaying) {
+            _controller.pause();
+          } else {
+            _controller.play();
+          }
+        });
+      },
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        child: _controller.value.isPlaying
+            ? const SizedBox.shrink()
+            : Container(
+                color: Colors.black38,
+                child: const Center(
+                  child: Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 50.0,
+                  ),
+                ),
+              ),
+      ),
+    );
   }
 }
 
@@ -3879,7 +4448,7 @@ class _VoicePlayerState extends State<_VoicePlayer> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: widget.isMine
-            ? Colors.white.withOpacity(0.2)
+            ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
             : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -3888,7 +4457,9 @@ class _VoicePlayerState extends State<_VoicePlayer> {
           IconButton(
             icon: Icon(
               _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-              color: widget.isMine ? Colors.white : const Color(0xFF7C3AED),
+              color: widget.isMine
+                  ? (isDark ? Colors.white : const Color(0xFF7C3AED))
+                  : const Color(0xFF7C3AED),
               size: 32,
             ),
             onPressed: _togglePlay,
@@ -3908,9 +4479,11 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                     max: _duration.inMilliseconds.toDouble() > 0 
                         ? _duration.inMilliseconds.toDouble() 
                         : 1.0,
-                    activeColor: widget.isMine ? Colors.white : const Color(0xFF7C3AED),
+                    activeColor: widget.isMine
+                        ? (isDark ? Colors.white : const Color(0xFF7C3AED))
+                        : const Color(0xFF7C3AED),
                     inactiveColor: widget.isMine
-                        ? Colors.white38
+                        ? (isDark ? Colors.white38 : const Color(0xFFDDD6FE))
                         : (isDark ? Colors.grey[600] : Colors.grey[300]),
                     onChanged: (val) {
                       _audioPlayer.seek(Duration(milliseconds: val.toInt()));
@@ -3927,7 +4500,7 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                         style: TextStyle(
                             fontSize: 10,
                             color: widget.isMine
-                                ? Colors.white70
+                                ? (isDark ? Colors.white70 : const Color(0xFF6D28D9))
                                 : (isDark ? Colors.grey[400] : Colors.grey)),
                       ),
                       Text(
@@ -3935,7 +4508,7 @@ class _VoicePlayerState extends State<_VoicePlayer> {
                         style: TextStyle(
                             fontSize: 10,
                             color: widget.isMine
-                                ? Colors.white70
+                                ? (isDark ? Colors.white70 : const Color(0xFF6D28D9))
                                 : (isDark ? Colors.grey[400] : Colors.grey)),
                       ),
                     ],

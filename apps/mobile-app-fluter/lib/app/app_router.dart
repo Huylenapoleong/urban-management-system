@@ -26,6 +26,7 @@ import '../services/app_services.dart';
 import '../features/contacts/contacts_screen.dart';
 import '../features/reports/reports_screen.dart';
 import '../services/location_service.dart';
+import '../features/profile/user_management_screen.dart';
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 const _officialRoles = {
@@ -38,11 +39,15 @@ const _officialRoles = {
 bool _isOfficial(String? role) =>
     role != null && _officialRoles.contains(role.toUpperCase());
 
+// ─── Global Navigator Key ───────────────────────────────────────────────────
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
+
 // ─── Router factory ───────────────────────────────────────────────────────────
 /// Tạo GoRouter instance.
 /// [session] dùng làm refreshListenable để router rebuild khi auth thay đổi.
 GoRouter createAppRouter(SessionController session) {
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/citizen/home',
     refreshListenable: session, // SessionController extends ChangeNotifier
     redirect: (context, state) {
@@ -289,6 +294,16 @@ GoRouter createAppRouter(SessionController session) {
                     },
                   ),
                 ],
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/official/users',
+                pageBuilder: (_, __) => const NoTransitionPage(
+                  child: UserManagementScreen(),
+                ),
               ),
             ],
           ),

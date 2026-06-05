@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/app_services.dart';
@@ -30,6 +31,57 @@ class _MapScreenState extends State<MapScreen> {
   double _zoom = 13.0;
 
   final Map<String, String> _resolvedLocations = {};
+  final Map<String, LatLng> _geocodedCoordinates = {};
+
+  String _parseReportAddress(String? desc, String fallback) {
+    if (desc == null) return fallback;
+    const prefix = "Địa chỉ: ";
+    if (desc.startsWith(prefix)) {
+      final idx = desc.indexOf("\n\n");
+      if (idx != -1) {
+        return desc.substring(prefix.length, idx).trim();
+      }
+    }
+    return fallback;
+  }
+
+  String _parseReportDescriptionOnly(String? desc, String fallback) {
+    if (desc == null) return fallback;
+    const prefix = "Địa chỉ: ";
+    if (desc.startsWith(prefix)) {
+      final idx = desc.indexOf("\n\n");
+      if (idx != -1) {
+        return desc.substring(idx + 2).trim();
+      }
+    }
+    return desc;
+  }
+
+  Future<void> _geocodeReportAddresses(List<ReportItem> reports) async {
+    for (final report in reports) {
+      final address = _parseReportAddress(report.description, "");
+      if (address.isNotEmpty) {
+        _geocodeReportAddress(report.id, address);
+      }
+    }
+  }
+
+  Future<void> _geocodeReportAddress(String reportId, String address) async {
+    if (_geocodedCoordinates.containsKey(reportId)) return;
+    try {
+      final locations = await locationFromAddress(address);
+      if (locations.isNotEmpty && mounted) {
+        setState(() {
+          _geocodedCoordinates[reportId] = LatLng(
+            locations.first.latitude,
+            locations.first.longitude,
+          );
+        });
+      }
+    } catch (e) {
+      debugPrint("Geocoding failed for address '$address': $e");
+    }
+  }
 
   Future<void> _resolveReportLocation(String locationCode) async {
     if (locationCode.isEmpty || _resolvedLocations.containsKey(locationCode)) return;
@@ -115,6 +167,8 @@ class _MapScreenState extends State<MapScreen> {
           _loading = false;
         });
         
+        _geocodeReportAddresses(apiReports);
+        
         // Animating map center transition
         _mapController.move(_center, _zoom);
       }
@@ -180,7 +234,7 @@ class _MapScreenState extends State<MapScreen> {
 
     // Dynamic marker generation list
     final List<Marker> markers = _reports.map((report) {
-      final position = _getDeterministicCoordinates(report);
+      final position = _geocodedCoordinates[report.id] ?? _getDeterministicCoordinates(report);
       
       Color priorityColor;
       switch (report.priority.toUpperCase()) {
@@ -486,7 +540,7 @@ class _MapScreenState extends State<MapScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              report.description ?? "Không có mô tả chi tiết.",
+              _parseReportDescriptionOnly(report.description, "Không có mô tả chi tiết."),
               style: TextStyle(
                 fontSize: 13,
                 color: isDark ? Colors.grey[400] : Colors.grey[700],
@@ -503,7 +557,10 @@ class _MapScreenState extends State<MapScreen> {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    _resolvedLocations[report.locationCode] ?? report.locationCode,
+                    _parseReportAddress(
+                      report.description,
+                      _resolvedLocations[report.locationCode] ?? report.locationCode,
+                    ),
                     style: TextStyle(
                       fontSize: 13,
                       color: isDark ? Colors.grey[300] : Colors.grey[600],

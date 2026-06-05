@@ -8,3 +8,6 @@ allowBuilds:
   protobufjs: true
   sharp: true
   unrs-resolver: false
+
+overrides:
+  "@smithy/types": "^4.14.0"

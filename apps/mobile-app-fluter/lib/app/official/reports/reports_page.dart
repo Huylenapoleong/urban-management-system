@@ -4,8 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../../models/report_item.dart';
@@ -41,9 +39,6 @@ class _OfficialReportsPageState extends State<OfficialReportsPage>
   bool _loading = true;
   String? _error;
   List<ReportItem> _reports = const [];
-
-  static const _statuses = ['ALL', 'NEW', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
-  static const _priorities = ['ALL', 'URGENT', 'HIGH', 'MEDIUM', 'LOW'];
 
 
   @override
@@ -552,7 +547,7 @@ class _OfficialReportsPageState extends State<OfficialReportsPage>
     _selectedMedia.clear();
     _category = "INFRASTRUCTURE";
     _priority = "MEDIUM";
-    _locationController.text = session.user?.unit ?? "";
+    _locationController.text = "";
 
     if (session.user?.locationCode != null && session.user!.locationCode.isNotEmpty) {
       locationService
@@ -561,12 +556,7 @@ class _OfficialReportsPageState extends State<OfficialReportsPage>
         if (mounted) {
           setState(() {
             final displayName = resolved.displayName;
-            final unit = session.user?.unit ?? "";
-            if (unit.trim().isNotEmpty) {
-              _locationController.text = "$displayName, $unit";
-            } else {
-              _locationController.text = displayName;
-            }
+            _locationController.text = displayName;
           });
         }
       }).catchError((_) {});
@@ -1040,22 +1030,27 @@ class _OfficialReportCard extends StatelessWidget {
                       color: isDark ? Colors.white : const Color(0xFF0F172A),
                     ),
                   ),
-                  if (report.description != null &&
-                      report.description!.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      report.description!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.4,
-                        color: isDark
-                          ? const Color(0xFF94A3B8)
-                          : const Color(0xFF475569),
-                      ),
-                    ),
-                  ],
+                  Builder(
+                    builder: (context) {
+                      final cleanDesc = _parseReportDescriptionOnly(report.description);
+                      if (cleanDesc.trim().isEmpty) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          cleanDesc,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.4,
+                            color: isDark
+                              ? const Color(0xFF94A3B8)
+                              : const Color(0xFF475569),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -1066,16 +1061,39 @@ class _OfficialReportCard extends StatelessWidget {
                               : Colors.grey),
                       const SizedBox(width: 4),
                       Expanded(
-                        child: Text(
-                          report.locationCode,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: isDark
-                                ? const Color(0xFF94A3B8)
-                                : const Color(0xFF64748B),
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                        child: Builder(
+                          builder: (context) {
+                            final parsedAddr = _parseReportAddress(report.description, "");
+                            if (parsedAddr.isNotEmpty) {
+                              return Text(
+                                parsedAddr,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: isDark
+                                      ? const Color(0xFF94A3B8)
+                                      : const Color(0xFF64748B),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              );
+                            }
+                            return FutureBuilder<String>(
+                              future: LocationResolver.resolve(context, report.locationCode),
+                              builder: (context, snapshot) {
+                                return Text(
+                                  snapshot.data ?? report.locationCode,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                );
+                              },
+                            );
+                          },
                         ),
                       ),
                       Icon(Icons.category_outlined,
@@ -1393,11 +1411,29 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
               const SizedBox(height: 10),
 
               // Meta info
-              _MetaRow(
-                icon: Icons.location_on_outlined,
-                label: 'Địa điểm',
-                value: report.locationCode,
-                isDark: isDark,
+              Builder(
+                builder: (context) {
+                  final parsedAddr = _parseReportAddress(report.description, "");
+                  if (parsedAddr.isNotEmpty) {
+                    return _MetaRow(
+                      icon: Icons.location_on_outlined,
+                      label: 'Địa điểm',
+                      value: parsedAddr,
+                      isDark: isDark,
+                    );
+                  }
+                  return FutureBuilder<String>(
+                    future: LocationResolver.resolve(context, report.locationCode),
+                    builder: (context, snapshot) {
+                      return _MetaRow(
+                        icon: Icons.location_on_outlined,
+                        label: 'Địa điểm',
+                        value: snapshot.data ?? report.locationCode,
+                        isDark: isDark,
+                      );
+                    },
+                  );
+                },
               ),
               _MetaRow(
                 icon: Icons.category_outlined,
@@ -1420,23 +1456,32 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                 ),
 
               // Description
-              if (report.description != null && report.description!.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text('Mô tả chi tiết',
-                    style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                        color: isDark ? Colors.white70 : const Color(0xFF1F3E68))),
-                const SizedBox(height: 6),
-                Text(
-                  report.description!,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
-                    height: 1.5,
-                  ),
-                ),
-              ],
+              Builder(
+                builder: (context) {
+                  final cleanDesc = _parseReportDescriptionOnly(report.description);
+                  if (cleanDesc.trim().isEmpty) return const SizedBox.shrink();
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 16),
+                      Text('Mô tả chi tiết',
+                          style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                              color: isDark ? Colors.white70 : const Color(0xFF1F3E68))),
+                      const SizedBox(height: 6),
+                      Text(
+                        cleanDesc,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
 
               // Images
               if (_imageUrls.isNotEmpty) ...[
@@ -1979,5 +2024,65 @@ class _ActionButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+String _parseReportAddress(String? description, String fallback) {
+  if (description == null) return fallback;
+  const prefix = "Địa chỉ: ";
+  if (description.startsWith(prefix)) {
+    final endIndex = description.indexOf("\n\n");
+    if (endIndex != -1) {
+      return description.substring(prefix.length, endIndex);
+    }
+  }
+  return fallback;
+}
+
+String _parseReportDescriptionOnly(String? description) {
+  if (description == null) return "";
+  const prefix = "Địa chỉ: ";
+  if (description.startsWith(prefix)) {
+    final endIndex = description.indexOf("\n\n");
+    if (endIndex != -1) {
+      return description.substring(endIndex + 2);
+    }
+  }
+  return description;
+}
+
+class LocationResolver {
+  static final Map<String, String> _resolvedNames = {};
+  static final Map<String, Future<String>> _pendingResolutions = {};
+
+  static Future<String> resolve(BuildContext context, String locationCode) async {
+    if (locationCode.isEmpty) return "";
+    if (_resolvedNames.containsKey(locationCode)) {
+      return _resolvedNames[locationCode]!;
+    }
+    if (_pendingResolutions.containsKey(locationCode)) {
+      return _pendingResolutions[locationCode]!;
+    }
+
+    final future = () async {
+      try {
+        final services = context.read<AppServices>();
+        final locationService = LocationService(apiClient: services.apiClient);
+        final resolved = await locationService.resolveLocationCode(locationCode);
+        final name = resolved.displayName;
+        _resolvedNames[locationCode] = name;
+        return name;
+      } catch (_) {
+        return locationCode;
+      }
+    }();
+
+    _pendingResolutions[locationCode] = future;
+    try {
+      final res = await future;
+      return res;
+    } finally {
+      _pendingResolutions.remove(locationCode);
+    }
   }
 }

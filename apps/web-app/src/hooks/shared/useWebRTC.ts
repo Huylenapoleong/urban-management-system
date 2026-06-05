@@ -331,7 +331,10 @@ export function useWebRTC() {
 
       peerConnectionsRef.current.forEach((pc) => pc.close());
       peerConnectionsRef.current.clear();
-      setRemoteStreams(new Map());
+      setRemoteStreams((prev) => {
+        prev.forEach((stream) => stream.getTracks().forEach((t) => t.stop()));
+        return new Map();
+      });
 
       if (iceSignalTimerRef.current !== null) {
         window.clearTimeout(iceSignalTimerRef.current);
@@ -346,6 +349,7 @@ export function useWebRTC() {
       iceRestartAttemptsRef.current.clear();
       setCallState("IDLE");
       callStateRef.current = "IDLE";
+      setCallDurationSeconds(0);
       setActiveConfig(null);
       activeConfigRef.current = null;
       setCallError(null);
@@ -906,6 +910,7 @@ export function useWebRTC() {
       activeConfigRef.current = enrichedConfig;
       setCallState("CALLING");
       callStateRef.current = "CALLING";
+      setCallDurationSeconds(0);
       setCallError(null);
 
       const signalConversationId = resolveSignalConversationId(config);
@@ -939,8 +944,14 @@ export function useWebRTC() {
           if (isGroupCall(config)) {
             try {
               await requestLocalMediaStream(config.isVideo);
+              
+              // We must explicitly join (accept) the existing active call!
+              await socketClient.safeEmitValidated(CHAT_SOCKET_EVENTS.CALL_ACCEPT, {
+                conversationId: signalConversationId,
+                userId: user?.sub,
+              });
             } catch (err) {
-              console.error("[WebRTC] Local media stream failed", err);
+              console.error("[WebRTC] Local media stream or CALL_ACCEPT failed", err);
             }
 
             setCallState("CONNECTED");
@@ -1435,6 +1446,16 @@ export function useWebRTC() {
 
     const onCallEnd = (rawData: unknown) => {
       const data = rawData as ChatCallEndPayload;
+      
+      if (!data.callStillActive) {
+        setActiveGroupCalls((prev) => {
+          if (!prev.has(data.conversationId)) return prev;
+          const next = new Set(prev);
+          next.delete(data.conversationId);
+          return next;
+        });
+      }
+
       if (callStateRef.current === "IDLE") return;
 
       const config = activeConfigRef.current;

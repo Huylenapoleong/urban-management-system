@@ -21,6 +21,12 @@ class OfficialShell extends StatelessWidget {
     final session = context.watch<SessionController>();
     final unreadCount = session.unreadMessagesCount;
 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.mounted) {
+        context.read<SessionController>().setActiveTabIndex(idx);
+      }
+    });
+
     return NotificationListenerWidget(
       child: CallIncomingListener(
       child: Scaffold(
@@ -68,7 +74,8 @@ class OfficialShell extends StatelessWidget {
                     _buildNavItem(context, 0, Icons.home_outlined, Icons.home, 'Trang chủ', idx, unreadCount),
                     _buildNavItem(context, 1, Icons.assignment_outlined, Icons.assignment, 'Báo cáo', idx, unreadCount),
                     _buildNavItem(context, 2, Icons.chat_bubble_outline, Icons.chat_bubble, 'Tin nhắn', idx, unreadCount),
-                    _buildNavItem(context, 3, Icons.person_outline, Icons.person, 'Cá nhân', idx, unreadCount),
+                    _buildNavItem(context, 3, Icons.people_outline, Icons.people, 'Nhân sự', idx, unreadCount),
+                    _buildNavItem(context, 4, Icons.person_outline, Icons.person, 'Cá nhân', idx, unreadCount),
                   ],
                 ),
               ),

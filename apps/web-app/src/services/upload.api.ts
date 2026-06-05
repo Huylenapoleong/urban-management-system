@@ -56,9 +56,19 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   mp3: "audio/mpeg",
   m4a: "audio/mp4",
   aac: "audio/aac",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
   pdf: "application/pdf",
   doc: "application/msword",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  csv: "text/csv",
+  txt: "text/plain",
+  rtf: "application/rtf",
+  zip: "application/zip",
 };
 
 function resolveContentType(file: File): string {

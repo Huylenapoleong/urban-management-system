@@ -436,11 +436,26 @@ export class ConversationsGateway
           maxLength: 50,
         });
 
-        return this.conversationsService.markMessageDelivered(
+        const result = await this.conversationsService.markMessageDelivered(
           user,
           conversationId,
           messageId,
         );
+
+        this.chatRealtimeService.emitToConversation(
+          result.conversationKey,
+          CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED,
+          {
+            conversationId: result.conversationId,
+            conversationKey: result.conversationKey,
+            messageId: result.messageId,
+            userId: user.id,
+            deliveredAt: result.deliveredAt,
+          },
+          client.id,
+        );
+
+        return result;
       },
       'CHAT_MESSAGE_DELIVERED_FAILED',
       CHAT_SOCKET_EVENTS.MESSAGE_DELIVERED,

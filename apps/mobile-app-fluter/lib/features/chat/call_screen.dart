@@ -38,6 +38,7 @@ class _CallScreenState extends State<CallScreen> {
   final Map<String, UserProfile> _profileCache = {};
   final Set<String> _requestedProfileIds = {};
   StreamSubscription? _participantLeftSub;
+  bool _isNavigatingBack = false;
 
   @override
   void initState() {
@@ -109,6 +110,9 @@ class _CallScreenState extends State<CallScreen> {
 
   void _handleCallStateChange() {
     if (widget.webRTCService.callState.value == CallState.idle && mounted) {
+      if (_isNavigatingBack) return;
+      _isNavigatingBack = true;
+      
       if (widget.launchedFromChatDetail) {
         final targetRoute = "chat_detail/${widget.conversation.conversationId}";
         Navigator.of(context).popUntil(
@@ -311,9 +315,14 @@ class _CallScreenState extends State<CallScreen> {
           ? (_loadedGroupName ?? widget.conversation.groupName ?? "Cuộc gọi nhóm")
           : widget.conversation.title;
 
+      final isCaller = widget.webRTCService.activeConfig?['callerId']?.toString() ==
+          widget.currentUser?.id.toString();
+
       final displaySub = isGroup
-          ? "$callerName đang gọi nhóm..."
-          : (isVideo ? "Cuộc gọi Video đến..." : "Cuộc gọi Thoại đến...");
+          ? (isCaller ? "Đang gọi nhóm..." : "$callerName đang gọi nhóm...")
+          : (isCaller
+              ? "Đang đổ chuông..."
+              : (isVideo ? "Cuộc gọi Video đến..." : "Cuộc gọi Thoại đến..."));
 
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,

@@ -29,6 +29,7 @@ class LocalNotificationService {
   // Notification IDs
   static const _idCall = 9001;
   static const _idReport = 9002;
+  static const _idOngoingCall = 9005;
   int _messageIdCounter = 1;
 
   Future<void> initialize() async {
@@ -120,6 +121,7 @@ class LocalNotificationService {
     required String conversationId,
     required String preview,
     String? groupName,
+    bool playSound = true,
   }) async {
     if (!_initialized) await initialize();
 
@@ -136,18 +138,20 @@ class LocalNotificationService {
           _channelMessage,
           'Tin nhắn',
           channelDescription: 'Thông báo tin nhắn mới',
-          importance: Importance.high,
-          priority: Priority.high,
+          importance: playSound ? Importance.high : Importance.low,
+          priority: playSound ? Priority.high : Priority.low,
           icon: '@mipmap/ic_launcher',
           groupKey: conversationId,
           setAsGroupSummary: false,
           styleInformation: BigTextStyleInformation(preview),
           ticker: title,
+          playSound: playSound,
+          enableVibration: playSound,
         ),
-        iOS: const DarwinNotificationDetails(
+        iOS: DarwinNotificationDetails(
           presentAlert: true,
           presentBadge: true,
-          presentSound: true,
+          presentSound: playSound,
         ),
       ),
       payload: 'chat:$conversationId',
@@ -196,6 +200,48 @@ class LocalNotificationService {
   /// Ẩn thông báo cuộc gọi (khi cuộc gọi kết thúc/được chấp nhận).
   Future<void> dismissCallNotification() async {
     await _plugin.cancel(_idCall);
+  }
+
+  /// Hiển thị thông báo cuộc gọi đang diễn ra.
+  Future<void> showOngoingCallNotification({
+    required String conversationId,
+    required String title,
+    required String body,
+  }) async {
+    if (!_initialized) await initialize();
+
+    await _plugin.show(
+      _idOngoingCall,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelCall,
+          'Cuộc gọi đang diễn ra',
+          channelDescription: 'Thông báo cuộc gọi đang diễn ra ngầm',
+          importance: Importance.low,
+          priority: Priority.low,
+          icon: '@mipmap/ic_launcher',
+          ongoing: true,          // Không thể swipe away
+          autoCancel: false,
+          showWhen: true,
+          usesChronometer: true,
+          category: AndroidNotificationCategory.call,
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: false,
+          presentSound: false,
+          interruptionLevel: InterruptionLevel.active,
+        ),
+      ),
+      payload: 'reenter:$conversationId',
+    );
+  }
+
+  /// Ẩn thông báo cuộc gọi đang diễn ra.
+  Future<void> dismissOngoingCallNotification() async {
+    await _plugin.cancel(_idOngoingCall);
   }
 
   /// Hiển thị thông báo báo cáo mới hoặc cập nhật trạng thái.

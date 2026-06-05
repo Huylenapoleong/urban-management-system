@@ -12,6 +12,11 @@ import "core/theme/app_theme.dart";
 import "services/app_services.dart";
 import "state/session_controller.dart";
 import "app/app_router.dart";
+import "features/chat/widgets/global_call_overlay.dart";
+import "services/webrtc_service.dart";
+import "models/conversation_summary.dart";
+import "features/chat/call_screen.dart";
+import "dart:async";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,6 +56,7 @@ class UrbanManagementApp extends StatefulWidget {
 class _UrbanManagementAppState extends State<UrbanManagementApp> {
   late final SessionController _session;
   late final GoRouter _router;
+  StreamSubscription? _notifTapSub;
 
   @override
   void initState() {
@@ -58,13 +64,73 @@ class _UrbanManagementAppState extends State<UrbanManagementApp> {
     _session = SessionController(appServices: widget.services)..initialize();
     // Router tạo một lần – nó tự refresh khi _session notify (refreshListenable)
     _router = createAppRouter(_session);
+
+    widget.services.webRTCService.callState.addListener(_handleCallStateChange);
+    _notifTapSub = widget.services.localNotificationService.onNotificationTap.listen(_handleNotificationTap);
   }
 
   @override
   void dispose() {
+    widget.services.webRTCService.callState.removeListener(_handleCallStateChange);
+    _notifTapSub?.cancel();
     _router.dispose();
     _session.dispose();
     super.dispose();
+  }
+
+  void _handleCallStateChange() {
+    final state = widget.services.webRTCService.callState.value;
+    final convId = widget.services.webRTCService.currentConversationId;
+    if ((state == CallState.connecting || state == CallState.connected) && convId != null) {
+      final isGroup = convId.startsWith("group:") ||
+          convId.startsWith("group#") ||
+          convId.startsWith("grp#") ||
+          convId.startsWith("GRP#");
+      final isVideo = !widget.services.webRTCService.isAudioOnly;
+      final typeStr = isVideo ? "Video" : "Thoại";
+      final title = isGroup ? "Cuộc gọi nhóm đang diễn ra" : "Cuộc gọi $typeStr đang diễn ra";
+
+      widget.services.localNotificationService.showOngoingCallNotification(
+        conversationId: convId,
+        title: title,
+        body: "Chạm để quay lại cuộc gọi",
+      );
+    } else if (state == CallState.idle) {
+      widget.services.localNotificationService.dismissOngoingCallNotification();
+    }
+  }
+
+  void _handleNotificationTap(String? payload) {
+    if (payload == null) return;
+    if (payload.startsWith("reenter:")) {
+      final convId = payload.substring(8);
+      final webRTCService = widget.services.webRTCService;
+      final user = _session.user;
+      if (webRTCService.callState.value != CallState.idle && user != null) {
+        final isGroup = convId.startsWith("group:") ||
+            convId.startsWith("group#") ||
+            convId.startsWith("grp#") ||
+            convId.startsWith("GRP#");
+
+        webRTCService.isCallMinimized.value = false;
+
+        rootNavigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => CallScreen(
+              webRTCService: webRTCService,
+              conversation: ConversationSummary(
+                conversationId: convId,
+                groupName: isGroup ? "Cuộc gọi nhóm" : "Đang gọi",
+                unreadCount: 0,
+                isGroup: isGroup,
+                updatedAt: DateTime.now().toIso8601String(),
+              ),
+              currentUser: user,
+            ),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -83,6 +149,16 @@ class _UrbanManagementAppState extends State<UrbanManagementApp> {
             darkTheme: AppTheme.dark(),
             themeMode: session.isDarkMode ? ThemeMode.dark : ThemeMode.light,
             routerConfig: _router,
+            builder: (context, child) {
+              return Stack(
+                children: [
+                  if (child != null) child,
+                  Positioned.fill(
+                    child: GlobalCallOverlay(services: widget.services),
+                  ),
+                ],
+              );
+            },
           );
         },
       ),

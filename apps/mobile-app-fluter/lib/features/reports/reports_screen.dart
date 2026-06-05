@@ -11,6 +11,7 @@ import "../../models/report_item.dart";
 import "../../services/report_service.dart";
 import "../../services/upload_service.dart";
 import "../../services/location_service.dart";
+import "../../services/app_services.dart";
 import "../../state/session_controller.dart";
 import "../shared/widgets/app_logo_button.dart";
 import "../shared/widgets/app_toast.dart";
@@ -254,7 +255,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   void _showCreateReportSheet() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final session = context.read<SessionController>();
-    _locationController.text = session.user?.unit ?? "";
+    _locationController.text = "";
 
     if (widget.locationService != null &&
         session.user?.locationCode != null &&
@@ -265,12 +266,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         if (mounted) {
           setState(() {
             final displayName = resolved.displayName;
-            final unit = session.user?.unit ?? "";
-            if (unit.trim().isNotEmpty) {
-              _locationController.text = "$displayName, $unit";
-            } else {
-              _locationController.text = displayName;
-            }
+            _locationController.text = displayName;
           });
         }
       }).catchError((_) {});
@@ -786,12 +782,31 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   Icon(Icons.location_on_outlined, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
                   const SizedBox(width: 4),
                   Expanded(
-                    child: Text(
-                      report.locationCode,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
-                      ),
+                    child: Builder(
+                      builder: (context) {
+                        final parsedAddr = _parseReportAddress(report.description, "");
+                        if (parsedAddr.isNotEmpty) {
+                          return Text(
+                            parsedAddr,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                            ),
+                          );
+                        }
+                        return FutureBuilder<String>(
+                          future: LocationResolver.resolve(context, report.locationCode),
+                          builder: (context, snapshot) {
+                            return Text(
+                              snapshot.data ?? report.locationCode,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                              ),
+                            );
+                          },
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -816,7 +831,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                report.description ?? "Không có mô tả",
+                _parseReportDescriptionOnly(report.description).trim().isEmpty
+                    ? "Không có mô tả"
+                    : _parseReportDescriptionOnly(report.description),
                 style: TextStyle(
                   fontSize: 14,
                   height: 1.5,
@@ -1214,7 +1231,9 @@ class _ReportCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                report.description ?? "Không có mô tả",
+                _parseReportDescriptionOnly(report.description).trim().isEmpty
+                    ? "Không có mô tả"
+                    : _parseReportDescriptionOnly(report.description),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 13),
@@ -1225,7 +1244,32 @@ class _ReportCard extends StatelessWidget {
                 children: [
                   Icon(Icons.location_on_outlined, size: 14, color: isDark ? Colors.grey.shade500 : Colors.grey.shade400),
                   const SizedBox(width: 4),
-                  Expanded(child: Text(report.locationCode, style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  Expanded(
+                    child: Builder(
+                      builder: (context) {
+                        final parsedAddr = _parseReportAddress(report.description, "");
+                        if (parsedAddr.isNotEmpty) {
+                          return Text(
+                            parsedAddr,
+                            style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          );
+                        }
+                        return FutureBuilder<String>(
+                          future: LocationResolver.resolve(context, report.locationCode),
+                          builder: (context, snapshot) {
+                            return Text(
+                              snapshot.data ?? report.locationCode,
+                              style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 12),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   _buildPriorityBadge(report.priority),
                 ],
@@ -1344,6 +1388,66 @@ class _ReportCard extends StatelessWidget {
       case "IN_PROGRESS": return Colors.blue.shade700;
       case "RESOLVED": return Colors.green.shade700;
       default: return Colors.grey.shade700;
+    }
+  }
+}
+
+String _parseReportAddress(String? description, String fallback) {
+  if (description == null) return fallback;
+  const prefix = "Địa chỉ: ";
+  if (description.startsWith(prefix)) {
+    final endIndex = description.indexOf("\n\n");
+    if (endIndex != -1) {
+      return description.substring(prefix.length, endIndex);
+    }
+  }
+  return fallback;
+}
+
+String _parseReportDescriptionOnly(String? description) {
+  if (description == null) return "";
+  const prefix = "Địa chỉ: ";
+  if (description.startsWith(prefix)) {
+    final endIndex = description.indexOf("\n\n");
+    if (endIndex != -1) {
+      return description.substring(endIndex + 2);
+    }
+  }
+  return description;
+}
+
+class LocationResolver {
+  static final Map<String, String> _resolvedNames = {};
+  static final Map<String, Future<String>> _pendingResolutions = {};
+
+  static Future<String> resolve(BuildContext context, String locationCode) async {
+    if (locationCode.isEmpty) return "";
+    if (_resolvedNames.containsKey(locationCode)) {
+      return _resolvedNames[locationCode]!;
+    }
+    if (_pendingResolutions.containsKey(locationCode)) {
+      return _pendingResolutions[locationCode]!;
+    }
+
+    final future = () async {
+      try {
+        final services = context.read<AppServices>();
+        final locationService = LocationService(apiClient: services.apiClient);
+        final resolved = await locationService.resolveLocationCode(locationCode);
+        final name = resolved.displayName;
+        _resolvedNames[locationCode] = name;
+        return name;
+      } catch (_) {
+        return locationCode;
+      }
+    }();
+
+    _pendingResolutions[locationCode] = future;
+    try {
+      final res = await future;
+      return res;
+    } finally {
+      _pendingResolutions.remove(locationCode);
     }
   }
 }

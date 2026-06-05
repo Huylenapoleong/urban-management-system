@@ -14,6 +14,7 @@ class MessageItem {
     required this.sentAt,
     this.updatedAt,
     this.replyTo,
+    this.replyMessage,
     this.deletedAt,
     this.recalledAt,
     this.attachmentUrl,
@@ -26,6 +27,7 @@ class MessageItem {
     this.deliveredCount,
     this.readByCount,
     this.lastReadAt,
+    this.pinnedAt,
   });
 
   MessageItem copyWith({
@@ -38,6 +40,7 @@ class MessageItem {
     String? sentAt,
     String? updatedAt,
     String? replyTo,
+    MessageItem? replyMessage,
     String? deletedAt,
     String? recalledAt,
     String? attachmentUrl,
@@ -51,6 +54,7 @@ class MessageItem {
     int? deliveredCount,
     int? readByCount,
     String? lastReadAt,
+    String? pinnedAt,
     // Add these purely for local UI override since contentText/resolvedAttachmentUrl use getters
     String? contentText,
     String? resolvedAttachmentUrl,
@@ -80,6 +84,7 @@ class MessageItem {
       sentAt: sentAt ?? this.sentAt,
       updatedAt: updatedAt ?? this.updatedAt,
       replyTo: replyTo ?? this.replyTo,
+      replyMessage: replyMessage ?? this.replyMessage,
       deletedAt: finalDeletedAt,
       recalledAt: recalledAt ?? this.recalledAt,
       attachmentUrl: attachmentUrl ?? this.attachmentUrl,
@@ -92,6 +97,7 @@ class MessageItem {
       deliveredCount: deliveredCount ?? this.deliveredCount,
       readByCount: readByCount ?? this.readByCount,
       lastReadAt: lastReadAt ?? this.lastReadAt,
+      pinnedAt: pinnedAt ?? this.pinnedAt,
     );
   }
 
@@ -105,6 +111,7 @@ class MessageItem {
   final String sentAt;
   final String? updatedAt;
   final String? replyTo;
+  final MessageItem? replyMessage;
   final String? deletedAt;
   final String? recalledAt;
   final String? attachmentUrl;
@@ -117,6 +124,7 @@ class MessageItem {
   final int? deliveredCount;
   final int? readByCount;
   final String? lastReadAt;
+  final String? pinnedAt;
 
   factory MessageItem.fromJson(Map<String, dynamic> json) {
     final assetRaw = json["attachmentAsset"];
@@ -133,6 +141,9 @@ class MessageItem {
       sentAt: (json["sentAt"] ?? json["createdAt"] ?? "").toString(),
       updatedAt: json["updatedAt"]?.toString(),
       replyTo: json["replyTo"]?.toString(),
+      replyMessage: json["replyMessage"] != null
+          ? MessageItem.fromJson(Map<String, dynamic>.from(json["replyMessage"]))
+          : null,
       deletedAt: json["deletedAt"]?.toString(),
       recalledAt: json["recalledAt"]?.toString(),
       attachmentUrl: json["attachmentUrl"]?.toString(),
@@ -152,6 +163,7 @@ class MessageItem {
           ? json["readByCount"] as int
           : int.tryParse(json["readByCount"]?.toString() ?? ""),
       lastReadAt: json["lastReadAt"]?.toString(),
+      pinnedAt: json["pinnedAt"]?.toString(),
     );
   }
 
@@ -167,6 +179,7 @@ class MessageItem {
       "sentAt": sentAt,
       "updatedAt": updatedAt,
       "replyTo": replyTo,
+      "replyMessage": replyMessage?.toJson(),
       "deletedAt": deletedAt,
       "recalledAt": recalledAt,
       "attachmentUrl": attachmentUrl,
@@ -177,6 +190,7 @@ class MessageItem {
       "deliveredCount": deliveredCount,
       "readByCount": readByCount,
       "lastReadAt": lastReadAt,
+      "pinnedAt": pinnedAt,
     };
   }
 
