@@ -16,6 +16,7 @@ import "package:url_launcher/url_launcher.dart";
 import "package:record/record.dart";
 import "package:path_provider/path_provider.dart";
 import "package:audioplayers/audioplayers.dart";
+import "package:video_player/video_player.dart";
 
 import "package:shared_preferences/shared_preferences.dart";
 import "../../models/conversation_summary.dart";
@@ -37,7 +38,6 @@ import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
 import "../../core/utils/translation_helper.dart";
 
-import "models/chat_message.dart";
 import "../../services/local_cache_service.dart";
 import "package:cached_network_image/cached_network_image.dart";
 import "package:skeletonizer/skeletonizer.dart";
@@ -87,6 +87,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final Map<String, Timer> _typingTimers = {};
   StreamSubscription? _typingSub;
   String? _conversationKey;
+  Map<String, dynamic>? _activeCallInfo;
+  StreamSubscription? _callInitSub;
+  StreamSubscription? _callInviteSub;
+  StreamSubscription? _callEndSub;
   Map<String, String> _aliases = {};
   bool _loadingAliases = false;
   String? _fetchedGroupName;
@@ -307,6 +311,33 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (mounted && data != null) {
         setState(() {
           _conversationKey = data["conversationKey"];
+          if (data["activeCall"] != null) {
+            _activeCallInfo = data["activeCall"];
+          }
+        });
+      }
+    });
+
+    _callInitSub = widget.socketService.onCallInit.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = data;
+        });
+      }
+    });
+
+    _callInviteSub = widget.socketService.onCallInvite.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = data;
+        });
+      }
+    });
+
+    _callEndSub = widget.socketService.onCallEnd.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = null;
         });
       }
     });
@@ -332,7 +363,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (msg.senderId != myId) {
           widget.socketService.markMessageDelivered(msg.conversationId, msg.id);
           widget.socketService.markAsRead(widget.conversation.conversationId);
-          widget.conversationService.markConversationAsRead(widget.conversation.conversationId).catchError((_) {});
+          widget.conversationService.markConversationAsRead(widget.conversation.conversationId).ignore();
         }
 
         // Save socket message to local cache
@@ -556,6 +587,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _snapshotSub?.cancel();
     _typingSub?.cancel();
     _updateSub?.cancel();
+    _callInitSub?.cancel();
+    _callInviteSub?.cancel();
+    _callEndSub?.cancel();
     for (final timer in _typingTimers.values) {
       timer.cancel();
     }
@@ -1552,46 +1586,80 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   Widget _buildActiveCallBanner() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return ValueListenableBuilder<CallState>(
       valueListenable: widget.webRTCService.callState,
       builder: (context, state, _) {
-        if (state != CallState.idle &&
-          widget.conversation.isGroup &&
+        final localCallActive = state != CallState.idle &&
             widget.webRTCService.currentConversationId ==
-                widget.conversation.conversationId) {
-          return Container(
-            color: Colors.green.withValues(alpha: 0.15),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                const Icon(Icons.group_add, color: Colors.green),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        state == CallState.ringing
-                            ? "Cuộc gọi nhóm đang chờ"
-                            : "Cuộc gọi nhóm đang diễn ra",
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.green),
+                widget.conversation.conversationId;
+                
+        final remoteCallActive = !localCallActive && _activeCallInfo != null;
+        
+        if (!localCallActive && !remoteCallActive) {
+          return const SizedBox.shrink();
+        }
+        
+        final isVideo = localCallActive 
+            ? !widget.webRTCService.isAudioOnly
+            : (_activeCallInfo?['isVideo'] ?? true);
+            
+        final bannerColor = localCallActive
+            ? Colors.green.withOpacity(0.15)
+            : const Color(0xFF7C3AED).withOpacity(0.15);
+            
+        final iconColor = localCallActive ? Colors.green : const Color(0xFF7C3AED);
+        
+        return Container(
+          color: bannerColor,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                localCallActive 
+                    ? (isVideo ? Icons.videocam : Icons.phone_in_talk)
+                    : (isVideo ? Icons.video_call : Icons.phone),
+                color: iconColor,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      localCallActive
+                          ? (state == CallState.ringing 
+                              ? "Cuộc gọi đang chờ" 
+                              : "Bạn đang trong cuộc gọi")
+                          : "Cuộc gọi đang diễn ra",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold, 
+                        color: iconColor,
                       ),
-                      Text('Nhấn để xem hoặc tham gia',
-                          style:
-                              TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.black54)),
-                    ],
+                    ),
+                    Text(
+                      localCallActive 
+                          ? 'Chạm để quay lại cuộc gọi' 
+                          : 'Nhấp để tham gia cuộc gọi',
+                      style: TextStyle(
+                        fontSize: 12, 
+                        color: isDark ? Colors.grey[400] : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: iconColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
                   ),
                 ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                  ),
-                  onPressed: () {
-                    // Navigate directly to CallScreen
+                onPressed: () {
+                  if (localCallActive) {
+                    widget.webRTCService.isCallMinimized.value = false;
                     Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => CallScreen(
@@ -1602,14 +1670,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         ),
                       ),
                     );
-                  },
-                  child: const Text('Tham gia'),
-                ),
-              ],
-            ),
-          );
-        }
-        return const SizedBox.shrink();
+                  } else {
+                    _startCall(video: isVideo);
+                  }
+                },
+                child: Text(localCallActive ? 'Quay lại' : 'Tham gia'),
+              ),
+            ],
+          ),
+        );
       },
     );
   }
@@ -4140,7 +4209,10 @@ class _AttachmentView extends StatelessWidget {
     if (message.isAudio) {
       return _VoicePlayer(url: url, isMine: isMine);
     }
-    if (message.isVideo || message.isDocument) {
+    if (message.isVideo) {
+      return _InlineVideoPlayer(videoUrl: url);
+    }
+    if (message.isDocument) {
       final isDark = Theme.of(context).brightness == Brightness.dark;
       return InkWell(
         onTap: () async {
@@ -4150,48 +4222,183 @@ class _AttachmentView extends StatelessWidget {
           }
         },
         child: Container(
-          width: message.isVideo ? 200 : null,
-          height: message.isVideo ? 150 : null,
-          padding: message.isVideo ? null : const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: message.isVideo
-                ? Colors.black87
-                : (isMine
-                    ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
-                    : (isDark ? const Color(0xFF334155) : Colors.grey[200])),
+            color: isMine
+                ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
+                : (isDark ? const Color(0xFF334155) : Colors.grey[200]),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: message.isVideo
-              ? const Center(
-                  child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
-                )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.insert_drive_file,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.insert_drive_file,
+                color: isMine
+                    ? (isDark ? Colors.white : const Color(0xFF7C3AED))
+                    : (isDark ? Colors.white70 : Colors.black54),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  message.attachmentName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
                       color: isMine
-                          ? (isDark ? Colors.white : const Color(0xFF7C3AED))
-                          : (isDark ? Colors.white70 : Colors.black54),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        message.attachmentName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: isMine
-                                ? (isDark ? Colors.white : const Color(0xFF6D28D9))
-                                : (isDark ? Colors.white70 : Colors.black87)),
-                      ),
-                    ),
-                  ],
+                          ? (isDark ? Colors.white : const Color(0xFF6D28D9))
+                          : (isDark ? Colors.white70 : Colors.black87)),
                 ),
+              ),
+            ],
+          ),
         ),
       );
     }
     return const SizedBox.shrink();
+  }
+}
+
+class _InlineVideoPlayer extends StatefulWidget {
+  final String videoUrl;
+  const _InlineVideoPlayer({required this.videoUrl});
+
+  @override
+  State<_InlineVideoPlayer> createState() => _InlineVideoPlayerState();
+}
+
+class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
+  late VideoPlayerController _controller;
+  bool _initialized = false;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() {
+            _initialized = true;
+          });
+        }
+      }).catchError((error) {
+        debugPrint("Video initialization error: $error");
+        if (mounted) {
+          setState(() {
+            _hasError = true;
+          });
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasError) {
+      return Container(
+        width: 200,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, color: Colors.redAccent, size: 36),
+              SizedBox(height: 8),
+              Text(
+                "Không thể phát video",
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!_initialized) {
+      return Container(
+        width: 200,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 30,
+            height: 30,
+            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 200,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: AspectRatio(
+        aspectRatio: _controller.value.aspectRatio,
+        child: Stack(
+          alignment: Alignment.bottomCenter,
+          children: [
+            VideoPlayer(_controller),
+            _buildPlayPauseOverlay(),
+            VideoProgressIndicator(
+              _controller,
+              allowScrubbing: true,
+              colors: const VideoProgressColors(
+                playedColor: Color(0xFF7C3AED),
+                bufferedColor: Colors.white30,
+                backgroundColor: Colors.white12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayPauseOverlay() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        setState(() {
+          if (_controller.value.isPlaying) {
+            _controller.pause();
+          } else {
+            _controller.play();
+          }
+        });
+      },
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        child: _controller.value.isPlaying
+            ? const SizedBox.shrink()
+            : Container(
+                color: Colors.black38,
+                child: const Center(
+                  child: Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 50.0,
+                  ),
+                ),
+              ),
+      ),
+    );
   }
 }
 

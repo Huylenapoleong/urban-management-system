@@ -1,8 +1,6 @@
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
-import "../../services/auth_service.dart";
 import "../../models/user_profile.dart";
-import "../../core/theme/app_theme.dart";
 import "../../services/upload_service.dart";
 import "../../services/user_service.dart";
 import "../../state/session_controller.dart";
@@ -12,7 +10,6 @@ import "edit_profile_screen.dart";
 import "security_screen.dart";
 import "help_support_screen.dart";
 import "about_app_screen.dart";
-import "user_management_screen.dart";
 import "knowledge_base_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "widgets/avatar_bottom_sheet.dart";
@@ -237,29 +234,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildActionList(BuildContext context, UserProfile user, bool isMe) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isOfficial = user.role != 'CITIZEN';
     
     return Column(
       children: [
-        if (isMe && isOfficial) ...[
-          _buildSectionTitle("Quản lý & Nghiệp vụ"),
-          _buildActionItem(
-            context,
-            icon: Icons.people_outline_rounded,
-            title: "Quản lý nhân sự & cư dân",
-            subtitle: user.role == 'PROVINCE_OFFICER'
-              ? "Quản lý Cán bộ phường & Cư dân trong tỉnh"
-              : "Quản lý Cư dân trong địa bàn",
-            iconColor: Colors.purple.shade600,
-            bgColor: isDark ? Colors.purple.shade900.withOpacity(0.3) : Colors.purple.shade50,
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
-                builder: (_) => const UserManagementScreen(),
-              ));
-            },
-          ),
-          const SizedBox(height: 16),
-        ],
         if (isMe) ...[
           _buildSectionTitle("Cá nhân"),
           _buildActionItem(
@@ -355,6 +332,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             titleColor: Colors.red.shade600,
             onTap: _handleLogout,
           ),
+        const SizedBox(height: 100),
       ],
     );
   }

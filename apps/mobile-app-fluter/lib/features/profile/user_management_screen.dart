@@ -62,7 +62,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         role: _selectedRoleFilter == 'ALL' ? null : _selectedRoleFilter,
         status: _selectedStatusFilter == 'ALL' ? null : _selectedStatusFilter,
         query: _searchController.text.trim().isEmpty ? null : _searchController.text.trim(),
-        locationCode: session.user?.role == 'ADMIN' ? null : currentLoc,
+        locationCode: (session.user?.role == 'ADMIN' || session.user?.role == 'PROVINCE_OFFICER') ? null : currentLoc,
       );
 
       if (mounted) {
@@ -383,7 +383,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   Widget _buildUserList(bool isDark) {
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       itemCount: _users.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, i) {
