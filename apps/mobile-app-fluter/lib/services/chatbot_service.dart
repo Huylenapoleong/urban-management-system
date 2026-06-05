@@ -5,6 +5,8 @@ import '../core/config/app_config.dart';
 import '../core/network/api_client.dart';
 import '../core/storage/auth_token_store.dart';
 
+import '../models/chatbot.dart';
+
 class ChatbotService {
   ChatbotService({
     required ApiClient apiClient,
@@ -22,7 +24,7 @@ class ChatbotService {
   }
 
   /// Hỏi đáp chatbot có xác thực (JWT)
-  Future<Map<String, dynamic>> authenticatedAsk(
+  Future<ChatbotResponse> authenticatedAsk(
     String question, {
     Map<String, dynamic>? selectedTarget,
   }) async {
@@ -33,7 +35,7 @@ class ChatbotService {
         if (selectedTarget != null) 'selectedTarget': selectedTarget,
       },
     );
-    return (raw as Map).cast<String, dynamic>();
+    return ChatbotResponse.fromJson((raw as Map).cast<String, dynamic>());
   }
 
   /// Tóm tắt nhóm chat (Cán bộ)

@@ -362,9 +362,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         setState(() {
           for (final wm in watermarks) {
             final userId = wm["userId"]?.toString();
-            final lastReadAt = wm["lastReadAt"]?.toString();
+            final lastReadAt = wm["lastReadAt"]?.toString() ?? wm["readAt"]?.toString();
             if (userId != null && lastReadAt != null) {
-              _memberReadWatermarks[userId] = lastReadAt;
+              _memberReadWatermarks[userId.toLowerCase()] = lastReadAt;
             }
           }
         });
@@ -379,7 +379,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
            data["conversationKey"] == _conversationKey)) {
         final messageId = data["messageId"]?.toString();
         final userId = data["userId"]?.toString();
-        if (messageId != null && userId != null && userId != widget.currentUser.id.toString()) {
+        if (messageId != null && userId != null && userId.toLowerCase() != widget.currentUser.id.toString().toLowerCase()) {
           final items = _pagingController.itemList;
           if (items != null) {
             final newList = List<MessageItem>.from(items);
@@ -421,8 +421,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           return;
         }
 
-        final myId = widget.currentUser.id.toString();
-        if (msg.senderId != myId) {
+        final myId = widget.currentUser.id.toString().toLowerCase();
+        if (msg.senderId.toLowerCase() != myId) {
           widget.socketService.markMessageDelivered(msg.conversationId, msg.id);
           widget.socketService.markAsRead(widget.conversation.conversationId);
           widget.conversationService.markConversationAsRead(widget.conversation.conversationId).ignore();
@@ -572,11 +572,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
            data["conversationKey"] == _conversationKey)) {
         final readByUserId = data["readByUserId"]?.toString() ?? data["userId"]?.toString();
         final readAtStr = data["readAt"]?.toString() ?? data["lastReadAt"]?.toString();
-        if (readByUserId != null && readAtStr != null && readByUserId != widget.currentUser.id.toString()) {
+        if (readByUserId != null && readAtStr != null && readByUserId.toLowerCase() != widget.currentUser.id.toString().toLowerCase()) {
           final readAt = DateTime.tryParse(readAtStr);
           if (readAt != null) {
             setState(() {
-              _memberReadWatermarks[readByUserId] = readAtStr;
+              _memberReadWatermarks[readByUserId.toLowerCase()] = readAtStr;
             });
             final items = _pagingController.itemList;
             if (items != null) {
@@ -602,7 +602,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       }
                     }
                     
-                    final isMyMsg = m.senderId == widget.currentUser.id.toString();
+                    final isMyMsg = m.senderId.toLowerCase() == widget.currentUser.id.toString().toLowerCase();
                     final nextState = isMyMsg ? 'READ' : m.deliveryState;
                     
                     newList[i] = m.copyWith(
@@ -613,7 +613,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     );
                     updatedAny = true;
                   } else {
-                    final isMyMsg = m.senderId == widget.currentUser.id.toString();
+                    final isMyMsg = m.senderId.toLowerCase() == widget.currentUser.id.toString().toLowerCase();
                     if (isMyMsg && m.deliveryState != 'READ') {
                       newList[i] = m.copyWith(
                         deliveryState: 'READ',
@@ -1095,9 +1095,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         return !(msg.type == "SYSTEM" && msg.contentText.contains("left the call"));
       }).toList();
 
-      final myId = widget.currentUser.id.toString();
+      final myId = widget.currentUser.id.toString().toLowerCase();
       for (final msg in filteredItems) {
-        if (msg.senderId != myId && msg.deliveryState != 'DELIVERED' && msg.deliveryState != 'READ') {
+        if (msg.senderId.toLowerCase() != myId && msg.deliveryState != 'DELIVERED' && msg.deliveryState != 'READ') {
           widget.socketService.markMessageDelivered(msg.conversationId, msg.id);
         }
       }
@@ -2503,7 +2503,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       builderDelegate: PagedChildBuilderDelegate<MessageItem>(
         itemBuilder: (context, message, index) {
           final items = _pagingController.itemList ?? [];
-          final isMine = message.senderId == widget.currentUser.id.toString();
+          final isMine = message.senderId.toLowerCase() == widget.currentUser.id.toString().toLowerCase();
           final senderAlias = _aliases[message.senderId];
           
           // Determine if we should show the read receipt avatar under this message
@@ -2514,9 +2514,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           List<Map<String, dynamic>> groupReadAvatars = [];
           
           if (widget.conversation.isGroup) {
-            final myId = widget.currentUser.id.toString();
+            final myId = widget.currentUser.id.toString().toLowerCase();
             for (final member in _conversationMembers) {
-              final userId = member["userId"]?.toString();
+              final userId = member["userId"]?.toString().toLowerCase();
               if (userId == null || userId == myId) continue;
               
               final lastRead = _memberReadWatermarks[userId];

@@ -160,7 +160,7 @@ class ConversationSummary {
     if (conversationId.startsWith("DM#")) {
       final parts = conversationId.substring(3).split("#");
       if (parts.length >= 2 && currentUserId != null) {
-        return parts[0] == currentUserId ? parts[1] : parts[0];
+        return parts[0].toLowerCase() == currentUserId.toLowerCase() ? parts[1] : parts[0];
       } else if (parts.length >= 2) {
         return parts[0];
       }

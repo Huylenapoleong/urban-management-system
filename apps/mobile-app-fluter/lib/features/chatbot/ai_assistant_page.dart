@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../state/providers.dart';
+import '../../models/chatbot.dart';
+import '../../models/conversation_summary.dart';
 
 class AiAssistantPage extends ConsumerStatefulWidget {
   const AiAssistantPage({super.key});
@@ -14,15 +16,21 @@ class AiAssistantPage extends ConsumerStatefulWidget {
 
 class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   final List<AiMessage> _messages = [];
   bool _isTyping = false;
   bool _showSlashSuggestions = false;
+  bool _showAutocompleteSuggestions = false;
+  List<ConversationSummary> _conversations = [];
+  List<ConversationSummary> _matchingConversations = [];
+  bool _loadingTargets = false;
 
   @override
   void dispose() {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _focusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -35,16 +43,56 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
       text: "Xin chào! Tôi là **Trợ lý Đô thị AI**. Tôi có thể giúp bạn tìm hiểu về quy định pháp luật, thủ tục hành chính hoặc tóm tắt các vấn đề đô thị. Bạn muốn hỏi gì không?",
       isUser: false,
     ));
+    _loadAutocompleteTargets();
+  }
+
+  Future<void> _loadAutocompleteTargets() async {
+    if (!mounted) return;
+    setState(() => _loadingTargets = true);
+    try {
+      final convSvc = ref.read(conversationServiceProvider);
+      final res = await convSvc.listConversations(limit: 200);
+      if (mounted) {
+        setState(() {
+          _conversations = res.items;
+          _loadingTargets = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[CHATBOT_DEBUG] Error loading conversations for autocomplete: $e');
+      if (mounted) {
+        setState(() => _loadingTargets = false);
+      }
+    }
   }
 
   void _onTextChanged() {
     final text = _controller.text;
-    final show = text.startsWith('/') && !text.contains(' ');
-    if (show != _showSlashSuggestions) {
-      setState(() {
-        _showSlashSuggestions = show;
-      });
+    final trimmedText = text.trim();
+    final showSlash = text.startsWith('/') && !text.contains(' ');
+    
+    List<ConversationSummary> matching = [];
+    if (text.startsWith('/summary ')) {
+      final query = text.substring(9).trim().toLowerCase();
+      if (query.isEmpty) {
+        matching = _conversations;
+      } else {
+        matching = _conversations.where((c) {
+          return c.title.toLowerCase().contains(query);
+        }).toList();
+      }
+    } else if (trimmedText.isNotEmpty && !text.startsWith('/')) {
+      final query = trimmedText.toLowerCase();
+      matching = _conversations.where((c) {
+        return c.title.toLowerCase().contains(query);
+      }).toList();
     }
+    
+    setState(() {
+      _showSlashSuggestions = showSlash;
+      _matchingConversations = matching;
+      _showAutocompleteSuggestions = matching.isNotEmpty;
+    });
   }
 
   void _scrollToBottom() {
@@ -59,38 +107,43 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
     });
   }
 
-  void _onSelectTarget(AiMessage parentMessage, Map<String, dynamic> target) {
+  void _onSelectTarget(AiMessage parentMessage, ChatbotTarget target) {
     if (parentMessage.isCandidateSelected) return;
     
     setState(() {
       parentMessage.isCandidateSelected = true;
     });
 
-    final targetName = target['name'] as String? ?? '';
-    final targetTypeLabel = target['type'] == 'GROUP' ? 'nhóm' : 'cuộc trò chuyện với';
+    final targetName = target.name;
+    final targetTypeLabel = target.type == 'GROUP' ? 'nhóm' : 'cuộc trò chuyện với';
     
     _handleSend(
-      customText: "Tóm tắt $targetTypeLabel $targetName",
-      selectedTarget: {
-        'type': target['type'],
-        'id': target['id'],
-      },
+      customText: parentMessage.originalQuery ?? "Tóm tắt $targetTypeLabel $targetName",
+      selectedTarget: target.toJson(),
+      displaySentText: "Tóm tắt $targetTypeLabel $targetName",
     );
   }
 
   Future<void> _handleSend({
     String? customText,
     Map<String, dynamic>? selectedTarget,
+    String? displaySentText,
   }) async {
     final text = customText ?? _controller.text.trim();
-    if (text.isEmpty || _isTyping) return;
+    debugPrint('[CHATBOT_DEBUG] _handleSend called. text: "$text", _isTyping: $_isTyping');
+    if (text.isEmpty || _isTyping) {
+      debugPrint('[CHATBOT_DEBUG] _handleSend returned early because text is empty or _isTyping is true');
+      return;
+    }
 
     if (customText == null) {
       _controller.clear();
     }
     
+    final displayedText = displaySentText ?? text;
+    
     setState(() {
-      _messages.add(AiMessage(text: text, isUser: true));
+      _messages.add(AiMessage(text: displayedText, isUser: true));
       _messages.add(AiMessage(text: "", isUser: false, isStreaming: true));
       _isTyping = true;
     });
@@ -101,18 +154,13 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
       
       final res = await chatbotSvc.authenticatedAsk(text, selectedTarget: selectedTarget);
       
-      final status = res['status'] as String?;
-      final answer = res['answer'] as String? ?? res['summary'] as String? ?? 'Xin lỗi, tôi chưa có câu trả lời phù hợp.';
-      final candidates = res['candidates'] as List<dynamic>?;
-      final sources = res['sources'] as List<dynamic>?;
-      final messagesFetched = res['messagesFetched'] as int?;
-      
-      String? targetName;
-      String? targetType;
-      if (res['target'] is Map) {
-        targetName = res['target']['name'] as String?;
-        targetType = res['target']['type'] as String?;
-      }
+      final status = res.status;
+      final answer = res.answer;
+      final candidates = res.candidates;
+      final sources = res.sources;
+      final messagesFetched = res.messagesFetched;
+      final targetName = res.target?.name;
+      final targetType = res.target?.type;
 
       if (mounted) {
         setState(() {
@@ -125,12 +173,14 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
             messagesFetched: messagesFetched,
             targetName: targetName,
             targetType: targetType,
+            originalQuery: text,
           );
           _isTyping = false;
         });
         _scrollToBottom();
       }
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('[CHATBOT_DEBUG] Error in _handleSend: $e\n$stack');
       if (mounted) {
         setState(() {
           _messages.last = AiMessage(
@@ -151,6 +201,8 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
     final cardBgColor = isDark ? const Color(0xFF161233) : Colors.white;
     final textMain = isDark ? Colors.white : const Color(0xFF1E1B4B);
     final textSec = isDark ? Colors.white60 : const Color(0xFF6D28D9);
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final inputHeight = 62.0 + (bottomPadding == 0 ? 16.0 : bottomPadding);
 
     return Container(
         height: MediaQuery.of(context).size.height * 0.85,
@@ -331,11 +383,23 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
                         },
                       ),
                     ),
-                    if (_showSlashSuggestions)
-                      _buildSlashSuggestions(isDark, cardBgColor, textMain, textSec),
                     _buildInputArea(isDark, bgColor, textMain, cardBgColor),
                   ],
                 ),
+                if (_showSlashSuggestions)
+                  Positioned(
+                    bottom: inputHeight + 4,
+                    left: 0,
+                    right: 0,
+                    child: _buildSlashSuggestions(isDark, cardBgColor, textMain, textSec),
+                  ),
+                if (_showAutocompleteSuggestions)
+                  Positioned(
+                    bottom: inputHeight + 4,
+                    left: 0,
+                    right: 0,
+                    child: _buildAutocompleteSuggestions(isDark, cardBgColor, textMain, textSec),
+                  ),
               ],
             ),
           ),
@@ -376,6 +440,7 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
               );
               _showSlashSuggestions = false;
             });
+            _focusNode.requestFocus();
           },
           borderRadius: BorderRadius.circular(16),
           child: Padding(
@@ -430,6 +495,124 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAutocompleteSuggestions(
+    bool isDark,
+    Color cardBgColor,
+    Color textMain,
+    Color textSec,
+  ) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 200),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: cardBgColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white.withOpacity(0.08) : const Color(0xFFDDD6FE),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          itemCount: _matchingConversations.length,
+          separatorBuilder: (context, index) => Divider(
+            height: 1,
+            color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+          ),
+          itemBuilder: (context, index) {
+            final c = _matchingConversations[index];
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () {
+                  final targetName = c.title;
+                  final targetTypeLabel = c.isGroup ? 'nhóm' : 'cuộc trò chuyện với';
+                  
+                  _handleSend(
+                    customText: "/summary ${c.title}",
+                    selectedTarget: {
+                      'type': c.isGroup ? 'GROUP' : 'USER',
+                      'id': c.conversationId,
+                    },
+                    displaySentText: "Tóm tắt $targetTypeLabel $targetName",
+                  );
+                  
+                  setState(() {
+                    _controller.clear();
+                    _showAutocompleteSuggestions = false;
+                  });
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B5CF6).withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          c.isGroup ? Icons.groups_rounded : Icons.person_rounded,
+                          color: const Color(0xFF8B5CF6),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              c.title,
+                              style: GoogleFonts.outfit(
+                                color: textMain,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              c.isGroup ? 'Nhóm' : 'Cuộc trò chuyện 1-1',
+                              style: GoogleFonts.inter(
+                                color: textSec.withOpacity(0.7),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        'Tóm tắt',
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFF8B5CF6),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -548,6 +731,7 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
                     ),
                   ),
                   child: TextField(
+                    focusNode: _focusNode,
                     controller: _controller,
                     maxLines: 4,
                     minLines: 1,
@@ -575,7 +759,7 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
           ),
           const SizedBox(width: 12),
           GestureDetector(
-            onTap: _isTyping ? null : _handleSend,
+            onTap: _isTyping ? null : () => _handleSend(),
             child: Container(
               width: 52,
               height: 52,
@@ -616,12 +800,13 @@ class AiMessage {
   final bool isUser;
   final bool isStreaming;
   final String? status; // 'summary' | 'candidates' | 'not_found' | 'law'
-  final List<dynamic>? candidates;
-  final List<dynamic>? sources;
+  final List<ChatbotTarget>? candidates;
+  final List<Map<String, dynamic>>? sources;
   final int? messagesFetched;
   final String? targetName;
   final String? targetType;
   bool isCandidateSelected;
+  String? originalQuery;
 
   AiMessage({
     required this.text,
@@ -634,12 +819,13 @@ class AiMessage {
     this.targetName,
     this.targetType,
     this.isCandidateSelected = false,
+    this.originalQuery,
   });
 }
 
 class _MessageBubble extends StatelessWidget {
   final AiMessage message;
-  final void Function(AiMessage message, Map<String, dynamic> target)? onSelectTarget;
+  final void Function(AiMessage message, ChatbotTarget target)? onSelectTarget;
 
   const _MessageBubble({required this.message, this.onSelectTarget});
 
@@ -778,16 +964,15 @@ class _MessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildCandidatesList(List<dynamic> candidates, bool isDark) {
+  Widget _buildCandidatesList(List<ChatbotTarget> candidates, bool isDark) {
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
         children: candidates.map((cand) {
-          final candMap = cand as Map<String, dynamic>;
-          final type = candMap['type'] as String?;
-          final name = candMap['name'] as String? ?? '';
+          final type = cand.type;
+          final name = cand.name;
           final isGroup = type == 'GROUP';
           
           final buttonColor = isDark ? Colors.white.withOpacity(0.06) : const Color(0xFFEEF2F6);
@@ -798,7 +983,7 @@ class _MessageBubble extends StatelessWidget {
             child: InkWell(
               onTap: message.isCandidateSelected 
                   ? null 
-                  : () => onSelectTarget?.call(message, candMap),
+                  : () => onSelectTarget?.call(message, cand),
               borderRadius: BorderRadius.circular(12),
               child: Opacity(
                 opacity: message.isCandidateSelected ? 0.6 : 1.0,

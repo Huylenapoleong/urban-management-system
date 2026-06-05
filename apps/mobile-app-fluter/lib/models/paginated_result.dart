@@ -15,10 +15,13 @@ class PaginatedResult<T> {
 
     final items = rawData?.map((item) => mapper((item as Map).cast<String, dynamic>())).toList() ?? [];
     
+    final nextCursor = meta?['nextCursor']?.toString() ?? meta?['cursor']?.toString();
+    final hasNextPage = nextCursor != null && nextCursor.isNotEmpty;
+
     return PaginatedResult<T>(
       items: items,
-      cursor: meta?['cursor']?.toString(),
-      hasNextPage: meta?['hasNextPage'] == true,
+      cursor: nextCursor,
+      hasNextPage: hasNextPage,
     );
   }
 }
