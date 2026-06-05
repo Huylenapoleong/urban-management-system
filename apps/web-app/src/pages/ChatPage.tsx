@@ -1972,7 +1972,27 @@ export function ChatPage() {
   const hasInitialScrolledRef = useRef(false);  // chỉ scroll xuống 1 lần khi vào chat
   const newestMessageIdRef = useRef<string | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const showScrollDownRef = useRef(false);
+  const chatScrollFrameRef = useRef<number | null>(null);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
+
+  const updateShowScrollDown = useCallback((nextValue: boolean) => {
+    if (showScrollDownRef.current === nextValue) {
+      return;
+    }
+
+    showScrollDownRef.current = nextValue;
+    setShowScrollDown(nextValue);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (chatScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(chatScrollFrameRef.current);
+        chatScrollFrameRef.current = null;
+      }
+    };
+  }, []);
 
   const [bookmarkedMessageIds, setBookmarkedMessageIds] = useState<Record<string, string[]>>(() => {
     if (typeof window === "undefined") return {};
@@ -2110,8 +2130,8 @@ export function ChatPage() {
     }
 
     container.scrollTo({ top: container.scrollHeight, behavior });
-    setShowScrollDown(false);
-  }, []);
+    updateShowScrollDown(false);
+  }, [updateShowScrollDown]);
   const {
     data: activeGroupMembers = [],
     isLoading: isLoadingGroupMembers,
@@ -3159,25 +3179,33 @@ export function ChatPage() {
 
   // Thay thế handleScroll từ dòng 2775 đến 2784
   const handleScroll = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    if (!hasInitialScrolledRef.current) {
-      setShowScrollDown(false);
+    if (chatScrollFrameRef.current !== null) {
       return;
     }
 
-    if (container.scrollTop <= 50) {
-      if (hasMoreRef.current && !isLoadingMoreRef.current) {
-        void handleLoadMoreMessages();
-      }
-    }
+    chatScrollFrameRef.current = window.requestAnimationFrame(() => {
+      chatScrollFrameRef.current = null;
 
-    // Hiện nút scroll down khi user đang ở cách cuối > 300px
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    setShowScrollDown(distanceFromBottom > SCROLL_DOWN_BUTTON_THRESHOLD_PX);
-  }, [handleLoadMoreMessages]);
+      const container = messagesContainerRef.current;
+      if (!container) return;
+
+      if (!hasInitialScrolledRef.current) {
+        updateShowScrollDown(false);
+        return;
+      }
+
+      if (container.scrollTop <= 50) {
+        if (hasMoreRef.current && !isLoadingMoreRef.current) {
+          void handleLoadMoreMessages();
+        }
+      }
+
+      // Hiện nút scroll down khi user đang ở cách cuối > 300px
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      updateShowScrollDown(distanceFromBottom > SCROLL_DOWN_BUTTON_THRESHOLD_PX);
+    });
+  }, [handleLoadMoreMessages, updateShowScrollDown]);
 
   useEffect(() => {
     if (!activeChat) {
@@ -3213,14 +3241,14 @@ export function ChatPage() {
     loadingOlderMessagesRef.current = false;
     previousScrollHeightRef.current = 0;
     previousScrollTopRef.current = 0;
-    setShowScrollDown(false);
+    updateShowScrollDown(false);
     newestMessageIdRef.current = null;
     setIsMultiSelectMode(false);
     setSelectedMessageIds([]);
     if (activeChat) {
       queryClient.removeQueries({ queryKey: ["messages", activeChat] });
     }
-  }, [activeChat, queryClient]);
+  }, [activeChat, queryClient, updateShowScrollDown]);
 
   useEffect(() => {
     if (!activeChat) {
@@ -3866,22 +3894,30 @@ export function ChatPage() {
   const handleComposerKeyDown = (
     event: React.KeyboardEvent<HTMLTextAreaElement>,
   ) => {
-    if (!isMentionMenuOpen) {
+    if (event.nativeEvent.isComposing) {
       return;
     }
 
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeMentionMenu();
-      return;
-    }
-
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const firstCandidate = mentionCandidates[0];
-      if (firstCandidate) {
-        handleInsertMention(firstCandidate);
+    if (isMentionMenuOpen) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMentionMenu();
+        return;
       }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const firstCandidate = mentionCandidates[0];
+        if (firstCandidate) {
+          handleInsertMention(firstCandidate);
+        }
+        return;
+      }
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
     }
   };
 
@@ -6543,7 +6579,7 @@ export function ChatPage() {
               <div
                 ref={messagesContainerRef}
                 onScroll={handleScroll}
-                className="h-full overflow-y-auto p-4 hide-scrollbar"
+                className="h-full overflow-y-auto overscroll-contain px-4 pb-2 pt-4 hide-scrollbar"
               >
               {loadingMessages && (
                 <div className="text-center py-4 text-sm text-gray-500 dark:text-slate-400">
@@ -6551,7 +6587,9 @@ export function ChatPage() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3 pb-4">
+              <div
+                className={`flex min-h-full flex-col justify-end gap-3 ${typingIndicatorText ? "pb-8" : "pb-2"}`}
+              >
                 {isLoadingMore ? (
                   <div className="flex justify-center py-2">
                     <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -7691,35 +7729,38 @@ export function ChatPage() {
                   </div>
                 ))}
 
-                {typingIndicatorText ? (
-                  <div
-                    className="flex items-center gap-1.5 px-4 py-2 text-[11.5px] text-slate-500 dark:text-slate-400 self-start pl-12 animate-in fade-in duration-200"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span className="font-medium italic">
-                      {typingIndicatorLabel}
-                    </span>
-                    <div className="flex items-center gap-1.5" aria-hidden="true">
-                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.3s]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.15s]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce" />
-                    </div>
-                  </div>
-                ) : null}
                 <div ref={messagesEndRef} />
               </div>
               </div>
+
+              {typingIndicatorText ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 flex px-4">
+                  <div
+                    className="inline-flex max-w-[min(75%,28rem)] items-center gap-1.5 rounded-t-md rounded-br-md bg-white/90 px-2.5 py-0.5 text-[11px] leading-4 text-slate-600 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-slate-900/90 dark:text-slate-300 dark:ring-slate-700/80 animate-in fade-in duration-200"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="truncate font-medium">
+                      {typingIndicatorLabel}
+                    </span>
+                    <div className="flex items-center gap-1" aria-hidden="true">
+                      <span className="h-1 w-1 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.3s]" />
+                      <span className="h-1 w-1 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce [animation-delay:-0.15s]" />
+                      <span className="h-1 w-1 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce" />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               {showScrollDown && (
                 <button
                   type="button"
                   aria-label="Cuon xuong tin nhan moi nhat"
                   onClick={() => scrollMessagesToBottom("smooth")}
-                  className="absolute bottom-16 right-5 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg shadow-slate-900/10 transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:text-blue-600 active:translate-y-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 sm:right-6"
+                  className="absolute bottom-4 right-5 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg shadow-slate-900/10 transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:text-blue-600 active:translate-y-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 sm:right-6"
                   title="Cuộn xuống tin nhắn mới nhất"
                 >
-                  <ChevronsDown size={22} />
+                  <ChevronsDown size={20} />
                 </button>
               )}
             </div>
@@ -7730,53 +7771,50 @@ export function ChatPage() {
                 onClick={handleCloseForwardDialog}
               >
                 <div
-                  className="w-full max-w-2xl rounded-md border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+                  className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-                    <h3 className="relative min-w-32 text-xl font-semibold text-slate-900 dark:text-slate-100">
-                      <span className="absolute inset-0 bg-white dark:bg-slate-900">
-                        Chia sẻ
-                      </span>
-                      Chuyển tiếp tin nhắn
+                  <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 dark:border-slate-700">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                      Chia sẻ
                     </h3>
                     <button
                       type="button"
                       onClick={handleCloseForwardDialog}
-                      className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                      className="rounded-md px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                       disabled={isForwardingMessage}
                     >
                       Đóng
                     </button>
                   </div>
 
-                  <div className="space-y-3 px-5 py-4">
+                  <div className="space-y-3 px-5 py-3.5">
                     <Input
                       value={forwardSearch}
                       onChange={(event) => setForwardSearch(event.target.value)}
                       placeholder="Tìm cuộc trò chuyện đích..."
-                      className="h-12 rounded-md bg-white text-base dark:bg-slate-800 dark:border-slate-700"
+                      className="h-10 rounded-xl bg-white text-sm dark:bg-slate-800 dark:border-slate-700"
                     />
 
                     <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-700">
-                      <div className="flex items-center gap-4 text-sm">
+                      <div className="flex items-center gap-3 text-[13px]">
                         <button type="button" className="border-b-2 border-blue-600 pb-2 font-semibold text-blue-600">
                           Gần đây
                         </button>
                         <button type="button" className="border-b-2 border-transparent pb-2 text-slate-700 hover:text-blue-600 dark:text-slate-300">
-                          Nhóm trò chuyện
+                          Nhóm
                         </button>
                         <button type="button" className="border-b-2 border-transparent pb-2 text-slate-700 hover:text-blue-600 dark:text-slate-300">
                           Bạn bè
                         </button>
                       </div>
-                      <button type="button" className="inline-flex items-center gap-1 pb-2 text-sm text-slate-700 dark:text-slate-300">
+                      <button type="button" className="inline-flex items-center gap-1 pb-2 text-[13px] font-medium text-slate-700 dark:text-slate-300">
                         Phân loại
                         <ChevronDown size={15} />
                       </button>
                     </div>
 
-                    <div className="max-h-80 overflow-y-auto hide-scrollbar">
+                    <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 hide-scrollbar">
                       {forwardDestinationConversations.length === 0 ? (
                         <div className="p-3 text-sm text-slate-500 dark:text-slate-400">
                           Không có cuộc trò chuyện phù hợp.
@@ -7789,9 +7827,32 @@ export function ChatPage() {
                                 selectedForwardConversationIds.includes(
                                   conversation.conversationId,
                                 );
+                              const conversationId =
+                                conversation.conversationId || "";
+                              const displayName =
+                                resolveConversationDisplayName(conversation);
+                              const isGroupDestination =
+                                conversationId.startsWith("group:") ||
+                                conversationId.startsWith("grp#") ||
+                                Boolean(conversation.isGroup);
+                              const destinationLabel = isGroupDestination
+                                ? "Nhóm trò chuyện"
+                                : "Tin nhắn riêng";
+                              const groupId =
+                                extractGroupIdFromConversationId(
+                                  conversationId,
+                                );
+                              const avatarUrl =
+                                (groupId
+                                  ? groupAvatarOverrides[groupId]
+                                  : undefined) ||
+                                dmAvatarMap[conversationId] ||
+                                resolveConversationAvatarUrl(
+                                  conversation as ConversationAvatarLike,
+                                );
                               return (
                                 <li key={conversation.conversationId}>
-                                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800">
                                     <input
                                       type="checkbox"
                                       checked={checked}
@@ -7802,18 +7863,23 @@ export function ChatPage() {
                                       }
                                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                     />
-                                    <Avatar className="h-10 w-10 shrink-0">
-                                      <AvatarFallback className="bg-blue-100 text-blue-600">
-                                        {(resolveConversationDisplayName(conversation).charAt(0) || "?").toUpperCase()}
+                                    <Avatar className="h-9 w-9 shrink-0">
+                                      {avatarUrl ? (
+                                        <AvatarImage
+                                          src={avatarUrl}
+                                          alt={displayName}
+                                        />
+                                      ) : null}
+                                      <AvatarFallback className={isGroupDestination ? "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200" : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200"}>
+                                        {(displayName.charAt(0) || "?").toUpperCase()}
                                       </AvatarFallback>
                                     </Avatar>
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                       <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                                        {conversation.groupName ||
-                                          "Không rõ tên"}
+                                        {displayName}
                                       </p>
-                                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                                        {conversation.conversationId}
+                                      <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                        {destinationLabel}
                                       </p>
                                     </div>
                                   </label>
@@ -7830,8 +7896,8 @@ export function ChatPage() {
                         {forwardActionError}
                       </p>
                     ) : null}
-                    <div className="rounded-md bg-slate-100 px-4 py-3 dark:bg-slate-800">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    <div className="rounded-xl bg-slate-100 px-3.5 py-2.5 dark:bg-slate-800">
+                      <p className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                         Chia sẻ tin nhắn
                       </p>
                       <p className="mt-1 line-clamp-2 text-sm text-slate-700 dark:text-slate-300">
@@ -7849,15 +7915,15 @@ export function ChatPage() {
                     </div>
                     <Input
                       placeholder="Nhập tin nhắn..."
-                      className="h-12 bg-white dark:bg-slate-800 dark:border-slate-700"
+                      className="h-10 rounded-xl bg-white text-sm dark:bg-slate-800 dark:border-slate-700"
                     />
                   </div>
 
-                  <div className="flex items-center justify-end gap-4 border-t border-slate-200 px-5 py-4 dark:border-slate-700">
+                  <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-3.5 dark:border-slate-700">
                     <button
                       type="button"
                       onClick={handleCloseForwardDialog}
-                      className="rounded-md bg-slate-200 px-6 py-3 text-base font-semibold text-slate-800 hover:bg-slate-300"
+                      className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                       disabled={isForwardingMessage}
                     >
                       Hủy
@@ -7865,7 +7931,7 @@ export function ChatPage() {
                     <button
                       type="button"
                       onClick={() => void handleConfirmForwardMessage()}
-                      className="rounded-md bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
                       disabled={isForwardingMessage || selectedForwardConversationIds.length === 0}
                     >
                       {isForwardingMessage
@@ -8232,26 +8298,26 @@ export function ChatPage() {
                 ) : null}
 
                 {/* Thanh công cụ tiện ích */}
-                <div className="flex h-6 items-center gap-1 mb-1.5 animate-in slide-in-from-bottom-1 duration-300">
+                <div className="flex h-5 items-center gap-1.5 mb-1 animate-in slide-in-from-bottom-1 duration-300">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isComposerBusy || isRecording}
-                    className="flex h-6 w-7 items-center justify-center rounded-lg text-slate-500 transition-all hover:bg-blue-50 hover:text-blue-600 dark:text-slate-400 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+                    className="flex h-5 w-6 items-center justify-center rounded-md text-slate-500 transition-all hover:bg-blue-50 hover:text-blue-600 dark:text-slate-400 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
                     title="Gửi file"
                   >
-                    <Paperclip size={18} />
+                    <Paperclip size={16} />
                   </button>
 
                   <button
                     type="button"
                     onClick={() => void handleStartVoiceRecording()}
                     disabled={!activeChat || isComposerBusy || isRecording}
-                    className="flex h-6 w-7 items-center justify-center rounded-lg text-slate-500 transition-all hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+                    className="flex h-5 w-6 items-center justify-center rounded-md text-slate-500 transition-all hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
                     title="Ghi am"
                     aria-label="Ghi am"
                   >
-                    <Mic size={18} />
+                    <Mic size={16} />
                   </button>
 
                   <button
@@ -8264,7 +8330,7 @@ export function ChatPage() {
                         setGifPickerTab("gif");
                       }
                     }}
-                    className={`flex h-6 w-7 items-center justify-center rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "gif"
+                    className={`flex h-5 w-6 items-center justify-center rounded-md transition-all ${isGifPickerOpen && gifPickerTab === "gif"
                       ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
                       : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
                       }`}
@@ -8272,8 +8338,8 @@ export function ChatPage() {
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
-                      width="18"
-                      height="18"
+                      width="16"
+                      height="16"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -8297,26 +8363,26 @@ export function ChatPage() {
                         setGifPickerTab("sticker");
                       }
                     }}
-                    className={`flex h-6 w-7 items-center justify-center rounded-lg transition-all ${isGifPickerOpen && gifPickerTab === "sticker"
+                    className={`flex h-5 w-6 items-center justify-center rounded-md transition-all ${isGifPickerOpen && gifPickerTab === "sticker"
                       ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
                       : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"
                       }`}
                     title="Gửi Sticker"
                   >
-                    <Sticker size={18} />
+                    <Sticker size={16} />
                   </button>
-                  <div className="mx-1 h-3.5 w-px bg-slate-200/80 dark:bg-slate-800" />
+                  <div className="mx-1 h-3 w-px bg-slate-200/80 dark:bg-slate-800" />
                   <button
                     type="button"
                     onClick={() => setIsEmojiPickerOpen((prev) => !prev)}
-                    className={`flex h-6 w-7 items-center justify-center rounded-lg transition-all ${isEmojiPickerOpen ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"}`}
+                    className={`flex h-5 w-6 items-center justify-center rounded-md transition-all ${isEmojiPickerOpen ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30"}`}
                     title="Emoji"
                   >
-                    <Smile size={18} />
+                    <Smile size={16} />
                   </button>
                 </div>
 
-                <div className="flex items-end gap-2.5">
+                <div className="flex items-end gap-1.5">
                   <div className="relative flex-1 min-w-0">
                     {isEmojiPickerOpen && (
                       <div
@@ -8487,10 +8553,11 @@ export function ChatPage() {
                     ) : null}
                     <textarea
                       rows={1}
+                      enterKeyHint="send"
                       placeholder={
                         activeGroupId ? "Nhập tin nhắn..." : "Nhập tin nhắn..."
                       }
-                      className={`block w-full min-h-11 max-h-28 resize-none overflow-y-auto rounded-[15px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-[15px] leading-5 text-slate-900 outline-none [overflow-wrap:anywhere] placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:bg-slate-800 ${isRecording ? "hidden" : ""} ${highlightComposer ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950" : ""}`}
+                      className={`block w-full min-h-10 max-h-24 resize-none overflow-y-auto rounded-[14px] border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm leading-5 text-slate-900 outline-none [overflow-wrap:anywhere] placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:bg-slate-800 ${isRecording ? "hidden" : ""} ${highlightComposer ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950" : ""}`}
                       ref={composerInputRef}
                       value={inputText}
                       onChange={(e) => {
@@ -8554,7 +8621,7 @@ export function ChatPage() {
                     <button
                       type="submit"
                       disabled={isComposerBusy}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                       title={composerActionLabel}
                       aria-label={composerActionLabel}
                     >
