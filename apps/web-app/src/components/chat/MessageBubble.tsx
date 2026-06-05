@@ -24,7 +24,7 @@ export const MessageBubbleContainer = forwardRef<
       {...props}
       ref={ref}
       className={cn(
-        "group relative flex max-w-[86%] flex-col rounded-2xl transition-all animate-in fade-in slide-in-from-bottom-2 duration-300 sm:max-w-[78%] lg:max-w-[70%]",
+        "group relative flex max-w-[86%] flex-col rounded-2xl transition-all sm:max-w-[78%] lg:max-w-[70%]",
         isMe ? "self-end" : "self-start",
         focused
           ? "ring-2 ring-amber-300/80 ring-offset-2 ring-offset-slate-100 dark:ring-amber-400/70 dark:ring-offset-slate-950"

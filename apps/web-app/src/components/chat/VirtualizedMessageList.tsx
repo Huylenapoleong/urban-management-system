@@ -52,6 +52,7 @@ export function VirtualizedMessageRows<T>({
     () => new Map<string, number>(),
   );
   const rowObserversRef = useRef(new Map<string, ResizeObserver>());
+  const viewportFrameRef = useRef<number | null>(null);
 
   const updateViewport = useCallback(() => {
     const container = containerRef.current;
@@ -76,6 +77,17 @@ export function VirtualizedMessageRows<T>({
     });
   }, [containerRef]);
 
+  const scheduleViewportUpdate = useCallback(() => {
+    if (viewportFrameRef.current !== null) {
+      return;
+    }
+
+    viewportFrameRef.current = window.requestAnimationFrame(() => {
+      viewportFrameRef.current = null;
+      updateViewport();
+    });
+  }, [updateViewport]);
+
   useEffect(() => {
     updateViewport();
   }, [messages.length, updateViewport]);
@@ -92,10 +104,10 @@ export function VirtualizedMessageRows<T>({
       return;
     }
 
-    const handleScroll = () => updateViewport();
+    const handleScroll = () => scheduleViewportUpdate();
     container.addEventListener("scroll", handleScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleScroll);
-  }, [containerRef, updateViewport]);
+  }, [containerRef, scheduleViewportUpdate]);
 
   useEffect(() => {
     const activeKeys = new Set(
@@ -222,6 +234,11 @@ export function VirtualizedMessageRows<T>({
   useEffect(() => {
     const rowObservers = rowObserversRef.current;
     return () => {
+      if (viewportFrameRef.current !== null) {
+        window.cancelAnimationFrame(viewportFrameRef.current);
+        viewportFrameRef.current = null;
+      }
+
       for (const observer of rowObservers.values()) {
         observer.disconnect();
       }
