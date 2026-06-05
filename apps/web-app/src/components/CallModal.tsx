@@ -205,7 +205,7 @@ export function CallModal({ rtc }: CallModalProps) {
   useEffect(() => {
     if (callState === "INCOMING" || callState === "CALLING") {
       if (!ringtoneRef.current) {
-        ringtoneRef.current = new Audio("/your_phone_linging_yo_phone_lingin_ringtone-www_tiengdong_com.mp3");
+        ringtoneRef.current = new Audio("/call.mp3");
         ringtoneRef.current.loop = true;
       }
       const playPromise = ringtoneRef.current.play();
