@@ -16,6 +16,7 @@ import "package:url_launcher/url_launcher.dart";
 import "package:record/record.dart";
 import "package:path_provider/path_provider.dart";
 import "package:audioplayers/audioplayers.dart";
+import "package:video_player/video_player.dart";
 
 import "package:shared_preferences/shared_preferences.dart";
 import "../../models/conversation_summary.dart";
@@ -4208,7 +4209,10 @@ class _AttachmentView extends StatelessWidget {
     if (message.isAudio) {
       return _VoicePlayer(url: url, isMine: isMine);
     }
-    if (message.isVideo || message.isDocument) {
+    if (message.isVideo) {
+      return _InlineVideoPlayer(videoUrl: url);
+    }
+    if (message.isDocument) {
       final isDark = Theme.of(context).brightness == Brightness.dark;
       return InkWell(
         onTap: () async {
@@ -4218,48 +4222,183 @@ class _AttachmentView extends StatelessWidget {
           }
         },
         child: Container(
-          width: message.isVideo ? 200 : null,
-          height: message.isVideo ? 150 : null,
-          padding: message.isVideo ? null : const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: message.isVideo
-                ? Colors.black87
-                : (isMine
-                    ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
-                    : (isDark ? const Color(0xFF334155) : Colors.grey[200])),
+            color: isMine
+                ? (isDark ? const Color(0xFF6D28D9) : const Color(0xFFEDE9FE))
+                : (isDark ? const Color(0xFF334155) : Colors.grey[200]),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: message.isVideo
-              ? const Center(
-                  child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
-                )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.insert_drive_file,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.insert_drive_file,
+                color: isMine
+                    ? (isDark ? Colors.white : const Color(0xFF7C3AED))
+                    : (isDark ? Colors.white70 : Colors.black54),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  message.attachmentName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
                       color: isMine
-                          ? (isDark ? Colors.white : const Color(0xFF7C3AED))
-                          : (isDark ? Colors.white70 : Colors.black54),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        message.attachmentName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: isMine
-                                ? (isDark ? Colors.white : const Color(0xFF6D28D9))
-                                : (isDark ? Colors.white70 : Colors.black87)),
-                      ),
-                    ),
-                  ],
+                          ? (isDark ? Colors.white : const Color(0xFF6D28D9))
+                          : (isDark ? Colors.white70 : Colors.black87)),
                 ),
+              ),
+            ],
+          ),
         ),
       );
     }
     return const SizedBox.shrink();
+  }
+}
+
+class _InlineVideoPlayer extends StatefulWidget {
+  final String videoUrl;
+  const _InlineVideoPlayer({required this.videoUrl});
+
+  @override
+  State<_InlineVideoPlayer> createState() => _InlineVideoPlayerState();
+}
+
+class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
+  late VideoPlayerController _controller;
+  bool _initialized = false;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() {
+            _initialized = true;
+          });
+        }
+      }).catchError((error) {
+        debugPrint("Video initialization error: $error");
+        if (mounted) {
+          setState(() {
+            _hasError = true;
+          });
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasError) {
+      return Container(
+        width: 200,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, color: Colors.redAccent, size: 36),
+              SizedBox(height: 8),
+              Text(
+                "Không thể phát video",
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!_initialized) {
+      return Container(
+        width: 200,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 30,
+            height: 30,
+            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 200,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: AspectRatio(
+        aspectRatio: _controller.value.aspectRatio,
+        child: Stack(
+          alignment: Alignment.bottomCenter,
+          children: [
+            VideoPlayer(_controller),
+            _buildPlayPauseOverlay(),
+            VideoProgressIndicator(
+              _controller,
+              allowScrubbing: true,
+              colors: const VideoProgressColors(
+                playedColor: Color(0xFF7C3AED),
+                bufferedColor: Colors.white30,
+                backgroundColor: Colors.white12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayPauseOverlay() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        setState(() {
+          if (_controller.value.isPlaying) {
+            _controller.pause();
+          } else {
+            _controller.play();
+          }
+        });
+      },
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        child: _controller.value.isPlaying
+            ? const SizedBox.shrink()
+            : Container(
+                color: Colors.black38,
+                child: const Center(
+                  child: Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 50.0,
+                  ),
+                ),
+              ),
+      ),
+    );
   }
 }
 
