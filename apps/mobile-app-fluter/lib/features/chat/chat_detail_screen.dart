@@ -91,6 +91,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   StreamSubscription? _callInitSub;
   StreamSubscription? _callInviteSub;
   StreamSubscription? _callEndSub;
+  StreamSubscription? _messageDeliveredSub;
+  final Map<String, String> _memberReadWatermarks = {};
+  final Map<String, Set<String>> _messageReadUserIds = {};
+  final Map<String, Set<String>> _messageDeliveredUserIds = {};
   Map<String, String> _aliases = {};
   bool _loadingAliases = false;
   String? _fetchedGroupName;
@@ -353,6 +357,64 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         })
         .catchError((_) {});
 
+    widget.conversationService.getReadWatermarks(widget.conversation.conversationId).then((watermarks) {
+      if (mounted) {
+        setState(() {
+          for (final wm in watermarks) {
+            final userId = wm["userId"]?.toString();
+            final lastReadAt = wm["lastReadAt"]?.toString();
+            if (userId != null && lastReadAt != null) {
+              _memberReadWatermarks[userId] = lastReadAt;
+            }
+          }
+        });
+      }
+    }).catchError((e) {
+      debugPrint("Error loading read watermarks: $e");
+    });
+
+    _messageDeliveredSub = widget.socketService.onMessageDelivered.listen((data) {
+      if (mounted &&
+          (data["conversationId"] == widget.conversation.conversationId ||
+           data["conversationKey"] == _conversationKey)) {
+        final messageId = data["messageId"]?.toString();
+        final userId = data["userId"]?.toString();
+        if (messageId != null && userId != null && userId != widget.currentUser.id.toString()) {
+          final items = _pagingController.itemList;
+          if (items != null) {
+            final newList = List<MessageItem>.from(items);
+            bool updatedAny = false;
+            for (int i = 0; i < newList.length; i++) {
+              final m = newList[i];
+              if (m.id == messageId) {
+                final deliveredSet = _messageDeliveredUserIds.putIfAbsent(m.id, () => {});
+                final readSet = _messageReadUserIds.putIfAbsent(m.id, () => {});
+                if (!readSet.contains(userId) && !deliveredSet.contains(userId)) {
+                  deliveredSet.add(userId);
+                  final currentCount = m.deliveredCount ?? 0;
+                  final nextCount = currentCount + 1;
+                  final nextState = m.deliveryState == 'READ'
+                      ? 'READ'
+                      : (nextCount > 0 ? 'DELIVERED' : m.deliveryState);
+                  newList[i] = m.copyWith(
+                    deliveredCount: nextCount,
+                    deliveryState: nextState,
+                  );
+                  updatedAny = true;
+                }
+                break;
+              }
+            }
+            if (updatedAny) {
+              setState(() {
+                _pagingController.itemList = newList;
+              });
+            }
+          }
+        }
+      }
+    });
+
     _msgSub = widget.socketService.onMessageCreated.listen((msg) {
       if (mounted && msg.conversationId == widget.conversation.conversationId) {
         if (msg.type == "SYSTEM" && msg.contentText.contains("left the call")) {
@@ -513,20 +575,52 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (readByUserId != null && readAtStr != null && readByUserId != widget.currentUser.id.toString()) {
           final readAt = DateTime.tryParse(readAtStr);
           if (readAt != null) {
+            setState(() {
+              _memberReadWatermarks[readByUserId] = readAtStr;
+            });
             final items = _pagingController.itemList;
             if (items != null) {
               final newList = List<MessageItem>.from(items);
               bool updatedAny = false;
               for (int i = 0; i < newList.length; i++) {
                 final m = newList[i];
-                if (m.senderId == widget.currentUser.id.toString()) {
-                  final mSentAt = DateTime.tryParse(m.sentAt);
-                  if (mSentAt != null && !mSentAt.isAfter(readAt) && m.deliveryState != 'READ') {
+                final mSentAt = DateTime.tryParse(m.sentAt);
+                if (mSentAt != null && !mSentAt.isAfter(readAt)) {
+                  final readSet = _messageReadUserIds.putIfAbsent(m.id, () => {});
+                  if (!readSet.contains(readByUserId)) {
+                    readSet.add(readByUserId);
+                    int currentReadCount = m.readByCount ?? 0;
+                    int newReadCount = currentReadCount + 1;
+                    
+                    final deliveredSet = _messageDeliveredUserIds.putIfAbsent(m.id, () => {});
+                    int currentDeliveredCount = m.deliveredCount ?? 0;
+                    if (deliveredSet.contains(readByUserId)) {
+                      deliveredSet.remove(readByUserId);
+                    } else {
+                      if (currentDeliveredCount < newReadCount) {
+                        currentDeliveredCount = newReadCount;
+                      }
+                    }
+                    
+                    final isMyMsg = m.senderId == widget.currentUser.id.toString();
+                    final nextState = isMyMsg ? 'READ' : m.deliveryState;
+                    
                     newList[i] = m.copyWith(
-                      deliveryState: 'READ',
+                      deliveryState: nextState,
+                      readByCount: newReadCount,
+                      deliveredCount: currentDeliveredCount,
                       lastReadAt: readAtStr,
                     );
                     updatedAny = true;
+                  } else {
+                    final isMyMsg = m.senderId == widget.currentUser.id.toString();
+                    if (isMyMsg && m.deliveryState != 'READ') {
+                      newList[i] = m.copyWith(
+                        deliveryState: 'READ',
+                        lastReadAt: readAtStr,
+                      );
+                      updatedAny = true;
+                    }
                   }
                 }
               }
@@ -590,6 +684,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _callInitSub?.cancel();
     _callInviteSub?.cancel();
     _callEndSub?.cancel();
+    _messageDeliveredSub?.cancel();
     for (final timer in _typingTimers.values) {
       timer.cancel();
     }
@@ -935,8 +1030,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Không tải được danh sách thành viên: $e")));
+        AppToast.show(
+          context,
+          message: "Không tải được danh sách thành viên: $e",
+          type: AppToastType.error,
+        );
       }
       return null;
     }
@@ -1044,8 +1142,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text("Dịch vụ định vị đã bị tắt. Vui lòng bật GPS.")));
+          AppToast.show(
+            context,
+            message: "Dịch vụ định vị đã bị tắt. Vui lòng bật GPS.",
+            type: AppToastType.warning,
+          );
         }
         return;
       }
@@ -1055,8 +1156,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text("Quyền truy cập vị trí bị từ chối")));
+            AppToast.show(
+              context,
+              message: "Quyền truy cập vị trí bị từ chối",
+              type: AppToastType.warning,
+            );
           }
           return;
         }
@@ -1064,9 +1168,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       if (permission == LocationPermission.deniedForever) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text(
-                  "Quyền truy cập vị trí bị từ chối vĩnh viễn. Vui lòng bật trong cài đặt.")));
+          AppToast.show(
+            context,
+            message: "Quyền truy cập vị trí bị từ chối vĩnh viễn. Vui lòng bật trong cài đặt.",
+            type: AppToastType.error,
+          );
         }
         return;
       }
@@ -1086,8 +1192,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       await _sendMessage(text: text);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Lỗi lấy vị trí: $e")));
+        AppToast.show(
+          context,
+          message: "Lỗi lấy vị trí: $e",
+          type: AppToastType.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -1197,8 +1306,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final errorMsg = e.toString().contains("upload") || e.toString().contains("tải lên")
             ? "Lỗi tải lên tệp: $e"
             : "Lỗi gửi tin nhắn: $e";
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMsg))
+        AppToast.show(
+          context,
+          message: errorMsg,
+          type: AppToastType.error,
         );
       }
       rethrow;
@@ -1287,8 +1398,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 onTap: () {
                   Navigator.pop(context);
                   Clipboard.setData(ClipboardData(text: message.contentText));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Đã sao chép")));
+                  AppToast.show(
+                    context,
+                    message: "Đã sao chép",
+                    type: AppToastType.success,
+                  );
                 },
               ),
               ListTile(
@@ -1465,11 +1579,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     widget.conversationService.forwardMessage(
         widget.conversation.conversationId, message.id,
         targetConversationIds: [targetConvId]).then((_) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text("Đã chuyển tiếp")));
+      AppToast.show(
+        context,
+        message: "Đã chuyển tiếp",
+        type: AppToastType.success,
+      );
     }).catchError((e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      AppToast.show(
+        context,
+        message: "Lỗi: $e",
+        type: AppToastType.error,
+      );
     });
   }
 
@@ -2391,8 +2511,42 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           String? peerId;
           String? peerAvatarUrl;
           String? peerDisplayName;
+          List<Map<String, dynamic>> groupReadAvatars = [];
           
-          if (isMine && !widget.conversation.isGroup) {
+          if (widget.conversation.isGroup) {
+            final myId = widget.currentUser.id.toString();
+            for (final member in _conversationMembers) {
+              final userId = member["userId"]?.toString();
+              if (userId == null || userId == myId) continue;
+              
+              final lastRead = _memberReadWatermarks[userId];
+              if (lastRead != null) {
+                final lastReadTime = DateTime.tryParse(lastRead);
+                final mSentTime = DateTime.tryParse(message.sentAt);
+                if (lastReadTime != null && mSentTime != null && !mSentTime.isAfter(lastReadTime)) {
+                  // Check if there is any newer message in items that this user has also read
+                  bool hasReadNewer = false;
+                  for (int i = 0; i < items.length; i++) {
+                    final otherMsg = items[i];
+                    final otherSentTime = DateTime.tryParse(otherMsg.sentAt);
+                    if (otherSentTime != null && otherSentTime.isAfter(mSentTime)) {
+                      if (!otherSentTime.isAfter(lastReadTime)) {
+                        hasReadNewer = true;
+                        break;
+                      }
+                    }
+                  }
+                  if (!hasReadNewer) {
+                    groupReadAvatars.add({
+                      "userId": userId,
+                      "avatarUrl": member["avatarUrl"]?.toString() ?? member["avatar"]?.toString(),
+                      "displayName": member["displayName"]?.toString() ?? member["fullName"]?.toString() ?? "User",
+                    });
+                  }
+                }
+              }
+            }
+          } else if (isMine) {
             peerId = widget.conversation.getPeerId(widget.currentUser.id.toString());
             if (peerId != null) {
               peerAvatarUrl = widget.conversation.peerAvatarUrl ?? widget.conversation.avatarUrl;
@@ -2437,6 +2591,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             peerId: peerId,
             peerAvatarUrl: peerAvatarUrl,
             peerDisplayName: peerDisplayName,
+            groupReadAvatars: groupReadAvatars,
             onReplyTap: message.replyTo != null
                 ? () => _scrollToMessage(message.replyTo!)
                 : null,
@@ -3461,7 +3616,7 @@ class ChatMessageBubble extends StatelessWidget {
   final String? peerId;
   final String? peerAvatarUrl;
   final String? peerDisplayName;
-
+  final List<Map<String, dynamic>> groupReadAvatars;
   final VoidCallback? onReplyTap;
 
   const ChatMessageBubble({
@@ -3477,6 +3632,7 @@ class ChatMessageBubble extends StatelessWidget {
     this.peerId,
     this.peerAvatarUrl,
     this.peerDisplayName,
+    this.groupReadAvatars = const [],
     this.onReplyTap,
   });
 
@@ -3544,6 +3700,33 @@ class ChatMessageBubble extends StatelessWidget {
               initialDisplayName: peerDisplayName ?? "User",
               radius: 8,
               userService: userService,
+            ),
+          ),
+        ] else if (groupReadAvatars.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Padding(
+            padding: EdgeInsets.only(
+              left: isMine ? 0.0 : 36.0,
+              right: isMine ? 4.0 : 0.0,
+            ),
+            child: Row(
+              mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: groupReadAvatars.map((member) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                  child: Tooltip(
+                    message: member["displayName"] ?? "User",
+                    child: UserAvatar(
+                      userId: member["userId"]!,
+                      initialAvatarUrl: member["avatarUrl"],
+                      initialDisplayName: member["displayName"] ?? "User",
+                      radius: 8,
+                      userService: userService,
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
           ),
         ],
@@ -3788,8 +3971,11 @@ class ChatMessageBubble extends StatelessWidget {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
         } else {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Không thể mở đường dẫn này")));
+            AppToast.show(
+              context,
+              message: "Không thể mở đường dẫn này",
+              type: AppToastType.error,
+            );
           }
         }
       },
@@ -3897,8 +4083,11 @@ class ChatMessageBubble extends StatelessWidget {
               await launchUrl(uri, mode: LaunchMode.externalApplication);
             } else {
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text("Không thể mở đường dẫn này")));
+                AppToast.show(
+                  context,
+                  message: "Không thể mở đường dẫn này",
+                  type: AppToastType.error,
+                );
               }
             }
           },
@@ -4062,11 +4251,10 @@ class _AttachmentView extends StatelessWidget {
 
   Future<void> _downloadImage(BuildContext context, String url) async {
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Đang tải ảnh xuống..."),
-          duration: Duration(seconds: 2),
-        ),
+      AppToast.show(
+        context,
+        message: "Đã bắt đầu tải xuống ảnh...",
+        type: AppToastType.info,
       );
 
       String extension = "jpg";
@@ -4098,37 +4286,33 @@ class _AttachmentView extends StatelessWidget {
       if (result.status == TaskStatus.complete) {
         final path = await FileDownloader().moveToSharedStorage(task, SharedStorage.images);
         if (path != null && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Đã lưu ảnh vào thư viện thành công!"),
-              backgroundColor: Colors.green,
-            ),
+          AppToast.show(
+            context,
+            message: "Đã lưu ảnh vào thư viện thành công!",
+            type: AppToastType.success,
           );
         } else if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Không thể lưu ảnh vào thư viện."),
-              backgroundColor: Colors.redAccent,
-            ),
+          AppToast.show(
+            context,
+            message: "Không thể lưu ảnh vào thư viện.",
+            type: AppToastType.error,
           );
         }
       } else {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Tải ảnh thất bại."),
-              backgroundColor: Colors.redAccent,
-            ),
+          AppToast.show(
+            context,
+            message: "Tải ảnh thất bại.",
+            type: AppToastType.error,
           );
         }
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Lỗi khi tải ảnh: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
+        AppToast.show(
+          context,
+          message: "Lỗi khi tải ảnh: $e",
+          type: AppToastType.error,
         );
       }
     }

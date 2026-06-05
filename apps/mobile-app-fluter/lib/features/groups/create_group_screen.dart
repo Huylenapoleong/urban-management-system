@@ -5,6 +5,7 @@ import "../../services/app_services.dart";
 import "../../models/user_profile.dart";
 import "../../state/session_controller.dart";
 import "../shared/widgets/user_avatar.dart";
+import "../shared/widgets/app_toast.dart";
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({super.key});
@@ -109,8 +110,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   Future<void> _handleCreate() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Vui lòng nhập tên nhóm")),
+      AppToast.show(
+        context,
+        message: "Vui lòng nhập tên nhóm",
+        type: AppToastType.warning,
       );
       return;
     }
@@ -127,21 +130,19 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       );
       if (mounted) {
         Navigator.pop(context, true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Tạo nhóm thành công"),
-            backgroundColor: Colors.green,
-          ),
+        AppToast.show(
+          context,
+          message: "Tạo nhóm thành công",
+          type: AppToastType.success,
         );
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isCreating = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Lỗi: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
+        AppToast.show(
+          context,
+          message: "Lỗi: $e",
+          type: AppToastType.error,
         );
       }
     }

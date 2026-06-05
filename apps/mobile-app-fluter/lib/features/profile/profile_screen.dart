@@ -13,6 +13,7 @@ import "about_app_screen.dart";
 import "knowledge_base_screen.dart";
 import "../shared/widgets/user_avatar.dart";
 import "widgets/avatar_bottom_sheet.dart";
+import "../shared/widgets/app_toast.dart";
 import "../shared/widgets/app_logo_button.dart";
 
 class ProfileScreen extends StatefulWidget {
@@ -68,8 +69,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _showAvatarBottomSheet() {
     if (widget.userService == null || widget.uploadService == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Dịch vụ không khả dụng. Vui lòng thử lại sau.")),
+      AppToast.show(
+        context,
+        message: "Dịch vụ không khả dụng. Vui lòng thử lại sau.",
+        type: AppToastType.error,
       );
       return;
     }

@@ -724,10 +724,12 @@ let sharedAudioCtx: AudioContext | null = null;
 const playTingSound = () => {
   try {
     if (!sharedAudioCtx) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      sharedAudioCtx = new AudioContext();
+      const AudioContextConstructor =
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!AudioContextConstructor) return;
+      sharedAudioCtx = new AudioContextConstructor();
     }
 
     // Resume context if browser autoplay policy suspended it
@@ -781,6 +783,35 @@ function extractGroupIdFromConversationId(
   }
 
   return undefined;
+}
+
+function getConversationIdVariants(conversationId?: string | null): string[] {
+  const raw = conversationId?.trim();
+  if (!raw) {
+    return [];
+  }
+
+  const variants = new Set([raw]);
+  if (/^group:/i.test(raw)) {
+    variants.add(raw.replace(/^group:/i, "GRP#"));
+  } else if (/^group#/i.test(raw)) {
+    variants.add(raw.replace(/^group#/i, "GRP#"));
+  } else if (/^grp#/i.test(raw)) {
+    variants.add(raw.replace(/^grp#/i, "GRP#"));
+    variants.add(raw.replace(/^grp#/i, "group:"));
+  }
+
+  return [...variants];
+}
+
+function conversationIdsMatch(
+  left?: string | null,
+  right?: string | null,
+): boolean {
+  const leftVariants = new Set(getConversationIdVariants(left));
+  return getConversationIdVariants(right).some((variant) =>
+    leftVariants.has(variant),
+  );
 }
 
 function escapeRegExp(value: string): string {
@@ -1706,6 +1737,21 @@ export function ChatPage() {
 
   const activeContact = mergedConversations.find(
     (c) => c.conversationId === activeChat,
+  );
+  const activeChatCallKeys = useMemo(
+    () => getConversationIdVariants(activeChat),
+    [activeChat],
+  );
+  const activeGroupCallVisible = Boolean(
+    activeContact?.isGroup &&
+    activeChat &&
+    (activeChatCallKeys.some((key) => rtc.activeGroupCalls.has(key)) ||
+      (rtc.callState !== "IDLE" &&
+        conversationIdsMatch(rtc.activeConfig?.conversationId, activeChat))),
+  );
+  const currentGroupCallIsVideo = Boolean(
+    rtc.activeConfig?.isVideo &&
+      conversationIdsMatch(rtc.activeConfig.conversationId, activeChat),
   );
 
 
@@ -3861,9 +3907,8 @@ export function ChatPage() {
     inlineReactionPickerMessageId,
   ]);
 
-  const handleStartCall = (isVideo: boolean) => {
-    if (!activeContact) return;
-
+  const buildCallConfig = (isVideo: boolean) => {
+    if (!activeContact) return null;
     const participantNames = Object.fromEntries(displayNameByUserId.entries());
     const participantAvatarUrls = Object.fromEntries([
       ...groupMemberAvatarByUserId.entries(),
@@ -3873,7 +3918,7 @@ export function ChatPage() {
         ? [[activeDmUserId, activeContactAvatarUrl]]
         : []),
     ]);
-    const config = {
+    return {
       isVideo,
       conversationId: activeContact.conversationId,
       targetUserId: activeDmUserId,
@@ -3888,7 +3933,18 @@ export function ChatPage() {
       participantNames,
       participantAvatarUrls,
     };
+  };
+
+  const handleStartCall = (isVideo: boolean) => {
+    const config = buildCallConfig(isVideo);
+    if (!config) return;
     startCall(config);
+  };
+
+  const handleJoinGroupCall = (isVideo: boolean) => {
+    const config = buildCallConfig(isVideo);
+    if (!config) return;
+    rtc.joinCall(config);
   };
 
   const resolveMessageType = (file?: File | null): ChatMessageType => {
@@ -7576,17 +7632,12 @@ export function ChatPage() {
                   );
                 })()}
 
-                {activeContact?.isGroup &&
-                  activeChat &&
-                  (rtc.activeGroupCalls.has(activeChat) ||
-                    (rtc.callState !== "IDLE" &&
-                      rtc.activeConfig?.conversationId === activeChat)) ? (
+                {activeGroupCallVisible ? (
                   <div className="flex w-full justify-center py-3">
                     <div className="flex flex-col items-center gap-2 rounded-xl bg-blue-50/80 border border-blue-200 px-5 py-3 shadow-sm dark:bg-blue-900/20 dark:border-blue-800 animate-in fade-in zoom-in duration-300">
                       <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-blue-950 shadow-sm relative">
-                          {rtc.activeConfig?.conversationId === activeChat &&
-                            rtc.activeConfig.isVideo ? (
+                          {currentGroupCallIsVideo ? (
                             <Video size={14} className="text-blue-500" />
                           ) : (
                             <Phone size={14} className="text-blue-500" />
@@ -7600,18 +7651,18 @@ export function ChatPage() {
                           Cuộc gọi nhóm đang diễn ra
                         </p>
                       </div>
-                      {rtc.callState !== "CONNECTED" && (
+                      {rtc.callState === "IDLE" && (
                         <div className="mt-1 flex w-full gap-2">
                           <button
                             type="button"
-                            onClick={() => handleStartCall(false)}
+                            onClick={() => handleJoinGroupCall(false)}
                             className="flex-1 rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-slate-300 transition dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
                           >
                             Tham gia thoại
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleStartCall(true)}
+                            onClick={() => handleJoinGroupCall(true)}
                             className="flex-1 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700 transition"
                           >
                             Tham gia video

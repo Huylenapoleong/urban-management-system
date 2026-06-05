@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../models/report_item.dart';
 import '../../../services/app_services.dart';
@@ -1208,8 +1209,8 @@ class _OfficialReportCard extends StatelessWidget {
         .toList();
   }
 
-  void _openDetail(BuildContext context) {
-    showModalBottomSheet(
+  void _openDetail(BuildContext context) async {
+    final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
       isScrollControlled: true,
       backgroundColor:
@@ -1224,6 +1225,14 @@ class _OfficialReportCard extends StatelessWidget {
         onStatusUpdate: onStatusUpdate,
       ),
     );
+
+    if (result != null && context.mounted) {
+      final convId = result['convId']!;
+      final creatorName = result['creatorName']!;
+      context.push(
+        '/official/chats/${Uri.encodeComponent(convId)}?name=${Uri.encodeComponent(creatorName)}',
+      );
+    }
   }
 
   void _openStatusUpdate(BuildContext context) {
@@ -1283,8 +1292,10 @@ class _ReportDetailSheet extends StatefulWidget {
   }) {
     final nextStatuses = _nextAllowedStatuses(report.status);
     if (nextStatuses.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Báo cáo này không thể cập nhật thêm.')),
+      AppToast.show(
+        context,
+        message: 'Báo cáo này không thể cập nhật thêm.',
+        type: AppToastType.warning,
       );
       return;
     }
@@ -1324,11 +1335,39 @@ class _ReportDetailSheet extends StatefulWidget {
 class _ReportDetailSheetState extends State<_ReportDetailSheet> {
   List<Map<String, dynamic>>? _auditLog;
   bool _loadingAudit = false;
+  Map<String, dynamic>? _creatorProfile;
+  bool _loadingCreator = false;
 
   @override
   void initState() {
     super.initState();
     _fetchAudit();
+    _fetchCreator();
+  }
+
+  Future<void> _fetchCreator() async {
+    final userId = widget.report.userId;
+    if (userId.isEmpty) return;
+    setState(() => _loadingCreator = true);
+    try {
+      final userService = context.read<AppServices>().userService;
+      final profile = await userService.getUserById(userId);
+      if (mounted) {
+        setState(() {
+          _creatorProfile = {
+            'fullName': profile.fullName,
+            'role': profile.role,
+            'phone': profile.phone,
+            'email': profile.email,
+            'unit': profile.unit,
+          };
+        });
+      }
+    } catch (_) {
+      // silently fail – fallback to userId
+    } finally {
+      if (mounted) setState(() => _loadingCreator = false);
+    }
   }
 
   Future<void> _fetchAudit() async {
@@ -1447,6 +1486,29 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                 value: _formatDateTime(report.createdAt),
                 isDark: isDark,
               ),
+              // Creator info
+              _MetaRow(
+                icon: Icons.person_outline_rounded,
+                label: 'Người tạo',
+                value: _loadingCreator
+                    ? 'Đang tải...'
+                    : (_creatorProfile?['fullName'] as String?) ?? report.userId,
+                isDark: isDark,
+              ),
+              if (_creatorProfile != null && (_creatorProfile!['unit'] as String?)?.isNotEmpty == true)
+                _MetaRow(
+                  icon: Icons.apartment_outlined,
+                  label: 'Đơn vị',
+                  value: _creatorProfile!['unit'] as String,
+                  isDark: isDark,
+                ),
+              if (_creatorProfile != null && (_creatorProfile!['phone'] as String?)?.isNotEmpty == true)
+                _MetaRow(
+                  icon: Icons.phone_outlined,
+                  label: 'Số điện thoại',
+                  value: _creatorProfile!['phone'] as String,
+                  isDark: isDark,
+                ),
               if (report.assignedOfficerId != null)
                 _MetaRow(
                   icon: Icons.person_outlined,
@@ -1454,6 +1516,38 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                   value: report.assignedOfficerId!,
                   isDark: isDark,
                 ),
+              // Chat button
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    final creatorId = widget.report.userId;
+                    final creatorName = (_creatorProfile?['fullName'] as String?) ?? 'Người dùng';
+                    // Build DM conversation key: DM#<smaller_id>#<larger_id>
+                    final session = context.read<SessionController>();
+                    final myId = session.user?.id ?? '';
+                    final ids = [myId, creatorId]..sort();
+                    final convId = 'DM#${ids[0]}#${ids[1]}';
+                    Navigator.pop(context, {
+                      'convId': convId,
+                      'creatorName': creatorName,
+                    });
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                  label: const Text(
+                    'Chat với người tạo',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1F3E68),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
+                  ),
+                ),
+              ),
 
               // Description
               Builder(
@@ -1763,18 +1857,18 @@ class _StatusPickerSheetState extends State<_StatusPickerSheet> {
       if (!mounted) return;
       Navigator.pop(context);
       widget.onStatusUpdate();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Đã cập nhật trạng thái thành ${_labels[_selected!]}'),
-        backgroundColor: const Color(0xFF059669),
-        behavior: SnackBarBehavior.floating,
-      ));
+      AppToast.show(
+        context,
+        message: 'Đã cập nhật trạng thái thành ${_labels[_selected!]}',
+        type: AppToastType.success,
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Lỗi: $e'),
-        backgroundColor: Colors.red.shade600,
-        behavior: SnackBarBehavior.floating,
-      ));
+      AppToast.show(
+        context,
+        message: 'Lỗi: $e',
+        type: AppToastType.error,
+      );
     } finally {
       if (mounted) setState(() => _updating = false);
     }
