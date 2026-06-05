@@ -128,24 +128,38 @@ describe('ChatCallSessionService', () => {
     );
   });
 
-  it('keeps a group call active while the caller is the only remaining participant', async () => {
-    await service.initiateCall(groupAccess, 'user-1', true);
-    await service.acceptCall(groupAccess, 'user-2');
+  it('keeps a single remaining group participant briefly, then treats it as stale', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-22T14:00:00.000Z'));
 
-    const participantLeft = await service.endCall(groupAccess, 'user-2');
+    try {
+      await service.initiateCall(groupAccess, 'user-1', true);
+      await service.acceptCall(groupAccess, 'user-2');
 
-    expect(participantLeft.shouldEmit).toBe(true);
-    await expect(
-      service.touchSignalingSession(groupAccess, 'user-1'),
-    ).resolves.toMatchObject({
-      status: 'ACTIVE',
-    });
+      jest.setSystemTime(new Date('2026-04-22T14:00:10.000Z'));
+      const participantLeft = await service.endCall(groupAccess, 'user-2');
 
-    const callerLeft = await service.endCall(groupAccess, 'user-1');
+      expect(participantLeft.shouldEmit).toBe(true);
+      await expect(
+        service.touchSignalingSession(groupAccess, 'user-1'),
+      ).resolves.toMatchObject({
+        acceptedByUserIds: ['user-1'],
+        status: 'ACTIVE',
+      });
+      await expect(
+        service.initiateCall(groupAccess, 'user-3', false),
+      ).rejects.toThrow(ConflictException);
 
-    expect(callerLeft.shouldEmit).toBe(true);
-    await expect(
-      service.touchSignalingSession(groupAccess, 'user-1'),
-    ).rejects.toThrow('There is no active call for this conversation.');
+      jest.setSystemTime(new Date('2026-04-22T14:00:26.000Z'));
+      const restarted = await service.initiateCall(
+        groupAccess,
+        'user-3',
+        false,
+      );
+
+      expect(restarted.shouldEmit).toBe(true);
+      expect(restarted.session?.initiatedByUserId).toBe('user-3');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

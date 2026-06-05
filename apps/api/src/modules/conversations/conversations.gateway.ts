@@ -807,7 +807,7 @@ export class ConversationsGateway
   async handleCallEnd(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: unknown,
-  ): Promise<ChatSocketAck<{ success: true }>> {
+  ): Promise<ChatSocketAck<{ success: true; callStillActive: boolean }>> {
     return this.withAck(
       async () => {
         const { access, user } = await this.resolveSignalAccess(
@@ -819,10 +819,7 @@ export class ConversationsGateway
           access,
           user.id,
         );
-        const callStillActive = Boolean(
-          result.session?.isGroup &&
-          result.session.acceptedByUserIds.length > 0,
-        );
+        const callStillActive = this.isGroupCallStillActive(result.session);
         const callEvent = result.session
           ? this.buildCallEventInfo(
               result.session,
@@ -860,7 +857,7 @@ export class ConversationsGateway
           }
         }
 
-        return { success: true };
+        return { success: true, callStillActive };
       },
       'CHAT_CALL_END_FAILED',
       CHAT_SOCKET_EVENTS.CALL_END,
@@ -1311,6 +1308,22 @@ export class ConversationsGateway
         ? { endedByUserId: actorUserId }
         : {}),
     };
+  }
+
+  private isGroupCallStillActive(
+    session:
+      | {
+          acceptedAt: string | null;
+          acceptedByUserIds: string[];
+          isGroup: boolean;
+        }
+      | undefined,
+  ): boolean {
+    if (!session?.isGroup || session.acceptedByUserIds.length === 0) {
+      return false;
+    }
+
+    return true;
   }
 
   private computeCallDurationSeconds(
