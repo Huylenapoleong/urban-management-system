@@ -48,6 +48,7 @@ export interface ChatCallSessionAccess {
 @Injectable()
 export class ChatCallSessionService {
   private readonly logger = new Logger(ChatCallSessionService.name);
+  private readonly groupSingleParticipantGraceTtlSeconds = 15;
   private readonly memorySessions = new Map<
     string,
     MemoryChatCallSessionEntry
@@ -62,7 +63,16 @@ export class ChatCallSessionService {
   async getActiveCallSession(
     access: ResolvedConversationAccess,
   ): Promise<ChatCallSession | undefined> {
-    return this.getSession(access.conversationKey);
+    const session = await this.getSession(access.conversationKey);
+    if (
+      session &&
+      this.isStaleConnectedSingleParticipantGroupSession(session)
+    ) {
+      await this.deleteSession(access.conversationKey);
+      return undefined;
+    }
+
+    return session;
   }
 
   async initiateCall(
@@ -70,7 +80,15 @@ export class ChatCallSessionService {
     callerUserId: string,
     isVideo: boolean,
   ): Promise<ChatCallTransitionResult> {
-    const existingSession = await this.getSession(access.conversationKey);
+    let existingSession = await this.getSession(access.conversationKey);
+
+    if (
+      existingSession &&
+      this.isStaleConnectedSingleParticipantGroupSession(existingSession)
+    ) {
+      await this.deleteSession(access.conversationKey);
+      existingSession = undefined;
+    }
 
     if (existingSession) {
       if (existingSession.initiatedByUserId === callerUserId) {
@@ -104,9 +122,7 @@ export class ChatCallSessionService {
 
     const created = await this.createSessionIfAbsent(
       session,
-      access.isGroup
-        ? this.config.chatCallActiveTtlSeconds
-        : this.config.chatCallInviteTtlSeconds,
+      this.getSessionTtlSeconds(session),
     );
 
     if (!created) {
@@ -135,6 +151,13 @@ export class ChatCallSessionService {
     calleeUserId: string,
   ): Promise<ChatCallTransitionResult> {
     const session = await this.requireSession(access.conversationKey);
+
+    if (this.isStaleConnectedSingleParticipantGroupSession(session)) {
+      await this.deleteSession(access.conversationKey);
+      throw new ConflictException(
+        'There is no active call for this conversation.',
+      );
+    }
 
     if (!session.isGroup && session.initiatedByUserId === calleeUserId) {
       throw new BadRequestException(
@@ -222,11 +245,7 @@ export class ChatCallSessionService {
     );
     session.updatedAt = nowIso();
 
-    const ttlSeconds =
-      session.status === 'ACTIVE'
-        ? this.config.chatCallActiveTtlSeconds
-        : this.config.chatCallInviteTtlSeconds;
-    await this.persistSession(session, ttlSeconds);
+    await this.persistSession(session, this.getSessionTtlSeconds(session));
 
     return {
       shouldEmit: true,
@@ -276,7 +295,7 @@ export class ChatCallSessionService {
       new Set([...session.endedByUserIds, userId]),
     );
 
-    if (session.acceptedByUserIds.length === 0) {
+    if (!this.isGroupSessionStillActive(session)) {
       await this.deleteSession(access.conversationKey);
 
       return {
@@ -286,7 +305,7 @@ export class ChatCallSessionService {
     }
 
     session.updatedAt = nowIso();
-    await this.persistSession(session, this.config.chatCallActiveTtlSeconds);
+    await this.persistSession(session, this.getSessionTtlSeconds(session));
 
     return {
       shouldEmit: true,
@@ -329,6 +348,13 @@ export class ChatCallSessionService {
   ): Promise<ChatCallSession> {
     const session = await this.requireSession(access.conversationKey);
 
+    if (this.isStaleConnectedSingleParticipantGroupSession(session)) {
+      await this.deleteSession(access.conversationKey);
+      throw new ConflictException(
+        'There is no active call for this conversation.',
+      );
+    }
+
     if (!session.participantUserIds.includes(userId)) {
       throw new ConflictException(
         'This user is not part of the active call session.',
@@ -345,8 +371,10 @@ export class ChatCallSessionService {
       );
     }
 
-    session.updatedAt = nowIso();
-    await this.persistSession(session, this.config.chatCallActiveTtlSeconds);
+    if (!this.isConnectedSingleParticipantGroupSession(session)) {
+      session.updatedAt = nowIso();
+      await this.persistSession(session, this.getSessionTtlSeconds(session));
+    }
     return session;
   }
 
@@ -498,6 +526,63 @@ export class ChatCallSessionService {
     }
 
     this.memorySessions.delete(conversationKey);
+  }
+
+  private getSessionTtlSeconds(session: ChatCallSession): number {
+    if (session.isGroup && !session.acceptedAt) {
+      return this.config.chatCallInviteTtlSeconds;
+    }
+
+    if (this.isConnectedSingleParticipantGroupSession(session)) {
+      return Math.min(
+        this.groupSingleParticipantGraceTtlSeconds,
+        this.config.chatCallInviteTtlSeconds,
+      );
+    }
+
+    return session.status === 'ACTIVE'
+      ? this.config.chatCallActiveTtlSeconds
+      : this.config.chatCallInviteTtlSeconds;
+  }
+
+  private isGroupSessionStillActive(session: ChatCallSession): boolean {
+    if (!session.isGroup) {
+      return false;
+    }
+
+    if (session.acceptedByUserIds.length === 0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private isConnectedSingleParticipantGroupSession(
+    session: ChatCallSession,
+  ): boolean {
+    return (
+      session.isGroup &&
+      Boolean(session.acceptedAt) &&
+      session.acceptedByUserIds.length <= 1
+    );
+  }
+
+  private isStaleConnectedSingleParticipantGroupSession(
+    session: ChatCallSession,
+  ): boolean {
+    if (!this.isConnectedSingleParticipantGroupSession(session)) {
+      return false;
+    }
+
+    const updatedAtMs = Date.parse(session.updatedAt);
+    if (Number.isNaN(updatedAtMs)) {
+      return true;
+    }
+
+    return (
+      Date.now() - updatedAtMs >
+      this.groupSingleParticipantGraceTtlSeconds * 1000
+    );
   }
 
   private parseSerializedSession(
