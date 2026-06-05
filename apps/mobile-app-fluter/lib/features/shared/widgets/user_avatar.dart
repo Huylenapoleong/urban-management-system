@@ -15,6 +15,7 @@ class UserAvatar extends StatefulWidget {
   final bool isActive;
   final UserService? userService;
   final GroupService? groupService;
+  final List<String>? memberAvatars;
 
   const UserAvatar({
     super.key,
@@ -27,6 +28,7 @@ class UserAvatar extends StatefulWidget {
     this.isActive = false,
     this.userService,
     this.groupService,
+    this.memberAvatars,
   });
 
   @override
@@ -38,6 +40,7 @@ class _UserAvatarState extends State<UserAvatar> {
   bool _loading = false;
   static final Set<String> _failedIds = {};
   static final Map<String, String> _resolvedAvatarUrls = {};
+  static final Map<String, List<String>> _groupGridAvatars = {};
 
   @override
   void initState() {
@@ -56,7 +59,10 @@ class _UserAvatarState extends State<UserAvatar> {
     }
     
     if ((_avatarUrl == null || _avatarUrl!.isEmpty) && id != null) {
-      _fetchAvatar();
+      final hasGrid = widget.memberAvatars != null || (widget.groupId != null && _groupGridAvatars.containsKey(widget.groupId));
+      if (!hasGrid) {
+        _fetchAvatar();
+      }
     }
   }
 
@@ -74,11 +80,14 @@ class _UserAvatarState extends State<UserAvatar> {
     }
     
     if ((_avatarUrl == null || _avatarUrl!.isEmpty) && 
-        (widget.userId != oldWidget.userId || widget.groupId != oldWidget.groupId)) {
+        (widget.userId != oldWidget.userId || widget.groupId != oldWidget.groupId || widget.memberAvatars != oldWidget.memberAvatars)) {
       if (id != null && _resolvedAvatarUrls.containsKey(id)) {
         setState(() => _avatarUrl = _resolvedAvatarUrls[id]);
       } else {
-        _fetchAvatar();
+        final hasGrid = widget.memberAvatars != null || (widget.groupId != null && _groupGridAvatars.containsKey(widget.groupId));
+        if (!hasGrid) {
+          _fetchAvatar();
+        }
       }
     }
   }
@@ -163,12 +172,43 @@ class _UserAvatarState extends State<UserAvatar> {
         final url = _normalizeUrl(group["avatarUrl"]?.toString());
         if (url != null && url.isNotEmpty) {
           _resolvedAvatarUrls[id] = url;
-        }
-        if (mounted) {
-          setState(() {
-            _avatarUrl = url;
-            _loading = false;
-          });
+          if (mounted) {
+            setState(() {
+              _avatarUrl = url;
+              _loading = false;
+            });
+          }
+        } else {
+          // Fetch members to build the 2x2 grid
+          final members = await widget.groupService!.listMembers(widget.groupId!);
+          final firstMembers = members.take(4).toList();
+          final List<String> resolvedAvatars = [];
+          for (final m in firstMembers) {
+            final uId = m['userId']?.toString();
+            if (uId != null && widget.userService != null) {
+              try {
+                final profile = await widget.userService!.getUserById(uId);
+                final uAvatar = profile.avatarUrl ?? profile.avatarAsset?.resolvedUrl;
+                if (uAvatar != null && uAvatar.isNotEmpty) {
+                  final norm = _normalizeUrl(uAvatar);
+                  resolvedAvatars.add(norm ?? "");
+                } else {
+                  resolvedAvatars.add("");
+                }
+              } catch (_) {
+                resolvedAvatars.add("");
+              }
+            } else {
+              resolvedAvatars.add("");
+            }
+          }
+          _groupGridAvatars[widget.groupId!] = resolvedAvatars;
+          if (mounted) {
+            setState(() {
+              _avatarUrl = null;
+              _loading = false;
+            });
+          }
         }
       } catch (e) {
         if (mounted) {
@@ -194,6 +234,134 @@ class _UserAvatarState extends State<UserAvatar> {
     return colors[hash % colors.length];
   }
 
+  Widget _buildGridAvatar(List<String> avatars, String initials, Color bgColor) {
+    final double size = widget.radius * 2;
+    final nonNullAvatars = avatars.where((url) => url.isNotEmpty).toList();
+    if (nonNullAvatars.isEmpty) {
+      return _buildInitials(initials, bgColor);
+    }
+    
+    if (nonNullAvatars.length == 1) {
+      return _buildSingleAvatar(nonNullAvatars[0], widget.radius);
+    }
+
+    if (nonNullAvatars.length == 2) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Stack(
+          children: [
+            Positioned(
+              left: 0,
+              top: 0,
+              child: _buildSingleAvatar(nonNullAvatars[0], widget.radius * 0.6),
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: _buildSingleAvatar(nonNullAvatars[1], widget.radius * 0.6),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (nonNullAvatars.length == 3) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Stack(
+          children: [
+            Positioned(
+              left: widget.radius * 0.4,
+              top: 0,
+              child: _buildSingleAvatar(nonNullAvatars[0], widget.radius * 0.55),
+            ),
+            Positioned(
+              left: 0,
+              bottom: 0,
+              child: _buildSingleAvatar(nonNullAvatars[1], widget.radius * 0.55),
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: _buildSingleAvatar(nonNullAvatars[2], widget.radius * 0.55),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildSingleAvatar(nonNullAvatars[0], widget.radius * 0.48),
+              _buildSingleAvatar(nonNullAvatars[1], widget.radius * 0.48),
+            ],
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildSingleAvatar(nonNullAvatars[2], widget.radius * 0.48),
+              _buildSingleAvatar(nonNullAvatars[3], widget.radius * 0.48),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSingleAvatar(String url, double radius) {
+    if (url.isEmpty) {
+      return Container(
+        width: radius * 2,
+        height: radius * 2,
+        decoration: BoxDecoration(
+          color: const Color(0xFF64748B).withOpacity(0.2),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Icon(Icons.person, color: const Color(0xFF64748B), size: radius * 1.2),
+        ),
+      );
+    }
+    
+    return Container(
+      width: radius * 2,
+      height: radius * 2,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF0F172A)
+              : Colors.white,
+          width: 1,
+        ),
+      ),
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(
+            color: Colors.grey,
+          ),
+          errorWidget: (context, url, error) => Container(
+            color: const Color(0xFF64748B).withOpacity(0.2),
+            child: Center(
+              child: Icon(Icons.person, color: const Color(0xFF64748B), size: radius * 1.2),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isGroup = widget.groupId != null;
@@ -203,7 +371,10 @@ class _UserAvatarState extends State<UserAvatar> {
 
     Widget avatarContent;
 
-    if (_avatarUrl != null && _avatarUrl!.isNotEmpty) {
+    final hasCustomAvatar = _avatarUrl != null && _avatarUrl!.isNotEmpty;
+    final gridAvatars = widget.memberAvatars ?? (widget.groupId != null ? _groupGridAvatars[widget.groupId] : null);
+
+    if (hasCustomAvatar) {
       avatarContent = CachedNetworkImage(
         imageUrl: _avatarUrl!,
         imageBuilder: (context, imageProvider) => Container(
@@ -215,6 +386,8 @@ class _UserAvatarState extends State<UserAvatar> {
         placeholder: (context, url) => _buildInitials(initials, bgColor, loading: true),
         errorWidget: (context, url, error) => _buildInitials(initials, bgColor),
       );
+    } else if (isGroup && gridAvatars != null && gridAvatars.isNotEmpty) {
+      avatarContent = _buildGridAvatar(gridAvatars, initials, bgColor);
     } else if (_loading) {
       avatarContent = _buildInitials(initials, bgColor, loading: true);
     } else {
@@ -256,8 +429,7 @@ class _UserAvatarState extends State<UserAvatar> {
     return Container(
       decoration: BoxDecoration(
         color: isGroup ? bgColor.withOpacity(0.1) : bgColor.withOpacity(0.2),
-        shape: isGroup ? BoxShape.rectangle : BoxShape.circle,
-        borderRadius: isGroup ? BorderRadius.circular(widget.radius * 0.5) : null,
+        shape: BoxShape.circle,
       ),
       child: Center(
         child: isGroup && (_avatarUrl == null || _avatarUrl!.isEmpty)
