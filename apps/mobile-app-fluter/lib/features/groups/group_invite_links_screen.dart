@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import '../../services/group_service.dart';
+import '../shared/widgets/app_toast.dart';
 
 class GroupInviteLinksScreen extends StatefulWidget {
   final GroupService groupService;
@@ -38,9 +39,21 @@ class _GroupInviteLinksScreenState extends State<GroupInviteLinksScreen> {
     try {
       await widget.groupService.createInviteLink(groupId: widget.groupId);
       _loadLinks();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã tạo link mời')));
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: 'Đã tạo link mời',
+          type: AppToastType.success,
+        );
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không thể tạo link mời')));
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: 'Không thể tạo link mời',
+          type: AppToastType.error,
+        );
+      }
     }
   }
 
@@ -48,9 +61,21 @@ class _GroupInviteLinksScreenState extends State<GroupInviteLinksScreen> {
     try {
       await widget.groupService.revokeInviteLink(groupId: widget.groupId, inviteId: inviteId);
       _loadLinks();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã thu hồi link')));
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: 'Đã thu hồi link',
+          type: AppToastType.success,
+        );
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không thể thu hồi')));
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: 'Không thể thu hồi',
+          type: AppToastType.error,
+        );
+      }
     }
   }
 
@@ -136,7 +161,11 @@ class _GroupInviteLinksScreenState extends State<GroupInviteLinksScreen> {
                               onSelected: (v) {
                                 if (v == 'copy') {
                                   Clipboard.setData(ClipboardData(text: code));
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã sao chép')));
+                                  AppToast.show(
+                                    context,
+                                    message: 'Đã sao chép',
+                                    type: AppToastType.success,
+                                  );
                                 } else if (v == 'revoke') {
                                   _revokeLink(id);
                                 }

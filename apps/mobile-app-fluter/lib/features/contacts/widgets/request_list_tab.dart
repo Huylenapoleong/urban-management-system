@@ -3,6 +3,7 @@ import "package:skeletonizer/skeletonizer.dart";
 import "../../../services/user_service.dart";
 import "../../../models/user_profile.dart";
 import "../../shared/widgets/user_avatar.dart";
+import "../../shared/widgets/app_toast.dart";
 
 class RequestListTab extends StatefulWidget {
   final UserService userService;
@@ -45,11 +46,10 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
       debugPrint("Error loading friend requests: $e");
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Lỗi tải danh sách yêu cầu: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
+        AppToast.show(
+          context,
+          message: "Lỗi tải danh sách yêu cầu: $e",
+          type: AppToastType.error,
         );
       }
     }
@@ -247,29 +247,39 @@ class _RequestListTabState extends State<RequestListTab> with AutomaticKeepAlive
       if (action == "accept") {
         await widget.userService.acceptFriendRequest(userId);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Đã chấp nhận kết bạn!"), backgroundColor: Color(0xFF22C55E)),
+          AppToast.show(
+            context,
+            message: "Đã chấp nhận kết bạn!",
+            type: AppToastType.success,
           );
         }
       } else if (action == "reject") {
         await widget.userService.rejectFriendRequest(userId);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Đã từ chối yêu cầu")),
+          AppToast.show(
+            context,
+            message: "Đã từ chối yêu cầu",
+            type: AppToastType.info,
           );
         }
       } else if (action == "cancel") {
         await widget.userService.cancelFriendRequest(userId);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Đã hủy yêu cầu kết bạn")),
+          AppToast.show(
+            context,
+            message: "Đã hủy yêu cầu kết bạn",
+            type: AppToastType.success,
           );
         }
       }
       _loadRequests();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+        AppToast.show(
+          context,
+          message: "Lỗi: $e",
+          type: AppToastType.error,
+        );
       }
     }
   }

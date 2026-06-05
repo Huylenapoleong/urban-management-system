@@ -9,6 +9,8 @@ import "../../core/theme/app_theme.dart";
 import "../shared/widgets/location_picker_widget.dart";
 import "forgot_password_screen.dart";
 
+import "../shared/widgets/app_toast.dart";
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -23,10 +25,13 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _locationController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
 
   bool _registerMode = false;
   bool _isOtpMode = false;
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+  bool _agreeToPolicy = false;
   final _otpController = TextEditingController();
 
   @override
@@ -37,6 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailController.dispose();
     _phoneController.dispose();
     _locationController.dispose();
+    _confirmPasswordController.dispose();
     _otpController.dispose();
     super.dispose();
   }
@@ -77,8 +83,16 @@ class _LoginScreenState extends State<LoginScreen> {
         _showError("Mật khẩu phải có ít nhất 10 ký tự.");
         return;
       }
+      if (_passwordController.text != _confirmPasswordController.text) {
+        _showError("Mật khẩu xác nhận không trùng khớp.");
+        return;
+      }
       if (_locationController.text.trim().isEmpty) {
         _showError("Vui lòng chọn Tỉnh/Thành phố và Phường/Xã hợp lệ.");
+        return;
+      }
+      if (!_agreeToPolicy) {
+        _showError("Bạn phải đồng ý với Điều khoản sử dụng và Chính sách bảo mật.");
         return;
       }
 
@@ -148,12 +162,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red.shade600,
-        behavior: SnackBarBehavior.floating,
-      ),
+    AppToast.show(
+      context,
+      message: message,
+      type: AppToastType.error,
     );
   }
 
@@ -345,6 +357,48 @@ class _LoginScreenState extends State<LoginScreen> {
                               },
                               onSubmit: (_) => _submit(session),
                             ),
+                            if (_registerMode) ...[
+                              const SizedBox(height: 16),
+                              _buildTextField(
+                                controller: _confirmPasswordController,
+                                label: "Xác nhận mật khẩu",
+                                hint: "••••••••",
+                                icon: Icons.lock_outline,
+                                isPassword: true,
+                                obscureText: _obscureConfirmPassword,
+                                onToggleVisibility: () {
+                                  setState(() {
+                                    _obscureConfirmPassword = !_obscureConfirmPassword;
+                                  });
+                                },
+                                onSubmit: (_) => _submit(session),
+                              ),
+                            ],
+                            if (_registerMode) ...[
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  Checkbox(
+                                    value: _agreeToPolicy,
+                                    activeColor: const Color(0xFF10B981),
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _agreeToPolicy = val ?? false;
+                                      });
+                                    },
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      "Tôi đồng ý với Điều khoản sử dụng và Chính sách bảo mật.",
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: const Color(0xFF475569),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 24),
                           ],
                           FilledButton(
@@ -421,6 +475,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ? null
                                   : () => setState(() {
                                         _registerMode = !_registerMode;
+                                        _passwordController.clear();
+                                        _confirmPasswordController.clear();
+                                        _agreeToPolicy = false;
                                       }),
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.blueGrey.shade600,

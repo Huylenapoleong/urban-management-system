@@ -13,6 +13,7 @@ import '../../../state/providers.dart';
 import 'chat_providers.dart';
 import 'widgets/gif_picker_sheet.dart';
 import 'widgets/sticker_picker_sheet.dart';
+import '../../../features/shared/widgets/app_toast.dart';
 
 class SharedChatDetailPage extends ConsumerStatefulWidget {
   const SharedChatDetailPage({
@@ -75,8 +76,10 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
     } catch (e) {
       if (!mounted) return;
       _controller.text = previousText;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ApiClient.extractError(e))),
+      AppToast.show(
+        context,
+        message: ApiClient.extractError(e),
+        type: AppToastType.error,
       );
     } finally {
       if (mounted) {
@@ -104,8 +107,10 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
       unawaited(_scrollToBottom());
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ApiClient.extractError(e))),
+      AppToast.show(
+        context,
+        message: ApiClient.extractError(e),
+        type: AppToastType.error,
       );
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -127,8 +132,10 @@ class _SharedChatDetailPageState extends ConsumerState<SharedChatDetailPage> {
       unawaited(_scrollToBottom());
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ApiClient.extractError(e))),
+      AppToast.show(
+        context,
+        message: ApiClient.extractError(e),
+        type: AppToastType.error,
       );
     } finally {
       if (mounted) setState(() => _sending = false);
