@@ -383,7 +383,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   Widget _buildUserList(bool isDark) {
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       itemCount: _users.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, i) {

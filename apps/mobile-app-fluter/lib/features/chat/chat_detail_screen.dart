@@ -37,7 +37,6 @@ import "../../app/shared/chat/widgets/sticker_picker_sheet.dart";
 import "../groups/group_settings_screen.dart";
 import "../../core/utils/translation_helper.dart";
 
-import "models/chat_message.dart";
 import "../../services/local_cache_service.dart";
 import "package:cached_network_image/cached_network_image.dart";
 import "package:skeletonizer/skeletonizer.dart";
@@ -87,6 +86,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final Map<String, Timer> _typingTimers = {};
   StreamSubscription? _typingSub;
   String? _conversationKey;
+  Map<String, dynamic>? _activeCallInfo;
+  StreamSubscription? _callInitSub;
+  StreamSubscription? _callInviteSub;
+  StreamSubscription? _callEndSub;
   Map<String, String> _aliases = {};
   bool _loadingAliases = false;
   String? _fetchedGroupName;
@@ -307,6 +310,33 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (mounted && data != null) {
         setState(() {
           _conversationKey = data["conversationKey"];
+          if (data["activeCall"] != null) {
+            _activeCallInfo = data["activeCall"];
+          }
+        });
+      }
+    });
+
+    _callInitSub = widget.socketService.onCallInit.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = data;
+        });
+      }
+    });
+
+    _callInviteSub = widget.socketService.onCallInvite.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = data;
+        });
+      }
+    });
+
+    _callEndSub = widget.socketService.onCallEnd.listen((data) {
+      if (mounted && data["conversationId"] == widget.conversation.conversationId) {
+        setState(() {
+          _activeCallInfo = null;
         });
       }
     });
@@ -332,7 +362,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (msg.senderId != myId) {
           widget.socketService.markMessageDelivered(msg.conversationId, msg.id);
           widget.socketService.markAsRead(widget.conversation.conversationId);
-          widget.conversationService.markConversationAsRead(widget.conversation.conversationId).catchError((_) {});
+          widget.conversationService.markConversationAsRead(widget.conversation.conversationId).ignore();
         }
 
         // Save socket message to local cache
@@ -556,6 +586,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _snapshotSub?.cancel();
     _typingSub?.cancel();
     _updateSub?.cancel();
+    _callInitSub?.cancel();
+    _callInviteSub?.cancel();
+    _callEndSub?.cancel();
     for (final timer in _typingTimers.values) {
       timer.cancel();
     }
@@ -1552,46 +1585,80 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   Widget _buildActiveCallBanner() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return ValueListenableBuilder<CallState>(
       valueListenable: widget.webRTCService.callState,
       builder: (context, state, _) {
-        if (state != CallState.idle &&
-          widget.conversation.isGroup &&
+        final localCallActive = state != CallState.idle &&
             widget.webRTCService.currentConversationId ==
-                widget.conversation.conversationId) {
-          return Container(
-            color: Colors.green.withValues(alpha: 0.15),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                const Icon(Icons.group_add, color: Colors.green),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        state == CallState.ringing
-                            ? "Cuộc gọi nhóm đang chờ"
-                            : "Cuộc gọi nhóm đang diễn ra",
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.green),
+                widget.conversation.conversationId;
+                
+        final remoteCallActive = !localCallActive && _activeCallInfo != null;
+        
+        if (!localCallActive && !remoteCallActive) {
+          return const SizedBox.shrink();
+        }
+        
+        final isVideo = localCallActive 
+            ? !widget.webRTCService.isAudioOnly
+            : (_activeCallInfo?['isVideo'] ?? true);
+            
+        final bannerColor = localCallActive
+            ? Colors.green.withOpacity(0.15)
+            : const Color(0xFF7C3AED).withOpacity(0.15);
+            
+        final iconColor = localCallActive ? Colors.green : const Color(0xFF7C3AED);
+        
+        return Container(
+          color: bannerColor,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                localCallActive 
+                    ? (isVideo ? Icons.videocam : Icons.phone_in_talk)
+                    : (isVideo ? Icons.video_call : Icons.phone),
+                color: iconColor,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      localCallActive
+                          ? (state == CallState.ringing 
+                              ? "Cuộc gọi đang chờ" 
+                              : "Bạn đang trong cuộc gọi")
+                          : "Cuộc gọi đang diễn ra",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold, 
+                        color: iconColor,
                       ),
-                      Text('Nhấn để xem hoặc tham gia',
-                          style:
-                              TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.black54)),
-                    ],
+                    ),
+                    Text(
+                      localCallActive 
+                          ? 'Chạm để quay lại cuộc gọi' 
+                          : 'Nhấp để tham gia cuộc gọi',
+                      style: TextStyle(
+                        fontSize: 12, 
+                        color: isDark ? Colors.grey[400] : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: iconColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
                   ),
                 ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                  ),
-                  onPressed: () {
-                    // Navigate directly to CallScreen
+                onPressed: () {
+                  if (localCallActive) {
+                    widget.webRTCService.isCallMinimized.value = false;
                     Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => CallScreen(
@@ -1602,14 +1669,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         ),
                       ),
                     );
-                  },
-                  child: const Text('Tham gia'),
-                ),
-              ],
-            ),
-          );
-        }
-        return const SizedBox.shrink();
+                  } else {
+                    _startCall(video: isVideo);
+                  }
+                },
+                child: Text(localCallActive ? 'Quay lại' : 'Tham gia'),
+              ),
+            ],
+          ),
+        );
       },
     );
   }

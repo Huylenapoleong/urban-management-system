@@ -7,7 +7,7 @@ import "../../../state/session_controller.dart";
 import "../../../models/conversation_summary.dart";
 import "../call_screen.dart";
 import "floating_call_overlay.dart";
-import "../../../../main.dart";
+import "../../../../app/app_router.dart";
 
 class GlobalCallOverlay extends StatelessWidget {
   final AppServices services;
@@ -28,38 +28,42 @@ class GlobalCallOverlay extends StatelessWidget {
           builder: (context, isMinimized, _) {
             if (!isMinimized) return const SizedBox.shrink();
 
-            return FloatingCallOverlay(
-              webRTCService: webRTCService,
-              onTap: () {
-                final session = Provider.of<SessionController>(context, listen: false);
-                final user = session.user;
-                final convId = webRTCService.currentConversationId;
-                if (convId != null && user != null) {
-                  final isGroup = convId.startsWith("group:") ||
-                      convId.startsWith("group#") ||
-                      convId.startsWith("grp#") ||
-                      convId.startsWith("GRP#");
+            return Stack(
+              children: [
+                FloatingCallOverlay(
+                  webRTCService: webRTCService,
+                  onTap: () {
+                    final session = Provider.of<SessionController>(context, listen: false);
+                    final user = session.user;
+                    final convId = webRTCService.currentConversationId;
+                    if (convId != null && user != null) {
+                      final isGroup = convId.startsWith("group:") ||
+                          convId.startsWith("group#") ||
+                          convId.startsWith("grp#") ||
+                          convId.startsWith("GRP#");
 
-                  webRTCService.isCallMinimized.value = false;
+                      webRTCService.isCallMinimized.value = false;
 
-                  Navigator.of(context, rootNavigator: true).push(
-                    MaterialPageRoute(
-                      builder: (_) => CallScreen(
-                        webRTCService: webRTCService,
-                        conversation: ConversationSummary(
-                          conversationId: convId,
-                          groupName: isGroup ? "Cuộc gọi nhóm" : "Đang gọi",
-                          unreadCount: 0,
-                          isGroup: isGroup,
-                          updatedAt: DateTime.now().toIso8601String(),
+                      rootNavigatorKey.currentState?.push(
+                        MaterialPageRoute(
+                          builder: (_) => CallScreen(
+                            webRTCService: webRTCService,
+                            conversation: ConversationSummary(
+                              conversationId: convId,
+                              groupName: isGroup ? "Cuộc gọi nhóm" : "Đang gọi",
+                              unreadCount: 0,
+                              isGroup: isGroup,
+                              updatedAt: DateTime.now().toIso8601String(),
+                            ),
+                            currentUser: user,
+                          ),
                         ),
-                        currentUser: user,
-                      ),
-                    ),
-                  );
-                }
-              },
-              onClose: () => webRTCService.stopCall(),
+                      );
+                    }
+                  },
+                  onClose: () => webRTCService.stopCall(),
+                ),
+              ],
             );
           },
         );
