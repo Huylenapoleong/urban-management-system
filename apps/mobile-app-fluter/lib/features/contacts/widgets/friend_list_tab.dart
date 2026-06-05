@@ -96,7 +96,7 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
         final locationCode = session.user?.locationCode;
         final currentUserId = session.user?.id;
         final raw = await widget.userService.listUsers(
-          locationCode: locationCode,
+          locationCode: (session.user?.role == 'ADMIN' || session.user?.role == 'PROVINCE_OFFICER') ? null : locationCode,
           limit: 100,
         );
         friends = raw.where((u) => u.id != currentUserId).toList();
