@@ -3,6 +3,7 @@ import "package:provider/provider.dart";
 
 import "../../state/session_controller.dart";
 import "../../core/theme/app_theme.dart";
+import "../shared/widgets/app_toast.dart";
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -27,21 +28,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+    AppToast.show(
+      context,
+      message: message,
+      type: AppToastType.error,
     );
   }
 
   void _showSuccess(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green.shade600,
-        behavior: SnackBarBehavior.floating,
-      ),
+    AppToast.show(
+      context,
+      message: message,
+      type: AppToastType.success,
     );
   }
 

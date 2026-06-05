@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
+import '../shared/widgets/app_toast.dart';
 
 class SecurityScreen extends StatefulWidget {
   final AuthService authService;
@@ -35,15 +36,19 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red.shade600),
+    AppToast.show(
+      context,
+      message: message,
+      type: AppToastType.error,
     );
   }
 
   void _showSuccess(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: const Color(0xFF10B981)),
+    AppToast.show(
+      context,
+      message: message,
+      type: AppToastType.success,
     );
   }
 

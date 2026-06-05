@@ -415,11 +415,14 @@ class _KnowledgeBaseScreenState extends ConsumerState<KnowledgeBaseScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Nguồn: ${doc.source}',
-                    style: TextStyle(
-                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                      fontSize: 11,
+                  Expanded(
+                    child: Text(
+                      'Nguồn: ${doc.source}',
+                      style: TextStyle(
+                        color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                        fontSize: 11,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],

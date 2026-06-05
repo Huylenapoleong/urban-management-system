@@ -58,7 +58,12 @@ class _CallIncomingListenerState extends State<CallIncomingListener> {
     }
 
     // Chỉ xử lý khi trạng thái là ringing và chưa đang navigate
-    if (state != CallState.ringing || _isNavigating) return;
+    final session = context.read<SessionController>();
+    final currentUser = session.user;
+    final callerId = svc.activeConfig?['callerId']?.toString();
+    final isCaller = currentUser != null && callerId == currentUser.id.toString();
+
+    if (state != CallState.ringing || _isNavigating || isCaller) return;
 
     // Phát nhạc chuông báo cuộc gọi đến
     _sound.playRingtone();

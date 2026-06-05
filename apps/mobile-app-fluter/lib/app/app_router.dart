@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../state/session_controller.dart';
 
@@ -48,7 +49,7 @@ final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>(deb
 GoRouter createAppRouter(SessionController session) {
   return GoRouter(
     navigatorKey: rootNavigatorKey,
-    initialLocation: '/citizen/home',
+    initialLocation: '/',
     refreshListenable: session, // SessionController extends ChangeNotifier
     redirect: (context, state) {
       final isInit = session.isInitialized;
@@ -56,8 +57,8 @@ GoRouter createAppRouter(SessionController session) {
       final role = session.user?.role;
       final location = state.uri.path;
 
-      // Đang khởi tạo → không redirect
-      if (!isInit) return null;
+      // Đang khởi tạo → giữ ở trang loading '/'
+      if (!isInit) return '/';
 
       // ── Tự động sửa lỗi chính tả và làm sạch đường dẫn thừa ────────────────────
       // Sửa lỗi gõ /offical (thiếu chữ i) -> /official
@@ -83,8 +84,8 @@ GoRouter createAppRouter(SessionController session) {
         return '/login';
       }
 
-      // Đã đăng nhập, đang ở login → về đúng home theo role
-      if (location == '/login') {
+      // Đã đăng nhập, đang ở login hoặc loading → về đúng home theo role
+      if (location == '/login' || location == '/') {
         return _isOfficial(role) ? '/official/home' : '/citizen/home';
       }
 
@@ -101,6 +102,69 @@ GoRouter createAppRouter(SessionController session) {
       return null; // không redirect
     },
     routes: [
+      GoRoute(
+        path: '/',
+        pageBuilder: (_, __) => NoTransitionPage(
+          child: Scaffold(
+            body: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFFF8FAFC), // Slate 50
+                    Color(0xFFF1F5F9), // Slate 100
+                    Color(0xFFE2E8F0), // Slate 200
+                  ],
+                ),
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFF10B981).withOpacity(0.3),
+                          width: 2,
+                        ),
+                      ),
+                      child: Image.asset(
+                        'assets/images/app_logo.png',
+                        width: 80,
+                        height: 80,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      "Urban Management",
+                      style: GoogleFonts.poppins(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF0F172A),
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "Cổng thông tin quản lý cư dân",
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        color: const Color(0xFF475569),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+
       // ── Login ─────────────────────────────────────────────────────────────
       GoRoute(
         path: '/login',
@@ -154,6 +218,7 @@ GoRouter createAppRouter(SessionController session) {
                 routes: [
                   GoRoute(
                     path: ':conversationId',
+                    parentNavigatorKey: rootNavigatorKey,
                     builder: (context, state) {
                       final id = Uri.decodeComponent(
                           state.pathParameters['conversationId'] ?? '');
@@ -269,6 +334,7 @@ GoRouter createAppRouter(SessionController session) {
                 routes: [
                   GoRoute(
                     path: ':conversationId',
+                    parentNavigatorKey: rootNavigatorKey,
                     builder: (context, state) {
                       final id = Uri.decodeComponent(
                           state.pathParameters['conversationId'] ?? '');

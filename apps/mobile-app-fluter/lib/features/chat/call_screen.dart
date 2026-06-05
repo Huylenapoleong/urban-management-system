@@ -8,6 +8,8 @@ import "../../services/webrtc_service.dart";
 import "../../services/app_services.dart";
 import "../shared/widgets/user_avatar.dart";
 import "chat_detail_screen.dart";
+import "../../state/session_controller.dart";
+import "../shared/widgets/app_toast.dart";
 
 class CallScreen extends StatefulWidget {
   final WebRTCService webRTCService;
@@ -112,12 +114,12 @@ class _CallScreenState extends State<CallScreen> {
     if (widget.webRTCService.callState.value == CallState.idle && mounted) {
       if (_isNavigatingBack) return;
       _isNavigatingBack = true;
+
+      final session = Provider.of<SessionController>(context, listen: false);
+      final isActive = session.activeConversationId == widget.conversation.conversationId;
       
-      if (widget.launchedFromChatDetail) {
-        final targetRoute = "chat_detail/${widget.conversation.conversationId}";
-        Navigator.of(context).popUntil(
-          (route) => route.settings.name == targetRoute || route.isFirst,
-        );
+      if (widget.launchedFromChatDetail || isActive) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
       } else {
         final services = Provider.of<AppServices>(context, listen: false);
         Navigator.of(context).pushReplacement(
@@ -165,24 +167,10 @@ class _CallScreenState extends State<CallScreen> {
     final profile = _profileCache[userId];
     final displayName = profile?.fullName ?? "Thành viên";
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          "$displayName đã rời cuộc gọi",
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        backgroundColor: const Color(0xFF1E293B),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        duration: const Duration(seconds: 3),
-        margin: const EdgeInsets.fromLTRB(24, 0, 24, 150),
-      ),
+    AppToast.show(
+      context,
+      message: "$displayName đã rời cuộc gọi",
+      type: AppToastType.info,
     );
   }
 

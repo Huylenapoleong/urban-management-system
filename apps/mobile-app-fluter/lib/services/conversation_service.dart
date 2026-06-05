@@ -272,6 +272,15 @@ class ConversationService {
     return ConversationSummary.fromJson((raw as Map).cast<String, dynamic>());
   }
 
+  Future<List<Map<String, dynamic>>> getReadWatermarks(String conversationId) async {
+    final raw = await _apiClient.get(
+      "/conversations/${Uri.encodeComponent(conversationId)}/read-watermarks",
+    );
+    return (raw as List)
+        .map((item) => (item as Map).cast<String, dynamic>())
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> listConversationAliases(
     String conversationId,
   ) async {

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../shared/widgets/app_toast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../services/upload_service.dart';
 import '../../../services/user_service.dart';
@@ -33,6 +34,7 @@ class AvatarBottomSheet extends StatefulWidget {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useRootNavigator: true,
       backgroundColor: Colors.transparent,
       builder: (_) => AvatarBottomSheet(
         user: user,
@@ -138,14 +140,18 @@ class _AvatarBottomSheetState extends State<AvatarBottomSheet> {
       widget.onAvatarChanged();
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Cập nhật ảnh đại diện thành công!")),
+        AppToast.show(
+          context,
+          message: "Cập nhật ảnh đại diện thành công!",
+          type: AppToastType.success,
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Lỗi tải ảnh: \$e")),
+        AppToast.show(
+          context,
+          message: "Lỗi tải ảnh: $e",
+          type: AppToastType.error,
         );
       }
     } finally {
@@ -201,21 +207,25 @@ class _AvatarBottomSheetState extends State<AvatarBottomSheet> {
         payload["avatarUrl"] = url;
       }
 
-      print("[AVATAR] Selecting from history. Payload: \$payload");
+      print("[AVATAR] Selecting from history. Payload: $payload");
       await widget.userService.updateProfile(payload);
 
       widget.onAvatarChanged();
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Đã khôi phục ảnh đại diện cũ!")),
+        AppToast.show(
+          context,
+          message: "Đã khôi phục ảnh đại diện cũ!",
+          type: AppToastType.success,
         );
       }
     } catch (e) {
-      print("Error changing to old avatar: \$e");
+      print("Error changing to old avatar: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Lỗi cập nhật ảnh: \$e")),
+        AppToast.show(
+          context,
+          message: "Lỗi cập nhật ảnh: $e",
+          type: AppToastType.error,
         );
       }
     } finally {
