@@ -47,6 +47,8 @@ class SocketService {
       StreamController<Map<String, dynamic>>.broadcast();
   final _callHeartbeatController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _messageDeliveredController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<void> get onChatReady => _chatReadyController.stream;
   Stream<MessageItem> get onMessageCreated => _messageCreatedController.stream;
@@ -78,6 +80,8 @@ class SocketService {
       _webrtcCandidateController.stream;
   Stream<Map<String, dynamic>> get onCallHeartbeat =>
       _callHeartbeatController.stream;
+  Stream<Map<String, dynamic>> get onMessageDelivered =>
+      _messageDeliveredController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
 
@@ -169,6 +173,13 @@ class SocketService {
     socket.on("message.deleted", (data) {
       if (data != null && data["messageId"] != null) {
         _messageDeletedController.add(data["messageId"].toString());
+      }
+    });
+
+    socket.on("message.delivered", (data) {
+      _logger.d("Socket event message.delivered: $data");
+      if (data is Map) {
+        _messageDeliveredController.add(data.cast<String, dynamic>());
       }
     });
 
@@ -460,6 +471,7 @@ class SocketService {
     _webrtcAnswerController.close();
     _webrtcCandidateController.close();
     _callHeartbeatController.close();
+    _messageDeliveredController.close();
     _connectionStatusController.close();
   }
 }
