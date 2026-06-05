@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/group_service.dart';
 import '../../services/app_services.dart';
+import '../shared/widgets/app_toast.dart';
 
 class JoinGroupScreen extends StatefulWidget {
   final String? inviteCode;
@@ -46,8 +47,10 @@ class _JoinGroupScreenState extends State<JoinGroupScreen> {
       final result = await groupService.joinByInviteCode(code);
       if (mounted) {
         setState(() { _result = result; _isJoining = false; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Đã tham gia nhóm "${result['groupName'] ?? ''}"')),
+        AppToast.show(
+          context,
+          message: 'Đã tham gia nhóm "${result['groupName'] ?? ''}"',
+          type: AppToastType.success,
         );
       }
     } catch (e) {

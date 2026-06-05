@@ -5,6 +5,7 @@ import "package:permission_handler/permission_handler.dart";
 import "../../../services/user_service.dart";
 import "../../../models/user_profile.dart";
 import "../../shared/widgets/user_avatar.dart";
+import "../../shared/widgets/app_toast.dart";
 
 class DiscoverTab extends StatefulWidget {
   final UserService userService;
@@ -227,8 +228,10 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
     try {
       await widget.userService.sendFriendRequest(userId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Đã gửi yêu cầu kết bạn"), backgroundColor: Color(0xFF7C3AED)),
+        AppToast.show(
+          context,
+          message: "Đã gửi yêu cầu kết bạn",
+          type: AppToastType.success,
         );
       }
     } catch (e) {
@@ -238,7 +241,11 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
         final errMsg = e.toString().contains('already sent you') 
             ? 'Người này đã gửi yêu cầu cho bạn. Hãy chấp nhận trong tab Yêu cầu.'
             : 'Lỗi: $e';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errMsg)));
+        AppToast.show(
+          context,
+          message: errMsg,
+          type: AppToastType.error,
+        );
         // If conflict due to incoming request, update state accordingly
         if (e.toString().contains('already sent you')) {
           setState(() => _pendingStates[userId] = 'INCOMING_REQUEST');
@@ -252,14 +259,20 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
     try {
       await widget.userService.cancelFriendRequest(userId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Đã hủy yêu cầu kết bạn")),
+        AppToast.show(
+          context,
+          message: "Đã hủy yêu cầu kết bạn",
+          type: AppToastType.success,
         );
       }
     } catch (e) {
       if (mounted) {
         setState(() => _pendingStates[userId] = 'OUTGOING_REQUEST');
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+        AppToast.show(
+          context,
+          message: "Lỗi: $e",
+          type: AppToastType.error,
+        );
       }
     }
   }
@@ -269,8 +282,10 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
     try {
       await widget.userService.acceptFriendRequest(userId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Đã kết bạn thành công!"), backgroundColor: Colors.green),
+        AppToast.show(
+          context,
+          message: "Đã kết bạn thành công!",
+          type: AppToastType.success,
         );
         // Remove from list
         setState(() {
@@ -284,7 +299,11 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
     } catch (e) {
       if (mounted) {
         setState(() => _pendingStates[userId] = 'INCOMING_REQUEST');
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+        AppToast.show(
+          context,
+          message: "Lỗi: $e",
+          type: AppToastType.error,
+        );
       }
     }
   }
@@ -314,25 +333,41 @@ class _DiscoverTabState extends State<DiscoverTab> with AutomaticKeepAliveClient
               _isSyncing = false;
             });
             if (matched.isEmpty) {
-              messenger.showSnackBar(const SnackBar(content: Text("Không tìm thấy bạn bè nào từ danh bạ")));
+              AppToast.show(
+                context,
+                message: "Không tìm thấy bạn bè nào từ danh bạ",
+                type: AppToastType.info,
+              );
             }
           }
         } else {
           if (mounted) {
             setState(() => _isSyncing = false);
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Danh bạ trống")));
+            AppToast.show(
+              context,
+              message: "Danh bạ trống",
+              type: AppToastType.warning,
+            );
           }
         }
       } else {
         if (mounted) {
           setState(() => _isSyncing = false);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cần quyền truy cập danh bạ để sử dụng tính năng này")));
+          AppToast.show(
+            context,
+            message: "Cần quyền truy cập danh bạ để sử dụng tính năng này",
+            type: AppToastType.warning,
+          );
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isSyncing = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi đồng bộ: $e")));
+        AppToast.show(
+          context,
+          message: "Lỗi đồng bộ: $e",
+          type: AppToastType.error,
+        );
       }
     }
   }

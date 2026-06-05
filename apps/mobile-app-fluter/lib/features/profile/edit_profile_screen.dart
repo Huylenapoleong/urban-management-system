@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../services/user_service.dart';
 import '../../models/user_profile.dart';
+import '../../services/app_services.dart';
+import '../../services/location_service.dart';
+import '../shared/widgets/app_toast.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final UserProfile user;
@@ -23,6 +27,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _fullNameController;
   late TextEditingController _emailController;
   late TextEditingController _phoneController;
+  late TextEditingController _locationController;
   
   bool _isLoading = false;
 
@@ -32,6 +37,38 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _fullNameController = TextEditingController(text: widget.user.fullName);
     _emailController = TextEditingController(text: widget.user.email ?? "");
     _phoneController = TextEditingController(text: widget.user.phone ?? "");
+    _locationController = TextEditingController(text: "Đang tải...");
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _resolveLocation();
+    });
+  }
+
+  Future<void> _resolveLocation() async {
+    if (widget.user.locationCode.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _locationController.text = "Không có địa chỉ";
+        });
+      }
+      return;
+    }
+    try {
+      final appServices = context.read<AppServices>();
+      final locationService = LocationService(apiClient: appServices.apiClient);
+      final resolved = await locationService.resolveLocationCode(widget.user.locationCode);
+      if (mounted) {
+        setState(() {
+          _locationController.text = resolved.displayName;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _locationController.text = widget.user.locationCode;
+        });
+      }
+    }
   }
 
   @override
@@ -39,6 +76,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _fullNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
+    _locationController.dispose();
     super.dispose();
   }
 
@@ -64,11 +102,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       widget.onProfileUpdated();
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Cập nhật thông tin thành công!"),
-            backgroundColor: Color(0xFF10B981),
-          ),
+        AppToast.show(
+          context,
+          message: "Cập nhật thông tin thành công!",
+          type: AppToastType.success,
         );
         Navigator.pop(context);
       }
@@ -93,12 +130,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red.shade600,
-        behavior: SnackBarBehavior.floating,
-      ),
+    AppToast.show(
+      context,
+      message: message,
+      type: AppToastType.error,
     );
   }
 
@@ -153,6 +188,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               icon: Icons.phone_outlined,
               keyboardType: TextInputType.phone,
             ),
+            const SizedBox(height: 20),
+            _buildTextField(
+              controller: _locationController,
+              label: "Địa chỉ",
+              hint: "Địa chỉ của bạn",
+              icon: Icons.location_on_outlined,
+              readOnly: true,
+            ),
             const SizedBox(height: 48),
             SizedBox(
               width: double.infinity,
@@ -186,6 +229,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required String hint,
     required IconData icon,
     TextInputType? keyboardType,
+    bool readOnly = false,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
@@ -203,27 +247,43 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         TextField(
           controller: controller,
           keyboardType: keyboardType,
+          readOnly: readOnly,
           style: GoogleFonts.inter(
             fontSize: 15,
-            color: isDark ? Colors.white : Colors.black87,
+            color: readOnly
+                ? (isDark ? Colors.grey.shade500 : Colors.grey.shade600)
+                : (isDark ? Colors.white : Colors.black87),
           ),
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: GoogleFonts.inter(color: isDark ? Colors.grey.shade500 : Colors.blueGrey.shade300, fontSize: 15),
             prefixIcon: Icon(icon, color: isDark ? Colors.grey.shade400 : Colors.blueGrey.shade400, size: 22),
+            suffixIcon: readOnly ? const Icon(Icons.lock_outline, color: Colors.grey, size: 20) : null,
             filled: true,
-            fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            fillColor: readOnly
+                ? (isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9))
+                : (isDark ? const Color(0xFF1E293B) : Colors.white),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: isDark ? Colors.grey.shade800 : Colors.blueGrey.shade100, width: 1),
+              borderSide: BorderSide(
+                color: readOnly
+                    ? (isDark ? Colors.grey.shade800 : Colors.blueGrey.shade50)
+                    : (isDark ? Colors.grey.shade800 : Colors.blueGrey.shade100),
+                width: 1,
+              ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5),
+              borderSide: BorderSide(
+                color: readOnly
+                    ? (isDark ? Colors.grey.shade800 : Colors.blueGrey.shade50)
+                    : const Color(0xFF10B981),
+                width: readOnly ? 1 : 1.5,
+              ),
             ),
             contentPadding: const EdgeInsets.symmetric(vertical: 16),
           ),

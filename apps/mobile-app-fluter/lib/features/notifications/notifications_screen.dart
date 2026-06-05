@@ -6,6 +6,7 @@ import "../../state/session_controller.dart";
 import "../../services/app_services.dart";
 import "../../models/report_item.dart";
 import "../../models/user_profile.dart";
+import "../shared/widgets/app_toast.dart";
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -210,8 +211,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       
       await prefs.setStringList(readKey, readIds);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Đã đánh dấu tất cả thông báo là đã đọc")),
+        AppToast.show(
+          context,
+          message: "Đã đánh dấu tất cả thông báo là đã đọc",
+          type: AppToastType.success,
         );
       }
     } catch (_) {}

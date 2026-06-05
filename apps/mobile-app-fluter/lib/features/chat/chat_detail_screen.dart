@@ -935,8 +935,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Không tải được danh sách thành viên: $e")));
+        AppToast.show(
+          context,
+          message: "Không tải được danh sách thành viên: $e",
+          type: AppToastType.error,
+        );
       }
       return null;
     }
@@ -1044,8 +1047,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text("Dịch vụ định vị đã bị tắt. Vui lòng bật GPS.")));
+          AppToast.show(
+            context,
+            message: "Dịch vụ định vị đã bị tắt. Vui lòng bật GPS.",
+            type: AppToastType.warning,
+          );
         }
         return;
       }
@@ -1055,8 +1061,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text("Quyền truy cập vị trí bị từ chối")));
+            AppToast.show(
+              context,
+              message: "Quyền truy cập vị trí bị từ chối",
+              type: AppToastType.warning,
+            );
           }
           return;
         }
@@ -1064,9 +1073,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       if (permission == LocationPermission.deniedForever) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text(
-                  "Quyền truy cập vị trí bị từ chối vĩnh viễn. Vui lòng bật trong cài đặt.")));
+          AppToast.show(
+            context,
+            message: "Quyền truy cập vị trí bị từ chối vĩnh viễn. Vui lòng bật trong cài đặt.",
+            type: AppToastType.error,
+          );
         }
         return;
       }
@@ -1086,8 +1097,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       await _sendMessage(text: text);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Lỗi lấy vị trí: $e")));
+        AppToast.show(
+          context,
+          message: "Lỗi lấy vị trí: $e",
+          type: AppToastType.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -1197,8 +1211,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final errorMsg = e.toString().contains("upload") || e.toString().contains("tải lên")
             ? "Lỗi tải lên tệp: $e"
             : "Lỗi gửi tin nhắn: $e";
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMsg))
+        AppToast.show(
+          context,
+          message: errorMsg,
+          type: AppToastType.error,
         );
       }
       rethrow;
@@ -1287,8 +1303,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 onTap: () {
                   Navigator.pop(context);
                   Clipboard.setData(ClipboardData(text: message.contentText));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Đã sao chép")));
+                  AppToast.show(
+                    context,
+                    message: "Đã sao chép",
+                    type: AppToastType.success,
+                  );
                 },
               ),
               ListTile(
@@ -1465,11 +1484,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     widget.conversationService.forwardMessage(
         widget.conversation.conversationId, message.id,
         targetConversationIds: [targetConvId]).then((_) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text("Đã chuyển tiếp")));
+      AppToast.show(
+        context,
+        message: "Đã chuyển tiếp",
+        type: AppToastType.success,
+      );
     }).catchError((e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      AppToast.show(
+        context,
+        message: "Lỗi: $e",
+        type: AppToastType.error,
+      );
     });
   }
 
@@ -3788,8 +3813,11 @@ class ChatMessageBubble extends StatelessWidget {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
         } else {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Không thể mở đường dẫn này")));
+            AppToast.show(
+              context,
+              message: "Không thể mở đường dẫn này",
+              type: AppToastType.error,
+            );
           }
         }
       },
@@ -3897,8 +3925,11 @@ class ChatMessageBubble extends StatelessWidget {
               await launchUrl(uri, mode: LaunchMode.externalApplication);
             } else {
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text("Không thể mở đường dẫn này")));
+                AppToast.show(
+                  context,
+                  message: "Không thể mở đường dẫn này",
+                  type: AppToastType.error,
+                );
               }
             }
           },
@@ -4062,11 +4093,10 @@ class _AttachmentView extends StatelessWidget {
 
   Future<void> _downloadImage(BuildContext context, String url) async {
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Đang tải ảnh xuống..."),
-          duration: Duration(seconds: 2),
-        ),
+      AppToast.show(
+        context,
+        message: "Đã bắt đầu tải xuống ảnh...",
+        type: AppToastType.info,
       );
 
       String extension = "jpg";
@@ -4098,37 +4128,33 @@ class _AttachmentView extends StatelessWidget {
       if (result.status == TaskStatus.complete) {
         final path = await FileDownloader().moveToSharedStorage(task, SharedStorage.images);
         if (path != null && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Đã lưu ảnh vào thư viện thành công!"),
-              backgroundColor: Colors.green,
-            ),
+          AppToast.show(
+            context,
+            message: "Đã lưu ảnh vào thư viện thành công!",
+            type: AppToastType.success,
           );
         } else if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Không thể lưu ảnh vào thư viện."),
-              backgroundColor: Colors.redAccent,
-            ),
+          AppToast.show(
+            context,
+            message: "Không thể lưu ảnh vào thư viện.",
+            type: AppToastType.error,
           );
         }
       } else {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Tải ảnh thất bại."),
-              backgroundColor: Colors.redAccent,
-            ),
+          AppToast.show(
+            context,
+            message: "Tải ảnh thất bại.",
+            type: AppToastType.error,
           );
         }
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Lỗi khi tải ảnh: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
+        AppToast.show(
+          context,
+          message: "Lỗi khi tải ảnh: $e",
+          type: AppToastType.error,
         );
       }
     }

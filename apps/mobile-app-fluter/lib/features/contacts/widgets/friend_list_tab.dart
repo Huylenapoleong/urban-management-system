@@ -8,6 +8,7 @@ import "package:provider/provider.dart";
 import "../../shared/widgets/user_avatar.dart";
 import "../../chat/chat_detail_screen.dart";
 import "../../profile/profile_screen.dart";
+import "../../shared/widgets/app_toast.dart";
 import "../../../models/conversation_summary.dart";
 import "../../../state/session_controller.dart";
 
@@ -382,7 +383,13 @@ class _FriendListTabState extends State<FriendListTab> with AutomaticKeepAliveCl
         await widget.userService.removeFriend(friend.id);
         _loadFriends();
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+        if (mounted) {
+          AppToast.show(
+            context,
+            message: "Lỗi: $e",
+            type: AppToastType.error,
+          );
+        }
       }
     }
   }

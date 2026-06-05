@@ -820,6 +820,60 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                 ),
               ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.person_outline, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                  const SizedBox(width: 4),
+                  Text(
+                    "Người báo cáo: ",
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      session.user?.fullName ?? report.userId,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(Icons.schedule_outlined, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                  const SizedBox(width: 4),
+                  Text(
+                    "Ngày tạo: ",
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                    ),
+                  ),
+                  Text(
+                    () {
+                      final dt = DateTime.tryParse(report.createdAt);
+                      if (dt == null) return report.createdAt;
+                      final local = dt.toLocal();
+                      return "${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}";
+                    }(),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                    ),
+                  ),
+                ],
+              ),
               const Divider(height: 32),
               Text(
                 "Mô tả chi tiết",
